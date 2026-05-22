@@ -1,0 +1,185 @@
+"""Isolated command runtime using subprocess execution and resource constraints."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+import psutil
+
+from velune.core.errors.execution import SandboxError
+import logging
+
+logger = logging.getLogger("velune.execution.sandbox")
+
+
+class SandboxResult:
+    """The result of executing a command in the sandbox."""
+
+    def __init__(
+        self,
+        exit_code: int,
+        stdout: str,
+        stderr: str,
+        duration_ms: float,
+        peak_memory_mb: float,
+        peak_cpu_pct: float,
+    ) -> None:
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr
+        self.duration_ms = duration_ms
+        self.peak_memory_mb = peak_memory_mb
+        self.peak_cpu_pct = peak_cpu_pct
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert result to a standard dictionary representation."""
+        return {
+            "exit_code": self.exit_code,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "duration_ms": self.duration_ms,
+            "peak_memory_mb": self.peak_memory_mb,
+            "peak_cpu_pct": self.peak_cpu_pct,
+        }
+
+
+class SubprocessSandbox:
+    """Windows-native and POSIX compliant subprocess-isolated execution sandbox."""
+
+    def __init__(
+        self,
+        workspace_path: Path,
+        max_memory_mb: float = 1024.0,
+        max_cpu_percent: float = 90.0,
+    ) -> None:
+        self.workspace_path = Path(workspace_path).resolve()
+        self.max_memory_mb = max_memory_mb
+        self.max_cpu_percent = max_cpu_percent
+        self.blocked_keywords = [
+            "rmdir /s",
+            "rd /s",
+            "del /f /s /q",
+            "format ",
+            "mkfs",
+            "dd ",
+            "rm -rf",
+            "shutdown",
+            "reboot",
+            "poweroff",
+            ":(){ :|:& };:",
+        ]
+
+    def _is_safe_command(self, cmd: str) -> bool:
+        """Check if command contains any blocked patterns."""
+        cmd_lower = cmd.lower()
+        for block in self.blocked_keywords:
+            if block in cmd_lower:
+                return False
+        return True
+
+    def _is_safe_path(self, target_path: Path) -> bool:
+        """Verify the execution path resides strictly within the workspace."""
+        try:
+            resolved = Path(target_path).resolve()
+            return self.workspace_path in resolved.parents or resolved == self.workspace_path
+        except Exception:
+            return False
+
+    def execute(
+        self,
+        cmd: str,
+        cwd: Optional[Path] = None,
+        env: Optional[Dict[str, str]] = None,
+        timeout: float = 60.0,
+    ) -> SandboxResult:
+        """Synchronously execute command in process-isolated sandbox."""
+        if not self._is_safe_command(cmd):
+            raise SandboxError(f"Command contains blocked pattern or is unsafe: {cmd}")
+
+        exec_cwd = cwd or self.workspace_path
+        if not self._is_safe_path(exec_cwd):
+            raise SandboxError(f"Execution directory is outside workspace: {exec_cwd}")
+
+        run_env = os.environ.copy()
+        if env:
+            run_env.update(env)
+
+        start_time = time.perf_counter()
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                shell=True,
+                cwd=str(exec_cwd),
+                env=run_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except Exception as e:
+            raise SandboxError(f"Failed to spawn subprocess: {e}")
+
+        peak_memory = 0.0
+        peak_cpu = 0.0
+        ps_proc = None
+        try:
+            ps_proc = psutil.Process(process.pid)
+        except Exception:
+            pass
+
+        timeout_occurred = False
+        try:
+            while process.poll() is None:
+                elapsed = time.perf_counter() - start_time
+                if elapsed > timeout:
+                    timeout_occurred = True
+                    break
+
+                if ps_proc:
+                    try:
+                        mem_info = ps_proc.memory_info()
+                        mem_mb = mem_info.rss / (1024 * 1024)
+                        if mem_mb > peak_memory:
+                            peak_memory = mem_mb
+
+                        cpu_pct = ps_proc.cpu_percent(interval=None)
+                        if cpu_pct > peak_cpu:
+                            peak_cpu = cpu_pct
+
+                        if mem_mb > self.max_memory_mb:
+                            process.terminate()
+                            raise SandboxError(
+                                f"Memory threshold exceeded: {mem_mb:.2f}MB > {self.max_memory_mb}MB"
+                            )
+
+                    except psutil.NoSuchProcess:
+                        pass
+                
+                time.sleep(0.05)
+        except Exception as e:
+            if process.poll() is None:
+                process.kill()
+            raise e
+
+        if timeout_occurred:
+            process.kill()
+            stdout, stderr = process.communicate()
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            raise SandboxError(
+                f"Command timed out after {timeout} seconds.\nStdout: {stdout}\nStderr: {stderr}"
+            )
+
+        stdout, stderr = process.communicate()
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        return SandboxResult(
+            exit_code=process.returncode,
+            stdout=stdout or "",
+            stderr=stderr or "",
+            duration_ms=duration_ms,
+            peak_memory_mb=peak_memory,
+            peak_cpu_pct=peak_cpu,
+        )

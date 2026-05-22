@@ -1,7 +1,6 @@
-"""Git state tools."""
-
+from __future__ import annotations
 from pathlib import Path
-from typing import list
+from typing import List
 from velune.tools.base.tool import BaseTool
 
 

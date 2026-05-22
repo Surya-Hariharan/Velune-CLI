@@ -1,47 +1,43 @@
-# Velune Project Configuration
-# This file controls Velune's behavior at the project level
-
 [project]
 name = "velune"
 version = "0.1.0"
 
 [workspace]
-# Workspace cognition settings
 index_on_init = true
 watch_files = true
 git_aware = true
 
 [context]
-# Context window management
 max_tokens = 128000
 compression_threshold = 0.8
-priority_tiers = ["critical", "high", "medium", "low"]
+priority_tiers = [ "critical", "high", "medium", "low",]
 
 [memory]
-# Memory system configuration
-working_memory_ttl = 3600  # seconds
+working_memory_ttl = 3600
 episodic_retention_days = 30
 semantic_threshold = 0.85
 graph_enabled = true
 
 [retrieval]
-# Hybrid retrieval configuration
 vector_weight = 0.5
 lexical_weight = 0.3
 graph_weight = 0.2
 rerank_top_k = 10
 
 [execution]
-# Execution safety settings
 sandbox_enabled = true
 auto_snapshot = true
 require_confirmation = true
 dry_run_default = false
 
 [providers]
-# Provider configuration
 default_provider = "openai"
-fallback_providers = ["anthropic", "ollama"]
+fallback_providers = [ "anthropic", "ollama",]
+
+[telemetry]
+enabled = true
+export_otlp = false
+log_level = "INFO"
 
 [providers.openai]
 api_key_env = "OPENAI_API_KEY"
@@ -56,8 +52,3 @@ base_url = "http://localhost:11434"
 
 [providers.lmstudio]
 base_url = "http://localhost:1234"
-
-[telemetry]
-enabled = true
-export_otlp = false
-log_level = "INFO"

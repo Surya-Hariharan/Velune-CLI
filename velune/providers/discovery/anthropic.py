@@ -1,8 +1,7 @@
-"""Anthropic model discovery."""
-
+from __future__ import annotations
 import os
 import httpx
-from typing import list
+from typing import List
 from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
 
 

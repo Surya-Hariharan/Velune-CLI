@@ -6,7 +6,7 @@ import importlib
 from typing import Callable, Dict, Optional
 
 from velune.core.errors import ProviderNotFoundError
-from velune.core.config.schema import ProvidersConfig
+from velune.kernel.config import ProvidersConfig
 from velune.providers.base import ModelProvider
 
 
@@ -16,62 +16,128 @@ class ProviderRegistry:
     def __init__(self, config: ProvidersConfig | None = None):
         self._providers: Dict[str, ModelProvider] = {}
         self._factories: Dict[str, Callable[[], ModelProvider]] = {}
+        
+        # Support passing root VeluneConfig or ProvidersConfig
         self._config = config
+        if config is not None and not isinstance(config, ProvidersConfig) and hasattr(config, "providers"):
+            self._config = getattr(config, "providers")
+            
         self._register_default_providers()
 
     def _register_default_providers(self) -> None:
         """Register default providers."""
-        if self._config and self._config.ollama:
+        config = self._config
+
+        # Ollama
+        if config and hasattr(config, "ollama") and config.ollama:
             self.register_factory(
                 "ollama",
                 self._provider_factory(
-                    "velune.providers.ollama.provider",
+                    "velune.providers.adapters.ollama",
                     "OllamaProvider",
-                    base_url=self._config.ollama.base_url,
+                    base_url=config.ollama.base_url or "http://localhost:11434",
                 ),
             )
         else:
             self.register_factory(
                 "ollama",
                 self._provider_factory(
-                    "velune.providers.ollama.provider",
+                    "velune.providers.adapters.ollama",
                     "OllamaProvider",
                 ),
             )
 
-        if self._config and self._config.openai:
+        # OpenAI
+        if config and hasattr(config, "openai") and config.openai:
             self.register_factory(
                 "openai",
                 self._provider_factory(
-                    "velune.providers.openai.provider",
+                    "velune.providers.adapters.openai",
                     "OpenAIProvider",
-                    base_url=self._config.openai.base_url,
+                    base_url=config.openai.base_url or "https://api.openai.com/v1",
                 ),
             )
         else:
             self.register_factory(
                 "openai",
                 self._provider_factory(
-                    "velune.providers.openai.provider",
+                    "velune.providers.adapters.openai",
                     "OpenAIProvider",
                 ),
             )
 
-        if self._config and self._config.anthropic:
+        # Anthropic
+        if config and hasattr(config, "anthropic") and config.anthropic:
             self.register_factory(
                 "anthropic",
                 self._provider_factory(
-                    "velune.providers.anthropic.provider",
+                    "velune.providers.adapters.anthropic",
                     "AnthropicProvider",
-                    base_url=self._config.anthropic.base_url,
+                    base_url=config.anthropic.base_url or "https://api.anthropic.com",
                 ),
             )
         else:
             self.register_factory(
                 "anthropic",
                 self._provider_factory(
-                    "velune.providers.anthropic.provider",
+                    "velune.providers.adapters.anthropic",
                     "AnthropicProvider",
+                ),
+            )
+
+        # LM Studio
+        if config and hasattr(config, "lmstudio") and config.lmstudio:
+            self.register_factory(
+                "lmstudio",
+                self._provider_factory(
+                    "velune.providers.adapters.lmstudio",
+                    "LMStudioProvider",
+                    base_url=config.lmstudio.base_url or "http://localhost:1234/v1",
+                ),
+            )
+        else:
+            self.register_factory(
+                "lmstudio",
+                self._provider_factory(
+                    "velune.providers.adapters.lmstudio",
+                    "LMStudioProvider",
+                ),
+            )
+
+        # Llama.cpp (GGUF local in-process)
+        if config and hasattr(config, "llamacpp") and config.llamacpp:
+            self.register_factory(
+                "llamacpp",
+                self._provider_factory(
+                    "velune.providers.adapters.llamacpp",
+                    "LlamaCppProvider",
+                ),
+            )
+        else:
+            self.register_factory(
+                "llamacpp",
+                self._provider_factory(
+                    "velune.providers.adapters.llamacpp",
+                    "LlamaCppProvider",
+                ),
+            )
+
+        # Hugging Face
+        if config and hasattr(config, "huggingface") and config.huggingface:
+            self.register_factory(
+                "huggingface",
+                self._provider_factory(
+                    "velune.providers.adapters.huggingface",
+                    "HuggingFaceProvider",
+                    base_url=config.huggingface.base_url or "https://api-inference.huggingface.co",
+                ),
+            )
+        else:
+            self.register_factory(
+                "huggingface",
+                self._provider_factory(
+                    "velune.providers.adapters.huggingface",
+                    "HuggingFaceProvider",
                 ),
             )
 

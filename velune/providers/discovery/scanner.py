@@ -1,6 +1,6 @@
 """Unified model discovery coordinator."""
 
-from typing import list, Dict, Any
+from typing import List, Dict, Any
 from velune.providers.discovery.ollama import OllamaDiscovery
 from velune.providers.discovery.lmstudio import LMStudioDiscovery
 from velune.providers.discovery.gguf import GGUFDiscovery

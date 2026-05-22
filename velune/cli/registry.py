@@ -41,7 +41,7 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     """Attach all built-in and plugin command groups to the app."""
 
     app.add_typer(ask_cmd, name="ask")
-    app.command()(run_cmd)
+    app.add_typer(run_cmd, name="run")
     app.add_typer(models_cmd, name="models")
     app.add_typer(workspace_cmd, name="workspace")
     app.add_typer(memory_cmd, name="memory")

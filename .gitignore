@@ -48,3 +48,13 @@ Thumbs.db
 
 # Tool-specific state
 .ipynb_checkpoints/
+
+# Additional common ignores
+__pypackages__/
+.cache/
+pip-wheel-metadata/
+.eggs/
+.ropeproject/
+*.swp
+*.swo
+.velune/

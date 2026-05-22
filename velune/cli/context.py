@@ -8,7 +8,7 @@ from typing import Optional
 
 from rich.console import Console
 
-from velune.core.config.schema import VeluneConfig
+from velune.kernel.config import VeluneConfig
 from velune.core.registry.container import ServiceContainer
 from velune.core.runtime import RuntimeContext
 

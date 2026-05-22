@@ -1,59 +1,135 @@
-"""Workspace command - velune workspace init/status."""
+"""Workspace commands — velune workspace init/status."""
 
 from __future__ import annotations
 
 from pathlib import Path
-
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
+from rich.box import ROUNDED
+
+from velune.cli.context import CLIContext
+from velune.core.async_runtime import run_async
 
 console = Console()
-
 workspace_cmd = typer.Typer(help="Workspace management commands")
 
 
 @workspace_cmd.command("init")
 def workspace_init(
+    ctx: typer.Context,
     path: Path = typer.Argument(Path.cwd(), help="Workspace path"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force reinitialization"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force reinitialization and re-index"),
 ) -> None:
-    """Initialize a Velune workspace."""
-    console.print(f"[yellow]Initializing workspace at {path}[/yellow]")
-    
-    # Create .velune directory
+    """Initialize a Velune workspace and build initial Tree-sitter AST parser indices."""
+    console.print(f"[bold cyan]Initializing Velune Cognitive Workspace at:[/bold cyan] {path}")
+
+    # 1. Create .velune directory structure
     velune_dir = path / ".velune"
     velune_dir.mkdir(exist_ok=True)
-    
-    # Create subdirectories
     (velune_dir / "memory").mkdir(exist_ok=True)
     (velune_dir / "retrieval").mkdir(exist_ok=True)
     (velune_dir / "index").mkdir(exist_ok=True)
+    (velune_dir / "snapshots").mkdir(exist_ok=True)
+
+    console.print("[green]✓[/green] Created .velune configuration directory structure.")
+
+    # 2. Get RepositoryCognitionService from container
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    container = cli_context.container
+    lifecycle = container.get("runtime.lifecycle")
+    repo_cognition = container.get("runtime.repository_cognition")
+
+    # 3. Boot subsystems and compile index
+    run_async(lifecycle.startup())
+
+    console.print("[bold cyan]⠋[/bold cyan] Building Tree-sitter compiler AST indices and scanning imports...")
+    with console.status("[bold magenta]⚡ Parsing symbols, dependencies, and git Authorship...[/bold magenta]") as status:
+        snapshot = repo_cognition.index(force=force)
+
+    # Calculate statistics
+    num_files = len(snapshot.files)
+    num_symbols = len(snapshot.symbols)
+    num_edges = len(snapshot.edges)
     
-    console.print(f"[green]✓[/green] Created .velune directory structure")
-    console.print("[green]✓[/green] Workspace initialized")
-    
-    console.print(Panel.fit(
-        f"Workspace: {path}\n"
-        f"Velune dir: {velune_dir}",
-        title="Workspace Status",
-    ))
+    languages = {}
+    for f in snapshot.files:
+        languages[f.language.value] = languages.get(f.language.value, 0) + 1
+
+    lang_summary = ", ".join(f"{count} {lang}" for lang, count in languages.items())
+    git_branch = snapshot.summary.get("git", {}).get("active_branch", "untracked")
+
+    # 4. Render gorgeous Success Summary Panel
+    console.print()
+    console.print(
+        Panel(
+            Text.assemble(
+                ("[bold green]✓ VELUNE WORKSPACE SUCCESSFULLY INDEXED[/bold green]\n\n"),
+                (f"[bold]Workspace path:[/bold] {path}\n"),
+                (f"[bold]Caches directory:[/bold] {velune_dir}\n"),
+                (f"[bold]Indexed files:[/bold] {num_files} ({lang_summary or 'no code files found'})\n"),
+                (f"[bold]Parsed AST symbols:[/bold] {num_symbols} classes/functions/imports\n"),
+                (f"[bold]Dependency edges:[/bold] {num_edges} import link(s)\n"),
+                (f"[bold]Active branch:[/bold] [magenta]{git_branch}[/magenta]\n\n"),
+                ("[dim]Velune repository cognitive engine is primed. Use 'velune run' to start autonomous edits.[/dim]")
+            ),
+            border_style="green",
+            box=ROUNDED,
+            title="[bold green]Cognitive Priming Success[/bold green]"
+        )
+    )
+
+    run_async(lifecycle.shutdown())
 
 
 @workspace_cmd.command("status")
 def workspace_status(
+    ctx: typer.Context,
     path: Path = typer.Option(Path.cwd(), "--path", "-p", help="Workspace path"),
 ) -> None:
-    """Show workspace status."""
+    """Show active workspace structure and index summary."""
     velune_dir = path / ".velune"
-    
+
     if not velune_dir.exists():
-        console.print("[red]✗[/red] Not a Velune workspace (no .velune directory)")
+        console.print("[bold red]✗ Not a Velune workspace (no .velune directory detected).[/bold red]")
+        console.print("[dim]Use 'velune workspace init' to initialize.[/dim]")
         return
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    container = cli_context.container
+    lifecycle = container.get("runtime.lifecycle")
+    repo_cognition = container.get("runtime.repository_cognition")
+
+    run_async(lifecycle.startup())
     
-    console.print(Panel.fit(
-        f"Workspace: {path}\n"
-        f"Velune dir: {velune_dir}\n"
-        f"Status: [green]Initialized[/green]",
-        title="Workspace Status",
-    ))
+    with console.status("[bold cyan]Querying cognitive index status...[/bold cyan]") as status:
+        snapshot = repo_cognition.index(force=False)
+
+    num_files = len(snapshot.files)
+    num_symbols = len(snapshot.symbols)
+    git_branch = snapshot.summary.get("git", {}).get("active_branch", "untracked")
+
+    console.print(
+        Panel(
+            Text.assemble(
+                (f"[bold]Workspace root:[/bold] {path}\n"),
+                (f"[bold]Velune cache:[/bold] {velune_dir}\n"),
+                (f"[bold]Indexed files count:[/bold] {num_files}\n"),
+                (f"[bold]Indexed symbols count:[/bold] {num_symbols}\n"),
+                (f"[bold]Git branch:[/bold] [magenta]{git_branch}[/magenta]\n"),
+                (f"[bold]Status:[/bold] [bold green]Active & Fully Primed[/bold green]")
+            ),
+            border_style="cyan",
+            box=ROUNDED,
+            title="[bold cyan]Workspace Status[/bold cyan]"
+        )
+    )
+
+    run_async(lifecycle.shutdown())

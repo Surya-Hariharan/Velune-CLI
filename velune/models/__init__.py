@@ -1,19 +1,16 @@
-"""Model cognition foundation."""
+"""Model intelligence and capability layer."""
 
-from velune.models.discovery import (
-    ModelClassification,
-    ModelDiscoveryService,
-    ModelRecord,
-    ModelRegistry,
-    ModelScanner,
-    ModelSpecialization,
-)
+from velune.models.registry import ModelCapabilityRegistry
+from velune.models.profiler import ModelProfile, ModelProfiler
+from velune.models.scorer import ModelScorer
+from velune.models.specializations import CouncilRole, ModelSpecializationMapper
 
 __all__ = [
-    "ModelClassification",
-    "ModelDiscoveryService",
-    "ModelRecord",
-    "ModelRegistry",
-    "ModelScanner",
-    "ModelSpecialization",
+    "ModelCapabilityRegistry",
+    "ModelProfile",
+    "ModelProfiler",
+    "ModelScorer",
+    "CouncilRole",
+    "ModelSpecializationMapper",
 ]
+

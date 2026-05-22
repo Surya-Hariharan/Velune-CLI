@@ -40,8 +40,7 @@ dependencies = [
     "anthropic>=0.18.0",
     "httpx>=0.26.0",
     
-    # Local Models
-    "llama-cpp-python>=0.2.0",
+
     
     # Orchestration
     "langgraph>=0.0.20",
@@ -50,11 +49,12 @@ dependencies = [
     
     # Memory
     "graphiti-core>=0.1.0",
-    "chromadb>=0.4.0",
+    "qdrant-client>=1.7.0",
+    
+
     
     # Retrieval
     "rank-bm25>=0.2.2",
-    "sentence-transformers>=2.3.0",
     
     # Repository
     "tree-sitter>=0.21.0",

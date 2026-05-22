@@ -1,7 +1,6 @@
-"""GGUF file discovery."""
-
+from __future__ import annotations
 from pathlib import Path
-from typing import list
+from typing import List
 from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
 
 

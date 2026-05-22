@@ -1,7 +1,6 @@
-"""Terminal history awareness."""
-
+from __future__ import annotations
 from pathlib import Path
-from typing import list
+from typing import List
 
 
 class TerminalAwareness:

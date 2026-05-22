@@ -1,7 +1,6 @@
-"""Git history tools."""
-
+from __future__ import annotations
 from pathlib import Path
-from typing import list, Optional
+from typing import List, Optional
 from velune.tools.base.tool import BaseTool
 
 

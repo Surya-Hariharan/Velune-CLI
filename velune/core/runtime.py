@@ -1,27 +1,25 @@
-"""Process runtime bootstrap for Velune CLI."""
+"""Process runtime bootstrap for Velune Cognitive OS CLI."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
 
-from velune.core.config.loader import ConfigLoader
-from velune.core.config.defaults import get_default_config
-from velune.core.config.service import ConfigService
-from velune.core.config.schema import VeluneConfig
-from velune.core.logging import LoggingConfig, configure_logging, get_logger
-from velune.core.registry.container import ServiceContainer
-from velune.models.discovery import ModelDiscoveryService, ModelRegistry
-from velune.memory.graph.service import GraphMemoryService
-from velune.memory.lifecycle.service import MemoryLifecycleService
-from velune.repository.cognition.service import RepositoryCognitionService
-from velune.retrieval.hybrid.service import HybridRetrievalEngine
-from velune.retrieval.lexical.memory import InMemoryLexicalIndex
-from velune.retrieval.vector.memory import InMemoryVectorStore
+from velune.kernel.config import ConfigService, get_default_config, VeluneConfig
+from velune.kernel.bus import CognitiveBus
+from velune.kernel.lifecycle import LifecycleCoordinator
 from velune.providers.registry import ProviderRegistry
+from velune.models.registry import ModelCapabilityRegistry
+from velune.models.specializations import ModelSpecializationMapper
+from velune.repository.cognition import RepositoryCognitionService
+from velune.retrieval.hybrid import HybridRetriever
+from velune.execution.executor import ExecutionExecutor
+from velune.cognition.orchestrator import CouncilOrchestrator
+from velune.core.registry.container import ServiceContainer
 
 
 @dataclass(slots=True)
@@ -43,46 +41,65 @@ def build_runtime(
 ) -> RuntimeContext:
     """Create and register the shared runtime services."""
 
+    # 1. Setup Logging and Console
+    console = Console(highlight=False)
+    logger_name = "velune"
+    logger = logging.getLogger(logger_name)
+    
+    # Configure root logger levels
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    # 2. Configuration Service
+    config_service = ConfigService(workspace=workspace, config_path=config_path)
     try:
-        loader = ConfigLoader(config_path=config_path)
-        config = loader.load_with_env_overrides()
-    except FileNotFoundError:
+        config = config_service.load()
+    except Exception as e:
+        logger.warning("Failed to load configuration. Falling back to system defaults: %s", e)
         config = get_default_config()
 
-    console = Console(highlight=False)
-    logging_config = LoggingConfig(level="DEBUG" if verbose else config.telemetry.log_level)
-    configure_logging(logging_config)
-
-    container = ServiceContainer()
-    logger_name = "velune"
-    logger = get_logger(logger_name)
-
+    # 3. Instantiate Cognitive OS Subsystems
+    bus = CognitiveBus()
+    lifecycle = LifecycleCoordinator()
     provider_registry = ProviderRegistry(config.providers)
-    model_registry = ModelRegistry()
-    model_discovery = ModelDiscoveryService(registry=model_registry, workspace=workspace)
-    config_service = ConfigService(workspace=workspace, config_path=config_path)
-    vector_store = InMemoryVectorStore()
-    lexical_index = InMemoryLexicalIndex()
-    hybrid_retrieval = HybridRetrievalEngine(vector_store=vector_store, lexical_index=lexical_index)
-    graph_memory = GraphMemoryService()
-    memory_lifecycle = MemoryLifecycleService()
-    repository_cognition = RepositoryCognitionService()
+    model_registry = ModelCapabilityRegistry()
+    model_specialization = ModelSpecializationMapper(model_registry)
+    repository_cognition = RepositoryCognitionService(workspace)
+    
+    # Embedded/in-process Qdrant falls back nicely
+    hybrid_retriever = HybridRetriever(location=":memory:")
+    
+    # Sandbox execution limits CPU/Memory resources on Windows
+    execution_executor = ExecutionExecutor(workspace)
+    
+    # LangGraph deliberative multi-agent reasoning council
+    council_orchestrator = CouncilOrchestrator(provider_registry, model_specialization)
 
+    # 4. Populate Dependency Injection Container
+    container = ServiceContainer()
     container.register_instance("runtime.config", config)
     container.register_instance("runtime.config_service", config_service)
     container.register_instance("runtime.console", console)
     container.register_instance("runtime.logger", logger)
+    container.register_instance("runtime.bus", bus)
+    container.register_instance("runtime.lifecycle", lifecycle)
     container.register_instance("runtime.provider_registry", provider_registry)
     container.register_instance("runtime.model_registry", model_registry)
-    container.register_instance("runtime.model_discovery", model_discovery)
-    container.register_instance("runtime.vector_store", vector_store)
-    container.register_instance("runtime.lexical_index", lexical_index)
-    container.register_instance("runtime.retrieval", hybrid_retrieval)
-    container.register_instance("runtime.graph_memory", graph_memory)
-    container.register_instance("runtime.memory_lifecycle", memory_lifecycle)
+    container.register_instance("runtime.model_discovery", model_registry.scanner)  # Backward compat for commands.models
     container.register_instance("runtime.repository_cognition", repository_cognition)
+    container.register_instance("runtime.retrieval", hybrid_retriever)
+    container.register_instance("runtime.execution_executor", execution_executor)
+    container.register_instance("runtime.council_orchestrator", council_orchestrator)
     container.register_instance("runtime.workspace", workspace)
     container.register_instance("runtime.config_path", config_path)
+
+    # 5. Register Subsystems in Lifecycle Coordinator
+    lifecycle.register("bus", bus)
+    lifecycle.register("providers", provider_registry)
+    lifecycle.register("models", model_registry)
+    lifecycle.register("repository", repository_cognition)
+    lifecycle.register("retrieval", hybrid_retriever)
+    lifecycle.register("execution", execution_executor)
 
     return RuntimeContext(
         workspace=workspace,

@@ -1,10 +1,11 @@
-"""Config command - velune config set/get."""
+"""Config command - velune config set/get/show."""
 
 from __future__ import annotations
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from typing import Any
 
 from velune.cli.context import CLIContext
 
@@ -15,21 +16,91 @@ config_cmd = typer.Typer(help="Configuration management commands")
 
 @config_cmd.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Configuration key"),
+    ctx: typer.Context,
+    key: str = typer.Argument(..., help="Configuration key (e.g. providers.default_provider)"),
     value: str = typer.Argument(..., help="Configuration value"),
 ) -> None:
-    """Set a configuration value."""
-    console.print(f"[yellow]Setting {key} = {value}[/yellow]")
-    console.print("[yellow]Configuration management not yet implemented.[/yellow]")
+    """Set a configuration value in velune.toml."""
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    if not cli_context:
+        console.print("[red]CLI context is uninitialized.[/red]")
+        raise typer.Exit(1)
+        
+    config_path = cli_context.config_path or (cli_context.workspace / "velune.toml")
+    
+    # Load raw TOML
+    import toml
+    try:
+        if config_path.exists():
+            data = toml.load(config_path)
+        else:
+            data = {}
+    except Exception as e:
+        console.print(f"[red]Failed to load existing config: {e}[/red]")
+        data = {}
+        
+    # Set the nested key
+    parts = key.split(".")
+    curr = data
+    for part in parts[:-1]:
+        if part not in curr or not isinstance(curr[part], dict):
+            curr[part] = {}
+        curr = curr[part]
+        
+    # Convert value to correct type (bool, int, float, str)
+    typed_val: Any = value
+    if value.lower() == "true":
+        typed_val = True
+    elif value.lower() == "false":
+        typed_val = False
+    else:
+        try:
+            if "." in value:
+                typed_val = float(value)
+            else:
+                typed_val = int(value)
+        except ValueError:
+            pass
+            
+    curr[parts[-1]] = typed_val
+    
+    # Save back
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w") as f:
+            toml.dump(data, f)
+        console.print(f"[green]✓ Successfully set [bold]{key}[/bold] to [bold]{typed_val}[/bold] in {config_path}[/green]")
+    except Exception as e:
+        console.print(f"[red]Failed to save config: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @config_cmd.command("get")
 def config_get(
-    key: str = typer.Argument(..., help="Configuration key"),
+    ctx: typer.Context,
+    key: str = typer.Argument(..., help="Configuration key (e.g. providers.default_provider)"),
 ) -> None:
     """Get a configuration value."""
-    console.print(f"[yellow]Getting {key}[/yellow]")
-    console.print("[yellow]Configuration management not yet implemented.[/yellow]")
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    if not cli_context:
+        console.print("[red]CLI context is uninitialized.[/red]")
+        raise typer.Exit(1)
+        
+    # Fetch from the active loaded config object which is resolved and typed
+    config = cli_context.config
+    parts = key.split(".")
+    curr: Any = config
+    
+    for part in parts:
+        if hasattr(curr, part):
+            curr = getattr(curr, part)
+        elif isinstance(curr, dict) and part in curr:
+            curr = curr[part]
+        else:
+            console.print(f"[red]Key '{key}' not found in active configuration.[/red]")
+            raise typer.Exit(1)
+            
+    console.print(f"[bold]{key}[/bold] = {curr}")
 
 
 @config_cmd.command("show")

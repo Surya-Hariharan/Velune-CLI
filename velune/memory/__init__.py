@@ -1,6 +1,30 @@
-"""Cognitive memory foundation."""
+"""Hierarchical Memory Subsystem for Velune Cognitive OS.
 
-from velune.memory.graph.service import GraphMemoryService
-from velune.memory.lifecycle.service import MemoryLifecycleService
+Includes working (Tier 1), episodic (Tier 2), semantic (Tier 3), graph (Tier 4),
+and archive (Tier 5) memory systems along with consolidator and decay pipelines.
+"""
 
-__all__ = ["GraphMemoryService", "MemoryLifecycleService"]
+from velune.memory.tiers.working import WorkingMemoryTier, MemoryTurn
+from velune.memory.tiers.episodic import EpisodicMemoryTier, EpisodicTurn, EpisodicStep
+from velune.memory.tiers.semantic import SemanticMemoryTier
+from velune.memory.tiers.graph import GraphMemoryTier, GraphNode, GraphEdge
+from velune.memory.tiers.archive import LongTermArchiveTier
+from velune.memory.prioritizer import MemoryPrioritizer
+from velune.memory.consolidator import MemoryConsolidator
+from velune.memory.lifecycle import MemoryLifecycleCoordinator
+
+__all__ = [
+    "WorkingMemoryTier",
+    "MemoryTurn",
+    "EpisodicMemoryTier",
+    "EpisodicTurn",
+    "EpisodicStep",
+    "SemanticMemoryTier",
+    "GraphMemoryTier",
+    "GraphNode",
+    "GraphEdge",
+    "LongTermArchiveTier",
+    "MemoryPrioritizer",
+    "MemoryConsolidator",
+    "MemoryLifecycleCoordinator",
+]
