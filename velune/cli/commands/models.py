@@ -1,8 +1,12 @@
 """Models command - velune models scan/list/assign."""
 
+from __future__ import annotations
+
 import typer
 from rich.console import Console
 from rich.table import Table
+
+from velune.cli.context import CLIContext
 
 console = Console()
 
@@ -11,30 +15,51 @@ models_cmd = typer.Typer(help="Model management commands")
 
 @models_cmd.command("scan")
 def models_scan(
+    ctx: typer.Context,
     provider: str = typer.Option(None, "--provider", "-p", help="Specific provider to scan"),
 ) -> None:
     """Scan for available models."""
-    console.print("[yellow]Model scanning not yet implemented.[/yellow]")
-    console.print("This will auto-discover models from:")
-    console.print("  • Ollama (localhost:11434)")
-    console.print("  • LM Studio (localhost:1234)")
-    console.print("  • OpenAI (via API)")
-    console.print("  • Anthropic (via API)")
-    console.print("  • Hugging Face (via API)")
-    console.print("  • Local GGUF files")
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    registry = cli_context.container.get("runtime.provider_registry") if cli_context else None
+
+    console.print("[bold]Provider scan boundary[/bold]")
+    console.print(f"Workspace: {cli_context.workspace if cli_context else 'current process'}")
+    if provider:
+        console.print(f"Requested provider filter: {provider}")
+
+    if registry is None:
+        console.print("[yellow]No provider registry is available yet.[/yellow]")
+        return
+
+    table = Table(title="Registered Providers")
+    table.add_column("Name", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Notes", style="magenta")
+
+    for provider_name in registry.list_providers():
+        table.add_row(provider_name, "registered", "discovery and routing boundary")
+
+    console.print(table)
 
 
 @models_cmd.command("list")
-def models_list() -> None:
+def models_list(ctx: typer.Context) -> None:
     """List registered models."""
-    console.print("[yellow]Model listing not yet implemented.[/yellow]")
-    
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+
     table = Table(title="Registered Models")
     table.add_column("ID", style="cyan")
     table.add_column("Name", style="green")
     table.add_column("Provider", style="magenta")
     table.add_column("Capabilities", style="blue")
-    
+
+    if cli_context is None:
+        table.add_row("<uninitialized>", "Velune", "system", "bootstrap only")
+    else:
+        provider_registry = cli_context.container.get("runtime.provider_registry")
+        for provider_name in provider_registry.list_providers():
+            table.add_row(provider_name, provider_name.title(), provider_name, "discovery pending")
+
     console.print(table)
 
 

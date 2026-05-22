@@ -1,9 +1,14 @@
 """Memory command - velune memory inspect/clear/export."""
 
-import typer
+from __future__ import annotations
+
 from pathlib import Path
+
+import typer
 from rich.console import Console
 from rich.table import Table
+
+from velune.cli.context import CLIContext
 
 console = Console()
 
@@ -25,6 +30,29 @@ def memory_inspect(
     table.add_column("Content Preview", style="magenta")
     table.add_column("Importance", style="blue")
     
+    console.print(table)
+
+
+@memory_cmd.command("stats")
+def memory_stats(ctx: typer.Context) -> None:
+    """Show memory subsystem statistics and configured policy."""
+
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    memory_config = cli_context.config.memory if cli_context else None
+
+    table = Table(title="Memory Statistics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    if memory_config is None:
+        table.add_row("status", "bootstrap-only")
+    else:
+        table.add_row("working_memory_ttl", str(memory_config.working_memory_ttl))
+        table.add_row("episodic_retention_days", str(memory_config.episodic_retention_days))
+        table.add_row("semantic_threshold", str(memory_config.semantic_threshold))
+        table.add_row("graph_enabled", str(memory_config.graph_enabled))
+        table.add_row("workspace", str(cli_context.workspace))
+
     console.print(table)
 
 

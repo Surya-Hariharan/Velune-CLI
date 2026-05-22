@@ -1,7 +1,10 @@
 """Workspace command - velune workspace init/status."""
 
-import typer
+from __future__ import annotations
+
 from pathlib import Path
+
+import typer
 from rich.console import Console
 from rich.panel import Panel
 
