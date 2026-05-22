@@ -99,6 +99,12 @@ benchmarks = [
 [project.scripts]
 velune = "velune.cli.main:app"
 
+[project.urls]
+Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
+Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
+Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
+Documentation = "https://github.com/Surya-Hariharan/Velune-CLI#readme"
+
 [tool.hatch.build.targets.wheel]
 packages = ["velune"]
 
