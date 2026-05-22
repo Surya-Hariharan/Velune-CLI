@@ -1,6 +1,6 @@
 """Cognitive model query interface."""
 
-from typing import Optional, list
+from typing import Optional
 from velune.workspace.cognition.model import LiveCognitionModel
 
 

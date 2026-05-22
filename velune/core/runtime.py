@@ -21,6 +21,24 @@ from velune.execution.executor import ExecutionExecutor
 from velune.cognition.orchestrator import CouncilOrchestrator
 from velune.core.registry.container import ServiceContainer
 
+# Stateful Orchestration & Memory Tiers
+from velune.orchestration.engine import LangGraphOrchestrationEngine
+from velune.memory.tiers.working import WorkingMemoryTier
+from velune.memory.tiers.episodic import EpisodicMemoryTier
+from velune.memory.tiers.semantic import SemanticMemoryTier
+from velune.memory.tiers.graph import GraphMemoryTier
+from velune.memory.tiers.archive import LongTermArchiveTier
+from velune.memory.consolidator import MemoryConsolidator
+from velune.memory.lifecycle import MemoryLifecycleCoordinator
+from velune.cognition.firewall import CognitiveFirewall
+from velune.tools.base.registry import ToolRegistry
+from velune.tools import (
+    ReadFile, ReadDirectory, WriteFile, CreateFile, DeleteFile,
+    GrepFiles, FindFiles, GitLog, GitDiff, GitBlame, GitStatus, GitBranch,
+    GitCommit, GitCheckout, ExecuteCommand, TerminalHistory,
+    SemanticCodeSearch, SymbolSearch, GoToDefinition, FindReferences, WebFetch
+)
+
 
 @dataclass(slots=True)
 class RuntimeContext:
@@ -66,14 +84,61 @@ def build_runtime(
     model_specialization = ModelSpecializationMapper(model_registry)
     repository_cognition = RepositoryCognitionService(workspace)
     
-    # Embedded/in-process Qdrant falls back nicely
-    hybrid_retriever = HybridRetriever(location=":memory:")
+    # Ensure local directory exists under .velune/
+    velune_dir = workspace / ".velune"
+    velune_dir.mkdir(parents=True, exist_ok=True)
+    db_path = velune_dir / "velune_cognitive_core.db"
+    vector_path = str(velune_dir / "qdrant_local_store")
+    archive_dir = velune_dir / "archive"
+
+    # Instantiate Tiers
+    working_tier = WorkingMemoryTier()
+    episodic_tier = EpisodicMemoryTier(db_path)
+    semantic_tier = SemanticMemoryTier(path=vector_path)
+    graph_tier = GraphMemoryTier(db_path)
+    archive_tier = LongTermArchiveTier(archive_dir)
+
+    # Instantiate Memory Coordinator & Consolidator
+    consolidator = MemoryConsolidator(
+        working_tier=working_tier,
+        episodic_tier=episodic_tier,
+        semantic_tier=semantic_tier,
+        graph_tier=graph_tier,
+        archive_tier=archive_tier,
+    )
+    memory_lifecycle = MemoryLifecycleCoordinator(consolidator)
+
+    # Instantiate ToolRegistry & Register default tools
+    tool_registry = ToolRegistry()
+    default_tools = [
+        ReadFile(), ReadDirectory(), WriteFile(), CreateFile(), DeleteFile(),
+        GrepFiles(), FindFiles(), GitLog(), GitDiff(), GitBlame(), GitStatus(), GitBranch(),
+        GitCommit(), GitCheckout(), ExecuteCommand(), TerminalHistory(),
+        SemanticCodeSearch(), SymbolSearch(), GoToDefinition(), FindReferences(), WebFetch()
+    ]
+    for tool in default_tools:
+        tool_registry.register(tool)
+
+    # Embedded/in-process Qdrant points to local store
+    hybrid_retriever = HybridRetriever(location=vector_path, client=semantic_tier.client)
     
     # Sandbox execution limits CPU/Memory resources on Windows
     execution_executor = ExecutionExecutor(workspace)
     
+    # Cognitive Firewall
+    cognitive_firewall = CognitiveFirewall()
+    
     # LangGraph deliberative multi-agent reasoning council
     council_orchestrator = CouncilOrchestrator(provider_registry, model_specialization)
+
+    # LangGraph stateful orchestration engine
+    orchestration_engine = LangGraphOrchestrationEngine(
+        retrieval=hybrid_retriever,
+        repository_cognition=repository_cognition,
+        memory_lifecycle=memory_lifecycle,
+        graph_memory=graph_tier,
+        tool_registry=tool_registry,
+    )
 
     # 4. Populate Dependency Injection Container
     container = ServiceContainer()
@@ -90,8 +155,20 @@ def build_runtime(
     container.register_instance("runtime.retrieval", hybrid_retriever)
     container.register_instance("runtime.execution_executor", execution_executor)
     container.register_instance("runtime.council_orchestrator", council_orchestrator)
+    container.register_instance("runtime.orchestration_engine", orchestration_engine)
+    container.register_instance("runtime.firewall", cognitive_firewall)
     container.register_instance("runtime.workspace", workspace)
     container.register_instance("runtime.config_path", config_path)
+    
+    # Memory Tier registrations
+    container.register_instance("runtime.working_memory", working_tier)
+    container.register_instance("runtime.episodic_memory", episodic_tier)
+    container.register_instance("runtime.semantic_memory", semantic_tier)
+    container.register_instance("runtime.graph_memory", graph_tier)
+    container.register_instance("runtime.archive_memory", archive_tier)
+    container.register_instance("runtime.memory_lifecycle", memory_lifecycle)
+    container.register_instance("runtime.memory_consolidator", consolidator)
+    container.register_instance("runtime.tool_registry", tool_registry)
 
     # 5. Register Subsystems in Lifecycle Coordinator
     lifecycle.register("bus", bus)
@@ -100,6 +177,7 @@ def build_runtime(
     lifecycle.register("repository", repository_cognition)
     lifecycle.register("retrieval", hybrid_retriever)
     lifecycle.register("execution", execution_executor)
+    lifecycle.register("memory", memory_lifecycle)
 
     return RuntimeContext(
         workspace=workspace,

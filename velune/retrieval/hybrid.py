@@ -1,6 +1,6 @@
 """Fusion orchestrator merging BM25, Qdrant vectors, and dependency graphs."""
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from velune.kernel.registry import ComponentRegistry
 from velune.providers.base import ModelProvider
@@ -14,9 +14,9 @@ from velune.retrieval.vector import VectorRetriever
 class HybridRetriever:
     """Orchestrates fusion retrieval, combining Lexical, Vector, and Graph traversals."""
 
-    def __init__(self, location: str = ":memory:") -> None:
+    def __init__(self, location: str = ":memory:", client: Optional[Any] = None) -> None:
         self.registry = ComponentRegistry()
-        self.vector_retriever = VectorRetriever(location=location)
+        self.vector_retriever = VectorRetriever(location=location, client=client)
         self.lexical_retriever = BM25Retriever()
         self.graph_retriever = GraphRetriever()
         self.reranker = ContextReranker()
@@ -113,17 +113,68 @@ class HybridRetriever:
             strategy="hybrid-fusion-reranked"
         )
 
+    def search(self, query: RetrievalQuery) -> RetrievalResult:
+        """Synchronously execute hybrid retrieval."""
+        import asyncio
+        import concurrent.futures
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(lambda: asyncio.run(self.retrieve(query)))
+                return future.result()
+        else:
+            return asyncio.run(self.retrieve(query))
+
+
     def _generate_embedding(self, text: str) -> List[float]:
         """Generates embedding using the registered ModelProvider, or falls back to a deterministic vector."""
         try:
-            provider = self.registry.get(ModelProvider)
-            if provider:
-                # We can call provider.embed synchronously or asynchronously in a mock blocking fashion
-                # Since embed() is typically async, we can resolve it using an event loop or fall back.
-                # To keep it extremely resilient, let's use a deterministic fallback if async context fails
-                pass
-        except Exception:
-            pass
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.provider_registry"):
+                provider_registry = container.get("runtime.provider_registry")
+                config = container.get("runtime.config") if container.has("runtime.config") else None
+                
+                provider_name = "openai"
+                if config and hasattr(config, "providers") and config.providers:
+                    provider_name = config.providers.default_provider
+                
+                provider = provider_registry.get(provider_name)
+                if provider:
+                    model_id = "text-embedding-3-small"
+                    if provider_name == "ollama":
+                        model_id = "nomic-embed-text"
+                    
+                    import asyncio
+                    import concurrent.futures
+
+                    async def _get_emb():
+                        res = await provider.embed([text], model_id=model_id)
+                        return res[0] if res else None
+
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+
+                    if loop and loop.is_running():
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(lambda: asyncio.run(_get_emb()))
+                            emb = future.result()
+                    else:
+                        emb = asyncio.run(_get_emb())
+
+                    if emb:
+                        return emb
+        except Exception as e:
+            import logging
+            logging.getLogger("velune.retrieval.hybrid").warning(
+                "Failed to generate embedding using ModelProvider: %s. Falling back to deterministic embedding.", e
+            )
             
         # Sophisticated deterministic fallback embedding vector
         # Computes characters sums to generate a unique but reproducible list of 1536 floats

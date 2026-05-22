@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from velune.core.types.context import ContextWindow
 from velune.core.types.task import TaskPlan
-from velune.repository.cognition.schemas import RepositorySnapshot
+from velune.repository.schemas import RepositorySnapshot
 from velune.retrieval.schemas import RetrievalResult
 
 

@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from velune.events.bus.engine import Event, EventBus
-from velune.memory.graph.service import GraphMemoryService
-from velune.memory.lifecycle.service import MemoryArtifact, MemoryLifecycleService
+from velune.memory.tiers.graph import GraphMemoryTier
+from velune.memory.lifecycle import MemoryArtifact, MemoryLifecycleCoordinator
 from velune.orchestration.checkpoints import InMemoryCheckpointStore
 from velune.orchestration.schemas import (
     AgentMessage,
@@ -23,9 +23,9 @@ from velune.orchestration.schemas import (
 )
 from velune.orchestration.validators import ExecutionValidator
 from velune.planning.service import AdaptivePlanningService
-from velune.repository.cognition.schemas import RepositorySnapshot
-from velune.repository.cognition.service import RepositoryCognitionService
-from velune.retrieval.hybrid.service import HybridRetrievalEngine
+from velune.repository.schemas import RepositorySnapshot
+from velune.repository.cognition import RepositoryCognitionService
+from velune.retrieval.hybrid import HybridRetriever
 from velune.retrieval.schemas import RetrievalQuery
 from velune.tools.base.executor import ToolExecutionCoordinator
 from velune.tools.base.registry import ToolRegistry
@@ -42,10 +42,10 @@ class LangGraphOrchestrationEngine:
 
     def __init__(
         self,
-        retrieval: HybridRetrievalEngine,
+        retrieval: HybridRetriever,
         repository_cognition: RepositoryCognitionService,
-        memory_lifecycle: MemoryLifecycleService,
-        graph_memory: GraphMemoryService,
+        memory_lifecycle: MemoryLifecycleCoordinator,
+        graph_memory: GraphMemoryTier,
         tool_registry: ToolRegistry,
         event_bus: Optional[EventBus] = None,
     ) -> None:

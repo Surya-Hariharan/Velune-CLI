@@ -1,7 +1,7 @@
-"""Code navigation tools."""
+from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, list
+from typing import Optional
 from velune.tools.base.tool import BaseTool
 
 

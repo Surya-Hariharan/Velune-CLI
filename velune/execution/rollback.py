@@ -49,26 +49,24 @@ class RollbackManager:
         checkpoint_id = checkpoint_data.get("checkpoint_id", "")
         logger.warning("Triggering state rollback for checkpoint: %s", checkpoint_id)
 
-        # 1. Restore the file snapshot copies
+        # 1. Perform git-level cleanup first if git is active (extremely fast and safe)
+        if checkpoint_data.get("git_active"):
+            try:
+                logger.info("Executing Git rollback: resetting tracked files and cleaning untracked artifacts...")
+                self.git_tracker._run_git(["reset", "--hard", "HEAD"])
+                self.git_tracker._run_git(["clean", "-fd"])
+                logger.info("Git rollback and workspace cleaning successfully completed.")
+            except Exception as e:
+                logger.warning("Git reset/clean rollback failed, attempting file-based copy recovery: %s", e)
+
+        # 2. Restore file snapshots (acts as primary recovery for non-git or fallback for git failures)
         file_snapshot = checkpoint_data.get("file_snapshot")
         if file_snapshot:
             try:
                 self.checkpointer.restore_checkpoint(checkpoint_id, file_snapshot)
+                logger.info("File copy recovery successfully completed.")
             except Exception as e:
                 logger.error("Snapshot restore failed during rollback: %s", e)
-                raise RollbackError(f"File rollback failed: {e}")
-
-        # 2. Perform git-level cleanup if git is active
-        if checkpoint_data.get("git_active"):
-            try:
-                # Discard unstaged modifications for check-pointed files
-                copied_files = file_snapshot.get("copied_files", {}) if file_snapshot else {}
-                for rel_path_str in copied_files.keys():
-                    abs_path = self.workspace_path / rel_path_str
-                    if abs_path.exists():
-                        self.git_tracker._run_git(["checkout", "--", str(abs_path)])
-                logger.info("Discarded uncommitted git modifications for tracked files")
-            except Exception as e:
-                logger.warning("Git checkout rollback failed: %s", e)
+                raise RollbackError(f"File rollback copy recovery failed: {e}")
 
         logger.info("Successfully reverted workspace to pre-execution state for %s", checkpoint_id)

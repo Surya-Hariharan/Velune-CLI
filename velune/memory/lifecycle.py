@@ -14,6 +14,24 @@ from velune.memory.consolidator import MemoryConsolidator
 logger = logging.getLogger("velune.memory.lifecycle")
 
 
+class MemoryArtifact:
+    """Represents a discrete memory chunk captured during run finalization."""
+
+    def __init__(
+        self,
+        id: str,
+        memory_type: str,
+        content: str,
+        importance: float,
+        metadata: dict[str, Any],
+    ) -> None:
+        self.id = id
+        self.memory_type = memory_type
+        self.content = content
+        self.importance = importance
+        self.metadata = metadata
+
+
 class MemoryLifecycleCoordinator:
     """Orchestrates memory subsystem boot protocols and triggers consolidation routines on milestones."""
 
@@ -31,6 +49,31 @@ class MemoryLifecycleCoordinator:
         logger.info("Flushing transient working memory buffers before shutdown...")
         # Clean shutdown behavior: ensure transient memories are not lost
         self._is_active = False
+
+    def ingest(self, artifact: MemoryArtifact) -> None:
+        """Ingest a finalized memory artifact into working and episodic tiers."""
+        session_id = artifact.metadata.get("run_id") or "default"
+        if self.consolidator.working:
+            self.consolidator.working.add_turn(
+                role="system",
+                content=artifact.content,
+                metadata=artifact.metadata,
+            )
+        if self.consolidator.episodic:
+            self.consolidator.episodic.add_turn(
+                session_id=session_id,
+                role="system",
+                content=artifact.content,
+                metadata=artifact.metadata,
+            )
+
+    def summary(self) -> dict[str, Any]:
+        """Retrieve dynamic health and retention stats across all tiers."""
+        return {
+            "working_turns": len(self.consolidator.working.get_turns()) if self.consolidator.working else 0,
+            "working_logs": len(self.consolidator.working.get_execution_logs()) if self.consolidator.working else 0,
+            "is_active": self._is_active,
+        }
 
     async def trigger_milestone_consolidation(
         self,

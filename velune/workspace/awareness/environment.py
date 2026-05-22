@@ -1,7 +1,7 @@
-"""Environment variable/tool awareness."""
+from __future__ import annotations
 
 import os
-from typing import Dict, list
+from typing import Dict
 
 
 class EnvironmentAwareness:

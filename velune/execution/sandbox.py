@@ -73,8 +73,20 @@ class SubprocessSandbox:
         ]
 
     def _is_safe_command(self, cmd: str) -> bool:
-        """Check if command contains any blocked patterns."""
+        """Check if command contains any blocked patterns, shell chainings, or curl/wget."""
         cmd_lower = cmd.lower()
+        
+        # Block command chaining / shell piping to enforce atomic execution steps
+        for char in ["&&", ";", "|", "||"]:
+            if char in cmd:
+                return False
+                
+        # Block network access or base64 decoding utilities
+        blocked_utils = ["curl", "wget", "iwr", "invoke-webrequest", "base64", "frombase64"]
+        for util in blocked_utils:
+            if util in cmd_lower:
+                return False
+
         for block in self.blocked_keywords:
             if block in cmd_lower:
                 return False

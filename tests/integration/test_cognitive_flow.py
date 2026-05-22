@@ -39,7 +39,7 @@ class MockModelProvider(ModelProvider):
                   "agent_role": "coder",
                   "dependencies": [],
                   "metadata": {
-                    "command": "python -c \\"import os; open('temp_verified.txt', 'w').write('Verified')\\"",
+                    "command": "python -c \\"open('temp_verified.txt', 'w').write('Verified')\\"",
                     "expected_files": ["temp_verified.txt"],
                     "syntax_check_files": [],
                     "timeout": 15.0

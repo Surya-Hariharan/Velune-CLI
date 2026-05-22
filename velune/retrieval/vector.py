@@ -10,10 +10,15 @@ from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalS
 class VectorRetriever:
     """Retrieves context from Qdrant vector database using dense embeddings."""
 
-    def __init__(self, collection_name: str = "velune_symbols", location: str = ":memory:") -> None:
+    def __init__(self, collection_name: str = "velune_symbols", location: str = ".velune/qdrant_local_store", client: Optional[QdrantClient] = None) -> None:
         self.collection_name = collection_name
         self.location = location
-        self.client = QdrantClient(location=self.location)
+        if client is not None:
+            self.client = client
+        elif location.startswith(".") or "/" in location or "\\" in location:
+            self.client = QdrantClient(path=location)
+        else:
+            self.client = QdrantClient(location=location)
         self._ensure_collection()
 
     def _ensure_collection(self) -> None:

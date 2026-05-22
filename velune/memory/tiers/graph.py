@@ -193,3 +193,12 @@ class GraphMemoryTier:
                     queue.append(path + [n_id])
                     
         return None
+
+    def upsert_entity(self, entity_id: str, entity_type: str, **properties: Any) -> None:
+        """Upsert a node (entity) in the knowledge graph."""
+        self.add_node(node_id=entity_id, node_type=entity_type, properties=properties)
+
+    def upsert_relationship(self, source_id: str, target_id: str, relation_type: str, **properties: Any) -> None:
+        """Upsert a directed edge (relationship) between two existing nodes."""
+        self.add_edge(source_id=source_id, target_id=target_id, relation_type=relation_type, properties=properties)
+

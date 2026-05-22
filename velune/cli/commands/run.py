@@ -24,7 +24,7 @@ def run_command(
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help="Deliberate but do not write modifications or execute scripts"),
     force: bool = typer.Option(False, "--force", "-f", help="Force execution without human confirm thresholds"),
 ) -> None:
-    """Deliberate with the multi-agent Reasoning Council and execute in the subprocess sandbox."""
+    """Deliberate with the stateful LangGraph Reasoning Council and execute in the secured sandbox."""
 
     cli_context = ctx.obj
     if not isinstance(cli_context, CLIContext):
@@ -34,11 +34,7 @@ def run_command(
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
     model_registry = container.get("runtime.model_registry")
-    model_specialization = container.get("runtime.council_orchestrator").mapper
-    repo_cognition = container.get("runtime.repository_cognition")
-    retrieval = container.get("runtime.retrieval")
-    orchestrator = container.get("runtime.council_orchestrator")
-    executor = container.get("runtime.execution_executor")
+    orchestration_engine = container.get("runtime.orchestration_engine")
     config = cli_context.config
 
     # 2. Boot up Cognitive OS Subsystems
@@ -49,94 +45,53 @@ def run_command(
     console.print("[bold cyan]⠋[/bold cyan] Probing system hardware and local/remote providers...")
     run_async(model_registry.refresh())
     
-    display = CouncilDisplayView(console)
-    display.render_header(task)
+    console.print()
+    console.print(Panel(f"[bold green]Task Auth:[/bold green] {task}", border_style="cyan", title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]"))
 
-    # 4. Render Specialized Council Seats
-    roles = model_specialization.map_roles()
-    display.render_role_assignments(roles)
-
-    # 5. Ingest and Scan Workspace AST + Git metadata
-    snapshot: RepositorySnapshot = None
-    with console.status("[bold magenta]⚡ Mapping repository AST & Git volatility metrics...[/bold magenta]") as status:
-        snapshot = repo_cognition.index()
+    # 4. Stream Multi-Agent Council Deliberation & Execution Graph
+    console.print("[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n")
     
-    # Format a dense representation of the snapshot for the council's context
-    formatted_snap = _format_snapshot_context(snapshot)
+    from velune.orchestration.schemas import ExecutionStatus
+    
+    async def stream_runner():
+        milestones = []
+        async for milestone in orchestration_engine.stream(task):
+            console.print(f"  [bold cyan]•[/bold cyan] {milestone}")
+            milestones.append(milestone)
+        
+        # Parse run_id from milestones (format: "[run_id] milestone_name")
+        run_id = None
+        for m in milestones:
+            if m.startswith("[") and "]" in m:
+                run_id = m.split("]")[0][1:]
+                break
+        return orchestration_engine.get_state(run_id) if run_id else None
 
-    # 6. Execute Multi-Agent Council Deliberation Graph
-    council_res = None
-    with console.status("[bold magenta]🧠Deliberating Reasoning Council debate graph...[/bold magenta]") as status:
-        council_res = run_async(orchestrator.execute_task(task, formatted_snap))
+    state = run_async(stream_runner())
 
-    # Parse council output data
-    task_plan = council_res["task_plan"]
-    coder_proposal = council_res["coder_proposal"]
-    reviewer_report = council_res["reviewer_report"]
-    challenger_report = council_res["challenger_report"]
-    arbitration = council_res["arbitration"]
-    final_summary = council_res["final_summary"]
-
-    # 7. Render Debate Artifacts & Scores
-    display.render_step_header("Council Planner", "📋")
-    display.render_planner_dag(task_plan)
-
-    display.render_step_header("Council Coder", "💻")
-    display.render_code_proposal(coder_proposal)
-
-    display.render_step_header("Council Reviewer", "🔍")
-    display.render_reviewer_report(reviewer_report)
-
-    display.render_step_header("Council Challenger", "⚡")
-    display.render_challenger_report(challenger_report)
-
-    display.render_step_header("Arbitration Engine", "⚖️")
-    display.render_arbitration_result(arbitration)
-
-    display.render_step_header("Council Synthesizer", "🚀")
-    display.render_synthesized_response(final_summary)
-
-    # 8. Deciding on Autonomous Execution Sandbox
-    requires_human = arbitration.get("requires_human_review", False)
-    overall_confidence = arbitration.get("overall_confidence", 0.0)
-
-    if dry_run:
-        console.print("\n[yellow]💡 Dry run active. Skipping sandbox modification execution.[/yellow]")
+    # 5. Display Task Execution Results
+    console.print()
+    if state is None:
+        console.print("[bold red]✗ Pipeline failed to initialize state.[/bold red]")
         run_async(lifecycle.shutdown())
         return
 
-    # Check execution boundaries and confirm with user
-    should_confirm = config.execution.require_confirmation or requires_human or (overall_confidence < 0.6)
-    if should_confirm and not force:
-        console.print()
-        if requires_human:
-            console.print("[bold red]⚠️  CRITICAL ALERT:[/bold red] The council arbitrator flagged this plan for manual intervention.")
-        elif overall_confidence < 0.6:
-            console.print("[bold yellow]⚠️  WARNING:[/bold yellow] Council confidence is low. Verification execution is highly recommended.")
-        
-        confirm = typer.confirm("Do you want to authorize autonomous sandbox execution of the plan?", default=True)
-        if not confirm:
-            console.print("[yellow]Execution aborted by user. Exiting gracefully.[/yellow]")
-            run_async(lifecycle.shutdown())
-            return
+    success = state.status == ExecutionStatus.COMPLETED
+    attempts_count = len(state.attempts)
+    plan_steps = len(state.task_plan.steps) if state.task_plan else 0
+    checkpoints_count = len(state.checkpoints)
 
-    # 9. Perform Sandbox Execution DAG Loop
-    console.print("\n[bold magenta]⚙️  Autonomous execution sandbox active...[/bold magenta]")
-    
-    execution_result = None
-    with console.status("[bold cyan]Executing plan steps, saving checkpoints, and verifying postconditions...[/bold cyan]") as status:
-        execution_result = run_async(executor.execute_plan(task_plan, dry_run=False))
-
-    # 10. Display Task Execution Results
-    console.print()
-    if execution_result.success:
+    if success:
         console.print(
             Panel(
                 Text.assemble(
-                    ("[bold green]✓ AUTONOMOUS SANDBOX EXECUTION FULLY COMPLETED[/bold green]\n"),
-                    (f"Time Taken: [bold white]{execution_result.execution_time_ms:.1f}ms[/bold white]\n"),
-                    (f"Plan Steps: [bold white]{execution_result.steps_completed} / {execution_result.steps_total} completed[/bold white]\n"),
-                    ("[green]State postconditions successfully validated. No rollbacks triggered.[/green]")
+                    ("[bold green]✓ STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"),
+                    (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
+                    (f"Plan Steps: [bold white]{plan_steps}[/bold white] steps processed\n"),
+                    (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
+                    (f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"),
+                    ("[bold green]Synthesized Output:[/bold green]\n"),
+                    (state.output or "Execution completed successfully.")
                 ),
                 border_style="green",
                 title="[bold green]Success Report[/bold green]"
@@ -146,17 +101,19 @@ def run_command(
         console.print(
             Panel(
                 Text.assemble(
-                    ("[bold red]✗ AUTONOMOUS EXECUTION BLOCKED & ROLLED BACK[/bold red]\n"),
-                    (f"Execution Error: [bold red]{execution_result.error or 'Unexpected validation/compile failure'}[/bold red]\n"),
-                    (f"Plan Steps: [bold white]{execution_result.steps_completed} / {execution_result.steps_total} completed[/bold white]\n"),
-                    ("[yellow]State checkpointer successfully stashed snapshots and fully rolled back file edits to keep workspace clean.[/yellow]")
+                    ("[bold red]✗ AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"),
+                    (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
+                    (f"Failure Reason: [bold red]{state.error or 'Validation/Execution mismatch'}[/bold red]\n"),
+                    (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
+                    (f"Validation Issues: [bold yellow]{', '.join(state.validation_issues) if state.validation_issues else 'None'}[/bold yellow]\n\n"),
+                    ("[yellow]State checkpointer stashed checkpoints, and Git workspace states have been preserved/rolled back.[/yellow]")
                 ),
                 border_style="red",
                 title="[bold red]Rollback Execution Report[/bold red]"
             )
         )
 
-    # 11. Graceful Shutdown
+    # 6. Graceful Shutdown
     run_async(lifecycle.shutdown())
 
 
