@@ -1,7 +1,6 @@
 """Embedding abstraction layer."""
 
 from abc import ABC, abstractmethod
-from typing import list
 
 
 class EmbeddingProvider(ABC):

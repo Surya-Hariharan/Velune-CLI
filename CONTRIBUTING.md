@@ -14,8 +14,8 @@ Run the core checks before opening a pull request:
 
 ```bash
 ruff check .
-black .
-pytest
+black --check .
+python -m compileall velune
 ```
 
 ## Pull requests

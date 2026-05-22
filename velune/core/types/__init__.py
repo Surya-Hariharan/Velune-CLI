@@ -4,7 +4,7 @@ from velune.core.types.agent import AgentRole, AgentMessage, AgentMessageType, A
 from velune.core.types.context import ContextPriority, ContextChunk, ContextWindow
 from velune.core.types.inference import InferenceRequest, StreamChunk, InferenceResponse
 from velune.core.types.memory import MemoryType, MemoryRecord, MemoryQuery
-from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
+from velune.core.types.model import CapabilityLevel, ModelCapability, ModelCapabilityProfile, ModelDescriptor
 from velune.core.types.provider import ProviderConfig, ProviderCapabilities
 from velune.core.types.repository import FileNode, SymbolNode, DependencyEdge
 from velune.core.types.task import TaskStatus, Task, TaskStep, TaskPlan, TaskResult
@@ -26,6 +26,7 @@ __all__ = [
     "MemoryQuery",
     "CapabilityLevel",
     "ModelCapability",
+    "ModelCapabilityProfile",
     "ModelDescriptor",
     "ProviderConfig",
     "ProviderCapabilities",

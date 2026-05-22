@@ -2,7 +2,8 @@
 
 from typing import Protocol, AsyncIterator, runtime_checkable
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
-from velune.core.types.model import ModelDescriptor, ProviderCapabilities
+from velune.core.types.model import ModelDescriptor
+from velune.core.types.provider import ProviderCapabilities
 from velune.core.types.provider import ProviderHealth
 
 

@@ -14,6 +14,13 @@ from velune.core.config.service import ConfigService
 from velune.core.config.schema import VeluneConfig
 from velune.core.logging import LoggingConfig, configure_logging, get_logger
 from velune.core.registry.container import ServiceContainer
+from velune.models.discovery import ModelDiscoveryService, ModelRegistry
+from velune.memory.graph.service import GraphMemoryService
+from velune.memory.lifecycle.service import MemoryLifecycleService
+from velune.repository.cognition.service import RepositoryCognitionService
+from velune.retrieval.hybrid.service import HybridRetrievalEngine
+from velune.retrieval.lexical.memory import InMemoryLexicalIndex
+from velune.retrieval.vector.memory import InMemoryVectorStore
 from velune.providers.registry import ProviderRegistry
 
 
@@ -51,13 +58,29 @@ def build_runtime(
     logger = get_logger(logger_name)
 
     provider_registry = ProviderRegistry(config.providers)
+    model_registry = ModelRegistry()
+    model_discovery = ModelDiscoveryService(registry=model_registry, workspace=workspace)
     config_service = ConfigService(workspace=workspace, config_path=config_path)
+    vector_store = InMemoryVectorStore()
+    lexical_index = InMemoryLexicalIndex()
+    hybrid_retrieval = HybridRetrievalEngine(vector_store=vector_store, lexical_index=lexical_index)
+    graph_memory = GraphMemoryService()
+    memory_lifecycle = MemoryLifecycleService()
+    repository_cognition = RepositoryCognitionService()
 
     container.register_instance("runtime.config", config)
     container.register_instance("runtime.config_service", config_service)
     container.register_instance("runtime.console", console)
     container.register_instance("runtime.logger", logger)
     container.register_instance("runtime.provider_registry", provider_registry)
+    container.register_instance("runtime.model_registry", model_registry)
+    container.register_instance("runtime.model_discovery", model_discovery)
+    container.register_instance("runtime.vector_store", vector_store)
+    container.register_instance("runtime.lexical_index", lexical_index)
+    container.register_instance("runtime.retrieval", hybrid_retrieval)
+    container.register_instance("runtime.graph_memory", graph_memory)
+    container.register_instance("runtime.memory_lifecycle", memory_lifecycle)
+    container.register_instance("runtime.repository_cognition", repository_cognition)
     container.register_instance("runtime.workspace", workspace)
     container.register_instance("runtime.config_path", config_path)
 

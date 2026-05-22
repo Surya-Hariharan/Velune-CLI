@@ -1,14 +1,35 @@
 """Core model type definitions."""
 
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Any, Optional, Literal
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ModelCapability(str, Enum):
+    """Capability categories used by the model router and classifiers."""
+
+    CODE_GENERATION = "code_generation"
+    CODE_ANALYSIS = "code_analysis"
+    REASONING = "reasoning"
+    PLANNING = "planning"
+    TOOL_USE = "tool_use"
+    DEBUGGING = "debugging"
+    REFACTORING = "refactoring"
+    SUMMARIZATION = "summarization"
+    RETRIEVAL = "retrieval"
+    MULTILINGUAL = "multilingual"
+    EMBEDDING = "embedding"
+    LONG_CONTEXT = "long_context"
 
 
 class CapabilityLevel(IntEnum):
     """Capability proficiency levels."""
     NONE = 0
     BASIC = 1
+    INTERMEDIATE = 2
+    ADVANCED = 3
+    EXPERT = 4
     CAPABLE = 2
     STRONG = 3
     EXCEPTIONAL = 4
@@ -29,11 +50,14 @@ class ModelCapabilityProfile(BaseModel):
 
 class ModelDescriptor(BaseModel):
     """Descriptor for a model."""
-    model_id: str
-    provider_id: str
-    display_name: str
-    context_length: int
-    capabilities: ModelCapabilityProfile
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    model_id: str = Field(alias="id")
+    provider_id: str = Field(alias="provider")
+    display_name: str = Field(alias="name")
+    context_length: int = Field(alias="context_window")
+    capabilities: Any
+    is_local: bool = False
     quantization: Optional[str] = None  # e.g. "Q4_K_M", "Q8_0"
     vram_required_gb: Optional[float] = None
     parameter_count_b: Optional[float] = None

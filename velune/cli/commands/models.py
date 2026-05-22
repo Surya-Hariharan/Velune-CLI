@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.table import Table
 
 from velune.cli.context import CLIContext
+from velune.core.async_runtime import run_async
 
 console = Console()
 
@@ -20,32 +21,44 @@ def models_scan(
 ) -> None:
     """Scan for available models."""
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
-    registry = cli_context.container.get("runtime.provider_registry") if cli_context else None
+    discovery = cli_context.container.get("runtime.model_discovery") if cli_context else None
 
-    console.print("[bold]Provider scan boundary[/bold]")
-    console.print(f"Workspace: {cli_context.workspace if cli_context else 'current process'}")
-    if provider:
-        console.print(f"Requested provider filter: {provider}")
+    if discovery is None:
+        console.print("[red]Model discovery service is unavailable.[/red]")
+        raise typer.Exit(code=1)
 
-    if registry is None:
-        console.print("[yellow]No provider registry is available yet.[/yellow]")
-        return
+    records = run_async(discovery.discover(provider_id=provider))
 
-    table = Table(title="Registered Providers")
-    table.add_column("Name", style="cyan")
-    table.add_column("Status", style="green")
-    table.add_column("Notes", style="magenta")
+    table = Table(title="Discovered Models")
+    table.add_column("Provider", style="cyan")
+    table.add_column("Model", style="green")
+    table.add_column("Specialization", style="magenta")
+    table.add_column("Speed", style="blue")
+    table.add_column("Context", style="yellow")
+    table.add_column("Embedding", style="white")
 
-    for provider_name in registry.list_providers():
-        table.add_row(provider_name, "registered", "discovery and routing boundary")
+    for record in records:
+        table.add_row(
+            record.provider_id,
+            record.model_id,
+            record.classification.specialization.value,
+            record.classification.speed_tier,
+            str(record.classification.context_length),
+            "yes" if record.classification.embedding_supported else "no",
+        )
 
     console.print(table)
+    summary = discovery.summary()
+    console.print(
+        f"[dim]Discovered {summary['total']} model(s) across {len(summary['providers'])} provider(s).[/dim]"
+    )
 
 
 @models_cmd.command("list")
 def models_list(ctx: typer.Context) -> None:
     """List registered models."""
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    registry = cli_context.container.get("runtime.model_registry") if cli_context else None
 
     table = Table(title="Registered Models")
     table.add_column("ID", style="cyan")
@@ -53,12 +66,16 @@ def models_list(ctx: typer.Context) -> None:
     table.add_column("Provider", style="magenta")
     table.add_column("Capabilities", style="blue")
 
-    if cli_context is None:
+    if registry is None:
         table.add_row("<uninitialized>", "Velune", "system", "bootstrap only")
     else:
-        provider_registry = cli_context.container.get("runtime.provider_registry")
-        for provider_name in provider_registry.list_providers():
-            table.add_row(provider_name, provider_name.title(), provider_name, "discovery pending")
+        for record in registry.list():
+            table.add_row(
+                record.model_id,
+                record.descriptor.display_name,
+                record.provider_id,
+                ", ".join(capability.value for capability in record.classification.capabilities.keys()) or "none",
+            )
 
     console.print(table)
 
