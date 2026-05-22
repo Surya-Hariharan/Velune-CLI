@@ -1,0 +1,129 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "velune"
+version = "0.1.0"
+description = "Cognitive AI CLI for autonomous software engineering"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Velune Contributors" }
+]
+keywords = ["ai", "cli", "agent", "autonomous", "coding"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # Core
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "toml>=0.10.2",
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    
+    # Async
+    "asyncio>=3.4.3",
+    "aiofiles>=23.2.1",
+    
+    # Providers
+    "openai>=1.10.0",
+    "anthropic>=0.18.0",
+    "httpx>=0.26.0",
+    
+    # Local Models
+    "llama-cpp-python>=0.2.0",
+    
+    # Orchestration
+    "langgraph>=0.0.20",
+    "langchain>=0.1.0",
+    "langchain-core>=0.1.0",
+    
+    # Memory
+    "graphiti-core>=0.1.0",
+    "chromadb>=0.4.0",
+    
+    # Retrieval
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=2.3.0",
+    
+    # Repository
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
+    "tree-sitter-rust>=0.21.0",
+    "tree-sitter-go>=0.21.0",
+    "gitpython>=3.1.40",
+    "networkx>=3.2.0",
+    
+    # Execution
+    "psutil>=5.9.0",
+    
+    # Events
+    "pyee>=11.0.0",
+    
+    # Telemetry
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "opentelemetry-exporter-otlp>=1.22.0",
+    
+    # Utilities
+    "python-dateutil>=2.8.2",
+    "tenacity>=8.2.0",
+    "orjson>=3.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.12.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+]
+
+benchmarks = [
+    "pytest-benchmark>=4.0.0",
+]
+
+[project.scripts]
+velune = "velune.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["velune"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

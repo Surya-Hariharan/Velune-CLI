@@ -1,0 +1,48 @@
+"""Core agent type definitions."""
+
+from enum import Enum
+from typing import Any, Optional
+from pydantic import BaseModel, Field
+
+
+class AgentRole(str, Enum):
+    """Agent role definitions."""
+    PLANNER = "planner"
+    CODER = "coder"
+    REASONER = "reasoner"
+    REVIEWER = "reviewer"
+    DEBUGGER = "debugger"
+    SUMMARIZER = "summarizer"
+    RETRIEVER = "retriever"
+    SUPERVISOR = "supervisor"
+
+
+class AgentMessageType(str, Enum):
+    """Typed message protocol for agent communication."""
+    TASK_REQUEST = "task_request"
+    TASK_RESPONSE = "task_response"
+    STATUS_UPDATE = "status_update"
+    ERROR_REPORT = "error_report"
+    QUERY = "query"
+    RESPONSE = "response"
+    CONTROL = "control"
+
+
+class AgentMessage(BaseModel):
+    """Typed message for inter-agent communication."""
+    message_type: AgentMessageType
+    sender: str
+    recipient: str
+    content: Any
+    timestamp: float
+    correlation_id: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentResult(BaseModel):
+    """Result from agent execution."""
+    success: bool
+    output: Optional[Any] = None
+    error: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    execution_time_ms: Optional[float] = None
