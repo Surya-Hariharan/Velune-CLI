@@ -9,7 +9,7 @@ from typing import Iterable, Sequence
 
 import typer
 
-from velune.cli.commands import ask_cmd, config_cmd, memory_cmd, models_cmd, run_cmd, workspace_cmd
+from velune.cli.commands import ask_command, config_cmd, memory_cmd, models_cmd, run_command, workspace_cmd
 from velune.core.registry.container import ServiceContainer
 
 BUILTIN_COMMAND_MODULES: Sequence[str] = (
@@ -40,8 +40,8 @@ def discover_plugin_entry_points(group: str = "velune.commands") -> list[EntryPo
 def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     """Attach all built-in and plugin command groups to the app."""
 
-    app.add_typer(ask_cmd, name="ask")
-    app.add_typer(run_cmd, name="run")
+    app.command(name="ask")(ask_command)
+    app.command(name="run")(run_command)
     app.add_typer(models_cmd, name="models")
     app.add_typer(workspace_cmd, name="workspace")
     app.add_typer(memory_cmd, name="memory")

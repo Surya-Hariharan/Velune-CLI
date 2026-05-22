@@ -40,7 +40,6 @@ class CouncilDisplayView:
         """Render a table displaying mapped specialized models for the council."""
         table = Table(
             title="[bold cyan]Mapped Council Specializations[/bold cyan]",
-            title_align="left",
             box=ROUNDED,
             border_style="dim",
             expand=True
@@ -51,7 +50,13 @@ class CouncilDisplayView:
         table.add_column("Key Skills / Tags", style="magenta")
 
         for role, desc in assignments.items():
-            tags = ", ".join(desc.capabilities.specialization_tags) if hasattr(desc, "capabilities") else "reasoning"
+            caps = []
+            if hasattr(desc, "capabilities") and desc.capabilities:
+                for cap_name in ["coding", "reasoning", "planning", "summarization", "tool_use"]:
+                    level = getattr(desc.capabilities, cap_name, None)
+                    if level and level > 0:
+                        caps.append(f"{cap_name} ({level.name})")
+            tags = ", ".join(caps) if caps else ", ".join(desc.tags) if getattr(desc, "tags", None) else "reasoning"
             table.add_row(
                 role.value.upper(),
                 desc.provider_id.capitalize(),
@@ -69,7 +74,6 @@ class CouncilDisplayView:
         """Render the Planner's task plan DAG as a neat hierarchical or sequential table."""
         table = Table(
             title="[bold yellow]Execution Plan Compiled by Council Planner[/bold yellow]",
-            title_align="left",
             box=ROUNDED,
             border_style="yellow",
             expand=True

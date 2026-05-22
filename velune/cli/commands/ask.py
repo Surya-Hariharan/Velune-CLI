@@ -18,7 +18,6 @@ console = Console()
 ask_cmd = typer.Typer(help="Interactive prompt entry point")
 
 
-@ask_cmd.callback(invoke_without_command=True)
 def ask_command(
     ctx: typer.Context,
     prompt: Optional[str] = typer.Argument(None, help="Question or task to route through Velune"),

@@ -18,7 +18,6 @@ console = Console()
 run_cmd = typer.Typer(help="Autonomous council run commands")
 
 
-@run_cmd.callback(invoke_without_command=True)
 def run_command(
     ctx: typer.Context,
     task: str = typer.Argument(..., help="Natural-language task to execute"),

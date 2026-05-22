@@ -31,7 +31,10 @@ class FileCheckpointer:
         copied_files: Dict[str, Any] = {}
         for file in files_to_track:
             try:
-                abs_file = Path(file).resolve()
+                if not Path(file).is_absolute():
+                    abs_file = (self.workspace_path / file).resolve()
+                else:
+                    abs_file = Path(file).resolve()
                 if not abs_file.exists():
                     # Keep record that file didn't exist so rollback deletes it
                     rel_str = str(abs_file.relative_to(self.workspace_path)).replace("\\", "/")
