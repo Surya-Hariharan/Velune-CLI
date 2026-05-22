@@ -140,7 +140,7 @@ async def test_end_to_end_cognitive_flow(tmp_path):
         historical_accuracy=0.9
     )
     
-    prompt = "Create a temporary verification file that writes 'Verified'"
+    prompt = "Create a temporary verification file that writes 'Verified' utilizing a thread-safe database interface"
     repo_context = "# Workspace root initialization\n"
     
     result = await orchestrator.execute_task(prompt, repo_context)

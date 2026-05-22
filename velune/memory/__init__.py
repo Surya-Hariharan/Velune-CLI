@@ -9,6 +9,7 @@ from velune.memory.tiers.episodic import EpisodicMemoryTier, EpisodicTurn, Episo
 from velune.memory.tiers.semantic import SemanticMemoryTier
 from velune.memory.tiers.graph import GraphMemoryTier, GraphNode, GraphEdge
 from velune.memory.tiers.archive import LongTermArchiveTier
+from velune.memory.tiers.lineage import LineageMemoryTier
 from velune.memory.prioritizer import MemoryPrioritizer
 from velune.memory.consolidator import MemoryConsolidator
 from velune.memory.lifecycle import MemoryLifecycleCoordinator
@@ -24,6 +25,7 @@ __all__ = [
     "GraphNode",
     "GraphEdge",
     "LongTermArchiveTier",
+    "LineageMemoryTier",
     "MemoryPrioritizer",
     "MemoryConsolidator",
     "MemoryLifecycleCoordinator",

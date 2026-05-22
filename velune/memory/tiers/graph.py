@@ -39,7 +39,7 @@ class GraphMemoryTier:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Initialize database tables for nodes and edges."""
+        """Initialize database tables for nodes, edges, and execution lineage."""
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with sqlite3.connect(self.db_path) as conn:
@@ -67,8 +67,34 @@ class GraphMemoryTier:
                     )
                 """)
                 
+                # Execution Nodes Table (Lineage Tracking)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS execution_nodes (
+                        id TEXT PRIMARY KEY,
+                        task_id TEXT NOT NULL,
+                        node_type TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        parameters TEXT NOT NULL,
+                        outcome TEXT,
+                        timestamp REAL NOT NULL
+                    )
+                """)
+
+                # Execution Edges Table (Lineage Tracking)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS execution_edges (
+                        source TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        relation_type TEXT NOT NULL,
+                        PRIMARY KEY (source, target, relation_type),
+                        FOREIGN KEY (source) REFERENCES execution_nodes(id) ON DELETE CASCADE,
+                        FOREIGN KEY (target) REFERENCES execution_nodes(id) ON DELETE CASCADE
+                    )
+                """)
+
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_nodes_task ON execution_nodes(task_id)")
                 
                 conn.commit()
             logger.info("Successfully initialized Graph Database at %s", self.db_path)
@@ -201,4 +227,90 @@ class GraphMemoryTier:
     def upsert_relationship(self, source_id: str, target_id: str, relation_type: str, **properties: Any) -> None:
         """Upsert a directed edge (relationship) between two existing nodes."""
         self.add_edge(source_id=source_id, target_id=target_id, relation_type=relation_type, properties=properties)
+
+    def record_execution_node(
+        self,
+        node_id: str,
+        task_id: str,
+        node_type: str,
+        status: str,
+        parameters: Dict[str, Any],
+        outcome: Optional[str] = None,
+    ) -> None:
+        """Record a step in the execution lineage graph."""
+        import time
+        params_str = json.dumps(parameters)
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO execution_nodes (id, task_id, node_type, status, parameters, outcome, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        status=excluded.status,
+                        parameters=excluded.parameters,
+                        outcome=excluded.outcome,
+                        timestamp=excluded.timestamp
+                    """,
+                    (node_id, task_id, node_type, status, params_str, outcome, time.time())
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error("Failed to record execution node %s: %s", node_id, e)
+
+    def record_execution_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+    ) -> None:
+        """Record a transition edge between execution steps."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO execution_edges (source, target, relation_type)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(source, target, relation_type) DO NOTHING
+                    """,
+                    (source_id, target_id, relation_type)
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error("Failed to record execution edge from %s to %s: %s", source_id, target_id, e)
+
+    def query_execution_lineage(self, file_path: str) -> List[Dict[str, Any]]:
+        """
+        Query historical execution lineage to identify prior attempts to modify a file
+        and why they succeeded or failed.
+        """
+        attempts = []
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, task_id, node_type, status, parameters, outcome, timestamp
+                    FROM execution_nodes
+                    WHERE parameters LIKE ?
+                    ORDER BY timestamp DESC
+                    """,
+                    (f"%{file_path}%",)
+                )
+                for row in cursor.fetchall():
+                    attempts.append({
+                        "id": row["id"],
+                        "task_id": row["task_id"],
+                        "node_type": row["node_type"],
+                        "status": row["status"],
+                        "parameters": json.loads(row["parameters"]),
+                        "outcome": row["outcome"],
+                        "timestamp": row["timestamp"],
+                    })
+        except Exception as e:
+            logger.error("Failed to query execution lineage for %s: %s", file_path, e)
+        return attempts
 

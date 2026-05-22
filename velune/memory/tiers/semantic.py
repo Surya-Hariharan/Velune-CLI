@@ -154,3 +154,23 @@ class SemanticMemoryTier:
             )
         except Exception as e:
             logger.error("Failed to delete points in %s: %s", collection_name, e)
+
+    def delete_by_payload(self, collection_name: str, payload_filter: Dict[str, Any]) -> None:
+        """Delete points matching a payload filter."""
+        try:
+            conditions = []
+            for key, val in payload_filter.items():
+                conditions.append(
+                    qmodels.FieldCondition(
+                        key=key,
+                        match=qmodels.MatchValue(value=val),
+                    )
+                )
+            q_filter = qmodels.Filter(must=conditions)
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=qmodels.FilterSelector(filter=q_filter),
+            )
+            logger.debug("Successfully deleted points matching filter %s from %s", payload_filter, collection_name)
+        except Exception as e:
+            logger.error("Failed to delete points by payload in %s: %s", collection_name, e)

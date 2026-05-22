@@ -34,18 +34,45 @@ class CoderAgent(BaseCouncilAgent):
             system_prompt=CODER_SYSTEM_PROMPT,
         )
 
-    async def write_code(self, prompt: str, current_code: str, plan_context: str) -> str:
-        """Emits concrete code implementations."""
+    async def write_code(
+        self,
+        prompt: str,
+        current_code: str,
+        plan_context: str,
+        style_profile: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Emits concrete code implementations aligned with codebase styling conventions."""
         logger.info("Coder generating code changes...")
         
+        style_block = ""
+        if style_profile:
+            naming = style_profile.get("naming_conventions", {})
+            dominant = naming.get("dominant", "Hybrid")
+            strictness = style_profile.get("type_hinting_strictness", 1.0)
+            paradigm = style_profile.get("class_vs_functional", "Hybrid")
+            doc_style = style_profile.get("docstring_style", "Google")
+            constructs = ", ".join(style_profile.get("preferred_constructs", []))
+            
+            style_block = (
+                f"### [COGNITIVE STYLE ENFORCEMENT]\n"
+                f"Adhere strictly to the following styling patterns of the target repository/directory:\n"
+                f"- **Naming Conventions**: Dominant style is `{dominant}`.\n"
+                f"- **Type Hinting Strictness**: Score: `{strictness:.2f}` (Ensure parameters and return types match this strictness level).\n"
+                f"- **Programming Paradigm**: Preferred style is `{paradigm}` (OOP, Functional, or Hybrid).\n"
+                f"- **Docstring Convention**: Use `{doc_style}` format (e.g. Google-style 'Args:' and 'Returns:' or Sphinx-style ':param').\n"
+                f"- **Preferred Constructs/Libraries**: `{constructs}`.\n\n"
+            )
+
+        user_content = style_block + (
+            f"GOAL: {prompt}\n\n"
+            f"ACTIVE EXECUTION STAGE PLAN:\n{plan_context}\n\n"
+            f"CURRENT FILE CONTENTS / CONTEXT:\n{current_code}"
+        )
+
         user_messages = [
             {
                 "role": "user",
-                "content": (
-                    f"GOAL: {prompt}\n\n"
-                    f"ACTIVE EXECUTION STAGE PLAN:\n{plan_context}\n\n"
-                    f"CURRENT FILE CONTENTS / CONTEXT:\n{current_code}"
-                ),
+                "content": user_content,
             }
         ]
 
