@@ -1,6 +1,12 @@
+# ---
+# title: "Cognitive Architecture"
+# description: "Cognition, retrieval, and orchestration boundaries for Velune."
+# ---
+
 # Cognitive Architecture
 
-This document captures the current cognition, retrieval, and orchestration boundaries used by Velune.
+This document captures the current cognition, retrieval, and orchestration
+boundaries used by Velune.
 
 ## Cognitive Layers
 
@@ -35,10 +41,14 @@ Velune keeps orchestration behind explicit contracts so LangGraph or a comparabl
 - Mutating operations remain snapshot-aware.
 - Validation remains staged: syntax, type, lint, and then targeted runtime checks.
 
-## Current Foundation Status
+# Current Foundation Status
 
 - Model discovery and registry are live.
 - Repository cognition is live.
 - Local-first retrieval and graph memory are live.
 - Lifecycle management is live.
 - Full autonomous orchestration is intentionally still a future boundary.
+
+---
+License: MIT
+Copyright © 2026 Velune Contributors

@@ -1,6 +1,12 @@
+# ---
+# title: "Velune Intelligence Foundation"
+# description: "Production-oriented cognition layer and subsystem design."
+# ---
+
 # Velune Intelligence Foundation
 
-This document describes the production-oriented cognition layer that now sits under the CLI.
+This document describes the production-oriented cognition layer that now sits
+under the CLI.
 
 ## Subsystem Architecture
 
@@ -82,7 +88,7 @@ graph TD
 - Add async boundaries now so orchestration can become concurrent later.
 - Keep command handlers thin and route through services in the runtime container.
 
-## Current CLI Surfaces
+# Current CLI Surfaces
 
 - `velune models scan`
 - `velune models list`
@@ -91,3 +97,7 @@ graph TD
 - `velune config show`
 - `velune workspace init`
 - `velune workspace status`
+
+---
+License: MIT
+Copyright © 2026 Velune Contributors

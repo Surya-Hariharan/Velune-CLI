@@ -1,6 +1,9 @@
-# Python bytecode and caches
+# .gitignore - Standard Python project ignores
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
+*.pyc
 *.pyo
 *.pyd
 
@@ -10,7 +13,7 @@ venv/
 env/
 ENV/
 
-# Test and type-check caches
+# Testing / type checking / linter caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -22,21 +25,25 @@ build/
 dist/
 *.egg-info/
 *.egg
+pip-wheel-metadata/
 
-# Coverage
+# Coverage and reports
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 
-# Local environment files
+# Environment and secrets
 .env
 .env.*
 !.env.example
 .python-version
+pip-selfcheck.json
 
 # Editor and OS files
 .vscode/
 .idea/
+*.sublime-workspace
 .DS_Store
 Thumbs.db
 
@@ -46,15 +53,18 @@ Thumbs.db
 *.sqlite3
 *.db
 
-# Tool-specific state
+# Jupyter notebooks
 .ipynb_checkpoints/
 
-# Additional common ignores
+# PEP 582; local packages
 __pypackages__/
+
+# Cache / miscellaneous
 .cache/
-pip-wheel-metadata/
 .eggs/
 .ropeproject/
 *.swp
 *.swo
+
+# Project-specific local artifacts
 .velune/

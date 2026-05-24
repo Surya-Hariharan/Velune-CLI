@@ -1,3 +1,8 @@
+# ---
+# title: "Contributing"
+# description: "Guidelines for contributing to Velune."
+# ---
+
 # Contributing
 
 Thanks for helping improve Velune.
@@ -20,4 +25,9 @@ python -m compileall velune
 
 ## Pull requests
 
-Keep changes focused, include tests when behavior changes, and update the README when user-facing commands or configuration change.
+Keep changes focused, include tests when behavior changes, and update the
+README when user-facing commands or configuration change.
+
+---
+License: MIT
+Copyright © 2026 Velune Contributors

@@ -1,6 +1,12 @@
+# ---
+# title: "Velune CLI"
+# description: "Terminal-first cognitive operating layer for repository-aware engineering workflows."
+# ---
+
 # Velune CLI
 
-Velune CLI is a terminal-first cognitive operating layer for repository-aware engineering workflows.
+Velune CLI is a terminal-first cognitive operating layer for repository-aware
+engineering workflows.
 
 ## What It Does Now
 
@@ -18,7 +24,9 @@ Velune CLI is a terminal-first cognitive operating layer for repository-aware en
 - Graph memory and lifecycle policy live in `velune/memory/graph` and `velune/memory/lifecycle`.
 - The runtime container wires all subsystems through `velune/core/runtime.py`.
 
-See [docs/intelligence-foundation.md](docs/intelligence-foundation.md) and [docs/cognitive-architecture.md](docs/cognitive-architecture.md) for the subsystem design.
+See [docs/intelligence-foundation.md](docs/intelligence-foundation.md) and
+[docs/cognitive-architecture.md](docs/cognitive-architecture.md) for the subsystem
+design.
 
 ## Installation
 
@@ -66,3 +74,7 @@ python -m compileall velune
 ## License
 
 MIT
+
+---
+License: MIT
+Copyright © 2026 Velune Contributors
