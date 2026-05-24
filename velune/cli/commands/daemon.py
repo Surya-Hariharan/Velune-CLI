@@ -1,0 +1,83 @@
+import os
+import sys
+import signal
+import time
+import subprocess
+import asyncio
+import typer
+from pathlib import Path
+from rich.console import Console
+
+from velune.daemon.client import DaemonClient
+from velune.daemon.transport import DAEMON_PID_FILE
+
+daemon_cmd = typer.Typer(help="Velune daemon management")
+console = Console()
+
+@daemon_cmd.command("start")
+def daemon_start(workspace: Path = typer.Option(Path.cwd(), help="Workspace root")):
+    """Start Velune daemon in background."""
+    if DaemonClient.is_running():
+        console.print("[yellow]Daemon is already running.[/yellow]")
+        return
+
+    workspace_abs = workspace.resolve()
+    
+    # Detached background process spawn
+    if sys.platform == "win32":
+        subprocess.Popen(
+            [sys.executable, "-m", "velune.daemon.server", str(workspace_abs)],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        subprocess.Popen(
+            [sys.executable, "-m", "velune.daemon.server", str(workspace_abs)],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    
+    # Wait for daemon to become active
+    for _ in range(30):
+        time.sleep(0.1)
+        if DaemonClient.is_running():
+            console.print("[green]Daemon started.[/green]")
+            return
+            
+    console.print("[red]Failed to start daemon.[/red]")
+
+@daemon_cmd.command("stop")
+def daemon_stop():
+    """Stop background Velune daemon process."""
+    if not DaemonClient.is_running():
+        console.print("[yellow]Daemon is not running.[/yellow]")
+        return
+        
+    if DAEMON_PID_FILE.exists():
+        pid = int(DAEMON_PID_FILE.read_text())
+        try:
+            os.kill(pid, signal.SIGTERM)
+            console.print("[green]Daemon stopped.[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to stop daemon PID {pid}: {e}[/red]")
+        finally:
+            try:
+                DAEMON_PID_FILE.unlink()
+            except Exception:
+                pass
+    else:
+        console.print("[yellow]Daemon running but PID file missing.[/yellow]")
+
+@daemon_cmd.command("status")
+def daemon_status():
+    """Display daemon running status and PID."""
+    if DaemonClient.is_running():
+        try:
+            result = asyncio.run(DaemonClient.send_command("ping"))
+            console.print(f"[green]Daemon running (PID: {result['pid']})[/green]")
+        except Exception as e:
+            console.print(f"[red]Daemon running but communication failed: {e}[/red]")
+    else:
+        console.print("[yellow]Daemon not running[/yellow]")

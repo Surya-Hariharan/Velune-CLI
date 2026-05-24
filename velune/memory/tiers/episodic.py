@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+
+from velune.memory.storage.sqlite_manager import SQLiteManager
 
 logger = logging.getLogger("velune.memory.tiers.episodic")
 
@@ -40,49 +41,40 @@ class EpisodicStep(BaseModel):
 class EpisodicMemoryTier:
     """Tier 2: Persisted SQLite storage for local episodic trace retrieval."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, sqlite_manager: Optional[SQLiteManager] = None) -> None:
         self.db_path = db_path
+        self.sqlite_manager = sqlite_manager or SQLiteManager(db_path)
         self._initialized = False
         self._init_db()
 
     def _init_db(self) -> None:
         """Initialize SQLite database schemas."""
         try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            schema_sql = """
+                CREATE TABLE IF NOT EXISTS conversation_turns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    metadata TEXT NOT NULL
+                );
                 
-                # Create turns table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS conversation_turns (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        role TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        timestamp REAL NOT NULL,
-                        metadata TEXT NOT NULL
-                    )
-                """)
+                CREATE TABLE IF NOT EXISTS execution_steps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    step_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    timestamp REAL NOT NULL
+                );
                 
-                # Create execution steps table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS execution_steps (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        step_name TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        payload TEXT NOT NULL,
-                        timestamp REAL NOT NULL
-                    )
-                """)
-                
-                # Indexes for faster queries
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_turns_session ON conversation_turns(session_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_steps_session ON execution_steps(session_id)")
-                
-                conn.commit()
+                CREATE INDEX IF NOT EXISTS idx_turns_session ON conversation_turns(session_id);
+                CREATE INDEX IF NOT EXISTS idx_steps_session ON execution_steps(session_id);
+            """
+            self.sqlite_manager.execute_script(schema_sql)
             self._initialized = True
-            logger.info("Successfully initialized Episodic SQLite DB at %s", self.db_path)
+            logger.info("Successfully initialized Episodic SQLite DB via SQLiteManager")
         except Exception as e:
             logger.error("Failed to initialize Episodic SQLite DB: %s", e)
 
@@ -91,13 +83,10 @@ class EpisodicMemoryTier:
         meta_str = json.dumps(metadata or {})
         now = time.time()
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO conversation_turns (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
-                    (session_id, role, content, now, meta_str)
-                )
-                conn.commit()
+            self.sqlite_manager.execute_write(
+                "INSERT INTO conversation_turns (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
+                (session_id, role, content, now, meta_str)
+            )
         except Exception as e:
             logger.error("Failed to insert episodic turn: %s", e)
 
@@ -105,22 +94,19 @@ class EpisodicMemoryTier:
         """Fetch all conversation turns for a session in chronological order."""
         turns: List[EpisodicTurn] = []
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, session_id, role, content, timestamp, metadata FROM conversation_turns WHERE session_id = ? ORDER BY timestamp ASC",
-                    (session_id,)
-                )
-                for row in cursor.fetchall():
-                    turns.append(EpisodicTurn(
-                        id=row["id"],
-                        session_id=row["session_id"],
-                        role=row["role"],
-                        content=row["content"],
-                        timestamp=row["timestamp"],
-                        metadata=json.loads(row["metadata"]),
-                    ))
+            rows = self.sqlite_manager.execute_read(
+                "SELECT id, session_id, role, content, timestamp, metadata FROM conversation_turns WHERE session_id = ? ORDER BY timestamp ASC",
+                (session_id,)
+            )
+            for row in rows:
+                turns.append(EpisodicTurn(
+                    id=row["id"],
+                    session_id=row["session_id"],
+                    role=row["role"],
+                    content=row["content"],
+                    timestamp=row["timestamp"],
+                    metadata=json.loads(row["metadata"]),
+                ))
         except Exception as e:
             logger.error("Failed to query episodic turns: %s", e)
         return turns
@@ -130,13 +116,10 @@ class EpisodicMemoryTier:
         payload_str = json.dumps(payload or {})
         now = time.time()
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO execution_steps (session_id, step_name, status, payload, timestamp) VALUES (?, ?, ?, ?, ?)",
-                    (session_id, step_name, status, payload_str, now)
-                )
-                conn.commit()
+            self.sqlite_manager.execute_write(
+                "INSERT INTO execution_steps (session_id, step_name, status, payload, timestamp) VALUES (?, ?, ?, ?, ?)",
+                (session_id, step_name, status, payload_str, now)
+            )
         except Exception as e:
             logger.error("Failed to insert episodic execution step: %s", e)
 
@@ -144,22 +127,19 @@ class EpisodicMemoryTier:
         """Fetch all execution steps for a session."""
         steps: List[EpisodicStep] = []
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, session_id, step_name, status, payload, timestamp FROM execution_steps WHERE session_id = ? ORDER BY timestamp ASC",
-                    (session_id,)
-                )
-                for row in cursor.fetchall():
-                    steps.append(EpisodicStep(
-                        id=row["id"],
-                        session_id=row["session_id"],
-                        step_name=row["step_name"],
-                        status=row["status"],
-                        payload=json.loads(row["payload"]),
-                        timestamp=row["timestamp"],
-                    ))
+            rows = self.sqlite_manager.execute_read(
+                "SELECT id, session_id, step_name, status, payload, timestamp FROM execution_steps WHERE session_id = ? ORDER BY timestamp ASC",
+                (session_id,)
+            )
+            for row in rows:
+                steps.append(EpisodicStep(
+                    id=row["id"],
+                    session_id=row["session_id"],
+                    step_name=row["step_name"],
+                    status=row["status"],
+                    payload=json.loads(row["payload"]),
+                    timestamp=row["timestamp"],
+                ))
         except Exception as e:
             logger.error("Failed to query episodic execution steps: %s", e)
         return steps
@@ -167,11 +147,8 @@ class EpisodicMemoryTier:
     def delete_session(self, session_id: str) -> None:
         """Delete all records associated with a session."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM conversation_turns WHERE session_id = ?", (session_id,))
-                cursor.execute("DELETE FROM execution_steps WHERE session_id = ?", (session_id,))
-                conn.commit()
-                logger.info("Deleted episodic history for session %s", session_id)
+            self.sqlite_manager.execute_write("DELETE FROM conversation_turns WHERE session_id = ?", (session_id,))
+            self.sqlite_manager.execute_write("DELETE FROM execution_steps WHERE session_id = ?", (session_id,))
+            logger.info("Deleted episodic history for session %s", session_id)
         except Exception as e:
             logger.error("Failed to delete session history: %s", e)

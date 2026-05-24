@@ -1,9 +1,11 @@
 import pytest
 import time
+import threading
 from pathlib import Path
 from velune.memory.prioritizer import MemoryPrioritizer
 from velune.memory.tiers.working import WorkingMemoryTier
 from velune.memory.tiers.episodic import EpisodicMemoryTier
+from velune.memory.storage.sqlite_manager import SQLiteManager
 
 def test_memory_prioritizer():
     # Halflife: 1 hour (3600 seconds)
@@ -65,6 +67,9 @@ def test_episodic_memory_tier(tmp_path):
     episodic.add_turn(session_id, "user", "Run simulation", {"model": "gpt-4"})
     episodic.add_turn(session_id, "assistant", "Simulation complete")
     
+    # Wait for the async writes to finish processing
+    episodic.sqlite_manager._write_queue.join()
+    
     turns = episodic.get_turns(session_id)
     assert len(turns) == 2
     assert turns[0].role == "user"
@@ -72,6 +77,10 @@ def test_episodic_memory_tier(tmp_path):
     assert turns[0].metadata["model"] == "gpt-4"
     
     episodic.add_execution_step(session_id, "run_command", "success", {"cmd": "pytest"})
+    
+    # Wait for the execution step write to finish
+    episodic.sqlite_manager._write_queue.join()
+    
     steps = episodic.get_execution_steps(session_id)
     assert len(steps) == 1
     assert steps[0].step_name == "run_command"
@@ -80,5 +89,51 @@ def test_episodic_memory_tier(tmp_path):
     
     # Delete session
     episodic.delete_session(session_id)
+    
+    # Wait for the deletes to finish
+    episodic.sqlite_manager._write_queue.join()
+    
     assert len(episodic.get_turns(session_id)) == 0
     assert len(episodic.get_execution_steps(session_id)) == 0
+    
+    # Clean up default SQLiteManager thread created in EpisodicMemoryTier constructor fallback
+    if hasattr(episodic, "sqlite_manager") and episodic.sqlite_manager:
+        episodic.sqlite_manager._is_running = False
+        episodic.sqlite_manager._write_queue.join()
+        episodic.sqlite_manager._write_thread.join(timeout=2.0)
+
+def test_sqlite_concurrency(tmp_path):
+    db_file = tmp_path / "concurrent.db"
+    sqlite_manager = SQLiteManager(db_file)
+    episodic = EpisodicMemoryTier(db_file, sqlite_manager=sqlite_manager)
+    
+    session_id = "concurrent-session"
+    
+    def write_worker(idx: int):
+        episodic.add_turn(
+            session_id=session_id,
+            role="user",
+            content=f"message {idx}",
+            metadata={"index": idx}
+        )
+        
+    threads = []
+    for i in range(10):
+        t = threading.Thread(target=write_worker, args=(i,))
+        threads.append(t)
+        t.start()
+        
+    for t in threads:
+        t.join()
+        
+    # Wait for all queued writes to complete
+    sqlite_manager._write_queue.join()
+    
+    # Verify
+    turns = episodic.get_turns(session_id)
+    assert len(turns) == 10
+    
+    # Cleanup
+    sqlite_manager._is_running = False
+    sqlite_manager._write_queue.join()
+    sqlite_manager._write_thread.join(timeout=2.0)

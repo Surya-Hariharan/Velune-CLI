@@ -1,5 +1,6 @@
 """Event replay for debugging."""
 
+import asyncio
 from typing import Optional, Callable
 from velune.events.bus.engine import Event
 from velune.events.store.log import EventLog

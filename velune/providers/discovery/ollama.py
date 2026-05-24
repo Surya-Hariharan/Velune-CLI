@@ -54,6 +54,7 @@ class OllamaDiscovery:
             display_name=model_id,
             context_length=details.get("num_ctx", 4096),
             capabilities=capabilities,
+            is_local=True,
             quantization=quantization,
             vram_required_gb=vram_gb,
             parameter_count_b=details.get("parameter_count"),

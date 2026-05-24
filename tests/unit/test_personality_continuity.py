@@ -13,8 +13,9 @@ from velune.cognition.personality import RepositoryPersonalityAgent
 from velune.memory.tiers.lineage import LineageMemoryTier
 from velune.cognition.council.coder import CoderAgent
 from velune.models.specializations import CouncilRole
-from velune.core.types.model import ModelDescriptor
+from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
 from velune.providers.base import ModelProvider
+from velune.core.types.inference import InferenceRequest, InferenceResponse
 
 
 # =====================================================================
@@ -170,23 +171,35 @@ class MockProvider(ModelProvider):
     def __init__(self) -> None:
         self.last_prompt = ""
 
-    async def deliberate(
-        self,
-        messages: List[Dict[str, str]],
-        model_id: str,
-        temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
-    ) -> str:
-        self.last_prompt = messages[-1]["content"]
-        return "class NewFeature:\n    pass"
+    @property
+    def provider_id(self) -> str:
+        return "mock"
 
-    async def validate_connection(self) -> bool:
-        return True
+    async def list_models(self) -> list[ModelDescriptor]:
+        return []
+
+    async def infer(self, request: InferenceRequest) -> InferenceResponse:
+        self.last_prompt = request.messages[-1]["content"]
+        return InferenceResponse(
+            content="class NewFeature:\n    pass",
+            model_id=request.model_id,
+            finish_reason="stop",
+            tokens_used=10,
+            latency_ms=1.5,
+        )
 
 
 @pytest.mark.anyio
 async def test_coder_style_enforcement_prompt_injection():
-    model = ModelDescriptor(model_id="mock-coder", provider_id="mock", specializations=[])
+    model = ModelDescriptor(
+        id="mock-coder",
+        provider="mock",
+        name="Mock Coder",
+        context_window=4096,
+        is_local=False,
+        capabilities=ModelCapabilityProfile(coding=CapabilityLevel.ADVANCED),
+        speed_tier="fast",
+    )
     provider = MockProvider()
     
     coder = CoderAgent(model=model, provider=provider)

@@ -21,23 +21,26 @@ class GoToDefinition(BaseTool):
         line: int,
     ) -> Optional[dict]:
         """Go to symbol definition."""
-        from velune.repository.ast.parser import ASTParser
-        from velune.repository.ast.extractors.python import PythonSymbolExtractor
+        from velune.repository.scanner import FilesystemScanner
+        from velune.repository.parser import ASTParser
         
         path = Path(file_path)
         parser = ASTParser()
-        extractor = PythonSymbolExtractor()
         
-        ast_tree = parser.parse(path)
-        if ast_tree:
-            symbols = extractor.extract(ast_tree, str(path))
-            for symbol in symbols:
-                if symbol.name == symbol_name:
-                    return {
-                        "file": str(path),
-                        "line": symbol.line_start,
-                        "kind": symbol.kind,
-                    }
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                code = f.read()
+        except Exception:
+            return None
+            
+        symbols, _ = parser.parse(path, code)
+        for symbol in symbols:
+            if symbol.name == symbol_name:
+                return {
+                    "file": str(path),
+                    "line": symbol.line_start,
+                    "kind": symbol.kind.value if hasattr(symbol.kind, "value") else symbol.kind,
+                }
         
         return None
 

@@ -31,3 +31,23 @@ jobs:
         run: python -m build
       - name: Test
         run: pytest
+
+  integration-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'  # Only on push, not PRs from forks
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Pull test model
+        run: ollama pull llama3.2:1b  # Smallest available for CI speed
+      - name: Run integration tests
+        run: pytest tests/integration/ -m "ollama" -v --timeout=120

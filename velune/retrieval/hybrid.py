@@ -12,7 +12,10 @@ from velune.retrieval.vector import VectorRetriever
 
 
 class HybridRetriever:
-    """Orchestrates fusion retrieval, combining Lexical, Vector, and Graph traversals."""
+    """Orchestrates fusion retrieval, combining Lexical, Vector, and Graph traversals.
+
+    Primary interface: await retrieve(). search() is sync-only.
+    """
 
     def __init__(self, location: str = ":memory:", client: Optional[Any] = None) -> None:
         self.registry = ComponentRegistry()
@@ -52,7 +55,7 @@ class HybridRetriever:
         if query.vector_weight > 0.0:
             try:
                 # Generate embedding for the query
-                emb = self._generate_embedding(query.text)
+                emb = await self._generate_embedding_async(query.text)
                 vector_hits = self.vector_retriever.retrieve(
                     emb, top_k=query.top_k, namespace=query.namespace
                 )
@@ -113,7 +116,7 @@ class HybridRetriever:
             strategy="hybrid-fusion-reranked"
         )
 
-    def search(self, query: RetrievalQuery) -> RetrievalResult:
+    def search_sync(self, query: RetrievalQuery) -> RetrievalResult:
         """Synchronously execute hybrid retrieval."""
         import asyncio
         import concurrent.futures
@@ -129,9 +132,31 @@ class HybridRetriever:
         else:
             return asyncio.run(self.retrieve(query))
 
+    def search(self, query: RetrievalQuery) -> RetrievalResult:
+        """Synchronous interface. Do NOT call from within a running event loop.
+        Use await retrieve() instead from async contexts."""
+        import asyncio
+        import warnings
+        try:
+            loop = asyncio.get_running_loop()
+            warnings.warn(
+                "HybridRetriever.search() called from async context. "
+                "Use 'await retriever.retrieve()' instead.",
+                RuntimeWarning, stacklevel=2
+            )
+        except RuntimeError:
+            pass  # No running loop, safe to use asyncio.run()
+        return asyncio.run(self.retrieve(query))
 
-    def _generate_embedding(self, text: str) -> List[float]:
-        """Generates embedding using the registered ModelProvider, or falls back to a deterministic vector."""
+    def _deterministic_fallback_embedding(self, text: str) -> List[float]:
+        """Sophisticated deterministic fallback embedding vector."""
+        res = [0.0] * 1536
+        for idx, char in enumerate(text[:300]):
+            res[idx % 1536] += ord(char) / 256.0
+        return res
+
+    async def _generate_embedding_async(self, text: str) -> List[float]:
+        """Generates embedding asynchronously using the registered ModelProvider, or falls back to a deterministic vector."""
         try:
             from velune.kernel.registry import get_container
             container = get_container()
@@ -149,25 +174,8 @@ class HybridRetriever:
                     if provider_name == "ollama":
                         model_id = "nomic-embed-text"
                     
-                    import asyncio
-                    import concurrent.futures
-
-                    async def _get_emb():
-                        res = await provider.embed([text], model_id=model_id)
-                        return res[0] if res else None
-
-                    try:
-                        loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        loop = None
-
-                    if loop and loop.is_running():
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(lambda: asyncio.run(_get_emb()))
-                            emb = future.result()
-                    else:
-                        emb = asyncio.run(_get_emb())
-
+                    res = await provider.embed([text], model_id=model_id)
+                    emb = res[0] if res else None
                     if emb:
                         return emb
         except Exception as e:
@@ -176,9 +184,20 @@ class HybridRetriever:
                 "Failed to generate embedding using ModelProvider: %s. Falling back to deterministic embedding.", e
             )
             
-        # Sophisticated deterministic fallback embedding vector
-        # Computes characters sums to generate a unique but reproducible list of 1536 floats
-        res = [0.0] * 1536
-        for idx, char in enumerate(text[:300]):
-            res[idx % 1536] += ord(char) / 256.0
-        return res
+        return self._deterministic_fallback_embedding(text)
+
+    def _generate_embedding(self, text: str) -> List[float]:
+        """Generates embedding synchronously using the registered ModelProvider, or falls back to a deterministic vector."""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+            
+        if loop and loop.is_running():
+            return self._deterministic_fallback_embedding(text)
+        else:
+            try:
+                return asyncio.run(self._generate_embedding_async(text))
+            except Exception:
+                return self._deterministic_fallback_embedding(text)

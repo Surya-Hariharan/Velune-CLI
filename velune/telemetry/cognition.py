@@ -55,7 +55,37 @@ class CognitivePerformanceAnalytics:
                     success INTEGER NOT NULL    -- 1 for success, 0 for failed
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS debate_telemetry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    turns_required INTEGER NOT NULL,
+                    initial_objection_count INTEGER NOT NULL,
+                    final_objection_count INTEGER NOT NULL,
+                    converged INTEGER NOT NULL,
+                    time_to_converge_ms INTEGER NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS compression_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    original_tokens INTEGER NOT NULL,
+                    compressed_tokens INTEGER NOT NULL,
+                    method TEXT NOT NULL,
+                    latency_ms INTEGER NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS injection_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    pattern TEXT NOT NULL
+                )
+            """)
             conn.commit()
+
 
     def record_metrics(
         self,
@@ -231,3 +261,90 @@ class CognitivePerformanceAnalytics:
                 weights[role] = max(0.1, min(2.0, weights[role] + delta))
                 
         return weights
+
+    def record_debate_outcome(
+        self,
+        turns_required: int,
+        initial_objection_count: int,
+        final_objection_count: int,
+        converged: bool,
+        time_to_converge_ms: int,
+    ) -> None:
+        """Records a single debate's performance and convergence telemetry."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO debate_telemetry (
+                    timestamp, turns_required, initial_objection_count,
+                    final_objection_count, converged, time_to_converge_ms
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now(tz=UTC).isoformat(),
+                    turns_required,
+                    initial_objection_count,
+                    final_objection_count,
+                    1 if converged else 0,
+                    time_to_converge_ms,
+                ),
+            )
+            conn.commit()
+            logger.debug(
+                "Recorded debate outcome: turns=%d, converged=%s, initial_objections=%d",
+                turns_required,
+                converged,
+                initial_objection_count,
+            )
+
+    def record_compression(
+        self,
+        original_tokens: int,
+        compressed_tokens: int,
+        method: str,
+        latency_ms: int,
+    ) -> None:
+        """Records a single context compression invocation's telemetry."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO compression_metrics (
+                    timestamp, original_tokens, compressed_tokens,
+                    method, latency_ms
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now(tz=UTC).isoformat(),
+                    original_tokens,
+                    compressed_tokens,
+                    method,
+                    latency_ms,
+                ),
+            )
+            conn.commit()
+            logger.debug(
+                "Recorded compression metrics: original_tokens=%d, compressed_tokens=%d, method=%s",
+                original_tokens,
+                compressed_tokens,
+                method,
+            )
+
+    def record_injection_attempt(self, source: str, pattern: str) -> None:
+        """Records a single blocked prompt injection attempt."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO injection_attempts (timestamp, source, pattern)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    datetime.now(tz=UTC).isoformat(),
+                    source,
+                    pattern,
+                ),
+            )
+            conn.commit()
+            logger.warning("Recorded prompt injection attempt from source '%s' matching pattern: %s", source, pattern)
+
+

@@ -12,9 +12,40 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
+        self._broken_tools: list[str] = []
+
+    def validate_tool(self, tool: BaseTool) -> bool:
+        """Validate a tool by calling get_name() and get_schema()."""
+        import logging
+        logger = logging.getLogger("velune")
+        try:
+            name = tool.get_name()
+            schema = tool.get_schema()
+            return True
+        except Exception as e:
+            class_name = tool.__class__.__name__
+            logger.warning(
+                "Tool class %s failed validation: %s",
+                class_name,
+                str(e),
+                exc_info=True,
+            )
+            try:
+                broken_name = tool.get_name()
+            except Exception:
+                broken_name = class_name
+            if broken_name not in self._broken_tools:
+                self._broken_tools.append(broken_name)
+            return False
+
+    def list_broken_tools(self) -> list[str]:
+        """List all tool names that failed validation."""
+        return self._broken_tools
 
     def register(self, tool: BaseTool, *, replace: bool = True) -> None:
         """Register a tool."""
+        if not self.validate_tool(tool):
+            return
 
         name = tool.get_name()
         if not replace and name in self._tools:

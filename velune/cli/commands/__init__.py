@@ -6,6 +6,9 @@ from velune.cli.commands.memory import memory_cmd
 from velune.cli.commands.models import models_cmd
 from velune.cli.commands.run import run_cmd, run_command
 from velune.cli.commands.workspace import workspace_cmd
+from velune.cli.commands.daemon import daemon_cmd
+from velune.cli.commands.doctor import doctor_cmd
+from velune.cli.commands.mcp import mcp_cmd, mcp_serve
 
 __all__ = [
     "ask_cmd",
@@ -16,4 +19,8 @@ __all__ = [
     "run_cmd",
     "run_command",
     "workspace_cmd",
-]
+    "daemon_cmd",
+    "doctor_cmd",
+    "mcp_cmd",
+    "mcp_serve",
+]

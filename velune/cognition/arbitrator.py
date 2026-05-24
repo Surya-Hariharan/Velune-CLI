@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Dict, Any, List, Optional
 import logging
 
+from velune.cognition.council.messages import ReviewerMessage, ChallengerMessage, CriticMessage
+
 logger = logging.getLogger("velune.cognition.arbitrator")
 
 
@@ -60,12 +62,12 @@ class CouncilArbitrator:
         self,
         plan_steps: List[str],
         coder_proposal: str,
-        reviewer_report: Dict[str, Any],
-        challenger_report: Dict[str, Any],
-        scalability_report: Optional[Dict[str, Any]] = None,
-        security_report: Optional[Dict[str, Any]] = None,
-        performance_report: Optional[Dict[str, Any]] = None,
-        maintainability_report: Optional[Dict[str, Any]] = None,
+        reviewer_report: Any,
+        challenger_report: Any,
+        scalability_report: Optional[Any] = None,
+        security_report: Optional[Any] = None,
+        performance_report: Optional[Any] = None,
+        maintainability_report: Optional[Any] = None,
         critic_weights: Optional[Dict[str, float]] = None,
         shi: Optional[float] = None,
     ) -> ArbitrationResult:
@@ -76,12 +78,21 @@ class CouncilArbitrator:
         flags: List[str] = []
 
         # 1. Claim Extraction and Synthesis Instructions
-        passed = reviewer_report.get("passed", True)
-        reviewer_confidence = reviewer_report.get("confidence_rating", 0.7)
-        reviewer_issues = reviewer_report.get("critical_issues", [])
+        if isinstance(reviewer_report, dict):
+            passed = reviewer_report.get("passed", True)
+            reviewer_confidence = reviewer_report.get("confidence_rating", 0.7)
+            reviewer_issues = reviewer_report.get("critical_issues", [])
+        else:
+            passed = reviewer_report.passed
+            reviewer_confidence = reviewer_report.confidence_rating
+            reviewer_issues = reviewer_report.critical_issues
         
-        challenger_issues = challenger_report.get("failure_vectors", [])
-        challenger_severity = challenger_report.get("severity_rating", 0.0)
+        if isinstance(challenger_report, dict):
+            challenger_issues = challenger_report.get("failure_vectors", [])
+            challenger_severity = challenger_report.get("severity_rating", 0.0)
+        else:
+            challenger_issues = challenger_report.failure_vectors
+            challenger_severity = challenger_report.severity_rating
 
         # 2. Extract specialized critic properties if they are provided
         critic_reports = []
@@ -95,10 +106,19 @@ class CouncilArbitrator:
             critic_reports.append(("Maintainability", maintainability_report))
 
         # Check if specialized critics failed
-        failed_critics = [name for name, report in critic_reports if not report.get("passed", True)]
+        failed_critics = []
         critic_issues = []
         for name, report in critic_reports:
-            for issue in report.get("issues", []):
+            if isinstance(report, dict):
+                is_passed = report.get("passed", True)
+                issues = report.get("issues", [])
+            else:
+                is_passed = report.passed
+                issues = report.issues
+            
+            if not is_passed:
+                failed_critics.append(name)
+            for issue in issues:
                 critic_issues.append(f"{name} Critic: {issue}")
 
         # 3. Contradiction Detection
@@ -138,7 +158,10 @@ class CouncilArbitrator:
         for name, report in critic_reports:
             role = name.lower()
             w_critic = weights_dict.get(role, 1.0)
-            c_score = report.get("score", report.get("confidence_rating", 0.7))
+            if isinstance(report, dict):
+                c_score = report.get("score", report.get("confidence_rating", 0.7))
+            else:
+                c_score = report.score
             sum_weighted_critic_scores += c_score * w_critic
             sum_critic_weights += w_critic
 

@@ -21,12 +21,17 @@ from velune.cognition.council.challenger import ChallengerAgent
 from velune.cognition.council.synthesizer import SynthesizerAgent
 from velune.cognition.arbitrator import CouncilArbitrator
 from velune.cognition.architecture import ArchitectureCognitionAgent
+from velune.cognition.tradeoff import TradeoffEvaluationMatrix
+from velune.cognition.evolution import EvolutionTimelineReporter
 from velune.cognition.council.critics import (
     ScalabilityCritic,
     SecurityCritic,
     PerformanceCritic,
     MaintainabilityCritic,
 )
+from velune.cognition.council.debate import calculate_max_debate_turns
+from velune.telemetry.cognition import CognitivePerformanceAnalytics
+
 
 logger = logging.getLogger("velune.cognition.orchestrator")
 
@@ -40,6 +45,7 @@ class CouncilOrchestrator:
         mapper: ModelSpecializationMapper,
         historical_accuracy: float = 0.85,
         lineage_db_path: Path | None = None,
+        analytics: CognitivePerformanceAnalytics | None = None,
     ) -> None:
         self.provider_registry = provider_registry
         self.mapper = mapper
@@ -48,6 +54,9 @@ class CouncilOrchestrator:
         
         db_path = lineage_db_path or Path(".velune") / "cognition" / "decision_lineage.db"
         self.lineage_memory = LineageMemoryTier(db_path)
+        self.evolution_reporter = EvolutionTimelineReporter(self.lineage_memory)
+        self.analytics = analytics or CognitivePerformanceAnalytics()
+
 
     def _get_or_refresh_style_profile(self, target_file: str) -> Optional[Dict[str, Any]]:
         """Queries the style profile from database, or scans and caches it if missing/stale."""
@@ -327,28 +336,46 @@ class CouncilOrchestrator:
 
         # 7. Contradiction-Driven Arbitration Multi-Agent Debate Loop
         objections = []
-        if not reviewer_report.get("passed", True):
-            objections.append(f"Reviewer: {reviewer_report.get('critical_issues', [])}")
-        if not scalability_report.get("passed", True):
-            objections.append(f"Scalability Critic: {scalability_report.get('issues', [])}")
-        if not security_report.get("passed", True):
-            objections.append(f"Security Critic: {security_report.get('issues', [])}")
-        if not performance_report.get("passed", True):
-            objections.append(f"Performance Critic: {performance_report.get('issues', [])}")
-        if not maintainability_report.get("passed", True):
-            objections.append(f"Maintainability Critic: {maintainability_report.get('issues', [])}")
-        if challenger_report.get("severity_rating", 0.0) > 0.6:
-            objections.append(f"Challenger (Severity: {challenger_report.get('severity_rating')}): {challenger_report.get('failure_vectors', [])}")
+        if not reviewer_report.passed:
+            objections.append(f"Reviewer: {reviewer_report.critical_issues}")
+        if not scalability_report.passed:
+            objections.append(f"Scalability Critic: {scalability_report.issues}")
+        if not security_report.passed:
+            objections.append(f"Security Critic: {security_report.issues}")
+        if not performance_report.passed:
+            objections.append(f"Performance Critic: {performance_report.issues}")
+        if not maintainability_report.passed:
+            objections.append(f"Maintainability Critic: {maintainability_report.issues}")
+        if challenger_report.severity_rating > 0.6:
+            objections.append(f"Challenger (Severity: {challenger_report.severity_rating}): {challenger_report.failure_vectors}")
 
-        if objections:
+        initial_objection_count = len(objections)
+        converged = (initial_objection_count == 0)
+        turns_required = 0
+        debate_start_time = time.time()
+
+        all_critic_reports = {
+            "security": security_report,
+            "scalability": scalability_report,
+            "challenger": challenger_report,
+        }
+        max_debate_turns = calculate_max_debate_turns(
+            initial_objections=objections,
+            critic_reports=all_critic_reports,
+            task_complexity="structural",
+        )
+        logger.info("Debate configured for %d max turns (objections: %d)", 
+                    max_debate_turns, len(objections))
+
+        if objections and max_debate_turns > 0:
             logger.info("[COUNCIL - DEBATE] Objections detected. Initiating Contradiction-Driven Arbitration Debate Loop...")
             
             debate_turn = 1
-            max_debate_turns = 2
             refined_proposal = coder_proposal
             
             while debate_turn <= max_debate_turns:
                 logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
+                turns_required = debate_turn
                 
                 objections_text = "\n".join([f"- {obj}" for obj in objections])
                 refine_prompt = (
@@ -369,53 +396,80 @@ class CouncilOrchestrator:
                 re_tasks = []
                 re_critics = []
                 
-                if not reviewer_report.get("passed", True):
+                if not reviewer_report.passed:
                     re_tasks.append(reviewer.review(task=prompt, proposal=refined_proposal, context=repo_context))
                     re_critics.append("reviewer")
-                if not scalability_report.get("passed", True):
+                if not scalability_report.passed:
                     re_tasks.append(scalability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
                     re_critics.append("scalability")
-                if not security_report.get("passed", True):
+                if not security_report.passed:
                     re_tasks.append(security_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
                     re_critics.append("security")
-                if not performance_report.get("passed", True):
+                if not performance_report.passed:
                     re_tasks.append(performance_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
                     re_critics.append("performance")
-                if not maintainability_report.get("passed", True):
+                if not maintainability_report.passed:
                     re_tasks.append(maintainability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
                     re_critics.append("maintainability")
                     
                 if re_tasks:
                     re_results = await asyncio.gather(*re_tasks)
-                    new_objections = []
+                    
+                    # Update all reports first to preserve converged state if we break early
                     for name, res in zip(re_critics, re_results):
                         if name == "reviewer":
                             reviewer_report = res
-                            if not res.get("passed", True):
-                                new_objections.append(f"Reviewer: {res.get('critical_issues', [])}")
                         elif name == "scalability":
                             scalability_report = res
-                            if not res.get("passed", True):
-                                new_objections.append(f"Scalability Critic: {res.get('issues', [])}")
                         elif name == "security":
                             security_report = res
-                            if not res.get("passed", True):
-                                new_objections.append(f"Security Critic: {res.get('issues', [])}")
                         elif name == "performance":
                             performance_report = res
-                            if not res.get("passed", True):
-                                new_objections.append(f"Performance Critic: {res.get('issues', [])}")
                         elif name == "maintainability":
                             maintainability_report = res
-                            if not res.get("passed", True):
-                                new_objections.append(f"Maintainability Critic: {res.get('issues', [])}")
+
+                    # convergence detection with score > 0.8
+                    all_passed_with_high_score = True
+                    for name, res in zip(re_critics, re_results):
+                        score = res.confidence_rating if name == "reviewer" else getattr(res, "score", 1.0)
+                        if not res.passed or score <= 0.8:
+                            all_passed_with_high_score = False
+                            break
+                            
+                    if all_passed_with_high_score:
+                        logger.info("Full convergence achieved on turn %d", debate_turn)
+                        coder_proposal = refined_proposal
+                        objections = []
+                        converged = True
+                        break
+                        
+                    new_objections = []
+                    for name, res in zip(re_critics, re_results):
+                        if name == "reviewer":
+                            if not res.passed:
+                                new_objections.append(f"Reviewer: {res.critical_issues}")
+                        elif name == "scalability":
+                            if not res.passed:
+                                new_objections.append(f"Scalability Critic: {res.issues}")
+                        elif name == "security":
+                            if not res.passed:
+                                new_objections.append(f"Security Critic: {res.issues}")
+                        elif name == "performance":
+                            if not res.passed:
+                                new_objections.append(f"Performance Critic: {res.issues}")
+                        elif name == "maintainability":
+                            if not res.passed:
+                                new_objections.append(f"Maintainability Critic: {res.issues}")
                     objections = new_objections
+
                 else:
                     objections = []
                     
                 if not objections:
+                    logger.info("Debate converged after %d turns", debate_turn)
                     logger.info("[COUNCIL - DEBATE] Debate loop converged! All objections resolved.")
                     coder_proposal = refined_proposal
+                    converged = True
                     break
                     
                 debate_turn += 1
@@ -423,6 +477,18 @@ class CouncilOrchestrator:
             if objections:
                 logger.warning("[COUNCIL - DEBATE] Debate loop finished but objections remain: %s", objections)
                 coder_proposal = refined_proposal
+                converged = False
+
+        if initial_objection_count > 0:
+            time_to_converge_ms = int((time.time() - debate_start_time) * 1000)
+            self.analytics.record_debate_outcome(
+                turns_required=turns_required,
+                initial_objection_count=initial_objection_count,
+                final_objection_count=len(objections),
+                converged=converged,
+                time_to_converge_ms=time_to_converge_ms,
+            )
+
 
         # 8. Council Arbitration and Confidence Fusion
         logger.info("[COUNCIL - ARBITRATION] Evaluating agent votes and contradictions...")
@@ -451,12 +517,12 @@ class CouncilOrchestrator:
             winning_claims=arbitration.winning_claims,
             plan=coder_proposal,
             audit_reports=[
-                reviewer_report,
-                challenger_report,
-                scalability_report,
-                security_report,
-                performance_report,
-                maintainability_report,
+                reviewer_report.model_dump(),
+                challenger_report.model_dump(),
+                scalability_report.model_dump(),
+                security_report.model_dump(),
+                performance_report.model_dump(),
+                maintainability_report.model_dump(),
             ],
             context=repo_context,
         )
@@ -506,6 +572,69 @@ class CouncilOrchestrator:
                     }
                 ]
             )
+
+            # ── Phase 5: TEM evaluation of winning proposal vs. fast-path alternatives ──
+            try:
+                tem = TradeoffEvaluationMatrix(
+                    task_id=decision_id,
+                    lineage_memory=self.lineage_memory,
+                )
+                tem.add_option(
+                    name="Council Proposal (Multi-Agent)",
+                    metrics={
+                        "performance": min(1.0, arbitration.overall_confidence),
+                        "maintainability": 1.0 - (len(objections) / 6.0),
+                        "safety": 0.85 if not objections else 0.60,
+                        "scalability": 0.75,
+                        "simplicity": 0.65,
+                    },
+                    notes="Multi-agent council deliberation with critic review.",
+                )
+                tem.add_option(
+                    name="Fast-Path Alternative (Single-Agent)",
+                    metrics={
+                        "performance": 0.70,
+                        "maintainability": 0.60,
+                        "safety": 0.55,
+                        "scalability": 0.50,
+                        "simplicity": 0.90,
+                    },
+                    notes="Direct single-agent execution without debate or review.",
+                )
+                tem_winner = tem.select_optimal()
+                logger.info(
+                    "[COUNCIL - TEM] Trade-off matrix selected: '%s' (score=%.4f)",
+                    tem_winner.name,
+                    tem_winner.weighted_score,
+                )
+            except Exception as tem_err:
+                logger.warning("TEM evaluation skipped: %s", tem_err)
+
+            # ── Phase 5: Evolution timeline snapshot ──
+            try:
+                if py_files:
+                    snap_dir = os.path.dirname(py_files[0])
+                else:
+                    snap_dir = subsystem_target
+
+                shi_score = self.architecture_agent.calculate_shi(snap_dir) if os.path.exists(snap_dir) else 0.0
+                coupling = self.architecture_agent.calculate_coupling_ratio(snap_dir) if os.path.exists(snap_dir) else 0.0
+                debt_count = len(self.architecture_agent.ledger.get_items())
+
+                self.evolution_reporter.snapshot_current_health(
+                    subsystem=subsystem_target,
+                    lcom_average=max(0.0, round(1.0 - shi_score, 3)),
+                    coupling_ratio=coupling,
+                    debt_items_count=debt_count,
+                    milestone=None,
+                    rationale_summary=final_summary[:300],
+                )
+                logger.info(
+                    "[COUNCIL - EVOLUTION] Architecture snapshot logged for '%s'.",
+                    subsystem_target,
+                )
+            except Exception as evo_err:
+                logger.warning("Evolution snapshot skipped: %s", evo_err)
 
         logger.info("Reasoning Council deliberation fully completed")
         return {

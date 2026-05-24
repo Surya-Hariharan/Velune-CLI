@@ -1,4 +1,4 @@
-"""Multi-factor scorer for model routing and selection."""
+"""Multi-factor scorer for model routing and selection with family-specific and quantization-aware adjustments."""
 
 from __future__ import annotations
 
@@ -28,6 +28,64 @@ class ModelScorer:
         self.w_reliability = w_reliability
         self.w_cost = w_cost
 
+    def _detect_model_family(self, model_id: str) -> str:
+        """Detect model family from ID for family-specific scoring adjustments."""
+        lower = model_id.lower()
+        families = {
+            "qwen": ["qwen"],
+            "deepseek": ["deepseek"],
+            "llama": ["llama", "meta-llama"],
+            "mistral": ["mistral", "mixtral"],
+            "phi": ["phi"],
+            "gemma": ["gemma"],
+            "codellama": ["codellama"],
+            "starcoder": ["starcoder"],
+        }
+        for family, patterns in families.items():
+            if any(p in lower for p in patterns):
+                return family
+        return "unknown"
+
+    def _get_family_capability_adjustments(self, family: str, task_category: str) -> float:
+        """
+        Return capability score adjustments for known model families.
+        Positive = boost, Negative = penalty.
+        Based on community benchmarks and known model strengths.
+        """
+        adjustments = {
+            ("qwen", "coding"): +0.1,
+            ("qwen", "reasoning"): +0.05,
+            ("deepseek", "coding"): +0.15,
+            ("deepseek", "reasoning"): +0.1,
+            ("codellama", "coding"): +0.2,
+            ("codellama", "reasoning"): -0.1,  # Not a reasoning model
+            ("phi", "coding"): +0.05,
+            ("phi", "reasoning"): +0.15,  # Phi is surprisingly capable at reasoning for its size
+            ("mistral", "summarization"): +0.1,
+            ("gemma", "instruction_following"): +0.05,
+            ("starcoder", "coding"): +0.2,
+            ("starcoder", "reasoning"): -0.15,
+        }
+        return adjustments.get((family, task_category), 0.0)
+
+    def _get_quantization_penalty(self, model: ModelDescriptor) -> float:
+        """
+        Quantization reduces quality. Apply penalty for heavily quantized models
+        on reasoning and complex tasks.
+        """
+        quant = (model.quantization or "").upper()
+        penalties = {
+            "Q2": -0.25,
+            "Q3": -0.15,
+            "Q4_0": -0.08,
+            "Q4_K_M": -0.05,
+            "Q5": -0.02,
+            "Q5_K_M": -0.02,
+            "Q8_0": 0.0,
+            "FP16": +0.05,  # Slight quality boost for full precision
+        }
+        return penalties.get(quant, 0.0)
+
     def score(
         self,
         model: ModelDescriptor,
@@ -42,8 +100,18 @@ class ModelScorer:
         
         agg_score = w_cap * cap_match + w_ctx * ctx_fit + w_speed * speed + w_rel * reliability - w_cost * cost
         """
-        # 1. Capability Score (0.0 to 1.0)
+        # 1. Base Capability Score (0.0 to 1.0)
         cap_score = self._calculate_capability_score(model, task_category)
+
+        # Apply model family adjustments
+        family = self._detect_model_family(model.model_id)
+        family_adj = self._get_family_capability_adjustments(family, task_category)
+        cap_score = max(0.0, min(1.0, cap_score + family_adj))
+
+        # Apply quantization penalty for reasoning-heavy tasks
+        if task_category in ("reasoning", "planning"):
+            quant_penalty = self._get_quantization_penalty(model)
+            cap_score = max(0.0, min(1.0, cap_score + quant_penalty))
 
         # 2. Context Fit Score (0.0 to 1.0)
         ctx_score = self._calculate_context_score(model.context_length, required_tokens)

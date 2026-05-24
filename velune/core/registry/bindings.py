@@ -1,6 +1,6 @@
 """Default service bindings."""
 
-from velune.core.registry.container import get_container
+from velune.kernel.registry import get_container
 
 
 def register_default_bindings() -> None:

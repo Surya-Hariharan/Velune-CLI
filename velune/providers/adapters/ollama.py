@@ -5,12 +5,15 @@ from __future__ import annotations
 import httpx
 import json
 import time
+import logging
 from typing import AsyncIterator, List, Optional
 from velune.providers.base import ModelProvider
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
 from velune.core.errors.provider import ProviderConnectionError, InferenceError
+
+logger = logging.getLogger("velune.providers.adapters.ollama")
 
 
 class OllamaProvider(ModelProvider):
@@ -93,6 +96,12 @@ class OllamaProvider(ModelProvider):
             response.raise_for_status()
             data = response.json()
             latency = (time.perf_counter() - start) * 1000.0
+
+            if latency > 30000.0:
+                logger.warning(
+                    "Slow inference on %s (%.1fs). Consider a smaller model for your hardware.", 
+                    request.model_id, latency / 1000.0
+                )
 
             return InferenceResponse(
                 content=data["message"]["content"],

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
+
+from velune.memory.storage.sqlite_manager import SQLiteManager
 
 logger = logging.getLogger("velune.memory.tiers.graph")
 
@@ -34,70 +35,56 @@ class GraphEdge(BaseModel):
 class GraphMemoryTier:
     """Tier 4: Structured entity-relationship store representing codebase and cognitive dependencies."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, sqlite_manager: Optional[SQLiteManager] = None) -> None:
         self.db_path = db_path
+        self.sqlite_manager = sqlite_manager or SQLiteManager(db_path)
         self._init_db()
 
     def _init_db(self) -> None:
         """Initialize database tables for nodes, edges, and execution lineage."""
         try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            schema_sql = """
+                CREATE TABLE IF NOT EXISTS graph_nodes (
+                    id TEXT PRIMARY KEY,
+                    node_type TEXT NOT NULL,
+                    properties TEXT NOT NULL
+                );
                 
-                # Nodes Table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS graph_nodes (
-                        id TEXT PRIMARY KEY,
-                        node_type TEXT NOT NULL,
-                        properties TEXT NOT NULL
-                    )
-                """)
+                CREATE TABLE IF NOT EXISTS graph_edges (
+                    source TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    properties TEXT NOT NULL,
+                    PRIMARY KEY (source, target, relation_type),
+                    FOREIGN KEY (source) REFERENCES graph_nodes(id) ON DELETE CASCADE,
+                    FOREIGN KEY (target) REFERENCES graph_nodes(id) ON DELETE CASCADE
+                );
                 
-                # Edges Table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS graph_edges (
-                        source TEXT NOT NULL,
-                        target TEXT NOT NULL,
-                        relation_type TEXT NOT NULL,
-                        properties TEXT NOT NULL,
-                        PRIMARY KEY (source, target, relation_type),
-                        FOREIGN KEY (source) REFERENCES graph_nodes(id) ON DELETE CASCADE,
-                        FOREIGN KEY (target) REFERENCES graph_nodes(id) ON DELETE CASCADE
-                    )
-                """)
-                
-                # Execution Nodes Table (Lineage Tracking)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS execution_nodes (
-                        id TEXT PRIMARY KEY,
-                        task_id TEXT NOT NULL,
-                        node_type TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        parameters TEXT NOT NULL,
-                        outcome TEXT,
-                        timestamp REAL NOT NULL
-                    )
-                """)
+                CREATE TABLE IF NOT EXISTS execution_nodes (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    node_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    parameters TEXT NOT NULL,
+                    outcome TEXT,
+                    timestamp REAL NOT NULL
+                );
 
-                # Execution Edges Table (Lineage Tracking)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS execution_edges (
-                        source TEXT NOT NULL,
-                        target TEXT NOT NULL,
-                        relation_type TEXT NOT NULL,
-                        PRIMARY KEY (source, target, relation_type),
-                        FOREIGN KEY (source) REFERENCES execution_nodes(id) ON DELETE CASCADE,
-                        FOREIGN KEY (target) REFERENCES execution_nodes(id) ON DELETE CASCADE
-                    )
-                """)
+                CREATE TABLE IF NOT EXISTS execution_edges (
+                    source TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    PRIMARY KEY (source, target, relation_type),
+                    FOREIGN KEY (source) REFERENCES execution_nodes(id) ON DELETE CASCADE,
+                    FOREIGN KEY (target) REFERENCES execution_nodes(id) ON DELETE CASCADE
+                );
 
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_nodes_task ON execution_nodes(task_id)")
-                
-                conn.commit()
-            logger.info("Successfully initialized Graph Database at %s", self.db_path)
+                CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source);
+                CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target);
+                CREATE INDEX IF NOT EXISTS idx_exec_nodes_task ON execution_nodes(task_id);
+            """
+            self.sqlite_manager.execute_script(schema_sql)
+            logger.info("Successfully initialized Graph Database via SQLiteManager")
         except Exception as e:
             logger.error("Failed to initialize Graph Database: %s", e)
 
@@ -105,19 +92,16 @@ class GraphMemoryTier:
         """Insert or update a node in the graph."""
         props_str = json.dumps(properties or {})
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO graph_nodes (id, node_type, properties)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        node_type=excluded.node_type,
-                        properties=excluded.properties
-                    """,
-                    (node_id, node_type, props_str)
-                )
-                conn.commit()
+            self.sqlite_manager.execute_write(
+                """
+                INSERT INTO graph_nodes (id, node_type, properties)
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    node_type=excluded.node_type,
+                    properties=excluded.properties
+                """,
+                (node_id, node_type, props_str)
+            )
         except Exception as e:
             logger.error("Failed to add node %s: %s", node_id, e)
 
@@ -125,35 +109,29 @@ class GraphMemoryTier:
         """Create a directed edge between two existing nodes."""
         props_str = json.dumps(properties or {})
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO graph_edges (source, target, relation_type, properties)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(source, target, relation_type) DO UPDATE SET
-                        properties=excluded.properties
-                    """,
-                    (source_id, target_id, relation_type, props_str)
-                )
-                conn.commit()
+            self.sqlite_manager.execute_write(
+                """
+                INSERT INTO graph_edges (source, target, relation_type, properties)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(source, target, relation_type) DO UPDATE SET
+                    properties=excluded.properties
+                """,
+                (source_id, target_id, relation_type, props_str)
+            )
         except Exception as e:
             logger.error("Failed to add edge from %s to %s: %s", source_id, target_id, e)
 
     def get_node(self, node_id: str) -> Optional[GraphNode]:
         """Fetch a specific node by its identifier."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute("SELECT id, node_type, properties FROM graph_nodes WHERE id = ?", (node_id,))
-                row = cursor.fetchone()
-                if row:
-                    return GraphNode(
-                        id=row["id"],
-                        node_type=row["node_type"],
-                        properties=json.loads(row["properties"]),
-                    )
+            rows = self.sqlite_manager.execute_read("SELECT id, node_type, properties FROM graph_nodes WHERE id = ?", (node_id,))
+            if rows:
+                row = rows[0]
+                return GraphNode(
+                    id=row["id"],
+                    node_type=row["node_type"],
+                    properties=json.loads(row["properties"]),
+                )
         except Exception as e:
             logger.error("Failed to query node %s: %s", node_id, e)
         return None
@@ -162,34 +140,30 @@ class GraphMemoryTier:
         """Find all neighboring nodes and their edge relations."""
         neighbors: List[Tuple[GraphNode, str, GraphEdge]] = []
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                
-                # Query outgoing connections
-                cursor.execute(
-                    """
-                    SELECT e.relation_type, e.properties as edge_props, n.id, n.node_type, n.properties as node_props
-                    FROM graph_edges e
-                    JOIN graph_nodes n ON e.target = n.id
-                    WHERE e.source = ?
-                    """,
-                    (node_id,)
+            # Query outgoing connections
+            rows = self.sqlite_manager.execute_read(
+                """
+                SELECT e.relation_type, e.properties as edge_props, n.id, n.node_type, n.properties as node_props
+                FROM graph_edges e
+                JOIN graph_nodes n ON e.target = n.id
+                WHERE e.source = ?
+                """,
+                (node_id,)
+            )
+            
+            for row in rows:
+                target_node = GraphNode(
+                    id=row["id"],
+                    node_type=row["node_type"],
+                    properties=json.loads(row["node_props"]),
                 )
-                
-                for row in cursor.fetchall():
-                    target_node = GraphNode(
-                        id=row["id"],
-                        node_type=row["node_type"],
-                        properties=json.loads(row["node_props"]),
-                    )
-                    edge = GraphEdge(
-                        source=node_id,
-                        target=row["id"],
-                        relation_type=row["relation_type"],
-                        properties=json.loads(row["edge_props"]),
-                    )
-                    neighbors.append((target_node, "outgoing", edge))
+                edge = GraphEdge(
+                    source=node_id,
+                    target=row["id"],
+                    relation_type=row["relation_type"],
+                    properties=json.loads(row["edge_props"]),
+                )
+                neighbors.append((target_node, "outgoing", edge))
         except Exception as e:
             logger.error("Failed to query graph neighbors for %s: %s", node_id, e)
         return neighbors
@@ -241,21 +215,18 @@ class GraphMemoryTier:
         import time
         params_str = json.dumps(parameters)
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO execution_nodes (id, task_id, node_type, status, parameters, outcome, timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        status=excluded.status,
-                        parameters=excluded.parameters,
-                        outcome=excluded.outcome,
-                        timestamp=excluded.timestamp
-                    """,
-                    (node_id, task_id, node_type, status, params_str, outcome, time.time())
-                )
-                conn.commit()
+            self.sqlite_manager.execute_write(
+                """
+                INSERT INTO execution_nodes (id, task_id, node_type, status, parameters, outcome, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    status=excluded.status,
+                    parameters=excluded.parameters,
+                    outcome=excluded.outcome,
+                    timestamp=excluded.timestamp
+                """,
+                (node_id, task_id, node_type, status, params_str, outcome, time.time())
+            )
         except Exception as e:
             logger.error("Failed to record execution node %s: %s", node_id, e)
 
@@ -267,17 +238,14 @@ class GraphMemoryTier:
     ) -> None:
         """Record a transition edge between execution steps."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO execution_edges (source, target, relation_type)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(source, target, relation_type) DO NOTHING
-                    """,
-                    (source_id, target_id, relation_type)
-                )
-                conn.commit()
+            self.sqlite_manager.execute_write(
+                """
+                INSERT INTO execution_edges (source, target, relation_type)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source, target, relation_type) DO NOTHING
+                """,
+                (source_id, target_id, relation_type)
+            )
         except Exception as e:
             logger.error("Failed to record execution edge from %s to %s: %s", source_id, target_id, e)
 
@@ -288,29 +256,25 @@ class GraphMemoryTier:
         """
         attempts = []
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT id, task_id, node_type, status, parameters, outcome, timestamp
-                    FROM execution_nodes
-                    WHERE parameters LIKE ?
-                    ORDER BY timestamp DESC
-                    """,
-                    (f"%{file_path}%",)
-                )
-                for row in cursor.fetchall():
-                    attempts.append({
-                        "id": row["id"],
-                        "task_id": row["task_id"],
-                        "node_type": row["node_type"],
-                        "status": row["status"],
-                        "parameters": json.loads(row["parameters"]),
-                        "outcome": row["outcome"],
-                        "timestamp": row["timestamp"],
-                    })
+            rows = self.sqlite_manager.execute_read(
+                """
+                SELECT id, task_id, node_type, status, parameters, outcome, timestamp
+                FROM execution_nodes
+                WHERE parameters LIKE ?
+                ORDER BY timestamp DESC
+                """,
+                (f"%{file_path}%",)
+            )
+            for row in rows:
+                attempts.append({
+                    "id": row["id"],
+                    "task_id": row["task_id"],
+                    "node_type": row["node_type"],
+                    "status": row["status"],
+                    "parameters": json.loads(row["parameters"]),
+                    "outcome": row["outcome"],
+                    "timestamp": row["timestamp"],
+                })
         except Exception as e:
             logger.error("Failed to query execution lineage for %s: %s", file_path, e)
         return attempts
-

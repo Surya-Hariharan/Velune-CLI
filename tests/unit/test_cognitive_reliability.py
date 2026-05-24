@@ -181,10 +181,19 @@ def test_execution_lineage_graph_dag(tmp_path):
         relation_type="rolled_back_by",
     )
     
+    # Wait for the async writes to finish processing
+    graph.sqlite_manager._write_queue.join()
+    
     # Query lineage
     lineage = graph.query_execution_lineage("server.py")
     assert len(lineage) == 2
     assert lineage[0]["id"] in ("exec-001", "exec-002")
+
+    # Cleanup default SQLiteManager thread
+    if hasattr(graph, "sqlite_manager") and graph.sqlite_manager:
+        graph.sqlite_manager._is_running = False
+        graph.sqlite_manager._write_queue.join()
+        graph.sqlite_manager._write_thread.join(timeout=2.0)
 
 
 # =====================================================================

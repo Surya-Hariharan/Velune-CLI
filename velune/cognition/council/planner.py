@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Dict, Any, List, Optional
 import logging
 
@@ -11,6 +10,7 @@ from velune.core.types.model import ModelDescriptor
 from velune.providers.base import ModelProvider
 from velune.cognition.council.base import BaseCouncilAgent
 from velune.core.types.task import TaskPlan, TaskStep, TaskStatus
+from velune.cognition.council.messages import PlannerMessage
 
 logger = logging.getLogger("velune.cognition.council.planner")
 
@@ -74,40 +74,10 @@ class PlannerAgent(BaseCouncilAgent):
             }
         ]
 
-        raw_output = await self.deliberate(user_messages, temperature=0.2)
+        result = await self.typed_deliberate(user_messages, PlannerMessage, temperature=0.2)
         
-        # Clean markdown codeblocks if model didn't follow instructions
-        cleaned = raw_output.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        try:
-            data = json.loads(cleaned)
-            steps = []
-            for s in data.get("steps", []):
-                steps.append(
-                    TaskStep(
-                        id=s["id"],
-                        description=s["description"],
-                        agent_role=s.get("agent_role", "coder"),
-                        status=TaskStatus.PENDING,
-                        dependencies=s.get("dependencies", []),
-                        metadata=s.get("metadata", {}),
-                    )
-                )
-
-            return TaskPlan(
-                task_id=data.get("task_id", "task-main"),
-                steps=steps,
-                metadata=data.get("metadata", {}),
-            )
-        except Exception as e:
-            logger.error("Failed to parse Planner JSON output. Falling back to default single step. Error: %s", e)
+        if result.parse_error:
+            logger.error("Failed to parse Planner JSON output. Falling back to default single step. Error: %s", result.parse_error)
             # Create a fallback single-step plan
             fallback_step = TaskStep(
                 id="execute_goal",
@@ -123,3 +93,21 @@ class PlannerAgent(BaseCouncilAgent):
                 task_id="task-fallback",
                 steps=[fallback_step],
             )
+
+        steps = []
+        for s in result.steps:
+            steps.append(
+                TaskStep(
+                    id=s.get("id", "step-unknown"),
+                    description=s.get("description", ""),
+                    agent_role=s.get("agent_role", "coder"),
+                    status=TaskStatus.PENDING,
+                    dependencies=s.get("dependencies", []),
+                    metadata=s.get("metadata", {}),
+                )
+            )
+
+        return TaskPlan(
+            task_id=result.task_id or "task-main",
+            steps=steps,
+        )

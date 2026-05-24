@@ -79,3 +79,58 @@ def test_rollback_manager_new_file_cleanup(tmp_path):
     # Verify rollback states
     assert file_existing.read_text() == "original"
     assert not file_new.exists()  # Newly created file should be cleaned up!
+
+
+def test_checkpointer_path_traversal_prevention(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    
+    checkpointer = FileCheckpointer(workspace)
+    
+    # Path outside workspace should raise ValueError
+    outside_file = workspace / "../outside_file.txt"
+    with pytest.raises(ValueError, match="is outside workspace"):
+        checkpointer.create_checkpoint("chk_err", [outside_file])
+
+
+def test_checkpointer_valid_paths(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    
+    checkpointer = FileCheckpointer(workspace)
+    
+    # Valid workspace path
+    valid_file = workspace / "valid_file.txt"
+    valid_file.write_text("ok")
+    
+    checkpoint_data = checkpointer.create_checkpoint("chk_ok", [valid_file])
+    assert "copied_files" in checkpoint_data
+
+
+def test_restore_checkpoint_path_containment_prevention(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    
+    checkpointer = FileCheckpointer(workspace)
+    
+    # Checkpoint data with target path outside workspace
+    malicious_data = {
+        "checkpoint_id": "chk_malicious",
+        "copied_files": {
+            "../outside.txt": "snapshots/chk_malicious/outside.txt"
+        }
+    }
+    
+    with pytest.raises(ValueError, match="is outside workspace"):
+        checkpointer.restore_checkpoint("chk_malicious", malicious_data)
+
+    # Checkpoint data with backup path outside workspace
+    malicious_backup = {
+        "checkpoint_id": "chk_malicious",
+        "copied_files": {
+            "inside.txt": "../outside.txt"
+        }
+    }
+    
+    with pytest.raises(ValueError, match="is outside workspace"):
+        checkpointer.restore_checkpoint("chk_malicious", malicious_backup)

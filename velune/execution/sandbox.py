@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import psutil
 
+from velune.execution.path_guard import is_within_workspace
+
 from velune.core.errors.execution import SandboxError
 import logging
 
@@ -48,6 +50,10 @@ class SandboxResult:
 
 class SubprocessSandbox:
     """Windows-native and POSIX compliant subprocess-isolated execution sandbox."""
+
+    @classmethod
+    def for_workspace(cls, workspace_path: Path) -> 'SubprocessSandbox':
+        return cls(workspace_path)
 
     def __init__(
         self,
@@ -94,11 +100,7 @@ class SubprocessSandbox:
 
     def _is_safe_path(self, target_path: Path) -> bool:
         """Verify the execution path resides strictly within the workspace."""
-        try:
-            resolved = Path(target_path).resolve()
-            return self.workspace_path in resolved.parents or resolved == self.workspace_path
-        except Exception:
-            return False
+        return is_within_workspace(target_path, self.workspace_path)
 
     def execute(
         self,

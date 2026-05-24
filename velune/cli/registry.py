@@ -9,8 +9,11 @@ from typing import Iterable, Sequence
 
 import typer
 
-from velune.cli.commands import ask_command, config_cmd, memory_cmd, models_cmd, run_command, workspace_cmd
-from velune.core.registry.container import ServiceContainer
+from velune.cli.commands import (
+    ask_command, config_cmd, memory_cmd, models_cmd, run_command,
+    workspace_cmd, daemon_cmd, doctor_cmd, mcp_cmd, mcp_serve
+)
+from velune.kernel.registry import ServiceContainer
 
 BUILTIN_COMMAND_MODULES: Sequence[str] = (
     "velune.cli.commands.ask",
@@ -19,6 +22,9 @@ BUILTIN_COMMAND_MODULES: Sequence[str] = (
     "velune.cli.commands.workspace",
     "velune.cli.commands.memory",
     "velune.cli.commands.config",
+    "velune.cli.commands.daemon",
+    "velune.cli.commands.doctor",
+    "velune.cli.commands.mcp",
 )
 
 
@@ -42,10 +48,15 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
 
     app.command(name="ask")(ask_command)
     app.command(name="run")(run_command)
+    app.command(name="mcp-serve")(mcp_serve)
     app.add_typer(models_cmd, name="models")
     app.add_typer(workspace_cmd, name="workspace")
     app.add_typer(memory_cmd, name="memory")
     app.add_typer(config_cmd, name="config")
+    app.add_typer(daemon_cmd, name="daemon")
+    app.add_typer(doctor_cmd, name="doctor")
+    app.add_typer(mcp_cmd, name="mcp")
+
 
     for entry_point in discover_plugin_entry_points():
         loaded = entry_point.load()

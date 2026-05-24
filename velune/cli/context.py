@@ -9,7 +9,7 @@ from typing import Optional
 from rich.console import Console
 
 from velune.kernel.config import VeluneConfig
-from velune.core.registry.container import ServiceContainer
+from velune.kernel.registry import ServiceContainer
 from velune.core.runtime import RuntimeContext
 
 
@@ -33,3 +33,17 @@ class CLIContext:
     @property
     def container(self) -> ServiceContainer:
         return self.runtime.container
+
+
+@dataclass
+class DaemonCLIContext:
+    """Thin context that routes commands via daemon client."""
+    client: Any
+    workspace: Path
+    config_path: Optional[Path] = None
+    verbose: bool = False
+
+    @property
+    def console(self) -> Console:
+        from rich.console import Console
+        return Console()

@@ -1,4 +1,4 @@
-"""Model specialization mapper for the Reasoning Council."""
+"""Model specialization mapper for the Reasoning Council with role-specific context optimizations."""
 
 from __future__ import annotations
 
@@ -23,8 +23,17 @@ class CouncilRole(str, Enum):
     SYNTHESIZER = "synthesizer"
 
 
+ROLE_CONTEXT_REQUIREMENTS = {
+    CouncilRole.PLANNER: 16384,      # Needs full repo context
+    CouncilRole.CODER: 32768,        # Needs code + context + plan
+    CouncilRole.REVIEWER: 32768,     # Needs to see full code
+    CouncilRole.CHALLENGER: 16384,   # Needs code summary
+    CouncilRole.SYNTHESIZER: 65536,  # Needs all outputs
+}
+
+
 class ModelSpecializationMapper:
-    """Intelligent mapper that assigns discovered models to council roles based on scoring."""
+    """Intelligent mapper that assigns discovered models to council roles based on scoring and role-specific context bounds."""
 
     def __init__(
         self,
@@ -40,17 +49,17 @@ class ModelSpecializationMapper:
     def map_roles(
         self,
         task_category: str = "coding",
-        required_tokens: int = 4096,
+        required_tokens: Optional[int] = None,
         local_preferred: bool = False,
     ) -> Dict[CouncilRole, ModelDescriptor]:
         """
-        Assigns the best available model for each CouncilRole based on their functional profiles.
+        Assigns the best available model for each CouncilRole based on their functional profiles and optimal context token sizes.
         
-        - Planner: High planning and instruction-following scores.
-        - Coder: High coding and tool-use scores.
-        - Reviewer: High reasoning and instruction-following scores (typically large models).
-        - Challenger: High reasoning and adversarial analysis capabilities.
-        - Synthesizer: High summarization and context window capability (prefers fast models).
+        - Planner: High planning and instruction-following scores (optimizes for 16k context window).
+        - Coder: High coding and tool-use scores (optimizes for 32k context window).
+        - Reviewer: High reasoning and instruction-following scores (optimizes for 32k context window).
+        - Challenger: High reasoning and adversarial analysis capabilities (optimizes for 16k context window).
+        - Synthesizer: High summarization and context window capability (optimizes for 64k context window).
         """
         models = self.registry.list_all()
         if not models:
@@ -59,11 +68,21 @@ class ModelSpecializationMapper:
 
         assignments: Dict[CouncilRole, ModelDescriptor] = {}
 
+        def get_tokens(role: CouncilRole) -> int:
+            if required_tokens is not None:
+                if role == CouncilRole.REVIEWER:
+                    return required_tokens + 2048
+                elif role == CouncilRole.SYNTHESIZER:
+                    return required_tokens + 4096
+                else:
+                    return required_tokens
+            return ROLE_CONTEXT_REQUIREMENTS[role]
+
         # 1. Map Planner
         planner_model = self._select_best_model(
             models=models,
             role_category="planning",
-            required_tokens=required_tokens,
+            required_tokens=get_tokens(CouncilRole.PLANNER),
             latency_requirement="medium",
             local_preferred=local_preferred,
         )
@@ -74,7 +93,7 @@ class ModelSpecializationMapper:
         coder_model = self._select_best_model(
             models=models,
             role_category="coding",
-            required_tokens=required_tokens,
+            required_tokens=get_tokens(CouncilRole.CODER),
             latency_requirement="medium",
             local_preferred=local_preferred,
         )
@@ -85,7 +104,7 @@ class ModelSpecializationMapper:
         reviewer_model = self._select_best_model(
             models=models,
             role_category="reasoning",
-            required_tokens=required_tokens + 2048,  # Add cushion for code context
+            required_tokens=get_tokens(CouncilRole.REVIEWER),
             latency_requirement="slow",
             local_preferred=local_preferred,
         )
@@ -96,7 +115,7 @@ class ModelSpecializationMapper:
         challenger_model = self._select_best_model(
             models=models,
             role_category="reasoning",
-            required_tokens=required_tokens,
+            required_tokens=get_tokens(CouncilRole.CHALLENGER),
             latency_requirement="medium",
             local_preferred=local_preferred,
         )
@@ -107,7 +126,7 @@ class ModelSpecializationMapper:
         synthesizer_model = self._select_best_model(
             models=models,
             role_category="summarization",
-            required_tokens=required_tokens + 4096,  # Usually digests large context
+            required_tokens=get_tokens(CouncilRole.SYNTHESIZER),
             latency_requirement="fast",
             local_preferred=local_preferred,
         )
@@ -139,10 +158,27 @@ class ModelSpecializationMapper:
         local_preferred: bool,
     ) -> Optional[ModelDescriptor]:
         """Helper to score all models and select the highest scoring candidate."""
+        try:
+            from velune.kernel.registry import get_container
+            gpu_info = get_container().get("runtime.gpu_info")
+            available_vram_gb = gpu_info.get("vram_free_gb")
+        except Exception:
+            available_vram_gb = None
+
         best_model: Optional[ModelDescriptor] = None
         best_score = -1.0
 
         for model in models:
+            # VRAM check for local models
+            if model.is_local and available_vram_gb is not None:
+                required_vram = model.vram_required_gb
+                if required_vram and required_vram > available_vram_gb:
+                    logger.info(
+                        "Skipping %s: requires %.1fGB VRAM, only %.1fGB available",
+                        model.model_id, required_vram, available_vram_gb
+                    )
+                    continue  # Skip models that won't fit in VRAM
+
             profile = self.profiler.get_profile(model.provider_id, model.model_id)
             score = self.scorer.score(
                 model=model,

@@ -6,7 +6,7 @@ from typing import Protocol
 
 import typer
 
-from velune.core.registry.container import ServiceContainer
+from velune.kernel.registry import ServiceContainer
 
 
 class CommandRegistrar(Protocol):

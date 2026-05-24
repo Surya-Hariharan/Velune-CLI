@@ -10,6 +10,7 @@ from velune.core.config.schema import (
     ExecutionConfig,
     ProvidersConfig,
     TelemetryConfig,
+    MCPConfig,
 )
 
 
@@ -24,4 +25,5 @@ def get_default_config() -> VeluneConfig:
         execution=ExecutionConfig(),
         providers=ProvidersConfig(),
         telemetry=TelemetryConfig(),
+        mcp=MCPConfig(),
     )

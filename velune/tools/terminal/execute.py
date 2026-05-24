@@ -7,6 +7,10 @@ from velune.tools.base.tool import BaseTool
 class ExecuteCommand(BaseTool):
     """Tool for executing terminal commands."""
 
+    def __init__(self, sandbox: Optional['SubprocessSandbox'] = None, workspace_path: Optional[str] = None):
+        self._sandbox = sandbox
+        self._workspace_path = workspace_path
+
     def get_name(self) -> str:
         return "execute_command"
 
@@ -20,24 +24,19 @@ class ExecuteCommand(BaseTool):
         timeout: int = 30,
     ) -> dict:
         """Execute a command."""
-        import subprocess
+        from velune.execution.sandbox import SubprocessSandbox
         from pathlib import Path
         
-        cwd = Path(directory) if directory else None
+        workspace = Path(directory or self._workspace_path or Path.cwd())
+        sandbox = self._sandbox or SubprocessSandbox(workspace)
         
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        
+        # This now goes through SubprocessSandbox._is_safe_command() check
+        result = sandbox.execute(command, cwd=Path(directory) if directory else None, timeout=float(timeout))
         return {
-            "exit_code": result.returncode,
+            "exit_code": result.exit_code,
             "stdout": result.stdout,
             "stderr": result.stderr,
+            "duration_ms": result.duration_ms,
         }
 
     def get_schema(self) -> dict:

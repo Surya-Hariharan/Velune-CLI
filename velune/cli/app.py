@@ -24,7 +24,7 @@ from velune import __version__
 from velune.cli.context import CLIContext
 from velune.cli.registry import register_commands
 from velune.core.runtime import build_runtime
-from velune.core.registry.container import ServiceContainer
+from velune.kernel.registry import ServiceContainer
 
 
 def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
@@ -100,7 +100,22 @@ def create_app() -> typer.Typer:
             Console().print(f"Velune v{__version__}")
             raise typer.Exit()
 
+        from velune.daemon.client import DaemonClient
+        from velune.cli.context import DaemonCLIContext
+        
+        DAEMON_COMPATIBLE_COMMANDS = []  # Phase 1: start/stop/status
+        
+        if DaemonClient.is_running() and ctx.invoked_subcommand in DAEMON_COMPATIBLE_COMMANDS:
+            ctx.obj = DaemonCLIContext(
+                client=DaemonClient(),
+                workspace=workspace,
+                config_path=config_path,
+                verbose=verbose,
+            )
+            return
+
         runtime = build_runtime(workspace=workspace, config_path=config_path, verbose=verbose)
+
         ctx.obj = CLIContext(
             workspace=workspace,
             config_path=config_path,

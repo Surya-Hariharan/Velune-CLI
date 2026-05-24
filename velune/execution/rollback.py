@@ -23,6 +23,11 @@ class RollbackManager:
 
     def save_state(self, checkpoint_id: str, files_to_track: List[Path]) -> Dict[str, Any]:
         """Save the workspace state for files before a command execution."""
+        from velune.execution.path_guard import validate_workspace_path
+        for file in files_to_track:
+            abs_file = Path(file).resolve() if Path(file).is_absolute() else (self.workspace_path / file).resolve()
+            validate_workspace_path(abs_file, self.workspace_path, "tracked file")
+
         # 1. Gather file snapshots
         file_snapshot = self.checkpointer.create_checkpoint(checkpoint_id, files_to_track)
         

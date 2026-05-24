@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import asyncio
+import time
 from typing import Any
 from velune.providers.base import ModelProvider
 from velune.context.window import estimate_tokens
+
 
 logger = logging.getLogger("velune.context.compressor")
 
@@ -13,8 +16,10 @@ logger = logging.getLogger("velune.context.compressor")
 class ContextCompressor:
     """Uses LLM-guided semantic compression to distill large logs or files to fit context constraints."""
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, analytics: CognitivePerformanceAnalytics | None = None) -> None:
+        from velune.telemetry.cognition import CognitivePerformanceAnalytics
+        self.analytics = analytics or CognitivePerformanceAnalytics()
+
 
     async def compress(
         self,
@@ -82,33 +87,50 @@ class ContextCompressor:
             f"{content_to_compress}"
         )
 
-        try:
-            response = await provider.complete(prompt=prompt, model=model_id)
-            compressed = response.text.strip()
-            
-            # Reconstruct with critical lines preserved at the top
-            final_content = []
-            if critical_lines:
-                final_content.append("### CRITICAL SYSTEM GUIDELINES & UNRESOLVED STEPS (PRESERVED) ###")
-                final_content.append(critical_text)
-                final_content.append("### COMPRESSED CONTEXT ###")
-            final_content.append(compressed)
-            
-            reconstructed = "\n".join(final_content)
-            logger.info("Compressed context successfully with guardrails.")
-            return reconstructed
-        except Exception as e:
-            logger.error("Failed to semantically compress context: %s. Returning raw truncated with guardrails.", e)
-            chars_limit = remaining_budget * 4
-            truncated = content_to_compress[:chars_limit] + "\n... [TRUNCATED] ..."
-            
-            final_content = []
-            if critical_lines:
-                final_content.append("### CRITICAL SYSTEM GUIDELINES & UNRESOLVED STEPS (PRESERVED) ###")
-                final_content.append(critical_text)
-                final_content.append("### TRUNCATED CONTEXT ###")
-            final_content.append(truncated)
-            return "\n".join(final_content)
+        compressed = None
+        method = "llm"
+        start_time = time.time()
+
+        if provider is not None:
+            try:
+                response = await asyncio.wait_for(
+                    provider.complete(prompt=prompt, model=model_id),
+                    timeout=15.0  # Don't block forever
+                )
+                compressed = response.text.strip()
+                logger.info("LLM compression successful: %d → %d tokens", 
+                            current_tokens, estimate_tokens(compressed))
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning("LLM compression failed (%s), using extractive fallback", type(e).__name__)
+
+        if compressed is None:
+            method = "extractive"
+            # Deterministic extractive fallback
+            from velune.context.extractive import extractive_compress
+            compressed = extractive_compress(content_to_compress, remaining_budget)
+            logger.info("Extractive compression successful: %d → %d tokens", 
+                        current_tokens, estimate_tokens(compressed))
+
+        latency_ms = int((time.time() - start_time) * 1000)
+        self.analytics.record_compression(
+            original_tokens=current_tokens,
+            compressed_tokens=estimate_tokens(compressed),
+            method=method,
+            latency_ms=latency_ms,
+        )
+
+        # Reconstruct with critical lines preserved at the top
+        final_content = []
+        if critical_lines:
+            final_content.append("### CRITICAL SYSTEM GUIDELINES & UNRESOLVED STEPS (PRESERVED) ###")
+            final_content.append(critical_text)
+            final_content.append("### COMPRESSED CONTEXT ###")
+        final_content.append(compressed)
+        
+        reconstructed = "\n".join(final_content)
+        logger.info("Compressed context successfully with guardrails using %s.", method)
+        return reconstructed
+
 class ContextBudgetManager:
     """Manages the token budget allocation for context assembly."""
 

@@ -107,17 +107,24 @@ class CouncilDisplayView:
             )
         )
 
-    def render_reviewer_report(self, report: Dict[str, Any]) -> None:
+    def render_reviewer_report(self, report: Any) -> None:
         """Render the Reviewer's static audit, showing passed status and critical issues."""
-        passed = report.get("passed", True)
+        if isinstance(report, dict):
+            passed = report.get("passed", True)
+            confidence = report.get("confidence_rating", 0.8)
+            issues = report.get("critical_issues", [])
+        else:
+            passed = report.passed
+            confidence = report.confidence_rating
+            issues = report.critical_issues
+
         status_text = "[bold green]PASS[/bold green]" if passed else "[bold red]FAIL / BLOCKED[/bold red]"
         border_style = "green" if passed else "red"
 
         content = []
         content.append(f"[bold]Verification Status:[/bold] {status_text}")
-        content.append(f"[bold]Confidence Rating:[/bold] {report.get('confidence_rating', 0.8):.2f}")
+        content.append(f"[bold]Confidence Rating:[/bold] {confidence:.2f}")
         
-        issues = report.get("critical_issues", [])
         if issues:
             content.append("\n[bold red]⚠️ Critical Issues Detected:[/bold red]")
             for issue in issues:
@@ -135,15 +142,20 @@ class CouncilDisplayView:
             )
         )
 
-    def render_challenger_report(self, report: Dict[str, Any]) -> None:
+    def render_challenger_report(self, report: Any) -> None:
         """Render the Challenger's adversarial audit and failure vector probes."""
-        severity = report.get("severity_rating", 0.0)
+        if isinstance(report, dict):
+            severity = report.get("severity_rating", 0.0)
+            vectors = report.get("failure_vectors", [])
+        else:
+            severity = report.severity_rating
+            vectors = report.failure_vectors
+
         border_style = "yellow" if severity > 0.4 else "dim"
         
         content = []
         content.append(f"[bold]Adversarial Severity Rating:[/bold] [bold red]{severity:.2f}[/bold red] / 1.00")
         
-        vectors = report.get("failure_vectors", [])
         if vectors:
             content.append("\n[bold yellow]⚡ Failure Vectors Simulated:[/bold yellow]")
             for vec in vectors:
@@ -161,11 +173,21 @@ class CouncilDisplayView:
             )
         )
 
-    def render_arbitration_result(self, res: Dict[str, Any]) -> None:
+    def render_arbitration_result(self, res: Any) -> None:
         """Display calibrated confidence score, contradiction matches, and human-review flags."""
-        confidence = res.get("overall_confidence", 0.8)
-        review_required = res.get("requires_human_review", False)
-        
+        if isinstance(res, dict):
+            confidence = res.get("overall_confidence", 0.8)
+            review_required = res.get("requires_human_review", False)
+            flags = res.get("flags", [])
+            winning_claims = res.get("winning_claims", [])
+            synthesis_inst = res.get("synthesis_instructions", "")
+        else:
+            confidence = res.overall_confidence
+            review_required = res.requires_human_review
+            flags = res.flags
+            winning_claims = res.winning_claims
+            synthesis_inst = res.synthesis_instructions
+
         # Color calibrated confidence based on score
         if confidence > 0.75:
             conf_str = f"[bold green]{confidence * 100:.1f}% (High Confidence)[/bold green]"
@@ -183,17 +205,14 @@ class CouncilDisplayView:
         content.append(f"[bold]Calibrated Council Confidence Score:[/bold] {conf_str}")
         content.append(f"[bold]Escalate to Human-in-the-Loop Review:[/bold] {status_text}")
         
-        flags = res.get("flags", [])
         if flags:
             content.append(f"[bold red]System Flags Raised:[/bold red] {', '.join(flags)}")
 
-        winning_claims = res.get("winning_claims", [])
         if winning_claims:
             content.append("\n[bold cyan]Winning Claims & Arbitration Compromise:[/bold cyan]")
             for claim in winning_claims:
                 content.append(f"  [cyan]✓[/cyan] {claim}")
 
-        synthesis_inst = res.get("synthesis_instructions", "")
         if synthesis_inst:
             content.append(f"\n[bold dim]Arbitrator Instructions for Synthesizer:[/bold dim]")
             content.append(f"[dim]{synthesis_inst}[/dim]")

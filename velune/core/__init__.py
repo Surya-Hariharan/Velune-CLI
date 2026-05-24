@@ -4,6 +4,7 @@ from velune.core.types import *
 from velune.core.config import *
 from velune.core.errors import *
 from velune.core.registry import *
+from velune.kernel.registry import ServiceContainer, inject, get_container
 
 __all__ = [
     # Types

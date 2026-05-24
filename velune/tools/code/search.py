@@ -65,30 +65,32 @@ class SymbolSearch(BaseTool):
         directory: str = ".",
     ) -> list[dict]:
         """Search for symbols."""
-        from velune.repository.scanner.filesystem import FilesystemScanner
-        from velune.repository.ast.parser import ASTParser
-        from velune.repository.ast.extractors.python import PythonSymbolExtractor
+        from velune.repository.scanner import FilesystemScanner
+        from velune.repository.parser import ASTParser
         
         root_path = Path(directory)
         scanner = FilesystemScanner(root_path)
         files = scanner.scan([".py"])
         
         parser = ASTParser()
-        extractor = PythonSymbolExtractor()
         
         results = []
         for file_path in files:
-            ast_tree = parser.parse(file_path)
-            if ast_tree:
-                symbols = extractor.extract(ast_tree, str(file_path))
-                for symbol in symbols:
-                    if symbol.name == symbol_name:
-                        results.append({
-                            "name": symbol.name,
-                            "kind": symbol.kind,
-                            "file": str(file_path),
-                            "line": symbol.line_start,
-                        })
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    code = f.read()
+            except Exception:
+                continue
+                
+            symbols, _ = parser.parse(file_path, code)
+            for symbol in symbols:
+                if symbol.name == symbol_name:
+                    results.append({
+                        "name": symbol.name,
+                        "kind": symbol.kind.value if hasattr(symbol.kind, "value") else symbol.kind,
+                        "file": str(file_path),
+                        "line": symbol.line_start,
+                    })
         
         return results
 

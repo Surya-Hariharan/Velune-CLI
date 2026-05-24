@@ -99,11 +99,26 @@ class LineageMemoryTier:
                         updated_at REAL NOT NULL
                     )
                 """)
-                
+
+                # Monthly Subsystem Evolution Timeline (Phase 5)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS repository_evolution_timeline (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp REAL NOT NULL,
+                        subsystem TEXT NOT NULL,
+                        lcom_average REAL NOT NULL,
+                        coupling_ratio REAL NOT NULL,
+                        debt_items_count INTEGER NOT NULL,
+                        major_milestone TEXT,
+                        rationales_summary TEXT NOT NULL
+                    )
+                """)
+
                 # Performance Indices
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_decisions_subsystem ON decision_nodes(target_subsystem)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_failures_subsystem ON failed_experiments(target_subsystem)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_personality_subsystem ON repo_personality_styles(subsystem)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_evolution_subsystem ON repository_evolution_timeline(subsystem)")
                 
                 conn.commit()
             logger.info("Lineage database successfully initialized at %s", self.db_path)
@@ -374,3 +389,58 @@ class LineageMemoryTier:
         except Exception as e:
             logger.error("Failed to query repository personality style: %s", e)
             return None
+
+    # =====================================================================
+    # Evolution Timeline Interfaces (Phase 5)
+    # =====================================================================
+
+    def log_monthly_snapshot(
+        self,
+        subsystem: str,
+        lcom_average: float,
+        coupling_ratio: float,
+        debt_items_count: int,
+        milestone: Optional[str] = None,
+        rationale_summary: str = "",
+    ) -> None:
+        """Queue a monthly architecture snapshot for the given subsystem."""
+        query = """
+            INSERT INTO repository_evolution_timeline
+                (timestamp, subsystem, lcom_average, coupling_ratio,
+                 debt_items_count, major_milestone, rationales_summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            time.time(),
+            subsystem,
+            round(lcom_average, 4),
+            round(coupling_ratio, 4),
+            int(debt_items_count),
+            milestone or "",
+            rationale_summary,
+        )
+        self.write_queue.put((query, params))
+
+    def get_evolution_timeline(
+        self, subsystem: str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Fetch the evolution snapshots for a subsystem, ordered by most-recent first."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, timestamp, subsystem, lcom_average, coupling_ratio,
+                           debt_items_count, major_milestone, rationales_summary
+                    FROM repository_evolution_timeline
+                    WHERE subsystem LIKE ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (f"%{subsystem}%", limit),
+                )
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Failed to query evolution timeline: %s", e)
+            return []

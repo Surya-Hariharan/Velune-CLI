@@ -8,6 +8,7 @@ from typing import Dict, Any, List
 import logging
 
 from velune.core.errors.execution import SnapshotError
+from velune.execution.path_guard import validate_workspace_path
 
 logger = logging.getLogger("velune.execution.checkpointer")
 
@@ -35,6 +36,17 @@ class FileCheckpointer:
                     abs_file = (self.workspace_path / file).resolve()
                 else:
                     abs_file = Path(file).resolve()
+            except Exception as e:
+                raise SnapshotError(f"Failed to resolve path {file}: {e}")
+                
+            # Validate path is within workspace
+            try:
+                validate_workspace_path(abs_file, self.workspace_path, "tracked file")
+            except ValueError as e:
+                logger.error("Path containment violation in checkpoint: %s", e)
+                raise
+
+            try:
                 if not abs_file.exists():
                     # Keep record that file didn't exist so rollback deletes it
                     rel_str = str(abs_file.relative_to(self.workspace_path)).replace("\\", "/")
@@ -68,7 +80,13 @@ class FileCheckpointer:
         copied_files = checkpoint_data.get("copied_files", {})
 
         for rel_path_str, backup_rel_str in copied_files.items():
-            target_file = self.workspace_path / rel_path_str
+            target_file = (self.workspace_path / rel_path_str).resolve()
+            try:
+                validate_workspace_path(target_file, self.workspace_path, "restore target file")
+            except ValueError as e:
+                logger.error("Path containment violation in restore target: %s", e)
+                raise
+
             if backup_rel_str is None:
                 # File did not exist when checkpoint was created, delete it if it does now
                 if target_file.exists():
@@ -84,7 +102,13 @@ class FileCheckpointer:
                         )
             else:
                 # Restore original file content
-                backup_file = self.workspace_path / backup_rel_str
+                backup_file = (self.workspace_path / backup_rel_str).resolve()
+                try:
+                    validate_workspace_path(backup_file, self.workspace_path, "backup source file")
+                except ValueError as e:
+                    logger.error("Path containment violation in restore source: %s", e)
+                    raise
+
                 if not backup_file.exists():
                     raise SnapshotError(f"Backup file not found: {backup_file}")
                 try:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Dict, Any, List, Optional
 import logging
 
@@ -10,6 +9,7 @@ from velune.models.specializations import CouncilRole
 from velune.core.types.model import ModelDescriptor
 from velune.providers.base import ModelProvider
 from velune.cognition.council.base import BaseCouncilAgent
+from velune.cognition.council.messages import ReviewerMessage
 
 logger = logging.getLogger("velune.cognition.council.reviewer")
 
@@ -50,7 +50,7 @@ class ReviewerAgent(BaseCouncilAgent):
             system_prompt=REVIEWER_SYSTEM_PROMPT,
         )
 
-    async def review(self, task: str, proposal: str, context: str) -> Dict[str, Any]:
+    async def review(self, task: str, proposal: str, context: str) -> ReviewerMessage:
         """Perform static quality audit on proposed plans or implementations."""
         logger.info("Reviewer auditing proposed implementation...")
 
@@ -65,25 +65,9 @@ class ReviewerAgent(BaseCouncilAgent):
             }
         ]
 
-        raw_output = await self.deliberate(user_messages, temperature=0.1)
-
-        # Clean markdown codeblocks if model didn't follow instructions
-        cleaned = raw_output.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        try:
-            return json.loads(cleaned)
-        except Exception as e:
-            logger.error("Failed to parse Reviewer JSON output: %s", e)
-            return {
-                "passed": True,
-                "critical_issues": [],
-                "suggestions": [f"Review executed but results were unparseable: {raw_output}"],
-                "confidence_rating": 0.5,
-            }
+        result = await self.typed_deliberate(user_messages, ReviewerMessage, temperature=0.1)
+        if result.parse_error:
+            logger.warning("Reviewer parse failed, using degraded default: %s", result.parse_error)
+            # Re-construct suggestions to contain a useful note
+            result.suggestions.append(f"Review executed but results were unparseable: {result.parse_error}")
+        return result

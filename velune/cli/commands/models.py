@@ -92,11 +92,13 @@ def models_list(ctx: typer.Context) -> None:
     table.add_column("Provider", style="magenta")
     table.add_column("Capabilities", style="blue")
 
+    records = []
     if registry is None:
         table.add_row("<uninitialized>", "Velune", "system", "bootstrap only")
     else:
         from velune.core.types.model import CapabilityLevel
-        for record in registry.list_all():
+        records = registry.list_all()
+        for record in records:
             capabilities = []
             for cap_name in ["coding", "reasoning", "planning", "summarization", "tool_use", "long_context"]:
                 level = getattr(record.capabilities, cap_name, None)
@@ -111,6 +113,24 @@ def models_list(ctx: typer.Context) -> None:
             )
 
     console.print(table)
+
+    # Get GPU info and show VRAM details
+    gpu_info = None
+    if cli_context:
+        try:
+            gpu_info = cli_context.container.get("runtime.gpu_info")
+        except Exception:
+            pass
+
+    if gpu_info and gpu_info.get("has_gpu"):
+        free_gb = gpu_info.get("vram_free_gb")
+        if free_gb is not None:
+            console.print(f"[dim]Available VRAM: {free_gb:.1f}GB[/dim]")
+            
+            over_budget = [m for m in records if 
+                           m.vram_required_gb and m.vram_required_gb > free_gb]
+            if over_budget:
+                console.print(f"[yellow]⚠ {len(over_budget)} models exceed available VRAM[/yellow]")
 
 
 @models_cmd.command("assign")
@@ -144,3 +164,89 @@ def models_assign(
 
     mapper.overrides[council_role] = model_id
     console.print(f"[green]Successfully assigned role '{council_role.value}' to model '{model_id}' for the current runtime context.[/green]")
+
+
+@models_cmd.command("benchmark")
+def models_benchmark(
+    ctx: typer.Context,
+    model_id: str = typer.Argument(None, help="Specific model ID to benchmark. If omitted, benchmarks all registered models."),
+) -> None:
+    """Run capability probes on a specific model or all registered models."""
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    if not cli_context:
+        console.print("[red]CLI context is unavailable.[/red]")
+        raise typer.Exit(code=1)
+
+    registry = cli_context.container.get("runtime.model_registry")
+    provider_registry = cli_context.container.get("runtime.provider_registry")
+
+    if registry is None or provider_registry is None:
+        console.print("[red]Model registry or provider registry is unavailable.[/red]")
+        raise typer.Exit(code=1)
+
+    # Get the models to benchmark
+    models_to_probe = []
+    if model_id:
+        model = registry.get(model_id)
+        if not model:
+            console.print(f"[red]Model '{model_id}' is not registered.[/red]")
+            raise typer.Exit(code=1)
+        models_to_probe.append(model)
+    else:
+        models_to_probe = registry.list_all()
+
+    if not models_to_probe:
+        console.print("[yellow]No models registered for benchmarking.[/yellow]")
+        return
+
+    from pathlib import Path
+    from velune.models.profile_cache import ModelProfileCache
+    from velune.models.probes import ModelProber
+
+    profile_cache = ModelProfileCache(Path(".velune") / "model_profiles.json")
+
+    table = Table(title="Model Empirical Benchmark Results")
+    table.add_column("Model ID", style="cyan")
+    table.add_column("Provider", style="magenta")
+    table.add_column("Coding Score (Lat)", style="green")
+    table.add_column("Reasoning Score (Lat)", style="blue")
+    table.add_column("Instruction Score (Lat)", style="yellow")
+    table.add_column("Source", style="white")
+
+    for model in models_to_probe:
+        provider = provider_registry.get(model.provider_id)
+        if not provider:
+            console.print(f"[yellow]Skipping model '{model.model_id}': Provider '{model.provider_id}' is not active or available.[/yellow]")
+            continue
+
+        console.print(f"Benchmarking model [bold cyan]{model.model_id}[/bold cyan] via [bold magenta]{model.provider_id}[/bold magenta]...")
+
+        prober = ModelProber(provider, model.model_id)
+        results = run_async(prober.run_all_probes())
+
+        # Save to cache
+        profile_cache.set(model.model_id, model.provider_id, results)
+        # Apply to registry in-memory
+        registry._apply_probe_results(model, results)
+
+        coding = results["coding"]
+        reasoning = results["reasoning"]
+        instruction = results["instruction"]
+
+        def format_result(res) -> str:
+            if res.latency_ms < 0:
+                return "[red]Failed[/red]"
+            color = "green" if res.passed else "yellow"
+            return f"[{color}]{res.score:.2f}[/{color}] ({res.latency_ms:.0f}ms)"
+
+        table.add_row(
+            model.model_id,
+            model.provider_id,
+            format_result(coding),
+            format_result(reasoning),
+            format_result(instruction),
+            "empirical (forced)",
+        )
+
+    console.print(table)
+

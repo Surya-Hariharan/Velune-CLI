@@ -335,7 +335,7 @@ class LangGraphOrchestrationEngine:
             return state
 
         query = RetrievalQuery(text=state.request.prompt, top_k=8)
-        result = self.retrieval.search(query=query)
+        result = await self.retrieval.retrieve(query=query)
         state.retrieval_result = result
         state.retrieval_state = {
             "hits": len(result.hits),

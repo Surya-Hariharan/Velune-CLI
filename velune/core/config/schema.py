@@ -71,6 +71,11 @@ class TelemetryConfig(BaseModel):
     log_level: str = "INFO"
 
 
+class MCPConfig(BaseModel):
+    """MCP configuration settings."""
+    servers: dict[str, str] = Field(default_factory=dict)
+
+
 class VeluneConfig(BaseModel):
     """Root Velune configuration."""
     project: ProjectConfig
@@ -81,3 +86,5 @@ class VeluneConfig(BaseModel):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
+

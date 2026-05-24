@@ -1,6 +1,6 @@
 """Global component registry."""
 
-from velune.core.registry.container import (
+from velune.kernel.registry import (
     ServiceContainer,
     inject,
     get_container,
