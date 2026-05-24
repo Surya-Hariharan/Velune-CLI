@@ -25,7 +25,7 @@ python -m compileall velune
 
 ## Pull requests
 
-Keep changes focused, include tests when behavior changes, and update the
+Keep changes focused, keep generated artifacts out of the tree, and update the
 README when user-facing commands or configuration change.
 
 ---

@@ -26,7 +26,8 @@ class ComponentRegistry:
         """Retrieve the registered implementation for an interface Type."""
         if interface in self._registry:
             return self._registry[interface]
-        raise KeyError(f"Kernel component not registered for interface: {interface.__name__ if hasattr(interface, "__name__") else str(interface)}")
+        interface_name = interface.__name__ if hasattr(interface, "__name__") else str(interface)
+        raise KeyError(f"Kernel component not registered for interface: {interface_name}")
 
     def swap(self, interface: Type[T], new_impl: T) -> None:
         """Hot-swap the implementation of an active interface in-flight."""

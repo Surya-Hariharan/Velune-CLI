@@ -40,7 +40,7 @@ orchestrating model consumers, and maintaining fidelity between intent and
 execution.
 
 - Problem: modern engineering requires continuous, reproducible, and
-	accountable automation that reasons about code, tests, and infra.
+	accountable automation that reasons about code and infrastructure.
 - Solution: a CLI-centered runtime that fuses repository cognition, vector and
 	graph memory, and deterministic orchestration to produce explainable actions.
 

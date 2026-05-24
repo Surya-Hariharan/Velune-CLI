@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import shutil
 import os
+import tempfile
 from pathlib import Path
 import typer
 from rich.console import Console
@@ -185,14 +186,14 @@ def _check_sqlite() -> dict:
         return {"name": "SQLite DB Initializable", "status": "fail", "message": f"Failed to initialize SQLite database: {e}"}
 
 def _check_qdrant() -> dict:
-    velune_dir = Path.cwd() / ".velune"
-    qdrant_path = velune_dir / "qdrant_local_store"
     try:
         from qdrant_client import QdrantClient
-        client = QdrantClient(path=str(qdrant_path))
-        client.get_collections()
-        client.close()
-        return {"name": "Qdrant In-Process Initializable", "status": "ok", "message": f"Qdrant local storage successfully initialized at {qdrant_path}"}
+        with tempfile.TemporaryDirectory(prefix="velune-qdrant-") as temp_dir:
+            qdrant_path = Path(temp_dir)
+            client = QdrantClient(path=str(qdrant_path))
+            client.get_collections()
+            client.close()
+            return {"name": "Qdrant In-Process Initializable", "status": "ok", "message": f"Qdrant local storage successfully initialized at {qdrant_path}"}
     except Exception as e:
         return {"name": "Qdrant In-Process Initializable", "status": "fail", "message": f"Failed to initialize local Qdrant client: {e}"}
 

@@ -27,7 +27,7 @@ Each step should specify:
    - 'command': The exact command string to run in the isolated subprocess sandbox.
    - 'expected_files': List of file paths relative to workspace that must be created or modified.
    - 'syntax_check_files': List of file paths to run language-specific syntax compiler checks against.
-   - 'test_command': Optional testing command to run (e.g., 'pytest tests/').
+    - 'test_command': Optional validation command to run for local checks.
    - 'timeout': Max seconds to allow this command to run before failing (default 60.0).
 
 OUTPUT EXCLUSIVELY A RAW VALID JSON OBJECT WITH NO CODEBLOCK WRAPPERS OR Markdown.
