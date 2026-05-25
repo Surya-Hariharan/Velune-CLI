@@ -1,7 +1,7 @@
 """Git operation tools."""
 
 from pathlib import Path
-from typing import Optional
+
 from velune.tools.base.tool import BaseTool
 
 
@@ -22,17 +22,16 @@ class GitCommit(BaseTool):
     ) -> str:
         """Commit changes."""
         import subprocess
-        from pathlib import Path
-        
+
         root_path = Path(directory)
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
-        
+
         if add_all:
             subprocess.run(["git", "add", "."], cwd=root_path, check=True)
-        
+
         subprocess.run(["git", "commit", "-m", message], cwd=root_path, check=True)
-        
+
         return f"Committed: {message}"
 
     def get_schema(self) -> dict:
@@ -73,19 +72,18 @@ class GitCheckout(BaseTool):
     ) -> str:
         """Checkout a branch."""
         import subprocess
-        from pathlib import Path
-        
+
         root_path = Path(directory)
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
-        
+
         cmd = ["git", "checkout"]
         if create:
             cmd.append("-b")
         cmd.append(branch)
-        
+
         subprocess.run(cmd, cwd=root_path, check=True)
-        
+
         return f"Checked out: {branch}"
 
     def get_schema(self) -> dict:

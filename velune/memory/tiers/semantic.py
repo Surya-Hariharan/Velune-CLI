@@ -7,7 +7,8 @@ summaries, and payload-filtered contextual searches.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from qdrant_client.http.exceptions import UnexpectedResponse
@@ -21,9 +22,9 @@ class SemanticMemoryTier:
     def __init__(
         self,
         location: str = ":memory:",
-        url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        path: Optional[str] = None,
+        url: str | None = None,
+        api_key: str | None = None,
+        path: str | None = None,
     ) -> None:
         """
         Initialize Qdrant client connection.
@@ -52,7 +53,7 @@ class SemanticMemoryTier:
             # Check if exists
             collections = self.client.get_collections().collections
             exists = any(c.name == collection_name for c in collections)
-            
+
             if not exists:
                 metric = qmodels.Distance.COSINE
                 if distance_metric.lower() == "euclidean":
@@ -74,9 +75,9 @@ class SemanticMemoryTier:
     def upsert_points(
         self,
         collection_name: str,
-        ids: List[int | str],
-        vectors: List[List[float]],
-        payloads: List[Dict[str, Any]],
+        ids: list[int | str],
+        vectors: list[list[float]],
+        payloads: list[dict[str, Any]],
     ) -> None:
         """Upsert structural code or memory embedding points into the collection."""
         points = []
@@ -103,10 +104,10 @@ class SemanticMemoryTier:
     def search_similarity(
         self,
         collection_name: str,
-        query_vector: List[float],
+        query_vector: list[float],
         limit: int = 5,
-        payload_filter: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        payload_filter: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Query vector similarities under optional key-value metadata payload filter matching.
         """
@@ -129,7 +130,7 @@ class SemanticMemoryTier:
                 limit=limit,
                 query_filter=q_filter,
             )
-            
+
             output = []
             for item in results:
                 output.append({
@@ -145,7 +146,7 @@ class SemanticMemoryTier:
             logger.error("Semantic search failure on %s: %s", collection_name, e)
             return []
 
-    def delete_points(self, collection_name: str, ids: List[int | str]) -> None:
+    def delete_points(self, collection_name: str, ids: list[int | str]) -> None:
         """Delete specific vectors by their identifier."""
         try:
             self.client.delete(
@@ -155,7 +156,7 @@ class SemanticMemoryTier:
         except Exception as e:
             logger.error("Failed to delete points in %s: %s", collection_name, e)
 
-    def delete_by_payload(self, collection_name: str, payload_filter: Dict[str, Any]) -> None:
+    def delete_by_payload(self, collection_name: str, payload_filter: dict[str, Any]) -> None:
         """Delete points matching a payload filter."""
         try:
             conditions = []

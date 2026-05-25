@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any
 
-from velune.kernel.schemas import Event as KernelEvent
 from velune.kernel.bus import CognitiveBus
+from velune.kernel.schemas import Event as KernelEvent
 
 logger = logging.getLogger("velune.events.handlers.execution")
 

@@ -7,11 +7,10 @@ OOP vs Functional paradigms, naming distributions, type hinting strictness, and 
 from __future__ import annotations
 
 import ast
+import logging
 import os
 import re
-import logging
-from pathlib import Path
-from typing import Any, Dict, List, Set, Optional
+from typing import Any
 
 logger = logging.getLogger("velune.cognition.personality")
 
@@ -23,26 +22,26 @@ class StyleVisitor(ast.NodeVisitor):
         self.classes_count = 0
         self.functions_count = 0
         self.top_level_functions_count = 0
-        
+
         # Naming convention counts
         self.snake_case_count = 0
         self.camel_case_count = 0
         self.pascal_case_count = 0
         self.upper_case_count = 0
-        
+
         # Type annotations counters
         self.annotated_params = 0
         self.total_params = 0
         self.annotated_returns = 0
         self.total_returns = 0
-        
+
         # Docstring style counters
         self.google_docstrings = 0
         self.sphinx_docstrings = 0
         self.total_docstrings = 0
 
         # Import modules
-        self.imports: Set[str] = set()
+        self.imports: set[str] = set()
 
         # Regex for naming conventions
         self.snake_re = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -53,7 +52,7 @@ class StyleVisitor(ast.NodeVisitor):
     def _classify_name(self, name: str) -> None:
         if not name or name.startswith("__") and name.endswith("__"):
             return
-        
+
         if self.snake_re.match(name):
             self.snake_case_count += 1
         elif self.camel_re.match(name):
@@ -66,7 +65,7 @@ class StyleVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.classes_count += 1
         self._classify_name(node.name)
-        
+
         # Check class docstring
         doc = ast.get_docstring(node)
         if doc:
@@ -77,7 +76,7 @@ class StyleVisitor(ast.NodeVisitor):
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.functions_count += 1
         self._classify_name(node.name)
-        
+
         # Check if function is top-level (module level)
         # Note: In NodeVisitor, we can track parent, but a simple check is to count total and we know if it's OOP dominant or Functional
         # Let's count parameters and return annotations
@@ -134,7 +133,7 @@ class StyleVisitor(ast.NodeVisitor):
 
     def _analyze_docstring(self, doc: str) -> None:
         self.total_docstrings += 1
-        
+
         # Check for Google Style
         if "Args:" in doc or "Returns:" in doc or "Yields:" in doc:
             self.google_docstrings += 1
@@ -146,24 +145,24 @@ class StyleVisitor(ast.NodeVisitor):
 class RepositoryPersonalityAgent:
     """Introspects Python directories to compile a cohesive model coding personality style."""
 
-    def __init__(self, workspace_root: Optional[str] = None) -> None:
+    def __init__(self, workspace_root: str | None = None) -> None:
         self.workspace_root = workspace_root or os.getcwd()
 
-    def analyze_directory_style(self, directory: str) -> Dict[str, Any]:
+    def analyze_directory_style(self, directory: str) -> dict[str, Any]:
         """Recursively scan Python files in directory via AST and compile the style profile."""
         visitor = StyleVisitor()
-        
+
         # Count top-level functions (directly under Module)
         for root, _, files in os.walk(directory):
             for file in files:
                 if file.endswith(".py"):
                     file_path = os.path.join(root, file)
                     try:
-                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        with open(file_path, encoding="utf-8", errors="ignore") as f:
                             code = f.read()
                         tree = ast.parse(code)
                         visitor.visit(tree)
-                        
+
                         # Inspect module body for top-level functions
                         for node in tree.body:
                             if isinstance(node, ast.FunctionDef):
@@ -178,14 +177,14 @@ class RepositoryPersonalityAgent:
             visitor.pascal_case_count +
             visitor.upper_case_count
         )
-        
+
         naming_stats = {
             "snake_case": visitor.snake_case_count,
             "camelCase": visitor.camel_case_count,
             "PascalCase": visitor.pascal_case_count,
             "UPPER_CASE": visitor.upper_case_count,
         }
-        
+
         dominant_naming = "Hybrid"
         if naming_totals > 0:
             for k, v in naming_stats.items():
@@ -203,7 +202,7 @@ class RepositoryPersonalityAgent:
         # If classes are dominant,OOP. If top-level functions are dominant, Functional. Else hybrid.
         classes = visitor.classes_count
         top_funcs = visitor.top_level_functions_count
-        
+
         if classes > top_funcs * 2 and classes > 1:
             class_vs_functional = "OOP"
         elif top_funcs > classes * 2 and top_funcs > 1:

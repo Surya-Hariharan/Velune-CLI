@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger("velune.context.stitcher")
 
@@ -16,9 +16,9 @@ class ContextStitcher:
 
     def stitch(
         self,
-        working_turns: List[Dict[str, Any]],
-        episodic_steps: List[Dict[str, Any]],
-        semantic_chunks: List[Dict[str, Any]],
+        working_turns: list[dict[str, Any]],
+        episodic_steps: list[dict[str, Any]],
+        semantic_chunks: list[dict[str, Any]],
         repository_ast: Optional[str] = None,
         git_diffs: Optional[str] = None,
     ) -> str:

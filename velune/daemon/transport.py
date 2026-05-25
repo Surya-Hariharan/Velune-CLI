@@ -1,9 +1,10 @@
-import sys
-import json
 import asyncio
+import json
 import socket
+import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Any, Dict
+from typing import Any
 
 DAEMON_SOCKET_PATH = Path.home() / ".velune" / "daemon.sock"
 DAEMON_PID_FILE = Path.home() / ".velune" / "daemon.pid"
@@ -15,7 +16,7 @@ def get_ipc_address() -> str:
     return str(DAEMON_SOCKET_PATH)
 
 class IpcServer:
-    def __init__(self, address: str, handle_callback: Callable[[Dict[str, Any]], Any]):
+    def __init__(self, address: str, handle_callback: Callable[[dict[str, Any]], Any]):
         self.address = address
         self.handle_callback = handle_callback
         self._server = None
@@ -66,7 +67,7 @@ class IpcServer:
             writer.close()
 
 class _WindowsNamedPipeServer:
-    def __init__(self, address: str, handle_callback: Callable[[Dict[str, Any]], Any]):
+    def __init__(self, address: str, handle_callback: Callable[[dict[str, Any]], Any]):
         self.address = address
         self.handle_callback = handle_callback
         self.listener = None

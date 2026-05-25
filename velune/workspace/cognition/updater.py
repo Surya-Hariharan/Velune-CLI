@@ -1,8 +1,7 @@
 """Cognitive model updater."""
 
-from pathlib import Path
-from velune.workspace.cognition.model import LiveCognitionModel
 from velune.repository.schemas import RepositorySnapshot
+from velune.workspace.cognition.model import LiveCognitionModel
 
 
 class CognitionModelUpdater:

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
-from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
+
+from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.providers.registry import ProviderRegistry
 
 logger = logging.getLogger("velune.providers.router")
@@ -15,24 +15,24 @@ class ProviderRouter:
 
     def __init__(self, provider_registry: ProviderRegistry) -> None:
         self._provider_registry = provider_registry
-        self._fallback_chain: List[str] = ["openai", "anthropic", "ollama"]
+        self._fallback_chain: list[str] = ["openai", "anthropic", "ollama"]
 
-    def set_fallback_chain(self, fallback_chain: List[str]) -> None:
+    def set_fallback_chain(self, fallback_chain: list[str]) -> None:
         """Set the provider routing fallback sequence."""
         self._fallback_chain = fallback_chain
 
     def route_task(
         self,
         task_category: str,
-        models_list: List[ModelDescriptor],
+        models_list: list[ModelDescriptor],
         min_level: CapabilityLevel = CapabilityLevel.BASIC,
         local_preferred: bool = False,
-    ) -> Optional[ModelDescriptor]:
+    ) -> ModelDescriptor | None:
         """Selects the best available model descriptor that satisfies the profile constraints."""
         candidates = models_list
 
         # Filter candidates by capability tier
-        qualified: List[ModelDescriptor] = []
+        qualified: list[ModelDescriptor] = []
         for model in candidates:
             # Check profile matches if present
             profile = getattr(model, "capabilities", None)
@@ -42,7 +42,7 @@ class ProviderRouter:
                     score = int(getattr(profile, task_category))
                 elif task_category in getattr(profile, "__dict__", {}):
                     score = int(profile.__dict__[task_category])
-                
+
                 if score >= int(min_level):
                     qualified.append(model)
             else:
@@ -71,7 +71,7 @@ class ProviderRouter:
         # Fallback: Just return the first matching qualified candidate
         return qualified[0]
 
-    def _select_best_by_speed_or_context(self, options: List[ModelDescriptor]) -> ModelDescriptor:
+    def _select_best_by_speed_or_context(self, options: list[ModelDescriptor]) -> ModelDescriptor:
         """Heuristic selector favoring larger context bounds or faster tiers."""
         # Sort by context window descending, and then speed tier (fast first)
         sorted_opts = sorted(

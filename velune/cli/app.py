@@ -100,11 +100,11 @@ def create_app() -> typer.Typer:
             Console().print(f"Velune v{__version__}")
             raise typer.Exit()
 
-        from velune.daemon.client import DaemonClient
         from velune.cli.context import DaemonCLIContext
-        
+        from velune.daemon.client import DaemonClient
+
         DAEMON_COMPATIBLE_COMMANDS = []  # Phase 1: start/stop/status
-        
+
         if DaemonClient.is_running() and ctx.invoked_subcommand in DAEMON_COMPATIBLE_COMMANDS:
             ctx.obj = DaemonCLIContext(
                 client=DaemonClient(),

@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
-from velune.providers.base import ModelProvider
-from velune.memory.tiers.working import WorkingMemoryTier
-from velune.memory.tiers.episodic import EpisodicMemoryTier
-from velune.memory.tiers.semantic import SemanticMemoryTier
-from velune.memory.tiers.graph import GraphMemoryTier
+from typing import Any
+
 from velune.memory.tiers.archive import LongTermArchiveTier
+from velune.memory.tiers.episodic import EpisodicMemoryTier
+from velune.memory.tiers.graph import GraphMemoryTier
+from velune.memory.tiers.semantic import SemanticMemoryTier
+from velune.memory.tiers.working import WorkingMemoryTier
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.memory.consolidator")
 
@@ -65,7 +66,7 @@ class MemoryConsolidator:
         session_id: str,
         provider: ModelProvider,
         model_id: str,
-        embedding_provider: Optional[Any] = None,
+        embedding_provider: Any | None = None,
     ) -> None:
         """
         Uses an LLM (Synthesizer) to distill raw SQLite conversation history into semantic facts
@@ -73,14 +74,14 @@ class MemoryConsolidator:
         """
         turns = self.episodic.get_turns(session_id)
         steps = self.episodic.get_execution_steps(session_id)
-        
+
         if not turns:
             logger.info("No episodic turns found to consolidate for session %s", session_id)
             return
 
         # 1. Compile prompt to extract key factual assertions
         history_text = "\n".join([f"{t.role.upper()}: {t.content}" for t in turns])
-        
+
         prompt = (
             "You are a cognitive memory consolidator. Analyze the following conversation history and execution steps "
             "and extract a structured list of permanent semantic facts and entity relationships.\n\n"
@@ -95,7 +96,7 @@ class MemoryConsolidator:
         try:
             logger.info("Distilling episodic memory via model %s...", model_id)
             response = await provider.complete(prompt=prompt, model=model_id)
-            
+
             # Simple JSON extraction
             content = response.text.strip()
             if "```json" in content:
@@ -104,9 +105,9 @@ class MemoryConsolidator:
                 content = content.split("```")[1].split("```")[0].strip()
 
             data = json.loads(content)
-            facts: List[str] = data.get("facts", [])
-            relations: List[Dict[str, str]] = data.get("relations", [])
-            
+            facts: list[str] = data.get("facts", [])
+            relations: list[dict[str, str]] = data.get("relations", [])
+
             logger.info("Extracted %d facts and %d relations.", len(facts), len(relations))
 
             # 2. Add to Graph Tier
@@ -129,14 +130,14 @@ class MemoryConsolidator:
                     vectors.append(emb)
                     payloads.append({"fact": fact, "session_id": session_id})
                     ids.append(f"{session_id}_fact_{i}")
-                
+
                 self.semantic.upsert_points("cognitive_facts", ids, vectors, payloads)
 
             # 4. Long-Term Gzip Archival
             turns_dict = [t.model_dump() for t in turns]
             steps_dict = [s.model_dump() for s in steps]
             facts_dict = [{"fact": f} for f in facts]
-            
+
             self.archive.archive_session(
                 session_id=session_id,
                 turns=turns_dict,

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import time
-from typing import Optional
+from pathlib import Path
 
 
 class ModelProfileCache:
@@ -17,7 +16,7 @@ class ModelProfileCache:
         self.cache_path = cache_path
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def get(self, model_id: str, provider_id: str) -> Optional[dict]:
+    def get(self, model_id: str, provider_id: str) -> dict | None:
         """Retrieve cached probe results if present and fresh."""
         if not self.cache_path.exists():
             return None
@@ -67,4 +66,17 @@ class ModelProfileCache:
             "probed_at": time.time(),
             "probes": serialized_probes,
         }
-        self.cache_path.write_text(json.dumps(data, indent=2))
+        import os
+        import tempfile
+
+        # Atomically write to temp file, then rename/replace
+        temp_dir = self.cache_path.parent
+        with tempfile.NamedTemporaryFile("w", dir=temp_dir, delete=False, encoding="utf-8") as temp_file:
+            json.dump(data, temp_file, indent=2)
+            temp_file_name = temp_file.name
+        try:
+            os.replace(temp_file_name, str(self.cache_path))
+        except Exception:
+            if os.path.exists(temp_file_name):
+                os.remove(temp_file_name)
+            raise

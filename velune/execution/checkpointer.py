@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List
-import logging
+from typing import Any
 
 from velune.core.errors.execution import SnapshotError
 from velune.execution.path_guard import validate_workspace_path
@@ -21,7 +21,7 @@ class FileCheckpointer:
         self.snapshots_dir = self.workspace_path / ".velune" / "snapshots"
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_checkpoint(self, checkpoint_id: str, files_to_track: List[Path]) -> Dict[str, Any]:
+    def create_checkpoint(self, checkpoint_id: str, files_to_track: list[Path]) -> dict[str, Any]:
         """Create a backup of the current state of files.
 
         Tracks whether files exist, copying their contents to a safe snapshots folder.
@@ -29,7 +29,7 @@ class FileCheckpointer:
         checkpoint_path = self.snapshots_dir / checkpoint_id
         checkpoint_path.mkdir(parents=True, exist_ok=True)
 
-        copied_files: Dict[str, Any] = {}
+        copied_files: dict[str, Any] = {}
         for file in files_to_track:
             try:
                 if not Path(file).is_absolute():
@@ -38,7 +38,7 @@ class FileCheckpointer:
                     abs_file = Path(file).resolve()
             except Exception as e:
                 raise SnapshotError(f"Failed to resolve path {file}: {e}")
-                
+
             # Validate path is within workspace
             try:
                 validate_workspace_path(abs_file, self.workspace_path, "tracked file")
@@ -55,10 +55,10 @@ class FileCheckpointer:
 
                 rel_path = abs_file.relative_to(self.workspace_path)
                 rel_str = str(rel_path).replace("\\", "/")
-                
+
                 backup_file = checkpoint_path / rel_path
                 backup_file.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 shutil.copy2(abs_file, backup_file)
                 backup_rel_str = str(backup_file.relative_to(self.workspace_path)).replace("\\", "/")
                 copied_files[rel_str] = backup_rel_str
@@ -71,7 +71,7 @@ class FileCheckpointer:
             "copied_files": copied_files,
         }
 
-    def restore_checkpoint(self, checkpoint_id: str, checkpoint_data: Dict[str, Any]) -> None:
+    def restore_checkpoint(self, checkpoint_id: str, checkpoint_data: dict[str, Any]) -> None:
         """Restore workspace files back to their checkpointed state.
 
         Also cleans up any temporary checkpoint files afterwards.

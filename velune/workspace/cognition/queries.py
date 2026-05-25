@@ -1,6 +1,6 @@
 """Cognitive model query interface."""
 
-from typing import Optional
+
 from velune.workspace.cognition.model import LiveCognitionModel
 
 
@@ -22,7 +22,7 @@ class CognitionModelQueries:
         """Check if there's an active task."""
         return self.model.current_task_id is not None
 
-    def get_task_id(self) -> Optional[str]:
+    def get_task_id(self) -> str | None:
         """Get current task ID."""
         return self.model.current_task_id
 

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -13,6 +14,6 @@ class PluginManifest(BaseModel):
     version: str = Field("0.1.0", description="Plugin semantic version.")
     description: str = Field("", description="Short plugin functional details.")
     entry_point: str = Field(..., description="Relative python module path (e.g., 'plugin.py').")
-    hooks: List[str] = Field(default_factory=list, description="List of Hook names subscribed (e.g., 'pre_execute').")
-    author: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    hooks: list[str] = Field(default_factory=list, description="List of Hook names subscribed (e.g., 'pre_execute').")
+    author: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

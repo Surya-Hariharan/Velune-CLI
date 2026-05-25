@@ -10,8 +10,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Base event
@@ -39,9 +38,9 @@ class CognitionEvent:
     event_id: str = field(default_factory=_new_id)
     trace_id: str = field(default_factory=_new_id)
     timestamp_ns: int = field(default_factory=lambda: time.time_ns())
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain JSON-compatible dictionary."""
         return {
             "event_id": self.event_id,
@@ -199,7 +198,7 @@ class EvolutionSnapshotTaken(CognitionEvent):
 # ─────────────────────────────────────────────────────────────────────────────
 
 #: Complete set of all known topic strings — used for validation & `/events` slash command.
-ALL_TOPICS: List[str] = [
+ALL_TOPICS: list[str] = [
     "velune.execution.started",
     "velune.execution.completed",
     "velune.execution.failed",
@@ -221,7 +220,7 @@ ALL_TOPICS: List[str] = [
 ]
 
 #: Map event class name -> class for deserialization
-EVENT_CLASS_MAP: Dict[str, type] = {
+EVENT_CLASS_MAP: dict[str, type] = {
     "ExecutionStarted": ExecutionStarted,
     "ExecutionCompleted": ExecutionCompleted,
     "ExecutionFailed": ExecutionFailed,

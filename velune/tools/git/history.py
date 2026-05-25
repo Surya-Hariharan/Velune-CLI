@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 from pathlib import Path
-from typing import List, Optional
+
 from velune.tools.base.tool import BaseTool
 
 
@@ -20,19 +21,18 @@ class GitLog(BaseTool):
     ) -> list[dict]:
         """Get git commit history."""
         import subprocess
-        from pathlib import Path
-        
+
         root_path = Path(directory)
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
-        
+
         result = subprocess.run(
             ["git", "log", f"-{limit}", "--pretty=format:%H|%an|%ad|%s", "--date=iso"],
             cwd=root_path,
             capture_output=True,
             text=True,
         )
-        
+
         commits = []
         for line in result.stdout.strip().split("\n"):
             if line:
@@ -43,7 +43,7 @@ class GitLog(BaseTool):
                     "date": parts[2],
                     "message": parts[3],
                 })
-        
+
         return commits
 
     def get_schema(self) -> dict:
@@ -74,27 +74,26 @@ class GitDiff(BaseTool):
     async def execute(
         self,
         directory: str = ".",
-        file_path: Optional[str] = None,
+        file_path: str | None = None,
     ) -> str:
         """Get git diff."""
         import subprocess
-        from pathlib import Path
-        
+
         root_path = Path(directory)
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
-        
+
         cmd = ["git", "diff"]
         if file_path:
             cmd.append(file_path)
-        
+
         result = subprocess.run(
             cmd,
             cwd=root_path,
             capture_output=True,
             text=True,
         )
-        
+
         return result.stdout
 
     def get_schema(self) -> dict:
@@ -129,19 +128,18 @@ class GitBlame(BaseTool):
     ) -> list[dict]:
         """Get git blame."""
         import subprocess
-        from pathlib import Path
-        
+
         root_path = Path(directory)
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
-        
+
         result = subprocess.run(
             ["git", "blame", file_path],
             cwd=root_path,
             capture_output=True,
             text=True,
         )
-        
+
         lines = []
         for line in result.stdout.split("\n"):
             if line:
@@ -152,7 +150,7 @@ class GitBlame(BaseTool):
                     "date": parts[2],
                     "content": parts[3] if len(parts) > 3 else "",
                 })
-        
+
         return lines
 
     def get_schema(self) -> dict:

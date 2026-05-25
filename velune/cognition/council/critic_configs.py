@@ -1,7 +1,7 @@
 """Configuration definitions for specialized critics in the Reasoning Council."""
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 from velune.models.specializations import CouncilRole
 
@@ -11,7 +11,7 @@ class CriticConfig:
     name: str
     council_role: CouncilRole
     system_prompt: str
-    output_fields: Dict[str, Any]  # Expected JSON fields with defaults
+    output_fields: dict[str, Any]  # Expected JSON fields with defaults
     temperature: float = 0.1
 
 

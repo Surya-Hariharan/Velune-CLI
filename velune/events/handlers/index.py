@@ -1,7 +1,5 @@
 """Events → repository re-indexing."""
 
-from typing import Optional
-from pathlib import Path
 from velune.events.bus.engine import Event
 from velune.repository.indexer import RepositoryIndexer
 

@@ -68,3 +68,13 @@ __pypackages__/
 
 # Project-specific local artifacts
 .velune/
+
+# SQLite lock files and journals
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
+# Local config overrides
+velune.local.toml
+local_settings.toml

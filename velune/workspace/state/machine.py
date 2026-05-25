@@ -1,7 +1,7 @@
 """Workspace state machine."""
 
-from enum import Enum
-from typing import Optional, Callable
+from collections.abc import Callable
+
 from velune.core.types import WorkspaceState
 
 
@@ -20,14 +20,14 @@ class WorkspaceStateMachine:
         """Transition to a new state."""
         if not self._can_transition(self.current_state, new_state):
             return False
-        
+
         old_state = self.current_state
         self.current_state = new_state
-        
+
         # Call transition handlers
         for handler in self._transition_handlers.get((old_state, new_state), []):
             handler(old_state, new_state)
-        
+
         return True
 
     def _can_transition(self, from_state: WorkspaceState, to_state: WorkspaceState) -> bool:
@@ -41,7 +41,7 @@ class WorkspaceStateMachine:
             WorkspaceState.INDEXING: [WorkspaceState.IDLE],
             WorkspaceState.ERROR: [WorkspaceState.IDLE],
         }
-        
+
         return to_state in valid_transitions.get(from_state, [])
 
     def on_transition(self, from_state: WorkspaceState, to_state: WorkspaceState, handler: Callable) -> None:

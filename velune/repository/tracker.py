@@ -2,7 +2,6 @@
 
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
 
 
 class GitTracker:
@@ -22,7 +21,7 @@ class GitTracker:
         except Exception:
             return "unknown"
 
-    def get_uncommitted_changes(self) -> List[str]:
+    def get_uncommitted_changes(self) -> list[str]:
         """Lists all unstaged, staged, or untracked changes in the workspace."""
         if not self.is_git:
             return []
@@ -37,13 +36,13 @@ class GitTracker:
         except Exception:
             return []
 
-    def get_recent_commits(self, limit: int = 10) -> List[Dict[str, str]]:
+    def get_recent_commits(self, limit: int = 10) -> list[dict[str, str]]:
         """Retrieves a list of recent commits with metadata."""
         if not self.is_git:
             return []
         try:
             # Format: hash | author | date | subject
-            res = self._run_git(["log", f"-n", str(limit), "--pretty=format:%H|%an|%ad|%s", "--date=short"])
+            res = self._run_git(["log", "-n", str(limit), "--pretty=format:%H|%an|%ad|%s", "--date=short"])
             commits = []
             for line in res.splitlines():
                 parts = line.split("|")
@@ -69,7 +68,7 @@ class GitTracker:
         except Exception:
             return 0
 
-    def get_blame(self, file_path: str) -> List[Dict[str, str]]:
+    def get_blame(self, file_path: str) -> list[dict[str, str]]:
         """Parses git blame details to index code line ownership and recency."""
         if not self.is_git:
             return []
@@ -77,9 +76,9 @@ class GitTracker:
             # git blame --porcelain file
             res = self._run_git(["blame", "--porcelain", file_path])
             blames = []
-            commit_data: Dict[str, Dict[str, str]] = {}
+            commit_data: dict[str, dict[str, str]] = {}
             lines = res.splitlines()
-            
+
             i = 0
             while i < len(lines):
                 line = lines[i]
@@ -87,7 +86,7 @@ class GitTracker:
                 if not parts:
                     i += 1
                     continue
-                    
+
                 sha = parts[0]
                 if sha not in commit_data:
                     # Parse commit info block
@@ -101,7 +100,7 @@ class GitTracker:
                             date = lines[j][12:]
                         j += 1
                     commit_data[sha] = {"author": author, "date": date}
-                    
+
                 # Find line contents
                 j = i + 1
                 while j < len(lines) and not lines[j].startswith("\t"):
@@ -139,7 +138,7 @@ class GitTracker:
         except Exception:
             return False
 
-    def _run_git(self, args: List[str]) -> str:
+    def _run_git(self, args: list[str]) -> str:
         """Helper to safely execute git subprocess commands in the repository root."""
         cmd = ["git"] + args
         res = subprocess.run(

@@ -1,8 +1,8 @@
 """Live cognitive workspace model."""
 
-from pathlib import Path
-from typing import Dict, Optional
 from datetime import datetime
+from pathlib import Path
+
 from velune.core.types import CognitionModel, WorkspaceState
 
 
@@ -12,12 +12,12 @@ class LiveCognitionModel:
     def __init__(self, workspace_path: Path):
         self.workspace_path = workspace_path
         self.state = WorkspaceState.IDLE
-        self.current_task_id: Optional[str] = None
+        self.current_task_id: str | None = None
         self.file_count = 0
         self.symbol_count = 0
-        self.last_indexed: Optional[datetime] = None
+        self.last_indexed: datetime | None = None
         self.health_score = 0.0
-        self._metadata: Dict[str, any] = {}
+        self._metadata: dict[str, any] = {}
 
     def update_state(self, new_state: WorkspaceState) -> None:
         """Update workspace state."""
@@ -45,7 +45,7 @@ class LiveCognitionModel:
         """Set metadata."""
         self._metadata[key] = value
 
-    def get_metadata(self, key: str) -> Optional[any]:
+    def get_metadata(self, key: str) -> any | None:
         """Get metadata."""
         return self._metadata.get(key)
 

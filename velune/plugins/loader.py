@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import json
-import sys
 import importlib.util
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+import json
 import logging
+import sys
+from pathlib import Path
+from typing import Any
 
-from velune.plugins.schemas import PluginManifest
 from velune.plugins.registry import PluginRegistry
 from velune.plugins.sandbox import PluginSandbox
+from velune.plugins.schemas import PluginManifest
 
 logger = logging.getLogger("velune.plugins.loader")
 
@@ -19,7 +19,7 @@ logger = logging.getLogger("velune.plugins.loader")
 class PluginLoader:
     """Discovers, parses, and dynamically imports plugins from specified directories."""
 
-    def __init__(self, registry: PluginRegistry, search_paths: Optional[List[Path]] = None) -> None:
+    def __init__(self, registry: PluginRegistry, search_paths: list[Path] | None = None) -> None:
         self.registry = registry
         self.search_paths = search_paths or []
 
@@ -42,8 +42,8 @@ class PluginLoader:
     def _load_plugin_folder(self, folder_path: Path, manifest_file: Path) -> None:
         """Parses manifest.json and loads the python entry point module dynamically."""
         logger.info("Discovered plugin manifest at %s", manifest_file)
-        
-        with open(manifest_file, "r", encoding="utf-8") as f:
+
+        with open(manifest_file, encoding="utf-8") as f:
             data = json.load(f)
 
         manifest = PluginManifest(**data)
@@ -60,7 +60,7 @@ class PluginLoader:
 
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
-        
+
         # Execute the module
         spec.loader.exec_module(module)
 

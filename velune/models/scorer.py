@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
-from velune.core.types.model import ModelDescriptor, CapabilityLevel
+
+from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.models.profiler import ModelProfile
 
 logger = logging.getLogger("velune.models.scorer")
@@ -92,7 +92,7 @@ class ModelScorer:
         task_category: str,
         required_tokens: int = 0,
         latency_requirement: str = "medium",
-        profile: Optional[ModelProfile] = None,
+        profile: ModelProfile | None = None,
         local_preferred: bool = False,
     ) -> float:
         """
@@ -176,13 +176,13 @@ class ModelScorer:
             # Severe penalty for context overflow
             return max(0.0, (context_length / required_tokens) * 0.5)
 
-    def _calculate_speed_score(self, model: ModelDescriptor, latency_requirement: str, profile: Optional[ModelProfile]) -> float:
+    def _calculate_speed_score(self, model: ModelDescriptor, latency_requirement: str, profile: ModelProfile | None) -> float:
         """Calculate speed score using empirical metrics (TPS/TTFT) if available, falling back to static tiers."""
         # Dynamic scoring if profile metrics exist
         if profile and profile.tps > 0:
             # Estimate speed based on empirical tokens per second. (assume 80 TPS is maximum optimal score)
             empirical_tps_score = min(1.0, profile.tps / 80.0)
-            
+
             # Penalize long TTFT (assume > 1.5 seconds starts decaying score)
             ttft_penalty = max(0.0, min(0.5, (profile.ttft_ms - 1500.0) / 3000.0)) if profile.ttft_ms > 0 else 0.0
             return max(0.1, empirical_tps_score - ttft_penalty)
@@ -198,7 +198,7 @@ class ModelScorer:
             return 1.0
         return model_speed / req_speed
 
-    def _calculate_reliability_score(self, model: ModelDescriptor, profile: Optional[ModelProfile], local_preferred: bool) -> float:
+    def _calculate_reliability_score(self, model: ModelDescriptor, profile: ModelProfile | None, local_preferred: bool) -> float:
         """Determine reliability and preference score based on locality and validation history."""
         score = 0.9  # Baseline reliability
 

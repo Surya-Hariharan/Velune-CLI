@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import typer
-from pathlib import Path
 from rich.console import Console
 
 from velune.cli.context import CLIContext
 from velune.cli.display.memory_view import MemoryDisplayView
-from velune.core.async_runtime import run_async
 
 console = Console()
 memory_cmd = typer.Typer(help="Memory management commands")
@@ -22,7 +20,7 @@ def memory_stats(ctx: typer.Context) -> None:
         raise typer.BadParameter("CLI context was not properly initialized")
 
     config = cli_context.config
-    
+
     # Compile memory statistics block
     stats = {
         "workspace": cli_context.workspace,
@@ -47,14 +45,19 @@ def memory_inspect(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
+    from velune.core.event_loop import submit
+    submit(_memory_inspect_async(cli_context, tier, limit))
+
+
+async def _memory_inspect_async(cli_context: CLIContext, tier: str, limit: int) -> None:
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
-    
+
     # Startup systems to connect to DB/Local memory files
-    run_async(lifecycle.startup())
+    await lifecycle.startup()
 
     display = MemoryDisplayView(console)
-    
+
     # Generate some high-quality mock/active demonstration records
     # in case the local memory files are still fresh
     sample_records = [
@@ -106,7 +109,7 @@ def memory_inspect(
         ]
         display.render_knowledge_graph(sample_entities, sample_relations)
 
-    run_async(lifecycle.shutdown())
+    await lifecycle.shutdown()
 
 
 @memory_cmd.command("clear")
@@ -134,16 +137,21 @@ def memory_compact(ctx: typer.Context) -> None:
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
+    from velune.core.event_loop import submit
+    submit(_memory_compact_async(cli_context))
+
+
+async def _memory_compact_async(cli_context: CLIContext) -> None:
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
 
-    run_async(lifecycle.startup())
+    await lifecycle.startup()
     console.print("[bold cyan]⠋[/bold cyan] Consolidating memory history logs...")
-    
+
     # Simulate semantic distillation and decay priorities
     console.print("[green]✓[/green] Ingested 10 episodic logs into semantic facts.")
     console.print("[green]✓[/green] Consolidated 4 AST dependencies to Graphiti entities.")
     console.print("[green]✓[/green] Decay policy equations executed successfully.")
-    
-    run_async(lifecycle.shutdown())
+
+    await lifecycle.shutdown()
     console.print("[bold green]Memory compaction completely succeeded.[/bold green]")

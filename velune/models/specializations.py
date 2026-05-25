@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Dict, List, Optional
+
 from velune.core.types.model import ModelDescriptor
+from velune.models.profiler import ModelProfiler
 from velune.models.registry import ModelCapabilityRegistry
 from velune.models.scorer import ModelScorer
-from velune.models.profiler import ModelProfiler
 
 logger = logging.getLogger("velune.models.specializations")
 
@@ -38,20 +38,20 @@ class ModelSpecializationMapper:
     def __init__(
         self,
         registry: ModelCapabilityRegistry,
-        scorer: Optional[ModelScorer] = None,
-        profiler: Optional[ModelProfiler] = None,
+        scorer: ModelScorer | None = None,
+        profiler: ModelProfiler | None = None,
     ) -> None:
         self.registry = registry
         self.scorer = scorer or ModelScorer()
         self.profiler = profiler or ModelProfiler()
-        self.overrides: Dict[CouncilRole, str] = {}
+        self.overrides: dict[CouncilRole, str] = {}
 
     def map_roles(
         self,
         task_category: str = "coding",
-        required_tokens: Optional[int] = None,
+        required_tokens: int | None = None,
         local_preferred: bool = False,
-    ) -> Dict[CouncilRole, ModelDescriptor]:
+    ) -> dict[CouncilRole, ModelDescriptor]:
         """
         Assigns the best available model for each CouncilRole based on their functional profiles and optimal context token sizes.
         
@@ -66,7 +66,7 @@ class ModelSpecializationMapper:
             logger.warning("No models found in the capability registry. Council mappings will be empty.")
             return {}
 
-        assignments: Dict[CouncilRole, ModelDescriptor] = {}
+        assignments: dict[CouncilRole, ModelDescriptor] = {}
 
         def get_tokens(role: CouncilRole) -> int:
             if required_tokens is not None:
@@ -151,12 +151,12 @@ class ModelSpecializationMapper:
 
     def _select_best_model(
         self,
-        models: List[ModelDescriptor],
+        models: list[ModelDescriptor],
         role_category: str,
         required_tokens: int,
         latency_requirement: str,
         local_preferred: bool,
-    ) -> Optional[ModelDescriptor]:
+    ) -> ModelDescriptor | None:
         """Helper to score all models and select the highest scoring candidate."""
         try:
             from velune.kernel.registry import get_container
@@ -165,7 +165,7 @@ class ModelSpecializationMapper:
         except Exception:
             available_vram_gb = None
 
-        best_model: Optional[ModelDescriptor] = None
+        best_model: ModelDescriptor | None = None
         best_score = -1.0
 
         for model in models:
@@ -188,7 +188,7 @@ class ModelSpecializationMapper:
                 profile=profile,
                 local_preferred=local_preferred,
             )
-            
+
             if score > best_score:
                 best_score = score
                 best_model = model

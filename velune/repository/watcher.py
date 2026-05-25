@@ -11,8 +11,9 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 from velune.repository.indexer import RepositoryIndexer
 
@@ -54,13 +55,23 @@ class WorkspaceEvolutionWatcher:
     Performs real-time AST parsing of modifications and invalidates outdated cache symbols.
     """
 
+    lifecycle_key = "workspace_watcher"
+
+    async def initialize(self) -> None:
+        """Lifecycle start callback."""
+        self.start()
+
+    async def shutdown(self) -> None:
+        """Lifecycle shutdown callback."""
+        self.stop()
+
     def __init__(
         self,
         root_path: Path,
         indexer: RepositoryIndexer,
-        grapher: Optional[Any] = None,
-        semantic_memory: Optional[Any] = None,
-        event_bus: Optional[Any] = None,
+        grapher: Any | None = None,
+        semantic_memory: Any | None = None,
+        event_bus: Any | None = None,
         poll_interval: float = 1.0,
     ) -> None:
         self.root_path = root_path.resolve()
@@ -71,9 +82,9 @@ class WorkspaceEvolutionWatcher:
         self.poll_interval = poll_interval
 
         self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._observer: Optional[Any] = None
-        self._file_states: Dict[str, tuple[float, int]] = {}
+        self._thread: threading.Thread | None = None
+        self._observer: Any | None = None
+        self._file_states: dict[str, tuple[float, int]] = {}
 
         self.ignored_dirs = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".velune"}
         self.supported_extensions = {".py", ".ts", ".js", ".go", ".rs", ".java", ".c", ".cpp"}
@@ -82,7 +93,7 @@ class WorkspaceEvolutionWatcher:
         """Start the background watcher."""
         if self._running:
             return
-        
+
         self._running = True
         logger.info("Starting WorkspaceEvolutionWatcher background thread...")
 
@@ -121,7 +132,7 @@ class WorkspaceEvolutionWatcher:
         if self._thread:
             self._thread.join(timeout=1.0)
             self._thread = None
-        
+
         logger.info("WorkspaceEvolutionWatcher stopped.")
 
     def _should_watch(self, path: Path) -> bool:
@@ -150,7 +161,7 @@ class WorkspaceEvolutionWatcher:
         """Fall-back mtime and size comparison loop."""
         while self._running:
             try:
-                current_states: Dict[str, tuple[float, int]] = {}
+                current_states: dict[str, tuple[float, int]] = {}
                 for root, dirs, files in os.walk(self.root_path):
                     if not self._running:
                         break
@@ -212,12 +223,12 @@ class WorkspaceEvolutionWatcher:
                     code = file_path.read_text(encoding="utf-8", errors="ignore")
                     symbols, edges = self.indexer.parser.parse(file_path, code)
                     language = self.indexer.parser._detect_language(file_path)
-                    
+
                     import json
                     cache = {}
                     if self.indexer.cache_path.exists():
                         try:
-                            with open(self.indexer.cache_path, "r", encoding="utf-8") as f:
+                            with open(self.indexer.cache_path, encoding="utf-8") as f:
                                 cache = json.load(f)
                         except Exception:
                             pass
@@ -250,7 +261,7 @@ class WorkspaceEvolutionWatcher:
             try:
                 import json
                 if self.indexer.cache_path.exists():
-                    with open(self.indexer.cache_path, "r", encoding="utf-8") as f:
+                    with open(self.indexer.cache_path, encoding="utf-8") as f:
                         cache = json.load(f)
                     if rel_path in cache:
                         del cache[rel_path]

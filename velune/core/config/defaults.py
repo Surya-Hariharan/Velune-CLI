@@ -1,16 +1,16 @@
 """Default configuration values."""
 
-from velune.core.config.schema import (
-    VeluneConfig,
-    ProjectConfig,
-    WorkspaceConfig,
+from velune.kernel.config import (
     ContextConfig,
-    MemoryConfig,
-    RetrievalConfig,
     ExecutionConfig,
-    ProvidersConfig,
-    TelemetryConfig,
     MCPConfig,
+    MemoryConfig,
+    ProjectConfig,
+    ProvidersConfig,
+    RetrievalConfig,
+    TelemetryConfig,
+    VeluneConfig,
+    WorkspaceConfig,
 )
 
 

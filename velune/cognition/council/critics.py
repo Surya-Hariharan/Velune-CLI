@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from velune.core.types.model import ModelDescriptor
-from velune.providers.base import ModelProvider
 from velune.cognition.council.critic_agent import CriticAgent
 from velune.cognition.council.critic_configs import (
+    MAINTAINABILITY_CONFIG,
+    PERFORMANCE_CONFIG,
     SCALABILITY_CONFIG,
     SECURITY_CONFIG,
-    PERFORMANCE_CONFIG,
-    MAINTAINABILITY_CONFIG,
 )
+from velune.core.types.model import ModelDescriptor
+from velune.providers.base import ModelProvider
 
 
 class ScalabilityCritic(CriticAgent):

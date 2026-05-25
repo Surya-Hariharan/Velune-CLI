@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+
 from velune.tools.base.tool import BaseTool
 
 
@@ -19,20 +19,19 @@ class GoToDefinition(BaseTool):
         symbol_name: str,
         file_path: str,
         line: int,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Go to symbol definition."""
-        from velune.repository.scanner import FilesystemScanner
         from velune.repository.parser import ASTParser
-        
+
         path = Path(file_path)
         parser = ASTParser()
-        
+
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(path, encoding="utf-8", errors="ignore") as f:
                 code = f.read()
         except Exception:
             return None
-            
+
         symbols, _ = parser.parse(path, code)
         for symbol in symbols:
             if symbol.name == symbol_name:
@@ -41,7 +40,7 @@ class GoToDefinition(BaseTool):
                     "line": symbol.line_start,
                     "kind": symbol.kind.value if hasattr(symbol.kind, "value") else symbol.kind,
                 }
-        
+
         return None
 
     def get_schema(self) -> dict:
@@ -81,14 +80,14 @@ class FindReferences(BaseTool):
     ) -> list[dict]:
         """Find references to a symbol."""
         from velune.tools.filesystem.search import GrepFiles
-        
+
         grep = GrepFiles()
         results = await grep.execute(
             pattern=symbol_name,
             directory=directory,
             file_pattern="*.py",
         )
-        
+
         return results
 
     def get_schema(self) -> dict:

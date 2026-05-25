@@ -3,37 +3,41 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-import re
 import os
+import re
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from velune.memory.tiers.lineage import LineageMemoryTier
 
-from velune.models.specializations import ModelSpecializationMapper, CouncilRole
-from velune.providers.registry import ProviderRegistry
-from velune.cognition.council.planner import PlannerAgent
-from velune.cognition.council.coder import CoderAgent
-from velune.cognition.council.reviewer import ReviewerAgent
-from velune.cognition.council.challenger import ChallengerAgent
-from velune.cognition.council.synthesizer import SynthesizerAgent
+if TYPE_CHECKING:
+    from velune.memory.storage.sqlite_manager import SQLiteManager
+    from velune.kernel.config import VeluneConfig
+
 from velune.cognition.arbitrator import CouncilArbitrator
 from velune.cognition.architecture import ArchitectureCognitionAgent
-from velune.cognition.tradeoff import TradeoffEvaluationMatrix
-from velune.cognition.evolution import EvolutionTimelineReporter
+from velune.cognition.council.challenger import ChallengerAgent
+from velune.cognition.council.coder import CoderAgent
 from velune.cognition.council.critics import (
+    MaintainabilityCritic,
+    PerformanceCritic,
     ScalabilityCritic,
     SecurityCritic,
-    PerformanceCritic,
-    MaintainabilityCritic,
 )
 from velune.cognition.council.debate import calculate_max_debate_turns
+from velune.cognition.council.planner import PlannerAgent
+from velune.cognition.council.reviewer import ReviewerAgent
+from velune.cognition.council.synthesizer import SynthesizerAgent
+from velune.cognition.council.tiers import CouncilTier, classify_task_tier
+from velune.cognition.evolution import EvolutionTimelineReporter
+from velune.cognition.tradeoff import TradeoffEvaluationMatrix
+from velune.core.trace import TracedLogger
+from velune.models.specializations import CouncilRole, ModelSpecializationMapper
+from velune.providers.registry import ProviderRegistry
 from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
-
-logger = logging.getLogger("velune.cognition.orchestrator")
+logger = TracedLogger("velune.cognition.orchestrator")
 
 
 class CouncilOrchestrator:
@@ -46,19 +50,25 @@ class CouncilOrchestrator:
         historical_accuracy: float = 0.85,
         lineage_db_path: Path | None = None,
         analytics: CognitivePerformanceAnalytics | None = None,
+        sqlite_manager: SQLiteManager | None = None,
+        config: VeluneConfig | None = None,
     ) -> None:
         self.provider_registry = provider_registry
         self.mapper = mapper
         self.arbitrator = CouncilArbitrator(historical_accuracy=historical_accuracy)
         self.architecture_agent = ArchitectureCognitionAgent(workspace_root=None, ledger=None)
-        
-        db_path = lineage_db_path or Path(".velune") / "cognition" / "decision_lineage.db"
-        self.lineage_memory = LineageMemoryTier(db_path)
+        self.config = config
+
+        db_path = lineage_db_path or Path(".velune") / "velune_cognitive_core.db"
+        self.lineage_memory = LineageMemoryTier(db_path, sqlite_manager=sqlite_manager)
         self.evolution_reporter = EvolutionTimelineReporter(self.lineage_memory)
-        self.analytics = analytics or CognitivePerformanceAnalytics()
+        self.analytics = analytics or CognitivePerformanceAnalytics(sqlite_manager=sqlite_manager)
+
+        from velune.cognition.firewall import CognitiveFirewall
+        self.firewall = CognitiveFirewall()
 
 
-    def _get_or_refresh_style_profile(self, target_file: str) -> Optional[Dict[str, Any]]:
+    def _get_or_refresh_style_profile(self, target_file: str) -> dict[str, Any] | None:
         """Queries the style profile from database, or scans and caches it if missing/stale."""
         target_dir = os.path.dirname(target_file)
         if not target_dir:
@@ -66,7 +76,7 @@ class CouncilOrchestrator:
 
         # Check in the SQLite DB
         profile = self.lineage_memory.get_personality_style(target_dir)
-        
+
         # If missing or older than 24 hours (86400 seconds), refresh it
         is_stale = False
         if profile:
@@ -79,7 +89,7 @@ class CouncilOrchestrator:
                 # AST Scan
                 from velune.cognition.personality import RepositoryPersonalityAgent
                 agent = RepositoryPersonalityAgent()
-                
+
                 # Check if directory exists
                 if os.path.exists(target_dir):
                     profile = agent.analyze_directory_style(target_dir)
@@ -94,7 +104,7 @@ class CouncilOrchestrator:
                     )
             except Exception as e:
                 logger.error("Failed to run RepositoryPersonalityAgent: %s", e)
-                
+
         return profile
 
     def _is_structural_change(self, prompt: str, repo_context: str) -> bool:
@@ -104,45 +114,273 @@ class CouncilOrchestrator:
         Structural changes: class/method definitions, interface changes, multiple files, DB/concurrency related.
         """
         prompt_lower = prompt.lower()
-        
+
         # 1. Structural indicators
         structural_keywords = [
             "redesign", "architect", "concurrency", "thread", "async", "lock", "database",
             "class", "interface", "refactor", "performance", "scalability", "security",
             "cohesion", "module", "coupling", "sandbox", "boundary", "lcom", "critic"
         ]
-        
+
         for kw in structural_keywords:
             if kw in prompt_lower:
                 return True
-                
+
         # 2. Simple indicators
         simple_keywords = ["typo", "comment", "format", "rename variable", "ui text", "alignment", "simple tweak"]
         for kw in simple_keywords:
             if kw in prompt_lower:
                 return False
-                
+
         # 3. Length heuristic
         if len(prompt.split()) > 15:
             return True
-            
+
         return False
 
-    async def execute_task(self, prompt: str, repo_context: str) -> Dict[str, Any]:
+    async def execute_task(self, prompt: str, repo_context: str, council_tier: str | None = None) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt."""
-        logger.info("Reasoning Council starting execution for goal: %s", prompt)
+        import uuid
+
+        from velune.core.trace import TraceContext
+
+        run_id = f"council-{uuid.uuid4().hex[:8]}"
+        with TraceContext(run_id=run_id):
+            # Estimate model speed from profiler
+            roles = self.mapper.map_roles()
+            coder_model = roles.get(CouncilRole.CODER)
+            estimated_tps = 8.0  # conservative default
+            if coder_model:
+                profile = self.mapper.profiler.get_profile(coder_model.provider_id, coder_model.model_id)
+                if profile and profile.tps > 0.0:
+                    estimated_tps = profile.tps
+
+            if council_tier:
+                try:
+                    tier = CouncilTier(council_tier.lower())
+                except ValueError:
+                    tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+            else:
+                tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+                
+            # Dynamic low-resource optimization mode
+            low_resource = (
+                (self.config and self.config.execution.low_resource_mode) or
+                os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
+            )
+            
+            if low_resource and tier == CouncilTier.FULL:
+                logger.info("[LOW-RESOURCE] Downgrading Council tier from FULL to STANDARD to optimize CPU usage.")
+                tier = CouncilTier.STANDARD
+
+            # Estimate cost (agent_count × estimated_seconds) before execution
+            agent_counts = {
+                CouncilTier.INSTANT: 1,
+                CouncilTier.STANDARD: 4,
+                CouncilTier.FULL: 10,
+            }
+            agent_count = agent_counts.get(tier, 4)
+            estimated_seconds_per_call = 300.0 / estimated_tps
+            estimated_cost_seconds = agent_count * estimated_seconds_per_call
+
+            logger.info(
+                "Council tier selected: %s for prompt: %s... (Estimated cost: %.1fs based on %d agents at %.1f TPS)",
+                tier.value,
+                prompt[:50],
+                estimated_cost_seconds,
+                agent_count,
+                estimated_tps,
+            )
+
+            start_time = time.time()
+            try:
+                if tier == CouncilTier.INSTANT:
+                    result = await self._execute_instant(prompt, repo_context)
+                elif tier == CouncilTier.STANDARD:
+                    result = await self._execute_standard(prompt, repo_context)
+                else:
+                    result = await self._execute_full(prompt, repo_context)
+                return result
+            finally:
+                elapsed_time = time.time() - start_time
+                logger.info("Executed %s tier in %.2fs", tier.value, elapsed_time)
+
+    async def _execute_instant(self, prompt: str, repo_context: str) -> dict[str, Any]:
+        """FAST PATH INSTANT: Coder only, no debate, no review, but still runs CognitiveFirewall scan on repo context."""
+        logger.info("[COUNCIL - INSTANT] Executing Instant single-agent Coder path...")
+
+        # INSTANT tier must still run CognitiveFirewall scan on repo context
+        from velune.cognition.firewall import CognitiveFirewall
+        firewall = CognitiveFirewall()
+
+        # Scan repo context for security issues
+        if not firewall.scan_file_for_injection("workspace_context", repo_context)["is_safe"]:
+            logger.error("Security: prompt injection detected in workspace context during Instant execution")
+            raise ValueError("Security: Potential prompt injection detected in workspace context")
+
+        target_file = "velune/core/main.py"
+        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
+        if py_files:
+            target_file = py_files[0]
+
+        style_profile = self._get_or_refresh_style_profile(target_file)
+
+        roles = self.mapper.map_roles()
+        coder_model = roles[CouncilRole.CODER]
+        coder = CoderAgent(
+            model=coder_model,
+            provider=self.provider_registry.get_or_raise(coder_model.provider_id),
+        )
+
+        coder_proposal = await coder.write_code(
+            prompt=prompt,
+            current_code=repo_context,
+            plan_context="Direct implementation (Instant path chosen).",
+            style_profile=style_profile,
+        )
+
+        return {
+            "tier": "instant",
+            "task_plan": None,
+            "coder_proposal": coder_proposal,
+            "reviewer_report": None,
+            "challenger_report": None,
+            "arbitration": {"overall_confidence": 0.85, "requires_human_review": False},
+            "final_summary": coder_proposal,
+        }
+
+    async def _execute_standard(self, prompt: str, repo_context: str) -> dict[str, Any]:
+        """STANDARD PATH: Planner + Coder + Reviewer + Synthesizer (No Challenger, no specialized critics, Max 1 debate turn)"""
+        logger.info("[COUNCIL - STANDARD] Executing Standard Coder + Reviewer path...")
+
+        target_file = "velune/core/main.py"
+        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
+        if py_files:
+            target_file = py_files[0]
+
+        style_profile = self._get_or_refresh_style_profile(target_file)
+
+        roles = self.mapper.map_roles()
+        planner_model = roles[CouncilRole.PLANNER]
+        coder_model = roles[CouncilRole.CODER]
+        reviewer_model = roles[CouncilRole.REVIEWER]
+        synthesizer_model = roles[CouncilRole.SYNTHESIZER]
+
+        planner = PlannerAgent(
+            model=planner_model,
+            provider=self.provider_registry.get_or_raise(planner_model.provider_id),
+        )
+        coder = CoderAgent(
+            model=coder_model,
+            provider=self.provider_registry.get_or_raise(coder_model.provider_id),
+        )
+        reviewer = ReviewerAgent(
+            model=reviewer_model,
+            provider=self.provider_registry.get_or_raise(reviewer_model.provider_id),
+        )
+        synthesizer = SynthesizerAgent(
+            model=synthesizer_model,
+            provider=self.provider_registry.get_or_raise(synthesizer_model.provider_id),
+        )
+
+        # 1. Generate plan
+        task_plan = await planner.generate_plan(prompt, repo_context)
+        plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
+
+        # 2. Generate code
+        coder_proposal = await coder.write_code(
+            prompt=prompt,
+            current_code=repo_context,
+            plan_context=plan_desc,
+            style_profile=style_profile,
+        )
+
+        # 3. Review code
+        reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
+
+        # Max 1 debate turn
+        objections = []
+        if not reviewer_report.passed:
+            objections.append(f"Reviewer: {reviewer_report.critical_issues}")
+
+        low_resource = (
+            (self.config and self.config.execution.low_resource_mode) or
+            os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
+        )
+
+        if objections and not low_resource:
+            logger.info("[COUNCIL - STANDARD] Objection detected. Running 1 refinement turn...")
+            objections_text = "\n".join([f"- {obj}" for obj in objections])
+            refine_prompt = (
+                f"The Reviewer has raised the following objections to your previous proposal:\n"
+                f"{objections_text}\n\n"
+                f"Please rewrite and refine the proposed code to resolve these objections."
+            )
+            coder_proposal = await coder.write_code(
+                prompt=prompt,
+                current_code=repo_context,
+                plan_context=f"Standard Refinement Turn:\n{refine_prompt}",
+                style_profile=style_profile,
+            )
+            # Re-run reviewer once
+            reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
+
+        # 4. Arbitration
+        arbitration = self.arbitrator.arbitrate(
+            plan_steps=[s.description for s in task_plan.steps],
+            coder_proposal=coder_proposal,
+            reviewer_report=reviewer_report,
+            challenger_report=None,  # No Challenger
+            scalability_report=None,
+            security_report=None,
+            performance_report=None,
+            maintainability_report=None,
+        )
+
+        # 5. Synthesize Walkthrough
+        final_summary = await synthesizer.synthesize(
+            task=prompt,
+            winning_claims=arbitration.winning_claims,
+            plan=coder_proposal,
+            audit_reports=[reviewer_report.model_dump()],
+            context=repo_context,
+        )
+
+        # Log successful decision to DLS
+        decision_id = f"DEC-{int(time.time())}"
+        self.lineage_memory.log_decision(
+            decision_id=decision_id,
+            target_subsystem="standard_path",
+            rationale=final_summary[:300],
+            architectural_impact=0.3,
+            consequences="Standard execution completed with single-reviewer arbitration.",
+        )
+
+        return {
+            "tier": "standard",
+            "task_plan": task_plan,
+            "coder_proposal": coder_proposal,
+            "reviewer_report": reviewer_report,
+            "challenger_report": None,
+            "arbitration": arbitration.to_dict(),
+            "final_summary": final_summary,
+        }
+
+    async def _execute_full(self, prompt: str, repo_context: str) -> dict[str, Any]:
+        """Orchestrate a complete council deliberation pass for a task prompt (FULL tier)."""
+        logger.info("Reasoning Council starting execution in FULL tier for goal: %s", prompt)
 
         # Resolve target file and directory for style extraction
         target_file = "velune/core/main.py"  # Default fallback
         py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
         if py_files:
             target_file = py_files[0]
-            
+
         style_profile = self._get_or_refresh_style_profile(target_file)
 
         # 1. Map specialized models to council roles
         roles = self.mapper.map_roles()
-        
+
         # 2. Instantiate active council agent instances
         logger.info("Instantiating specialized council agents...")
         planner_model = roles[CouncilRole.PLANNER]
@@ -160,65 +398,15 @@ class CouncilOrchestrator:
             provider=self.provider_registry.get_or_raise(synthesizer_model.provider_id),
         )
 
-        # 3. Assess Complexity and route to Fast-Path if simple
-        if not self._is_structural_change(prompt, repo_context):
-            logger.info("[COUNCIL - COMPLEXITY] Task classified as simple. Executing Fast-Path Single-Agent execution...")
-            coder_proposal = await coder.write_code(
-                prompt=prompt,
-                current_code=repo_context,
-                plan_context="Fast-path bypass plan: Execute direct change.",
-                style_profile=style_profile,
-            )
-            
-            final_summary = await synthesizer.synthesize(
-                task=prompt,
-                winning_claims=["Direct execution path chosen for simple change."],
-                plan=coder_proposal,
-                audit_reports=[],
-                context=repo_context,
-            )
-            
-            fast_path_arbitration = {
-                "requires_human_review": False,
-                "winning_claims": ["Direct execution path chosen for simple change."],
-                "overall_confidence": 0.95,
-                "flags": ["FAST_PATH"],
-                "synthesis_instructions": "Direct approval.",
-            }
-            
-            # Log the fast-path decision
-            decision_id = f"DEC-{int(time.time())}"
-            self.lineage_memory.log_decision(
-                decision_id=decision_id,
-                target_subsystem="fast_path",
-                rationale=final_summary[:300],
-                architectural_impact=0.1,
-                consequences="Fast-path single-agent execution approved direct change.",
-            )
-            
-            return {
-                "task_plan": None,
-                "coder_proposal": coder_proposal,
-                "reviewer_report": None,
-                "challenger_report": None,
-                "arbitration": fast_path_arbitration,
-                "final_summary": final_summary,
-            }
-
         # --- STRUCTURAL CHANGE PATH ---
-        logger.info("[COUNCIL - COMPLEXITY] Task classified as structural. Launching Architecture Cognition Agent & Multi-Critique Council...")
-        
+        logger.info("[COUNCIL - COMPLEXITY] Launching Architecture Cognition Agent & Multi-Critique Council...")
+
         # ACA Analysis
-        target_file = "velune/core/main.py"  # Default fallback
-        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
-        if py_files:
-            target_file = py_files[0]
-            
         logger.info("[COUNCIL - ACA] Executing Architecture Cognition Agent audit on: %s", target_file)
         architectural_context = ""
         if "class " in repo_context or "def " in repo_context:
             self.architecture_agent.audit_architecture(target_file, repo_context)
-            
+
             # Retrieve persistent ledger items to enrich reasoning
             debt_items = self.architecture_agent.ledger.get_items()
             if debt_items:
@@ -240,7 +428,7 @@ class CouncilOrchestrator:
 
         # Query past architectural decisions and failed experiment warnings
         decisions, failures = self.lineage_memory.query_continuity_warnings(prompt, repo_context)
-        
+
         continuity_context = ""
         if decisions or failures:
             continuity_context += "\n--- COGNITIVE CONTINUITY WARNINGS ---\n"
@@ -258,7 +446,14 @@ class CouncilOrchestrator:
                     continuity_context += f"- Failed Experiment {fail['id']} in Subsystem: {fail['target_subsystem']}\n"
                     continuity_context += f"  Approach / Patch:\n{fail['patch']}\n"
                     continuity_context += f"  Failure Error ({fail['error_type']}): {fail['error_message']}\n"
-            continuity_context += "--------------------------------------\n"
+
+        # SECURE WORKSPACE DATA VIA XML WRAPPING
+        architectural_context = self.firewall.wrap_workspace_content(
+            "architectural_debt_ledger", architectural_context
+        )
+        continuity_context = self.firewall.wrap_workspace_content(
+            "continuity_warnings", continuity_context
+        )
 
         enriched_repo_context = repo_context + architectural_context + continuity_context
 
@@ -275,7 +470,7 @@ class CouncilOrchestrator:
             model=challenger_model,
             provider=self.provider_registry.get_or_raise(challenger_model.provider_id),
         )
-        
+
         scalability_critic = ScalabilityCritic(
             model=challenger_model,
             provider=self.provider_registry.get_or_raise(challenger_model.provider_id),
@@ -296,7 +491,7 @@ class CouncilOrchestrator:
         # 4. Deliberation Phase A: Planner compiles DAG Execution Plan
         logger.info("[COUNCIL - PLANNER] Decomposing task into steps...")
         task_plan = await planner.generate_plan(prompt, enriched_repo_context)
-        
+
         # 5. Deliberation Phase B: Coder generates solution proposal
         plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
         logger.info("[COUNCIL - CODER] Designing code implementation...")
@@ -309,7 +504,7 @@ class CouncilOrchestrator:
 
         # 6. Deliberation Phase C & D: Concurrent Review and Parallel Critics Council
         logger.info("[COUNCIL - PARALLEL] Launching parallel adversarial review & 4 specialized critics...")
-        
+
         reviewer_task = reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
         challenger_task = challenger.challenge(task=prompt, proposal=coder_proposal, context=repo_context)
         scalability_task = scalability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
@@ -359,124 +554,139 @@ class CouncilOrchestrator:
             "scalability": scalability_report,
             "challenger": challenger_report,
         }
+
+        # Calculate debate turns based on complexity and scores, but capped at 3
         max_debate_turns = calculate_max_debate_turns(
             initial_objections=objections,
             critic_reports=all_critic_reports,
             task_complexity="structural",
         )
-        logger.info("Debate configured for %d max turns (objections: %d)", 
+        max_debate_turns = min(3, max_debate_turns)
+        logger.info("Debate configured for %d max turns (objections: %d)",
                     max_debate_turns, len(objections))
+
+        refined_proposal = coder_proposal
 
         if objections and max_debate_turns > 0:
             logger.info("[COUNCIL - DEBATE] Objections detected. Initiating Contradiction-Driven Arbitration Debate Loop...")
-            
-            debate_turn = 1
-            refined_proposal = coder_proposal
-            
-            while debate_turn <= max_debate_turns:
-                logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
-                turns_required = debate_turn
-                
-                objections_text = "\n".join([f"- {obj}" for obj in objections])
-                refine_prompt = (
-                    f"The Reasoning Council has raised the following objections to your previous proposal:\n"
-                    f"{objections_text}\n\n"
-                    f"Please rewrite and refine the proposed code to resolve ALL of these objections completely while satisfying the original task."
-                )
-                
-                logger.info("[COUNCIL - DEBATE] Coder refining proposal...")
-                refined_proposal = await coder.write_code(
-                    prompt=prompt,
-                    current_code=repo_context,
-                    plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
-                    style_profile=style_profile,
-                )
-                
-                logger.info("[COUNCIL - DEBATE] Re-running objecting critics on refined proposal...")
-                re_tasks = []
-                re_critics = []
-                
-                if not reviewer_report.passed:
-                    re_tasks.append(reviewer.review(task=prompt, proposal=refined_proposal, context=repo_context))
-                    re_critics.append("reviewer")
-                if not scalability_report.passed:
-                    re_tasks.append(scalability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                    re_critics.append("scalability")
-                if not security_report.passed:
-                    re_tasks.append(security_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                    re_critics.append("security")
-                if not performance_report.passed:
-                    re_tasks.append(performance_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                    re_critics.append("performance")
-                if not maintainability_report.passed:
-                    re_tasks.append(maintainability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                    re_critics.append("maintainability")
-                    
-                if re_tasks:
-                    re_results = await asyncio.gather(*re_tasks)
-                    
-                    # Update all reports first to preserve converged state if we break early
-                    for name, res in zip(re_critics, re_results):
-                        if name == "reviewer":
-                            reviewer_report = res
-                        elif name == "scalability":
-                            scalability_report = res
-                        elif name == "security":
-                            security_report = res
-                        elif name == "performance":
-                            performance_report = res
-                        elif name == "maintainability":
-                            maintainability_report = res
 
-                    # convergence detection with score > 0.8
-                    all_passed_with_high_score = True
-                    for name, res in zip(re_critics, re_results):
-                        score = res.confidence_rating if name == "reviewer" else getattr(res, "score", 1.0)
-                        if not res.passed or score <= 0.8:
-                            all_passed_with_high_score = False
+            async def _run_debate_loop() -> None:
+                nonlocal coder_proposal, refined_proposal, reviewer_report, scalability_report, security_report, performance_report, maintainability_report, objections, converged, turns_required
+
+                debate_turn = 1
+                refined_proposal = coder_proposal
+
+                while debate_turn <= max_debate_turns:
+                    logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
+                    turns_required = debate_turn
+
+                    objections_text = "\n".join([f"- {obj}" for obj in objections])
+                    refine_prompt = (
+                        f"The Reasoning Council has raised the following objections to your previous proposal:\n"
+                        f"{objections_text}\n\n"
+                        f"Please rewrite and refine the proposed code to resolve ALL of these objections completely while satisfying the original task."
+                    )
+
+                    logger.info("[COUNCIL - DEBATE] Coder refining proposal...")
+                    refined_proposal = await coder.write_code(
+                        prompt=prompt,
+                        current_code=repo_context,
+                        plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
+                        style_profile=style_profile,
+                    )
+
+                    logger.info("[COUNCIL - DEBATE] Re-running objecting critics on refined proposal...")
+                    re_tasks: list[Any] = []
+                    re_critics: list[str] = []
+
+                    if not reviewer_report.passed:
+                        re_tasks.append(reviewer.review(task=prompt, proposal=refined_proposal, context=repo_context))
+                        re_critics.append("reviewer")
+                    if not scalability_report.passed:
+                        re_tasks.append(scalability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                        re_critics.append("scalability")
+                    if not security_report.passed:
+                        re_tasks.append(security_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                        re_critics.append("security")
+                    if not performance_report.passed:
+                        re_tasks.append(performance_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                        re_critics.append("performance")
+                    if not maintainability_report.passed:
+                        re_tasks.append(maintainability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                        re_critics.append("maintainability")
+
+                    if re_tasks:
+                        re_results = await asyncio.gather(*re_tasks)
+
+                        # Update all reports first to preserve converged state if we break early
+                        for name, res in zip(re_critics, re_results):
+                            if name == "reviewer":
+                                reviewer_report = res
+                            elif name == "scalability":
+                                scalability_report = res
+                            elif name == "security":
+                                security_report = res
+                            elif name == "performance":
+                                performance_report = res
+                            elif name == "maintainability":
+                                maintainability_report = res
+
+                        # convergence detection with score > 0.8
+                        all_passed_with_high_score = True
+                        for name, res in zip(re_critics, re_results):
+                            score = res.confidence_rating if name == "reviewer" else getattr(res, "score", 1.0)
+                            if not res.passed or score <= 0.8:
+                                all_passed_with_high_score = False
+                                break
+
+                        if all_passed_with_high_score:
+                            logger.info("Full convergence achieved on turn %d", debate_turn)
+                            coder_proposal = refined_proposal
+                            objections = []
+                            converged = True
                             break
-                            
-                    if all_passed_with_high_score:
-                        logger.info("Full convergence achieved on turn %d", debate_turn)
-                        coder_proposal = refined_proposal
+
+                        new_objections = []
+                        for name, res in zip(re_critics, re_results):
+                            if name == "reviewer":
+                                if not res.passed:
+                                    new_objections.append(f"Reviewer: {res.critical_issues}")
+                            elif name == "scalability":
+                                if not res.passed:
+                                    new_objections.append(f"Scalability Critic: {res.issues}")
+                            elif name == "security":
+                                if not res.passed:
+                                    new_objections.append(f"Security Critic: {res.issues}")
+                            elif name == "performance":
+                                if not res.passed:
+                                    new_objections.append(f"Performance Critic: {res.issues}")
+                            elif name == "maintainability":
+                                if not res.passed:
+                                    new_objections.append(f"Maintainability Critic: {res.issues}")
+                        objections = new_objections
+
+                    else:
                         objections = []
+
+                    if not objections:
+                        logger.info("Debate converged after %d turns", debate_turn)
+                        logger.info("[COUNCIL - DEBATE] Debate loop converged! All objections resolved.")
+                        coder_proposal = refined_proposal
                         converged = True
                         break
-                        
-                    new_objections = []
-                    for name, res in zip(re_critics, re_results):
-                        if name == "reviewer":
-                            if not res.passed:
-                                new_objections.append(f"Reviewer: {res.critical_issues}")
-                        elif name == "scalability":
-                            if not res.passed:
-                                new_objections.append(f"Scalability Critic: {res.issues}")
-                        elif name == "security":
-                            if not res.passed:
-                                new_objections.append(f"Security Critic: {res.issues}")
-                        elif name == "performance":
-                            if not res.passed:
-                                new_objections.append(f"Performance Critic: {res.issues}")
-                        elif name == "maintainability":
-                            if not res.passed:
-                                new_objections.append(f"Maintainability Critic: {res.issues}")
-                    objections = new_objections
 
-                else:
-                    objections = []
-                    
-                if not objections:
-                    logger.info("Debate converged after %d turns", debate_turn)
-                    logger.info("[COUNCIL - DEBATE] Debate loop converged! All objections resolved.")
+                    debate_turn += 1
+
+                if objections:
+                    logger.warning("[COUNCIL - DEBATE] Debate loop finished but objections remain: %s", objections)
                     coder_proposal = refined_proposal
-                    converged = True
-                    break
-                    
-                debate_turn += 1
-                
-            if objections:
-                logger.warning("[COUNCIL - DEBATE] Debate loop finished but objections remain: %s", objections)
-                coder_proposal = refined_proposal
+                    converged = False
+
+            MAX_DEBATE_WALL_TIME = 300.0  # 5 minutes hard cap for entire debate
+            try:
+                await asyncio.wait_for(_run_debate_loop(), timeout=MAX_DEBATE_WALL_TIME)
+            except TimeoutError:
+                logger.warning("Debate loop hit wall time limit, proceeding with best proposal")
                 converged = False
 
         if initial_objection_count > 0:
@@ -488,7 +698,6 @@ class CouncilOrchestrator:
                 converged=converged,
                 time_to_converge_ms=time_to_converge_ms,
             )
-
 
         # 8. Council Arbitration and Confidence Fusion
         logger.info("[COUNCIL - ARBITRATION] Evaluating agent votes and contradictions...")
@@ -502,7 +711,7 @@ class CouncilOrchestrator:
             performance_report=performance_report,
             maintainability_report=maintainability_report,
         )
-        
+
         fusion_score = arbitration.overall_confidence
         logger.info(
             "[COUNCIL - FUSION] Reasoning Confidence Fusion Score: %.3f (Objections: %d)",
@@ -562,7 +771,7 @@ class CouncilOrchestrator:
                 decision_id=decision_id,
                 target_subsystem=subsystem_target,
                 rationale=final_summary[:300],
-                architectural_impact=0.7 if self._is_structural_change(prompt, repo_context) else 0.2,
+                architectural_impact=0.7,
                 consequences="Approved and validated by Reasoning Council.",
                 alternatives=[
                     {
@@ -638,6 +847,7 @@ class CouncilOrchestrator:
 
         logger.info("Reasoning Council deliberation fully completed")
         return {
+            "tier": "full",
             "task_plan": task_plan,
             "coder_proposal": coder_proposal,
             "reviewer_report": reviewer_report,
@@ -649,3 +859,5 @@ class CouncilOrchestrator:
             "arbitration": arbitration.to_dict(),
             "final_summary": final_summary,
         }
+
+

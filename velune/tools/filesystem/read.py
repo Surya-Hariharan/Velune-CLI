@@ -1,7 +1,7 @@
 """Filesystem read tools."""
 
 from pathlib import Path
-from typing import Optional
+
 from velune.tools.base.tool import BaseTool
 
 
@@ -19,8 +19,8 @@ class ReadFile(BaseTool):
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        
-        with open(path, "r", encoding="utf-8") as f:
+
+        with open(path, encoding="utf-8") as f:
             return f.read()
 
     def get_schema(self) -> dict:
@@ -50,7 +50,7 @@ class ReadDirectory(BaseTool):
         path = Path(directory_path)
         if not path.exists() or not path.is_dir():
             raise NotADirectoryError(f"Directory not found: {directory_path}")
-        
+
         return [item.name for item in path.iterdir()]
 
     def get_schema(self) -> dict:

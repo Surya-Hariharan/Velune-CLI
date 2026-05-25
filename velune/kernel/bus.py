@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import logging
-from datetime import datetime, UTC
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Set, Union
+from collections.abc import AsyncIterator, Callable
+from datetime import datetime
+from typing import Any
+
 from velune.kernel.schemas import Event as KernelEvent
 
 logger = logging.getLogger("velune.kernel.bus")
 
-EventHandler = Callable[[KernelEvent], Union[None, Any]]
+EventHandler = Callable[[KernelEvent], None | Any]
 
 
 class Subscription:
@@ -31,18 +33,18 @@ class CognitiveBus:
     """Async event bus supporting wildcard routing, replay, and correlation waiting."""
 
     def __init__(self) -> None:
-        self._subscribers: Dict[str, Set[EventHandler]] = {}
+        self._subscribers: dict[str, set[EventHandler]] = {}
         self._queue: asyncio.Queue[KernelEvent] = asyncio.Queue()
         self._running: bool = False
-        self._dispatch_task: Optional[asyncio.Task] = None
-        self._history: List[KernelEvent] = []
-        self._pending_responses: Dict[str, asyncio.Future[KernelEvent]] = {}
+        self._dispatch_task: asyncio.Task | None = None
+        self._history: list[KernelEvent] = []
+        self._pending_responses: dict[str, asyncio.Future[KernelEvent]] = {}
 
     async def emit(self, event: KernelEvent) -> None:
         """Enqueue/Publish a kernel event to the bus."""
         # Record to history for replay capability
         self._history.append(event)
-        
+
         # Resolve any correlation wait futures
         if event.correlation_id and event.correlation_id in self._pending_responses:
             future = self._pending_responses[event.correlation_id]
@@ -86,7 +88,7 @@ class CognitiveBus:
         try:
             response = await asyncio.wait_for(future, timeout=timeout)
             return response
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("Timeout waiting for correlation event to emitted ID: %s", event.event_id)
             raise TimeoutError(f"Event correlation timeout for {event.event_id}")
         finally:
@@ -96,7 +98,7 @@ class CognitiveBus:
         """Asynchronously stream events in history since from_timestamp."""
         target_timestamp = from_timestamp.timestamp()
         filtered_events = [evt for evt in self._history if evt.timestamp >= target_timestamp]
-        
+
         # Sort in chronological order
         sorted_events = sorted(filtered_events, key=lambda x: x.timestamp)
         for event in sorted_events:
@@ -119,7 +121,7 @@ class CognitiveBus:
                 await self._dispatch_task
             except asyncio.CancelledError:
                 pass
-        
+
         # Process remaining items in queue
         while not self._queue.empty():
             try:
@@ -168,9 +170,9 @@ class CognitiveBus:
         except Exception as e:
             logger.error("Error running asynchronous event handler: %s", e)
 
-    def _find_matching_handlers(self, event_type: str) -> List[EventHandler]:
+    def _find_matching_handlers(self, event_type: str) -> list[EventHandler]:
         """Find all subscriber handlers whose pattern matches the event_type."""
-        matched: List[EventHandler] = []
+        matched: list[EventHandler] = []
         for pattern, handlers in self._subscribers.items():
             if fnmatch.fnmatchcase(event_type, pattern):
                 matched.extend(handlers)

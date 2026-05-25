@@ -1,8 +1,6 @@
 """Architectural layer classifier and design pattern analyzer."""
 
-import os
 from pathlib import Path
-from typing import Dict, List, Set
 
 
 class CodebaseAnalyzer:
@@ -11,9 +9,9 @@ class CodebaseAnalyzer:
     def __init__(self, root_path: Path) -> None:
         self.root_path = root_path.resolve()
 
-    def classify_architecture_layers(self, file_paths: List[str]) -> Dict[str, List[str]]:
+    def classify_architecture_layers(self, file_paths: list[str]) -> dict[str, list[str]]:
         """Groups files into functional architectural layers based on folder topology."""
-        layers: Dict[str, List[str]] = {
+        layers: dict[str, list[str]] = {
             "kernel": [],
             "providers": [],
             "models": [],
@@ -35,19 +33,19 @@ class CodebaseAnalyzer:
             # Normalize to forward slashes
             norm = path.replace("\\", "/")
             classified = False
-            
+
             for layer in layers.keys():
                 if f"velune/{layer}/" in norm or norm.startswith(f"{layer}/"):
                     layers[layer].append(norm)
                     classified = True
                     break
-                    
+
             if not classified:
                 layers["other"].append(norm)
 
         return layers
 
-    def detect_dependency_violations(self, layers: Dict[str, List[str]], import_edges: List[tuple]) -> List[Dict[str, str]]:
+    def detect_dependency_violations(self, layers: dict[str, list[str]], import_edges: list[tuple]) -> list[dict[str, str]]:
         """Identifies circular dependencies or violations of layered architectural boundaries.
 
         Rules:
@@ -55,10 +53,10 @@ class CodebaseAnalyzer:
         - Providers layer MUST NOT import cli or cognition.
         - Higher levels can import kernel/providers freely.
         """
-        violations: List[Dict[str, str]] = []
-        
+        violations: list[dict[str, str]] = []
+
         # Build mapping of file to its layer
-        layer_by_file: Dict[str, str] = {}
+        layer_by_file: dict[str, str] = {}
         for layer, files in layers.items():
             for f in files:
                 layer_by_file[f] = layer
@@ -102,9 +100,9 @@ class CodebaseAnalyzer:
 
         return violations
 
-    def detect_framework_footprint(self, code_files: Dict[str, str]) -> List[str]:
+    def detect_framework_footprint(self, code_files: dict[str, str]) -> list[str]:
         """Detects specific framework libraries and dependencies active in the codebase."""
-        footprints: Set[str] = set()
+        footprints: set[str] = set()
 
         for code in code_files.values():
             if "import typer" in code or "from typer" in code:

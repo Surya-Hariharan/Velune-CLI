@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, List, Optional, Protocol, runtime_checkable
+from collections.abc import AsyncIterator
+from typing import Protocol, runtime_checkable
+
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
@@ -18,7 +20,7 @@ class ModelProvider(Protocol):
         """The distinct ID slug of this provider (e.g., 'ollama', 'openai')."""
         ...
 
-    async def list_models(self) -> List[ModelDescriptor]:
+    async def list_models(self) -> list[ModelDescriptor]:
         """Query and list all active/available models for this provider."""
         ...
 
@@ -30,7 +32,7 @@ class ModelProvider(Protocol):
         """Multi-turn, token-streaming model completion."""
         ...
 
-    async def embed(self, texts: List[str], model_id: str) -> List[List[float]]:
+    async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         """Generate vector embeddings. Raises NotImplementedError if unsupported."""
         ...
 
@@ -69,12 +71,12 @@ class EmbeddingProvider(ABC):
     """Abstract embedding provider interface."""
 
     @abstractmethod
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         """Generate embedding for a single text."""
         pass
 
     @abstractmethod
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a batch of texts."""
         pass
 

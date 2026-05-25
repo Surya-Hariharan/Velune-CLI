@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
 import logging
+from typing import Any
 
-from velune.models.specializations import CouncilRole
-from velune.core.types.model import ModelDescriptor
-from velune.providers.base import ModelProvider
 from velune.cognition.council.base import BaseCouncilAgent
+from velune.core.types.model import ModelDescriptor
+from velune.models.specializations import CouncilRole
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.coder")
 
@@ -39,11 +39,11 @@ class CoderAgent(BaseCouncilAgent):
         prompt: str,
         current_code: str,
         plan_context: str,
-        style_profile: Optional[Dict[str, Any]] = None,
+        style_profile: dict[str, Any] | None = None,
     ) -> str:
         """Emits concrete code implementations aligned with codebase styling conventions."""
         logger.info("Coder generating code changes...")
-        
+
         style_block = ""
         if style_profile:
             naming = style_profile.get("naming_conventions", {})
@@ -52,7 +52,7 @@ class CoderAgent(BaseCouncilAgent):
             paradigm = style_profile.get("class_vs_functional", "Hybrid")
             doc_style = style_profile.get("docstring_style", "Google")
             constructs = ", ".join(style_profile.get("preferred_constructs", []))
-            
+
             style_block = (
                 f"### [COGNITIVE STYLE ENFORCEMENT]\n"
                 f"Adhere strictly to the following styling patterns of the target repository/directory:\n"

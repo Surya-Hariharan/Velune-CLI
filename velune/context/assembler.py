@@ -7,12 +7,13 @@ scores, compresses, and stitches final LLM system prompts.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
-from velune.providers.base import ModelProvider
-from velune.context.window import ContextWindowTracker, estimate_tokens
-from velune.context.compressor import ContextCompressor, ContextBudgetManager
+from typing import Any
+
+from velune.context.compressor import ContextBudgetManager, ContextCompressor
 from velune.context.scorer import ContextScorer
 from velune.context.stitcher import ContextStitcher
+from velune.context.window import ContextWindowTracker, estimate_tokens
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.context.assembler")
 
@@ -23,9 +24,9 @@ class ContextAssembler:
     def __init__(
         self,
         max_tokens: int = 8192,
-        scorer: Optional[ContextScorer] = None,
-        compressor: Optional[ContextCompressor] = None,
-        stitcher: Optional[ContextStitcher] = None,
+        scorer: ContextScorer | None = None,
+        compressor: ContextCompressor | None = None,
+        stitcher: ContextStitcher | None = None,
     ) -> None:
         self.max_tokens = max_tokens
         self.scorer = scorer or ContextScorer()
@@ -36,13 +37,13 @@ class ContextAssembler:
 
     async def assemble(
         self,
-        working_turns: List[Dict[str, Any]],
-        episodic_steps: List[Dict[str, Any]],
-        semantic_chunks: List[Dict[str, Any]],
+        working_turns: list[dict[str, Any]],
+        episodic_steps: list[dict[str, Any]],
+        semantic_chunks: list[dict[str, Any]],
         provider: ModelProvider,
         model_id: str,
-        repository_ast: Optional[str] = None,
-        git_diffs: Optional[str] = None,
+        repository_ast: str | None = None,
+        git_diffs: str | None = None,
     ) -> str:
         """
         Assemble, score, compress, and stitch context elements into a single formatted prompt.
@@ -67,7 +68,7 @@ class ContextAssembler:
         ranked_chunks = self.scorer.rank_items(semantic_chunks)
         selected_chunks = []
         accumulated_tokens = 0
-        
+
         for chunk in ranked_chunks:
             chunk_tokens = estimate_tokens(str(chunk))
             if accumulated_tokens + chunk_tokens <= budgets["semantic"]:

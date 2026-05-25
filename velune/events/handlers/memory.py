@@ -1,6 +1,5 @@
 """Events → memory updates."""
 
-from typing import Optional
 from velune.events.bus.engine import Event
 from velune.memory.lifecycle import MemoryLifecycleCoordinator
 
@@ -20,7 +19,7 @@ class MemoryEventHandler:
                 event.data.get("file_path")
             )
             working.log_execution_step(
-                step="file_created",
+                step_name="file_created",
                 payload={"file_path": event.data.get("file_path")}
             )
 
@@ -33,7 +32,7 @@ class MemoryEventHandler:
                 event.data.get("file_path")
             )
             working.log_execution_step(
-                step="file_modified",
+                step_name="file_modified",
                 payload={"file_path": event.data.get("file_path")}
             )
 
@@ -46,7 +45,7 @@ class MemoryEventHandler:
                 event.data.get("command")
             )
             working.log_execution_step(
-                step="command_executed",
+                step_name="command_executed",
                 payload={"command": event.data.get("command")}
             )
 

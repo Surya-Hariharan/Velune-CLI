@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from velune.core.config.defaults import get_default_config
 from velune.core.config.loader import ConfigLoader
-from velune.core.config.schema import VeluneConfig
+from velune.kernel.config import VeluneConfig
 
 
 @dataclass(slots=True)
@@ -16,7 +15,7 @@ class ConfigService:
     """Workspace-aware configuration service."""
 
     workspace: Path
-    config_path: Optional[Path] = None
+    config_path: Path | None = None
 
     def load(self) -> VeluneConfig:
         """Load configuration from the resolved workspace path."""
@@ -27,7 +26,7 @@ class ConfigService:
         except FileNotFoundError:
             return get_default_config()
 
-    def _resolve_config_path(self) -> Optional[Path]:
+    def _resolve_config_path(self) -> Path | None:
         if self.config_path:
             return self.config_path
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from velune.memory.prioritizer import MemoryPrioritizer
 
@@ -23,7 +23,7 @@ class ContextAttentionPrioritizer(MemoryPrioritizer):
         default_halflife_hours: float = 24.0,
         retrieval_boost_factor: float = 0.15,
         max_importance: float = 1.0,
-        type_halflives: Dict[str, float] | None = None,
+        type_halflives: dict[str, float] | None = None,
     ) -> None:
         super().__init__(
             default_halflife_hours=default_halflife_hours,
@@ -81,7 +81,7 @@ class ContextScorer:
         w_recency: float = 0.3,
         w_semantic: float = 0.5,
         w_dependency: float = 0.2,
-        prioritizer: Optional[ContextAttentionPrioritizer] = None,
+        prioritizer: ContextAttentionPrioritizer | None = None,
     ) -> None:
         """
         Initialize weights and the underlying advanced prioritizer.
@@ -134,7 +134,7 @@ class ContextScorer:
         total_score = 0.5 * traditional_score + 0.5 * attention_score
         return max(0.0, min(1.0, total_score))
 
-    def rank_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def rank_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Scores and ranks a list of items.
         Each item dict should optionally contain:
@@ -162,7 +162,7 @@ class ContextScorer:
                 is_unresolved_task=unresolved,
                 is_core_dependency=core_dep,
             )
-            
+
             # Save score into item copy
             item_copy = dict(item)
             item_copy["relevance_score"] = score

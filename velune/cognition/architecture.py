@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple, Optional
+from typing import Any
 
 logger = logging.getLogger("velune.cognition.architecture")
 
@@ -22,7 +22,7 @@ class LCOMVisitor(ast.NodeVisitor):
 
     def __init__(self) -> None:
         self.current_method: str | None = None
-        self.method_accessed_attributes: Dict[str, Set[str]] = {}
+        self.method_accessed_attributes: dict[str, set[str]] = {}
         self.class_name: str | None = None
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
@@ -35,7 +35,7 @@ class LCOMVisitor(ast.NodeVisitor):
                 self.generic_visit(subnode)
                 self.current_method = None
         # Do not recurse into nested classes to avoid confusion
-        
+
     def visit_Attribute(self, node: ast.Attribute) -> None:
         # Check if attribute access is on 'self' (e.g. self.attr)
         if self.current_method and isinstance(node.value, ast.Name) and node.value.id == "self":
@@ -51,14 +51,14 @@ class CognitiveDebtLedger:
             self.ledger_path = Path(".velune") / "debt_ledger.json"
         else:
             self.ledger_path = Path(ledger_path)
-        
+
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_ledger()
 
     def _load_ledger(self) -> None:
         if self.ledger_path.exists():
             try:
-                with open(self.ledger_path, "r", encoding="utf-8") as f:
+                with open(self.ledger_path, encoding="utf-8") as f:
                     self.data = json.load(f)
             except Exception:
                 self.data = {"debt_items": [], "total_severity": 0.0}
@@ -87,7 +87,7 @@ class CognitiveDebtLedger:
                 "description": description,
                 "severity": severity,
             })
-        
+
         # Recompute total severity
         self.data["total_severity"] = sum(item["severity"] for item in self.data["debt_items"])
         self._save_ledger()
@@ -98,7 +98,7 @@ class CognitiveDebtLedger:
         self.data["total_severity"] = sum(item["severity"] for item in self.data["debt_items"])
         self._save_ledger()
 
-    def get_items(self) -> List[Dict[str, Any]]:
+    def get_items(self) -> list[dict[str, Any]]:
         return self.data["debt_items"]
 
 
@@ -108,23 +108,23 @@ class ArchitectureCognitionAgent:
     verifies architectural boundary coupling, and records technical debt.
     """
 
-    def __init__(self, workspace_root: Optional[str] = None, ledger: Optional[CognitiveDebtLedger] = None) -> None:
+    def __init__(self, workspace_root: str | None = None, ledger: CognitiveDebtLedger | None = None) -> None:
         self.workspace_root = workspace_root or os.getcwd()
         self.ledger = ledger or CognitiveDebtLedger()
-        
+
         # Layering Rules: maps prefix -> list of disallowed module prefixes
-        self.layering_rules: List[Tuple[str, List[str]]] = [
+        self.layering_rules: list[tuple[str, list[str]]] = [
             ("velune/core", ["velune/execution", "velune/cognition", "velune/cli"]),
             ("velune/kernel", ["velune/execution", "velune/cognition", "velune/cli"]),
             ("velune/models", ["velune/providers", "velune/orchestration", "velune/cli"]),
         ]
 
-    def calculate_lcom(self, code: str) -> Dict[str, int]:
+    def calculate_lcom(self, code: str) -> dict[str, int]:
         """
         Calculates Lack of Cohesion of Methods (LCOM) for each class in the code.
         Returns a dictionary mapping class name to LCOM score.
         """
-        scores: Dict[str, int] = {}
+        scores: dict[str, int] = {}
         try:
             tree = ast.parse(code)
         except SyntaxError:
@@ -134,18 +134,18 @@ class ArchitectureCognitionAgent:
             if isinstance(node, ast.ClassDef):
                 visitor = LCOMVisitor()
                 visitor.visit(node)
-                
+
                 methods = list(visitor.method_accessed_attributes.keys())
                 # Exclude constructor __init__ from scoring if preferred, or keep all.
                 # Let's count LCOM based on standard formula.
                 p = 0
                 q = 0
-                
+
                 n = len(methods)
                 if n <= 1:
                     scores[node.name] = 0
                     continue
-                
+
                 for i in range(n):
                     for j in range(i + 1, n):
                         m1 = methods[i]
@@ -156,10 +156,10 @@ class ArchitectureCognitionAgent:
                             p += 1
                         else:
                             q += 1
-                
+
                 lcom = p - q if p > q else 0
                 scores[node.name] = lcom
-                
+
         return scores
 
     def calculate_coupling_ratio(self, directory: str) -> float:
@@ -185,7 +185,7 @@ class ArchitectureCognitionAgent:
                 if file.endswith(".py"):
                     file_path = os.path.join(root, file)
                     try:
-                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        with open(file_path, encoding="utf-8", errors="ignore") as f:
                             content = f.read()
                         tree = ast.parse(content)
                         for node in ast.walk(tree):
@@ -222,7 +222,7 @@ class ArchitectureCognitionAgent:
                 if file.endswith(".py"):
                     file_path = os.path.join(root, file)
                     try:
-                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        with open(file_path, encoding="utf-8", errors="ignore") as f:
                             content = f.read()
                         scores = self.calculate_lcom(content)
                         lcom_scores.extend(scores.values())
@@ -250,7 +250,7 @@ class ArchitectureCognitionAgent:
         shi = 1.0 * cohesion - 0.5 * coupling - 0.2 * debt_penalty
         return max(0.0, min(1.0, round(shi, 3)))
 
-    def propose_refactoring(self, directory: str) -> Optional[str]:
+    def propose_refactoring(self, directory: str) -> str | None:
         """Generates proactive refactoring suggestions in markdown when SHI < 0.60."""
         shi = self.calculate_shi(directory)
         if shi >= 0.60:
@@ -271,7 +271,7 @@ class ArchitectureCognitionAgent:
                 if file.endswith(".py"):
                     file_path = os.path.join(root, file)
                     try:
-                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        with open(file_path, encoding="utf-8", errors="ignore") as f:
                             scores = self.calculate_lcom(f.read())
                             for cls, score in scores.items():
                                 lcom_scores.append((cls, score, file))
@@ -307,7 +307,7 @@ class ArchitectureCognitionAgent:
         proposal += "3. **Clear Technical Debt**: Address the boundary layering violations and resolve critical warnings immediately.\n"
         return proposal
 
-    def verify_boundaries(self, proposed_code: str, file_path: str, raise_on_violation: bool = False) -> List[str]:
+    def verify_boundaries(self, proposed_code: str, file_path: str, raise_on_violation: bool = False) -> list[str]:
         """
         Checks proposed Python code for clean architecture layering and modular boundary violations.
         Returns a list of violations found.
@@ -316,9 +316,9 @@ class ArchitectureCognitionAgent:
         violations = []
         # Standardize path slashes for matching
         norm_path = file_path.replace("\\", "/")
-        
+
         # Identify if target file has active layering rules
-        disallowed_prefixes: List[str] = []
+        disallowed_prefixes: list[str] = []
         for prefix, rules in self.layering_rules:
             if norm_path.startswith(prefix):
                 disallowed_prefixes.extend(rules)
@@ -352,16 +352,16 @@ class ArchitectureCognitionAgent:
 
         return violations
 
-    def audit_architecture(self, file_path: str, code: str) -> Dict[str, Any]:
+    def audit_architecture(self, file_path: str, code: str) -> dict[str, Any]:
         """
         Performs full cohesion and architectural boundary audit.
         Records violations and high LCOM classes in the Technical Debt Ledger.
         """
         self.ledger.clear_file_debt(file_path)
-        
+
         lcom_scores = self.calculate_lcom(code)
         boundary_violations = self.verify_boundaries(code, file_path)
-        
+
         # Log LCOM high scores as debt (LCOM > 5 is considered high)
         for class_name, score in lcom_scores.items():
             if score > 5:

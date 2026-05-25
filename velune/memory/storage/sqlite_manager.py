@@ -1,11 +1,11 @@
-from pathlib import Path
+import logging
+import queue
 import sqlite3
 import threading
-import queue
-import logging
 import time
-from typing import Any, Tuple, List, Optional
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("velune.memory.storage.sqlite_manager")
 
@@ -15,23 +15,23 @@ class SQLiteManager:
     All memory tiers should use this manager instead of direct sqlite3.connect() calls.
     WAL (Write-Ahead Logging) mode allows concurrent readers with one writer.
     """
-    
+
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._write_queue: queue.Queue[Tuple[str, tuple, Optional[threading.Event]]] = queue.Queue()
+        self._write_queue: queue.Queue[tuple[str, tuple, threading.Event | None]] = queue.Queue()
         self._is_running = True
         self._write_thread = threading.Thread(target=self._process_writes, daemon=True)
         self._write_thread.start()
         self._initialize_wal()
-    
+
     def _initialize_wal(self) -> None:
         """Enable WAL mode for better concurrent read performance."""
         with self._read_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA busy_timeout=5000")
-    
+
     @contextmanager
     def _read_connection(self):
         """Get a read connection. Multiple read connections are safe with WAL mode."""
@@ -41,29 +41,35 @@ class SQLiteManager:
             yield conn
         finally:
             conn.close()
-    
+
     def execute_write(self, query: str, params: tuple = ()) -> None:
         """Queue a write operation. Fire and forget."""
         self._write_queue.put((query, params, None))
-    
+
     def execute_write_sync(self, query: str, params: tuple = ()) -> None:
         """Queue a write operation and wait for completion."""
         done = threading.Event()
         self._write_queue.put((query, params, done))
         done.wait(timeout=10.0)
-    
-    def execute_read(self, query: str, params: tuple = ()) -> List[sqlite3.Row]:
+
+    def execute_write_many(self, queries: list[tuple[str, tuple]]) -> None:
+        """Batch multiple writes as a single atomic transaction."""
+        done = threading.Event()
+        self._write_queue.put(("__BATCH__", queries, done))
+        done.wait(timeout=15.0)
+
+    def execute_read(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:
         """Execute a read query. Thread-safe with WAL mode."""
         with self._read_connection() as conn:
             cursor = conn.execute(query, params)
             return cursor.fetchall()
-    
+
     def execute_script(self, script: str) -> None:
         """Execute a DDL script (CREATE TABLE, CREATE INDEX, etc.)."""
         done = threading.Event()
         self._write_queue.put((script, None, done))  # None params = script mode
         done.wait(timeout=10.0)
-    
+
     def _process_writes(self) -> None:
         while self._is_running:
             try:
@@ -77,13 +83,17 @@ class SQLiteManager:
                 continue
             except Exception as e:
                 logger.error("SQLite write error: %s", e)
-    
-    def _do_write(self, query: str, params: Optional[tuple]) -> None:
+
+    def _do_write(self, query: str, params: Any | None) -> None:
         for attempt in range(3):
             try:
                 conn = sqlite3.connect(str(self.db_path), timeout=30.0)
                 conn.execute("PRAGMA busy_timeout=5000")
-                if params is None:
+                if query == "__BATCH__":
+                    # params is actually a list of (query, params) tuples
+                    for q, p in params:
+                        conn.execute(q, p)
+                elif params is None:
                     conn.executescript(query)
                 else:
                     conn.execute(query, params)
@@ -96,13 +106,15 @@ class SQLiteManager:
                     continue
                 logger.error("Write failed after %d attempts: %s", attempt + 1, e)
                 break
-    
+
     async def initialize(self) -> None:
         """Lifecycle start, no-op since thread starts in __init__."""
         pass
 
     async def shutdown(self) -> None:
-        """Gracefully shut down the write processing thread."""
-        self._is_running = False
+        """Gracefully shut down the write processing thread.
+        
+        This is a no-op except for waiting on current writes to complete (flushing),
+        to ensure the thread remains running across CLI commands.
+        """
         self._write_queue.join()
-        self._write_thread.join(timeout=2.0)

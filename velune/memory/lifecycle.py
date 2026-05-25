@@ -7,9 +7,10 @@ period/milestone-driven memory consolidation routines.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
-from velune.providers.base import ModelProvider
+from typing import Any
+
 from velune.memory.consolidator import MemoryConsolidator
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.memory.lifecycle")
 
@@ -80,7 +81,7 @@ class MemoryLifecycleCoordinator:
         session_id: str,
         provider: ModelProvider,
         model_id: str,
-        embedding_provider: Optional[Any] = None,
+        embedding_provider: Any | None = None,
     ) -> None:
         """
         Triggers a full episodic-to-semantic-and-graph consolidation routine.
@@ -91,10 +92,10 @@ class MemoryLifecycleCoordinator:
             return
 
         logger.info("Milestone hit! Initiating episodic-to-semantic consolidation for session %s.", session_id)
-        
+
         # 1. Flush any remaining Working memory turns to Episodic sqlite first
         await self.consolidator.ingest_working_to_episodic(session_id)
-        
+
         # 2. Consolidate episodic SQLite data into Qdrant vectors and Graphitti graph nodes
         await self.consolidator.consolidate_episodic_to_semantic_and_graph(
             session_id=session_id,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
 
 logger = logging.getLogger("velune.context.window")
 
@@ -36,7 +35,7 @@ class ContextWindowTracker:
     def __init__(self, max_tokens: int = 8192) -> None:
         self.max_tokens = max_tokens
         self.current_tokens = 0
-        self.segments: Dict[str, int] = {}
+        self.segments: dict[str, int] = {}
 
     def reserve(self, segment_name: str, text: str) -> int:
         """Reserve token budget for a specific context segment."""

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 import time
-from typing import Any
-from velune.providers.base import ModelProvider
-from velune.context.window import estimate_tokens
 
+from velune.context.window import estimate_tokens
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.context.compressor")
 
@@ -36,13 +35,13 @@ class ContextCompressor:
         # Cognitive Continuity Guardrails: Extract critical lines that must NOT be compressed
         critical_lines = []
         regular_lines = []
-        
+
         for line in content.splitlines():
             stripped = line.strip()
             is_critical = (
-                stripped.startswith("[ ]") or 
+                stripped.startswith("[ ]") or
                 stripped.startswith("- [ ]") or
-                stripped.startswith("[/") or 
+                stripped.startswith("[/") or
                 stripped.startswith("- [/]") or
                 "ERROR" in stripped.upper() or
                 "CRITICAL" in stripped.upper() or
@@ -65,7 +64,7 @@ class ContextCompressor:
         # Compute remaining budget for the non-critical content
         remaining_budget = max(100, target_token_budget - critical_tokens)
         content_to_compress = "\n".join(regular_lines)
-        
+
         current_tokens = estimate_tokens(content_to_compress)
         if current_tokens <= remaining_budget:
             # If everything fits under the budget, no need to compress
@@ -98,9 +97,9 @@ class ContextCompressor:
                     timeout=15.0  # Don't block forever
                 )
                 compressed = response.text.strip()
-                logger.info("LLM compression successful: %d → %d tokens", 
+                logger.info("LLM compression successful: %d → %d tokens",
                             current_tokens, estimate_tokens(compressed))
-            except (asyncio.TimeoutError, Exception) as e:
+            except (TimeoutError, Exception) as e:
                 logger.warning("LLM compression failed (%s), using extractive fallback", type(e).__name__)
 
         if compressed is None:
@@ -108,7 +107,7 @@ class ContextCompressor:
             # Deterministic extractive fallback
             from velune.context.extractive import extractive_compress
             compressed = extractive_compress(content_to_compress, remaining_budget)
-            logger.info("Extractive compression successful: %d → %d tokens", 
+            logger.info("Extractive compression successful: %d → %d tokens",
                         current_tokens, estimate_tokens(compressed))
 
         latency_ms = int((time.time() - start_time) * 1000)
@@ -126,7 +125,7 @@ class ContextCompressor:
             final_content.append(critical_text)
             final_content.append("### COMPRESSED CONTEXT ###")
         final_content.append(compressed)
-        
+
         reconstructed = "\n".join(final_content)
         logger.info("Compressed context successfully with guardrails using %s.", method)
         return reconstructed

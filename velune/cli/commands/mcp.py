@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+
 import typer
 from rich.console import Console
 
 from velune.cli.context import CLIContext
 from velune.core.runtime import build_runtime
-from velune.mcp.server import VeluneMCPServer
 from velune.mcp.client import VeluneMCPClient
+from velune.mcp.server import VeluneMCPServer
 
 console = Console()
 mcp_cmd = typer.Typer(help="Model Context Protocol (MCP) commands")
@@ -24,9 +25,9 @@ def mcp_connect(
 ) -> None:
     """Connect to an external MCP server and list its tools."""
     console.print(f"[cyan]Connecting to external MCP server '{name}' at {server_url}...[/cyan]")
-    
+
     client = VeluneMCPClient(server_url, name)
-    
+
     async def _connect_and_list():
         try:
             tools = await client.connect()
@@ -42,7 +43,7 @@ def mcp_connect(
             raise typer.Exit(1)
         finally:
             await client.disconnect()
-            
+
     asyncio.run(_connect_and_list())
 
 
@@ -52,14 +53,14 @@ def mcp_serve_subcmd(ctx: typer.Context) -> None:
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
     workspace = cli_context.workspace if cli_context else Path.cwd()
     config_path = cli_context.config_path if cli_context else None
-    
+
     container = build_runtime(workspace, config_path=config_path).container
     tool_registry = container.get("runtime.tool_registry")
     server = VeluneMCPServer(tool_registry)
-    
+
     import logging
     logging.getLogger("velune").setLevel(logging.WARNING)
-    
+
     asyncio.run(server.run_stdio())
 
 
@@ -68,12 +69,12 @@ def mcp_serve(ctx: typer.Context) -> None:
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
     workspace = cli_context.workspace if cli_context else Path.cwd()
     config_path = cli_context.config_path if cli_context else None
-    
+
     container = build_runtime(workspace, config_path=config_path).container
     tool_registry = container.get("runtime.tool_registry")
     server = VeluneMCPServer(tool_registry)
-    
+
     import logging
     logging.getLogger("velune").setLevel(logging.WARNING)
-    
+
     asyncio.run(server.run_stdio())

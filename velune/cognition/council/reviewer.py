@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
 import logging
 
-from velune.models.specializations import CouncilRole
-from velune.core.types.model import ModelDescriptor
-from velune.providers.base import ModelProvider
 from velune.cognition.council.base import BaseCouncilAgent
 from velune.cognition.council.messages import ReviewerMessage
+from velune.core.types.model import ModelDescriptor
+from velune.models.specializations import CouncilRole
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.reviewer")
 

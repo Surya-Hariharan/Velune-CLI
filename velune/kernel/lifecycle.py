@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
+
 from velune.kernel.schemas import ComponentStatus
 
 logger = logging.getLogger("velune.kernel.lifecycle")
@@ -27,8 +28,10 @@ class LifecycleCoordinator:
     """Orchestrates structured startup, health transitions, and graceful shutdown of subsystems."""
 
     def __init__(self) -> None:
-        self._components: Dict[str, Subsystem] = {}
-        self._states: Dict[str, ComponentStatus] = {}
+        self._components: dict[str, Subsystem] = {}
+        self._states: dict[str, ComponentStatus] = {}
+        self._started = False
+        self.container: Any = None
 
     def register(self, name: str, component: Subsystem) -> None:
         """Register a component for active lifecycle tracking."""
@@ -48,6 +51,9 @@ class LifecycleCoordinator:
 
     async def startup(self) -> None:
         """Initialize all registered subsystems sequentially."""
+        if self._started:
+            return
+        self._started = True
         logger.info("Initializing Velune systems...")
         for name, comp in self._components.items():
             if self._states[name] != ComponentStatus.UNINITIALIZED:
@@ -66,6 +72,13 @@ class LifecycleCoordinator:
 
     async def shutdown(self) -> None:
         """Shut down all registered subsystems gracefully in reverse order."""
+        if self.container and self.container.has("runtime.task_registry"):
+            try:
+                task_registry = self.container.get("runtime.task_registry")
+                await task_registry.cancel_all(timeout=10.0)
+            except Exception as e:
+                logger.error("Failed to cancel background tasks during shutdown: %s", e)
+
         logger.info("Shutting down Velune systems...")
         for name in reversed(list(self._components.keys())):
             comp = self._components[name]
@@ -86,3 +99,4 @@ class LifecycleCoordinator:
 
         self._components.clear()
         self._states.clear()
+        self._started = False

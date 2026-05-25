@@ -1,14 +1,14 @@
 """Core repository type definitions."""
 
-from enum import Enum
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class FileNode(BaseModel):
     """A file node in the repository."""
     path: str
-    language: Optional[str] = None
+    language: str | None = None
     size_bytes: int
     last_modified: float
     is_ignored: bool = False
@@ -22,7 +22,7 @@ class SymbolNode(BaseModel):
     file_path: str
     line_start: int
     line_end: int
-    parent: Optional[str] = None
+    parent: str | None = None
     children: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

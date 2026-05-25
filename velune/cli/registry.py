@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from importlib.metadata import EntryPoint, entry_points
 from types import ModuleType
-from typing import Iterable, Sequence
 
 import typer
 
 from velune.cli.commands import (
-    ask_command, config_cmd, memory_cmd, models_cmd, run_command,
-    workspace_cmd, daemon_cmd, doctor_cmd, mcp_cmd, mcp_serve
+    ask_command,
+    config_cmd,
+    daemon_cmd,
+    doctor_cmd,
+    mcp_cmd,
+    mcp_serve,
+    memory_cmd,
+    models_cmd,
+    run_command,
+    workspace_cmd,
 )
 from velune.kernel.registry import ServiceContainer
 

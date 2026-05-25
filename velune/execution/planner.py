@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import List, Dict, Set
 import logging
 
-from velune.core.types.task import TaskStep, TaskPlan, TaskStatus
 from velune.core.errors.execution import ExecutionError
+from velune.core.types.task import TaskPlan, TaskStep
 
 logger = logging.getLogger("velune.execution.planner")
 
@@ -16,9 +15,9 @@ class ExecutionDAG:
 
     def __init__(self, plan_id: str) -> None:
         self.plan_id = plan_id
-        self.steps: Dict[str, TaskStep] = {}
-        self.adj_list: Dict[str, Set[str]] = {}  # step_id -> dependent step_ids
-        self.in_degree: Dict[str, int] = {}  # step_id -> number of prerequisites
+        self.steps: dict[str, TaskStep] = {}
+        self.adj_list: dict[str, set[str]] = {}  # step_id -> dependent step_ids
+        self.in_degree: dict[str, int] = {}  # step_id -> number of prerequisites
 
     def add_step(self, step: TaskStep) -> None:
         """Add a TaskStep and establish dependency connections."""
@@ -32,18 +31,18 @@ class ExecutionDAG:
             # Set up dependency connection (dep -> step.id)
             if dep not in self.adj_list:
                 self.adj_list[dep] = set()
-            
+
             if step.id not in self.adj_list[dep]:
                 self.adj_list[dep].add(step.id)
                 self.in_degree[step.id] = self.in_degree.get(step.id, 0) + 1
 
-    def topological_sort(self) -> List[TaskStep]:
+    def topological_sort(self) -> list[TaskStep]:
         """Compute the topological sort using Kahn's Algorithm.
 
         Ensures dependency orders are strictly adhered to. Detects circular graphs.
         """
         in_degrees = self.in_degree.copy()
-        
+
         # Ensure all steps added are represented in in_degrees
         for step_id in self.steps:
             if step_id not in in_degrees:
@@ -51,7 +50,7 @@ class ExecutionDAG:
 
         # Queue nodes with no incoming dependencies (in_degree = 0)
         queue = [sid for sid, degree in in_degrees.items() if degree == 0]
-        sorted_steps: List[TaskStep] = []
+        sorted_steps: list[TaskStep] = []
 
         while queue:
             # Sort to preserve list order where possible
@@ -83,7 +82,7 @@ class ExecutionPlanner:
         """Compile a standard TaskPlan into a verifiable ExecutionDAG."""
         logger.info("Compiling plan %s containing %d steps", plan.task_id, len(plan.steps))
         dag = ExecutionDAG(plan.task_id)
-        
+
         for step in plan.steps:
             dag.add_step(step)
 

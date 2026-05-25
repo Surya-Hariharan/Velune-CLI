@@ -1,8 +1,8 @@
 from __future__ import annotations
+
 import os
-import httpx
-from typing import List
-from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
+
+from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 
 
 class AnthropicDiscovery:
@@ -17,20 +17,20 @@ class AnthropicDiscovery:
         """Discover models from Anthropic."""
         if not self.api_key:
             return []
-        
+
         # Anthropic has a fixed set of models
         models = [
             self._create_model_descriptor("claude-3-opus-20240229", 200000, 0.015),
             self._create_model_descriptor("claude-3-sonnet-20240229", 200000, 0.003),
             self._create_model_descriptor("claude-3-haiku-20240307", 200000, 0.00025),
         ]
-        
+
         return models
 
     def _create_model_descriptor(self, model_id: str, context_length: int, cost_per_1k: float) -> ModelDescriptor:
         """Create a model descriptor."""
         capabilities = self._classify_capabilities(model_id)
-        
+
         return ModelDescriptor(
             model_id=model_id,
             provider_id=self.provider_id,
@@ -49,7 +49,7 @@ class AnthropicDiscovery:
     def _classify_capabilities(self, model_id: str) -> ModelCapabilityProfile:
         """Classify capabilities for Anthropic models."""
         profile = ModelCapabilityProfile()
-        
+
         if "opus" in model_id:
             profile.coding = CapabilityLevel.STRONG
             profile.reasoning = CapabilityLevel.EXCEPTIONAL
@@ -74,5 +74,5 @@ class AnthropicDiscovery:
             profile.instruction_following = CapabilityLevel.CAPABLE
             profile.tool_use = CapabilityLevel.CAPABLE
             profile.long_context = CapabilityLevel.CAPABLE
-        
+
         return profile

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from velune.tools.base.tool import BaseTool
 
 
@@ -52,7 +50,7 @@ class ToolRegistry:
             raise ValueError(f"Tool already registered: {name}")
         self._tools[name] = tool
 
-    def get(self, name: str) -> Optional[BaseTool]:
+    def get(self, name: str) -> BaseTool | None:
         """Get a tool by name."""
         return self._tools.get(name)
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
 import logging
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("velune.plugins.sandbox")
 
@@ -14,7 +15,7 @@ class PluginSandbox:
     @staticmethod
     def wrap_callback(callback: Callable[..., Any]) -> Callable[..., Any]:
         """Wrap callback to run inside try-except boundary, catching all leakage or crashes."""
-        
+
         # Handle async callbacks
         import asyncio
         if asyncio.iscoroutinefunction(callback):

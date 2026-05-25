@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Dict, Optional
 
 
 class TemporalResolver:
@@ -20,7 +19,7 @@ class TemporalResolver:
             r"\blast week\b": 604800,
         }
 
-    def resolve(self, text: str) -> Optional[float]:
+    def resolve(self, text: str) -> float | None:
         """
         Scans text for temporal references and returns a relative time offset in seconds.
         Returns None if no temporal signals are present.
@@ -35,7 +34,7 @@ class TemporalResolver:
                 return seconds
         return None
 
-    def get_query_window(self, text: str) -> Optional[float]:
+    def get_query_window(self, text: str) -> float | None:
         """
         Returns the absolute timestamp for the start of the query window.
         e.g., if query says "yesterday", returns current_time - 86400.

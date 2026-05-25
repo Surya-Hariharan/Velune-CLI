@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("velune.memory.tiers.working")
@@ -19,28 +20,28 @@ class MemoryTurn(BaseModel):
     role: str
     content: str
     timestamp: float = Field(default_factory=time.time)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkingMemoryTier:
     """Tier 1: Fast, in-memory transient store for the active session."""
 
     def __init__(self) -> None:
-        self._turns: List[MemoryTurn] = []
-        self._state: Dict[str, Any] = {}
-        self._execution_logs: List[Dict[str, Any]] = []
+        self._turns: list[MemoryTurn] = []
+        self._state: dict[str, Any] = {}
+        self._execution_logs: list[dict[str, Any]] = []
 
-    def add_turn(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    def add_turn(self, role: str, content: str, metadata: dict[str, Any] | None = None) -> None:
         """Add a conversation turn to working memory."""
         turn = MemoryTurn(role=role, content=content, metadata=metadata or {})
         self._turns.append(turn)
         logger.debug("Added turn to working memory: %s", role)
 
-    def get_turns(self) -> List[MemoryTurn]:
+    def get_turns(self) -> list[MemoryTurn]:
         """Get all turns in chronological order."""
         return list(self._turns)
 
-    def get_recent_turns(self, limit: int = 10) -> List[MemoryTurn]:
+    def get_recent_turns(self, limit: int = 10) -> list[MemoryTurn]:
         """Get the N most recent conversation turns."""
         return self._turns[-limit:]
 
@@ -52,7 +53,7 @@ class WorkingMemoryTier:
         """Retrieve a transient state variable."""
         return self._state.get(key, default)
 
-    def log_execution_step(self, step_name: str, payload: Dict[str, Any]) -> None:
+    def log_execution_step(self, step_name: str, payload: dict[str, Any]) -> None:
         """Record a transient execution step log."""
         self._execution_logs.append({
             "step": step_name,
@@ -60,7 +61,7 @@ class WorkingMemoryTier:
             "timestamp": time.time(),
         })
 
-    def get_execution_logs(self) -> List[Dict[str, Any]]:
+    def get_execution_logs(self) -> list[dict[str, Any]]:
         """Get all transient execution logs."""
         return list(self._execution_logs)
 

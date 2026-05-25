@@ -1,9 +1,12 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any
+
 from velune.kernel.config import VeluneConfig
-from velune.kernel.registry import ServiceContainer
 from velune.kernel.lifecycle import LifecycleCoordinator
+from velune.kernel.registry import ServiceContainer
+
 
 @dataclass
 class SubsystemModule:
@@ -11,8 +14,8 @@ class SubsystemModule:
     name: str
     factory: Callable[['RuntimeEnvironment'], Any]
     container_key: str
-    lifecycle_key: Optional[str] = None  # None = not lifecycle-managed
-    dependencies: List[str] = field(default_factory=list)  # container keys this needs
+    lifecycle_key: str | None = None  # None = not lifecycle-managed
+    dependencies: list[str] = field(default_factory=list)  # container keys this needs
 
 @dataclass
 class RuntimeEnvironment:
@@ -25,41 +28,45 @@ class RuntimeEnvironment:
 
 class RuntimeBootstrapper:
     def __init__(self) -> None:
-        self._modules: List[SubsystemModule] = []
-    
+        self._modules: list[SubsystemModule] = []
+
     def register_module(self, module: SubsystemModule) -> None:
         self._modules.append(module)
-    
+
     def bootstrap(self, env: RuntimeEnvironment) -> None:
         """Initialize all modules in dependency order."""
+        from velune.core.task_registry import BackgroundTaskRegistry
+        registry = BackgroundTaskRegistry()
+        env.container.register_instance("runtime.task_registry", registry)
+
         resolved = self._topological_sort()
         for module in resolved:
             instance = module.factory(env)
             env.container.register_instance(module.container_key, instance)
             if module.lifecycle_key:
                 env.lifecycle.register(module.lifecycle_key, instance)
-    
-    def _topological_sort(self) -> List[SubsystemModule]:
+
+    def _topological_sort(self) -> list[SubsystemModule]:
         # Kahn's algorithm on dependency graph
         in_degree = {}
         graph = {}
         key_to_mod = {mod.container_key: mod for mod in self._modules}
-        
+
         for mod in self._modules:
             in_degree[mod.container_key] = 0
             graph[mod.container_key] = []
-            
+
         for mod in self._modules:
             # only consider dependencies that are other modules
             for dep in mod.dependencies:
                 if dep in key_to_mod:
                     graph[dep].append(mod.container_key)
                     in_degree[mod.container_key] += 1
-                    
+
         # Find all modules with in_degree == 0
         from collections import deque
         queue = deque([mod.container_key for mod in self._modules if in_degree[mod.container_key] == 0])
-        
+
         resolved_keys = []
         while queue:
             node = queue.popleft()
@@ -68,9 +75,9 @@ class RuntimeBootstrapper:
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
                     queue.append(neighbor)
-                    
+
         if len(resolved_keys) != len(self._modules):
             unresolved = set(key_to_mod.keys()) - set(resolved_keys)
             raise ValueError(f"Circular dependency or missing module dependency detected in bootstrap! Unresolved: {unresolved}")
-            
+
         return [key_to_mod[key] for key in resolved_keys]

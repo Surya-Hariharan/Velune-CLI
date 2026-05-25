@@ -1,4 +1,5 @@
-from velune.kernel.bootstrap import SubsystemModule, RuntimeEnvironment
+from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
+
 
 def _create_model_registry(env: RuntimeEnvironment):
     from velune.models.registry import ModelCapabilityRegistry

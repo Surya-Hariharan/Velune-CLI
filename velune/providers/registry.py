@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
 
 from velune.core.errors import ProviderNotFoundError
 from velune.kernel.config import ProvidersConfig
@@ -14,14 +14,14 @@ class ProviderRegistry:
     """Registry for model providers."""
 
     def __init__(self, config: ProvidersConfig | None = None):
-        self._providers: Dict[str, ModelProvider] = {}
-        self._factories: Dict[str, Callable[[], ModelProvider]] = {}
-        
+        self._providers: dict[str, ModelProvider] = {}
+        self._factories: dict[str, Callable[[], ModelProvider]] = {}
+
         # Support passing root VeluneConfig or ProvidersConfig
         self._config = config
         if config is not None and not isinstance(config, ProvidersConfig) and hasattr(config, "providers"):
             self._config = getattr(config, "providers")
-            
+
         self._register_default_providers()
 
     def _register_default_providers(self) -> None:
@@ -160,7 +160,7 @@ class ProviderRegistry:
 
         self._factories[name] = factory
 
-    def get(self, name: str) -> Optional[ModelProvider]:
+    def get(self, name: str) -> ModelProvider | None:
         """Get a provider by name."""
         if name in self._providers:
             return self._providers[name]

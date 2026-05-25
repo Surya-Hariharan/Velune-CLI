@@ -1,9 +1,10 @@
 """Core workspace type definitions."""
 
-from enum import Enum
-from typing import Any, Optional
-from pydantic import BaseModel, Field
 from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class WorkspaceState(str, Enum):
@@ -29,9 +30,9 @@ class CognitionModel(BaseModel):
     """Live cognitive model of the workspace."""
     workspace_path: str
     state: WorkspaceState
-    current_task_id: Optional[str] = None
+    current_task_id: str | None = None
     file_count: int = 0
     symbol_count: int = 0
-    last_indexed: Optional[datetime] = None
+    last_indexed: datetime | None = None
     health_score: float = Field(ge=0.0, le=1.0)
     metadata: dict[str, Any] = Field(default_factory=dict)

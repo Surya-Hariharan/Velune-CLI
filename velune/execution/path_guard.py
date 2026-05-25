@@ -1,11 +1,12 @@
 from pathlib import Path
 
+
 def is_within_workspace(path: Path, workspace: Path) -> bool:
     """Check if path is within workspace directory."""
     try:
         resolved = Path(path).resolve()
         workspace_resolved = Path(workspace).resolve()
-        return (workspace_resolved in resolved.parents or 
+        return (workspace_resolved in resolved.parents or
                 resolved == workspace_resolved or
                 str(resolved).startswith(str(workspace_resolved) + "/") or
                 str(resolved).startswith(str(workspace_resolved) + "\\"))

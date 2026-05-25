@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -42,7 +42,7 @@ def _score_reasoning_response(response: str) -> float:
     cleaned = response.strip().lower()
     if not cleaned:
         return 0.0
-    
+
     score = 0.0
     if "yes" in cleaned:
         score += 0.7
@@ -144,7 +144,7 @@ class ModelProber:
         except Exception as e:
             return ProbeResult("instruction", 0.0, -1.0, False, str(e))
 
-    async def run_all_probes(self) -> Dict[str, ProbeResult]:
+    async def run_all_probes(self) -> dict[str, ProbeResult]:
         """Run all capability probes in parallel."""
         import asyncio
         coding, reasoning, instruction = await asyncio.gather(
@@ -153,3 +153,30 @@ class ModelProber:
             self.run_instruction_probe(),
         )
         return {"coding": coding, "reasoning": reasoning, "instruction": instruction}
+
+
+class FastProbe:
+    """Single lightweight probe to validate a model is responding."""
+
+    PING_PROMPT = "Reply with exactly the word: PONG"
+    TIMEOUT = 10.0
+
+    async def ping(self, provider: Any, model_id: str) -> bool:
+        """Returns True if model responds within timeout."""
+        import asyncio
+
+        from velune.core.types.inference import InferenceRequest
+        try:
+            req = InferenceRequest(
+                model_id=model_id,
+                messages=[{"role": "user", "content": self.PING_PROMPT}],
+                temperature=0.0,
+                max_tokens=5,
+            )
+            response = await asyncio.wait_for(
+                provider.infer(req),
+                timeout=self.TIMEOUT,
+            )
+            return bool(response.content.strip())
+        except Exception:
+            return False

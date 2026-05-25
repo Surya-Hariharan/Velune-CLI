@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 from pathlib import Path
-from typing import List
+
 from velune.tools.base.tool import BaseTool
 
 
@@ -23,10 +24,10 @@ class SemanticCodeSearch(BaseTool):
         # This would use vector search in production
         # For now, do simple keyword search
         from velune.tools.filesystem.search import GrepFiles
-        
+
         grep = GrepFiles()
         results = await grep.execute(pattern=query, directory=directory)
-        
+
         return results[:limit]
 
     def get_schema(self) -> dict:
@@ -65,23 +66,23 @@ class SymbolSearch(BaseTool):
         directory: str = ".",
     ) -> list[dict]:
         """Search for symbols."""
-        from velune.repository.scanner import FilesystemScanner
         from velune.repository.parser import ASTParser
-        
+        from velune.repository.scanner import FilesystemScanner
+
         root_path = Path(directory)
         scanner = FilesystemScanner(root_path)
         files = scanner.scan([".py"])
-        
+
         parser = ASTParser()
-        
+
         results = []
         for file_path in files:
             try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(file_path, encoding="utf-8", errors="ignore") as f:
                     code = f.read()
             except Exception:
                 continue
-                
+
             symbols, _ = parser.parse(file_path, code)
             for symbol in symbols:
                 if symbol.name == symbol_name:
@@ -91,7 +92,7 @@ class SymbolSearch(BaseTool):
                         "file": str(file_path),
                         "line": symbol.line_start,
                     })
-        
+
         return results
 
     def get_schema(self) -> dict:

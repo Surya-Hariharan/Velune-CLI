@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Any
 import logging
+from typing import Any, Optional
 
-from velune.plugins.schemas import PluginManifest
 from velune.plugins.hooks import PluginHookDispatcher
+from velune.plugins.schemas import PluginManifest
 
 logger = logging.getLogger("velune.plugins.registry")
 
@@ -16,8 +16,8 @@ class PluginRegistry:
 
     def __init__(self, hook_dispatcher: Optional[PluginHookDispatcher] = None) -> None:
         self.hook_dispatcher = hook_dispatcher or PluginHookDispatcher()
-        self._manifests: Dict[str, PluginManifest] = {}
-        self._instances: Dict[str, Any] = {}
+        self._manifests: dict[str, PluginManifest] = {}
+        self._instances: dict[str, Any] = {}
 
     def register_plugin(self, manifest: PluginManifest, instance: Any) -> None:
         """Saves a loaded plugin manifest and instantiates hook callbacks."""
@@ -31,7 +31,7 @@ class PluginRegistry:
             clean_hook_name = hook_name
             if clean_hook_name.startswith("on_"):
                 clean_hook_name = clean_hook_name[3:]
-                
+
             if hasattr(instance, method_name):
                 callback = getattr(instance, method_name)
                 if callable(callback):
@@ -49,6 +49,6 @@ class PluginRegistry:
         """Fetch active plugin instance."""
         return self._instances.get(name)
 
-    def list_plugins(self) -> List[PluginManifest]:
+    def list_plugins(self) -> list[PluginManifest]:
         """Returns metadata list of loaded active plugins."""
         return list(self._manifests.values())

@@ -14,9 +14,8 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("velune.execution.benchmarker")
 
@@ -71,7 +70,7 @@ class BenchmarkResult:
         self.cpu_factor: float = 1.0     # set by SubsystemBenchmarker.compare()
         self.error = error
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dictionary.
 
         Returns:
@@ -110,7 +109,7 @@ class SubsystemBenchmarker:
         self,
         timeout: float = _DEFAULT_TIMEOUT,
         repetitions: int = _DEFAULT_REPS,
-        workspace: Optional[Path] = None,
+        workspace: Path | None = None,
     ) -> None:
         self.timeout = timeout
         self.repetitions = max(1, repetitions)
@@ -131,8 +130,8 @@ class SubsystemBenchmarker:
         Returns:
             A ``BenchmarkResult`` with averaged latency and peak RSS memory.
         """
-        latencies: List[float] = []
-        peak_rss_values: List[float] = []
+        latencies: list[float] = []
+        peak_rss_values: list[float] = []
         last_error = ""
 
         for rep in range(self.repetitions):
@@ -164,7 +163,7 @@ class SubsystemBenchmarker:
         )
         return result
 
-    def compare(self, snippets: Dict[str, str]) -> List[BenchmarkResult]:
+    def compare(self, snippets: dict[str, str]) -> list[BenchmarkResult]:
         """Benchmark multiple alternatives and return results ranked by latency.
 
         After benchmarking, each result's ``cpu_factor`` is normalised relative to
@@ -181,7 +180,7 @@ class SubsystemBenchmarker:
             logger.warning("compare() called with empty snippets dict.")
             return []
 
-        results: List[BenchmarkResult] = []
+        results: list[BenchmarkResult] = []
         for label, code in snippets.items():
             result = self.run_benchmark(code, label)
             results.append(result)
@@ -199,7 +198,7 @@ class SubsystemBenchmarker:
         results.sort(key=lambda r: r.latency_ms if not r.error else float("inf"))
         return results
 
-    def results_to_tem_metrics(self, results: List[BenchmarkResult]) -> Dict[str, Dict[str, float]]:
+    def results_to_tem_metrics(self, results: list[BenchmarkResult]) -> dict[str, dict[str, float]]:
         """Convert ranked benchmark results into TEM-compatible metric dicts.
 
         For each result, scores ``performance`` and ``simplicity`` axes on a
@@ -219,7 +218,7 @@ class SubsystemBenchmarker:
         max_lat = max((r.latency_ms for r in results if not r.error), default=1.0)
         max_rss = max((r.peak_rss_kb for r in results if not r.error), default=1.0)
 
-        metrics: Dict[str, Dict[str, float]] = {}
+        metrics: dict[str, dict[str, float]] = {}
         for r in results:
             if r.error:
                 metrics[r.label] = {"performance": 0.0, "safety": 0.0}

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Dict, Any, List, Optional
 import logging
+from pathlib import Path
+from typing import Any
 
 from velune.core.errors.execution import RollbackError
 from velune.execution.checkpointer import FileCheckpointer
@@ -16,12 +16,12 @@ logger = logging.getLogger("velune.execution.rollback")
 class RollbackManager:
     """Orchestrates checkpoint saving and target rollback on execution failure."""
 
-    def __init__(self, workspace_path: Path, git_tracker: Optional[GitTracker] = None) -> None:
+    def __init__(self, workspace_path: Path, git_tracker: GitTracker | None = None) -> None:
         self.workspace_path = Path(workspace_path).resolve()
         self.checkpointer = FileCheckpointer(self.workspace_path)
         self.git_tracker = git_tracker or GitTracker(self.workspace_path)
 
-    def save_state(self, checkpoint_id: str, files_to_track: List[Path]) -> Dict[str, Any]:
+    def save_state(self, checkpoint_id: str, files_to_track: list[Path]) -> dict[str, Any]:
         """Save the workspace state for files before a command execution."""
         from velune.execution.path_guard import validate_workspace_path
         for file in files_to_track:
@@ -30,7 +30,7 @@ class RollbackManager:
 
         # 1. Gather file snapshots
         file_snapshot = self.checkpointer.create_checkpoint(checkpoint_id, files_to_track)
-        
+
         # 2. Add git state tracking if git is active
         git_active = self.git_tracker.is_git
         git_stash_success = False
@@ -49,7 +49,7 @@ class RollbackManager:
             "git_stash_success": git_stash_success,
         }
 
-    def rollback(self, checkpoint_data: Dict[str, Any]) -> None:
+    def rollback(self, checkpoint_data: dict[str, Any]) -> None:
         """Rolls back the workspace state to the captured checkpoint."""
         checkpoint_id = checkpoint_data.get("checkpoint_id", "")
         logger.warning("Triggering state rollback for checkpoint: %s", checkpoint_id)

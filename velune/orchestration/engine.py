@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from velune.events.bus.engine import Event, EventBus
-from velune.memory.tiers.graph import GraphMemoryTier
 from velune.memory.lifecycle import MemoryArtifact, MemoryLifecycleCoordinator
-from velune.orchestration.checkpoints import InMemoryCheckpointStore
+from velune.memory.tiers.graph import GraphMemoryTier
 from velune.orchestration.schemas import (
     AgentMessage,
     ExecutionAttempt,
@@ -23,7 +22,6 @@ from velune.orchestration.schemas import (
 )
 from velune.orchestration.validators import ExecutionValidator
 from velune.planning.service import AdaptivePlanningService
-from velune.repository.schemas import RepositorySnapshot
 from velune.repository.cognition import RepositoryCognitionService
 from velune.retrieval.hybrid import HybridRetriever
 from velune.retrieval.schemas import RetrievalQuery
@@ -47,7 +45,8 @@ class LangGraphOrchestrationEngine:
         memory_lifecycle: MemoryLifecycleCoordinator,
         graph_memory: GraphMemoryTier,
         tool_registry: ToolRegistry,
-        event_bus: Optional[EventBus] = None,
+        event_bus: EventBus | None = None,
+        workspace_path: Path | None = None,
     ) -> None:
         self.retrieval = retrieval
         self.repository_cognition = repository_cognition
@@ -59,11 +58,26 @@ class LangGraphOrchestrationEngine:
 
         self.planner = AdaptivePlanningService()
         self.validator = ExecutionValidator()
-        self.checkpoints = InMemoryCheckpointStore()
+        self.workspace_path = workspace_path
+
+        # Resolve shared SQLiteManager from container if available
+        sqlite_manager = None
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.sqlite_manager"):
+                sqlite_manager = container.get("runtime.sqlite_manager")
+        except Exception:
+            pass
+
+        from velune.orchestration.checkpoints import SQLiteCheckpointStore
+        db_path = None
+        if self.workspace_path:
+            db_path = Path(self.workspace_path) / ".velune" / "velune_cognitive_core.db"
+        self.checkpoints = SQLiteCheckpointStore(db_path=db_path, sqlite_manager=sqlite_manager)
+
         self._states: dict[str, OrchestrationState] = {}
         self._interrupt_flags: set[str] = set()
-
-        self._graph = self._build_graph() if StateGraph is not None else None
 
     async def plan(self, prompt: str) -> dict[str, object]:
         """Produce an adaptive execution plan for the given prompt."""
@@ -106,7 +120,7 @@ class LangGraphOrchestrationEngine:
 
         await self._publish("orchestration.started", run_id, {"prompt": request.prompt})
 
-        final_state = await self._run_graph(state)
+        final_state = await self._execute_nodes(state, emit_fn=None)
         self._states[run_id] = final_state
 
         await self._publish(
@@ -132,45 +146,26 @@ class LangGraphOrchestrationEngine:
             status=ExecutionStatus.IN_PROGRESS,
             task_state={"task_id": self._task_id(request.prompt)},
             execution_state={"max_retries": request.max_retries, "attempt": 0},
+            retrieval_state={},
+            memory_state={},
+            repository_state={},
+            context_state={},
         )
         self._states[run_id] = state
 
-        yield f"[{run_id}] context reconstruction"
-        state = await self._context_reconstruction_node(state)
+        queue = asyncio.Queue()
+        task = asyncio.create_task(self._execute_nodes(state, emit_fn=lambda s: queue.put_nowait(s)))
 
-        yield f"[{run_id}] planning"
-        state = await self._planning_node(state)
-
-        while True:
-            yield f"[{run_id}] retrieval"
-            state = await self._retrieval_node(state)
-
-            yield f"[{run_id}] reasoning"
-            state = await self._reasoning_node(state)
-
-            yield f"[{run_id}] tool execution"
-            state = await self._tool_execution_node(state)
-
-            yield f"[{run_id}] validation"
-            state = await self._validation_node(state)
-
-            if self._route_after_validation(state) == "retry":
-                yield f"[{run_id}] retrying"
-                state = await self._replan_node(state)
+        while not task.done() or not queue.empty():
+            try:
+                milestone = await asyncio.wait_for(queue.get(), timeout=0.1)
+                yield milestone
+                queue.task_done()
+            except TimeoutError:
                 continue
-            break
 
-        yield f"[{run_id}] review"
-        state = await self._review_node(state)
-
-        yield f"[{run_id}] finalize"
-        state = await self._finalize_node(state)
-        self._states[run_id] = state
-
-        if state.error:
-            yield f"[{run_id}] failed: {state.error}"
-        else:
-            yield f"[{run_id}] completed"
+        final_state = await task
+        self._states[run_id] = final_state
 
     async def interrupt(self, run_id: str) -> bool:
         """Request interruption for a running orchestration."""
@@ -190,7 +185,7 @@ class LangGraphOrchestrationEngine:
 
         state.status = ExecutionStatus.IN_PROGRESS
         state.updated_at = datetime.now(tz=UTC)
-        resumed = await self._run_graph(state)
+        resumed = await self._execute_nodes(state, emit_fn=None)
         self._states[run_id] = resumed
         return {
             "run_id": run_id,
@@ -199,90 +194,80 @@ class LangGraphOrchestrationEngine:
             "issues": resumed.validation_issues,
         }
 
-    def get_state(self, run_id: str) -> Optional[OrchestrationState]:
+    def get_state(self, run_id: str) -> OrchestrationState | None:
         return self._states.get(run_id)
 
-    def _build_graph(self):
-        if StateGraph is None:
-            return None
+    async def _execute_nodes(
+        self,
+        state: OrchestrationState,
+        emit_fn: Callable[[str], None] | None = None,
+    ) -> OrchestrationState:
+        """Single consolidated execution path for orchestration state graph."""
+        run_id = state.run_id
 
-        graph = StateGraph(dict)
-        graph.add_node("context_reconstruction", self._graph_node(self._context_reconstruction_node))
-        graph.add_node("planning", self._graph_node(self._planning_node))
-        graph.add_node("retrieval", self._graph_node(self._retrieval_node))
-        graph.add_node("reasoning", self._graph_node(self._reasoning_node))
-        graph.add_node("tool_execution", self._graph_node(self._tool_execution_node))
-        graph.add_node("validation", self._graph_node(self._validation_node))
-        graph.add_node("replan", self._graph_node(self._replan_node))
-        graph.add_node("review", self._graph_node(self._review_node))
-        graph.add_node("finalize", self._graph_node(self._finalize_node))
+        async def emit(milestone: str):
+            if emit_fn:
+                if asyncio.iscoroutinefunction(emit_fn):
+                    await emit_fn(milestone)
+                else:
+                    emit_fn(milestone)
 
-        graph.set_entry_point("context_reconstruction")
-        graph.add_edge("context_reconstruction", "planning")
-        graph.add_edge("planning", "retrieval")
-        graph.add_edge("retrieval", "reasoning")
-        graph.add_edge("reasoning", "tool_execution")
-        graph.add_edge("tool_execution", "validation")
-        graph.add_conditional_edges(
-            "validation",
-            self._route_after_validation,
-            {
-                "retry": "replan",
-                "review": "review",
-            },
-        )
-        graph.add_edge("replan", "retrieval")
-        graph.add_edge("review", "finalize")
-        graph.add_edge("finalize", END)
-        return graph.compile()
+        # 1. Context Reconstruction
+        await emit(f"[{run_id}] context reconstruction")
+        state = await self._context_reconstruction_node(state)
+        if state.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
+            return state
 
-    async def _run_graph(self, state: OrchestrationState) -> OrchestrationState:
-        if self._graph is None:
-            return await self._run_fallback_sequence(state)
+        # 2. Planning
+        await emit(f"[{run_id}] planning")
+        state = await self._planning_node(state)
+        if state.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
+            return state
 
-        current_state = state
-        payload = {"state": current_state.model_dump(mode="json")}
-        result = await self._graph.ainvoke(payload)
-        if isinstance(result, dict) and "state" in result:
-            return OrchestrationState.model_validate(result["state"])
-        return current_state
+        # 3. Validation Loop
+        while True:
+            await emit(f"[{run_id}] retrieval")
+            state = await self._retrieval_node(state)
+            if state.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
+                return state
 
-    async def _run_fallback_sequence(self, state: OrchestrationState) -> OrchestrationState:
-        nodes = [
-            self._context_reconstruction_node,
-            self._planning_node,
-            self._retrieval_node,
-            self._reasoning_node,
-            self._tool_execution_node,
-            self._validation_node,
-        ]
+            await emit(f"[{run_id}] reasoning")
+            state = await self._reasoning_node(state)
+            if state.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
+                return state
 
-        current = state
-        for node in nodes:
-            current = await node(current)
-            if current.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
-                return current
+            await emit(f"[{run_id}] tool execution")
+            state = await self._tool_execution_node(state)
+            if state.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
+                return state
 
-        while self._route_after_validation(current) == "retry":
-            current = await self._replan_node(current)
-            current = await self._retrieval_node(current)
-            current = await self._reasoning_node(current)
-            current = await self._tool_execution_node(current)
-            current = await self._validation_node(current)
-            if current.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
-                return current
+            await emit(f"[{run_id}] validation")
+            state = await self._validation_node(state)
+            if state.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
+                return state
 
-        current = await self._review_node(current)
-        current = await self._finalize_node(current)
-        return current
+            if self._route_after_validation(state) == "retry":
+                await emit(f"[{run_id}] retrying")
+                state = await self._replan_node(state)
+                continue
+            break
 
-    def _graph_node(self, handler):
-        async def wrapped(payload: dict[str, Any]) -> dict[str, Any]:
-            state = OrchestrationState.model_validate(payload["state"])
-            state = await handler(state)
-            return {"state": state.model_dump(mode="json")}
+        # 4. Review
+        await emit(f"[{run_id}] review")
+        state = await self._review_node(state)
+        if state.status in {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}:
+            return state
 
-        return wrapped
+        # 5. Finalize
+        await emit(f"[{run_id}] finalize")
+        state = await self._finalize_node(state)
+
+        if state.error:
+            await emit(f"[{run_id}] failed: {state.error}")
+        else:
+            await emit(f"[{run_id}] completed")
+
+        return state
 
     async def _context_reconstruction_node(self, state: OrchestrationState) -> OrchestrationState:
         if self._check_interrupt(state):

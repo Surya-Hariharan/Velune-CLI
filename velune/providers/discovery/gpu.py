@@ -1,13 +1,12 @@
 """GPU/VRAM detection."""
 
 import subprocess
-from typing import Dict, Optional
 
 
 class GPUDetector:
     """Detects GPU capabilities and VRAM."""
 
-    def detect(self) -> Dict[str, any]:
+    def detect(self) -> dict[str, any]:
         """Detect GPU information."""
         info = {
             "has_gpu": False,
@@ -16,28 +15,28 @@ class GPUDetector:
             "vram_free_gb": None,
             "cuda_available": False,
         }
-        
+
         # Try NVIDIA
         nvidia_info = self._detect_nvidia()
         if nvidia_info:
             info.update(nvidia_info)
             return info
-        
+
         # Try AMD (ROCm)
         amd_info = self._detect_amd()
         if amd_info:
             info.update(amd_info)
             return info
-        
+
         # Try Apple Silicon (Metal)
         metal_info = self._detect_metal()
         if metal_info:
             info.update(metal_info)
             return info
-        
+
         return info
 
-    def _detect_nvidia(self) -> Optional[Dict[str, any]]:
+    def _detect_nvidia(self) -> dict[str, any] | None:
         """Detect NVIDIA GPU via nvidia-smi."""
         try:
             result = subprocess.run(
@@ -46,16 +45,16 @@ class GPUDetector:
                 text=True,
                 check=True,
             )
-            
+
             lines = result.stdout.strip().split("\n")
             if not lines:
                 return None
-            
+
             parts = lines[0].split(",")
             gpu_name = parts[0].strip()
             memory_total = parts[1].strip().replace(" MiB", "")
             memory_free = parts[2].strip().replace(" MiB", "")
-            
+
             return {
                 "has_gpu": True,
                 "gpu_type": "nvidia",
@@ -67,7 +66,7 @@ class GPUDetector:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
 
-    def _detect_amd(self) -> Optional[Dict[str, any]]:
+    def _detect_amd(self) -> dict[str, any] | None:
         """Detect AMD GPU via rocm-smi."""
         try:
             result = subprocess.run(
@@ -76,7 +75,7 @@ class GPUDetector:
                 text=True,
                 check=True,
             )
-            
+
             # Parse rocm-smi output (simplified)
             return {
                 "has_gpu": True,
@@ -86,18 +85,18 @@ class GPUDetector:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
 
-    def _detect_metal(self) -> Optional[Dict[str, any]]:
+    def _detect_metal(self) -> dict[str, any] | None:
         """Detect Apple Silicon GPU via Metal."""
         try:
             import platform
-            
+
             if platform.machine() != "arm64":
                 return None
-            
+
             # Apple Silicon has unified memory
             import psutil
             total_memory = psutil.virtual_memory().total / (1024**3)  # GB
-            
+
             return {
                 "has_gpu": True,
                 "gpu_type": "apple_silicon",

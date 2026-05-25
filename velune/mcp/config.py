@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from velune.kernel.config import ConfigLoader
 
 
-def load_mcp_servers(config_path: Optional[Path] = None) -> dict[str, str]:
+def load_mcp_servers(config_path: Path | None = None) -> dict[str, str]:
     """Load external MCP server configurations from velune.toml."""
     try:
         loader = ConfigLoader(config_path)

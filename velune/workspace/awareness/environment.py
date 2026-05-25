@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Dict
 
 
 class EnvironmentAwareness:
@@ -10,7 +9,7 @@ class EnvironmentAwareness:
     def __init__(self):
         pass
 
-    def get_environment_variables(self) -> Dict[str, str]:
+    def get_environment_variables(self) -> dict[str, str]:
         """Get relevant environment variables."""
         relevant_vars = [
             "PATH",
@@ -20,7 +19,7 @@ class EnvironmentAwareness:
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
         ]
-        
+
         env_vars = {}
         for var in relevant_vars:
             if var in os.environ:
@@ -29,7 +28,7 @@ class EnvironmentAwareness:
                     env_vars[var] = "***" + os.environ[var][-4:]
                 else:
                     env_vars[var] = os.environ[var]
-        
+
         return env_vars
 
     def check_tool_availability(self, tool: str) -> bool:
@@ -49,10 +48,10 @@ class EnvironmentAwareness:
             "gcc",
             "clang",
         ]
-        
+
         available = []
         for tool in common_tools:
             if self.check_tool_availability(tool):
                 available.append(tool)
-        
+
         return available

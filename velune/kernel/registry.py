@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Type, TypeVar, Union
+from typing import Any, TypeVar
 
 logger = logging.getLogger("velune.kernel.registry")
 
@@ -15,21 +16,21 @@ class ComponentRegistry:
     """Type-safe dynamic component registry supporting hot-swappable interfaces."""
 
     def __init__(self) -> None:
-        self._registry: Dict[Type[Any], Any] = {}
+        self._registry: dict[type[Any], Any] = {}
 
-    def register(self, interface: Type[T], implementation: T) -> None:
+    def register(self, interface: type[T], implementation: T) -> None:
         """Register a concrete implementation for a given interface Type."""
         self._registry[interface] = implementation
         logger.debug("Registered component for interface: %s", interface.__name__ if hasattr(interface, "__name__") else str(interface))
 
-    def get(self, interface: Type[T]) -> T:
+    def get(self, interface: type[T]) -> T:
         """Retrieve the registered implementation for an interface Type."""
         if interface in self._registry:
             return self._registry[interface]
         interface_name = interface.__name__ if hasattr(interface, "__name__") else str(interface)
         raise KeyError(f"Kernel component not registered for interface: {interface_name}")
 
-    def swap(self, interface: Type[T], new_impl: T) -> None:
+    def swap(self, interface: type[T], new_impl: T) -> None:
         """Hot-swap the implementation of an active interface in-flight."""
         logger.info("Hot-swapping interface %s implementation.", interface.__name__ if hasattr(interface, "__name__") else str(interface))
         self._registry[interface] = new_impl
@@ -39,9 +40,9 @@ class ServiceContainer:
     """Backward-compatible component registry container supporting string-based lazy factories."""
 
     def __init__(self) -> None:
-        self._services: Dict[str, Any] = {}
-        self._factories: Dict[str, Callable[[], Any]] = {}
-        self._singletons: Dict[str, Any] = {}
+        self._services: dict[str, Any] = {}
+        self._factories: dict[str, Callable[[], Any]] = {}
+        self._singletons: dict[str, Any] = {}
         self._type_registry = ComponentRegistry()
 
     def register(self, name: str, factory: Callable[[], T], singleton: bool = True) -> None:

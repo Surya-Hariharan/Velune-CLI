@@ -1,11 +1,12 @@
-import os
-import sys
-import signal
-import time
-import subprocess
 import asyncio
-import typer
+import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
+
+import typer
 from rich.console import Console
 
 from velune.daemon.client import DaemonClient
@@ -22,7 +23,7 @@ def daemon_start(workspace: Path = typer.Option(Path.cwd(), help="Workspace root
         return
 
     workspace_abs = workspace.resolve()
-    
+
     # Detached background process spawn
     if sys.platform == "win32":
         subprocess.Popen(
@@ -38,14 +39,14 @@ def daemon_start(workspace: Path = typer.Option(Path.cwd(), help="Workspace root
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-    
+
     # Wait for daemon to become active
     for _ in range(30):
         time.sleep(0.1)
         if DaemonClient.is_running():
             console.print("[green]Daemon started.[/green]")
             return
-            
+
     console.print("[red]Failed to start daemon.[/red]")
 
 @daemon_cmd.command("stop")
@@ -54,7 +55,7 @@ def daemon_stop():
     if not DaemonClient.is_running():
         console.print("[yellow]Daemon is not running.[/yellow]")
         return
-        
+
     if DAEMON_PID_FILE.exists():
         pid = int(DAEMON_PID_FILE.read_text())
         try:

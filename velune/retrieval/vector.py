@@ -1,6 +1,5 @@
 """Vector retrieval layer using Qdrant client."""
 
-from typing import Any, Dict, List, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
@@ -10,7 +9,7 @@ from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalS
 class VectorRetriever:
     """Retrieves context from Qdrant vector database using dense embeddings."""
 
-    def __init__(self, collection_name: str = "velune_symbols", location: str = ".velune/qdrant_local_store", client: Optional[QdrantClient] = None) -> None:
+    def __init__(self, collection_name: str = "velune_symbols", location: str = ".velune/qdrant_local_store", client: QdrantClient | None = None) -> None:
         self.collection_name = collection_name
         self.location = location
         if client is not None:
@@ -28,7 +27,7 @@ class VectorRetriever:
             # or 384 for standard local models. Let's make it highly dynamic.
             collections = self.client.get_collections().collections
             exists = any(c.name == self.collection_name for c in collections)
-            
+
             if not exists:
                 self.client.create_collection(
                     collection_name=self.collection_name,
@@ -45,7 +44,7 @@ class VectorRetriever:
         """Inserts or updates a document with its embedding in Qdrant."""
         if not doc.embedding:
             return
-            
+
         # Ensure embedding matches collection dimensions (default to 1536)
         emb = doc.embedding
         if len(emb) < 1536:
@@ -53,7 +52,7 @@ class VectorRetriever:
             emb = emb + [0.0] * (1536 - len(emb))
         elif len(emb) > 1536:
             emb = emb[:1536]
-            
+
         try:
             self.client.upsert(
                 collection_name=self.collection_name,
@@ -73,7 +72,7 @@ class VectorRetriever:
         except Exception:
             pass
 
-    def retrieve(self, query_vector: List[float], top_k: int = 10, namespace: Optional[str] = None) -> List[RetrievalHit]:
+    def retrieve(self, query_vector: list[float], top_k: int = 10, namespace: str | None = None) -> list[RetrievalHit]:
         """Queries Qdrant vector spaces and returns matching document hits."""
         # Normalize vector dimension
         vector = query_vector
@@ -81,8 +80,8 @@ class VectorRetriever:
             vector = vector + [0.0] * (1536 - len(vector))
         elif len(vector) > 1536:
             vector = vector[:1536]
-            
-        hits: List[RetrievalHit] = []
+
+        hits: list[RetrievalHit] = []
         try:
             # Build filters
             query_filter = None
@@ -95,14 +94,14 @@ class VectorRetriever:
                         )
                     ]
                 )
-                
+
             results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=vector,
                 query_filter=query_filter,
                 limit=top_k
             )
-            
+
             for rank, res in enumerate(results):
                 payload = res.payload or {}
                 doc = RetrievalDocument(
@@ -121,5 +120,5 @@ class VectorRetriever:
                 )
         except Exception:
             pass
-            
+
         return hits

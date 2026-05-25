@@ -1,4 +1,5 @@
-from velune.kernel.bootstrap import SubsystemModule, RuntimeEnvironment
+from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
+
 
 def _create_hybrid_retriever(env: RuntimeEnvironment):
     from velune.retrieval.hybrid import HybridRetriever

@@ -5,40 +5,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 
-from velune.kernel.config import ConfigService, get_default_config, VeluneConfig
-from velune.kernel.bus import CognitiveBus
+from velune.kernel.config import ConfigService, VeluneConfig, get_default_config
 from velune.kernel.lifecycle import LifecycleCoordinator
-from velune.providers.registry import ProviderRegistry
-from velune.models.registry import ModelCapabilityRegistry
-from velune.models.specializations import ModelSpecializationMapper
-from velune.repository.cognition import RepositoryCognitionService
-from velune.retrieval.hybrid import HybridRetriever
-from velune.execution.executor import ExecutionExecutor
-from velune.cognition.orchestrator import CouncilOrchestrator
 from velune.kernel.registry import ServiceContainer
 
 # Stateful Orchestration & Memory Tiers
-from velune.orchestration.engine import LangGraphOrchestrationEngine
-from velune.memory.tiers.working import WorkingMemoryTier
-from velune.memory.tiers.episodic import EpisodicMemoryTier
-from velune.memory.tiers.semantic import SemanticMemoryTier
-from velune.memory.tiers.graph import GraphMemoryTier
-from velune.memory.tiers.archive import LongTermArchiveTier
-from velune.memory.storage.sqlite_manager import SQLiteManager
-from velune.memory.consolidator import MemoryConsolidator
-from velune.memory.lifecycle import MemoryLifecycleCoordinator
-from velune.cognition.firewall import CognitiveFirewall
-from velune.tools.base.registry import ToolRegistry
-from velune.tools import (
-    ReadFile, ReadDirectory, WriteFile, CreateFile, DeleteFile,
-    GrepFiles, FindFiles, GitLog, GitDiff, GitBlame, GitStatus, GitBranch,
-    GitCommit, GitCheckout, ExecuteCommand, TerminalHistory,
-    SemanticCodeSearch, SymbolSearch, GoToDefinition, FindReferences, WebFetch
-)
 
 
 @dataclass(slots=True)
@@ -46,7 +20,7 @@ class RuntimeContext:
     """Runtime resources shared across CLI commands."""
 
     workspace: Path
-    config_path: Optional[Path]
+    config_path: Path | None
     config: VeluneConfig
     console: Console
     logger_name: str
@@ -55,7 +29,7 @@ class RuntimeContext:
 
 def build_runtime(
     workspace: Path,
-    config_path: Optional[Path] = None,
+    config_path: Path | None = None,
     verbose: bool = False,
 ) -> RuntimeContext:
     """Create and register the shared runtime services using the declarative bootstrapper."""
@@ -63,7 +37,7 @@ def build_runtime(
     console = Console(highlight=False)
     logger_name = "velune"
     logger = logging.getLogger(logger_name)
-    
+
     # Configure root logger levels
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
@@ -78,6 +52,7 @@ def build_runtime(
 
     container = ServiceContainer()
     lifecycle = LifecycleCoordinator()
+    lifecycle.container = container
 
     # Pre-register basic primitive context dependencies
     container.register_instance("runtime.config", config)
@@ -86,6 +61,7 @@ def build_runtime(
     container.register_instance("runtime.logger", logger)
     container.register_instance("runtime.workspace", workspace)
     container.register_instance("runtime.config_path", config_path)
+    container.register_instance("runtime.lifecycle", lifecycle)
 
     # Detect and persist GPU info
     from velune.providers.discovery.gpu import GPUDetector
@@ -93,7 +69,7 @@ def build_runtime(
     container.register_instance("runtime.gpu_info", gpu_info)
 
     # 3. Initialize and bootstrap declarative subsystems in dependency order
-    from velune.kernel.bootstrap import RuntimeEnvironment, RuntimeBootstrapper
+    from velune.kernel.bootstrap import RuntimeBootstrapper, RuntimeEnvironment
     from velune.kernel.modules import ALL_MODULES
 
     env = RuntimeEnvironment(

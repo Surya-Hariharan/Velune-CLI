@@ -1,9 +1,10 @@
 """Core memory type definitions."""
 
-from enum import Enum
-from typing import Any, Optional
-from pydantic import BaseModel, Field
 from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class MemoryType(str, Enum):
@@ -20,12 +21,12 @@ class MemoryRecord(BaseModel):
     id: str
     memory_type: MemoryType
     content: str
-    embedding: Optional[list[float]] = None
+    embedding: list[float] | None = None
     importance: float = Field(ge=0.0, le=1.0)
     access_count: int = 0
     last_accessed: datetime
     created_at: datetime
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

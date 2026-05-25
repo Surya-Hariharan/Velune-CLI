@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict
+
 from velune.kernel.lifecycle import ComponentStatus, LifecycleCoordinator
 from velune.kernel.schemas import HealthReport
 
@@ -16,7 +16,7 @@ class SubsystemHealthMonitor:
 
     def __init__(self, coordinator: LifecycleCoordinator) -> None:
         self._coordinator = coordinator
-        self._custom_checks: Dict[str, Callable[[], dict]] = {}
+        self._custom_checks: dict[str, Callable[[], dict]] = {}
 
     def register_health_hook(self, name: str, hook: Callable[[], dict]) -> None:
         """Register a custom diagnostic function for a subsystem."""
@@ -25,10 +25,10 @@ class SubsystemHealthMonitor:
     def check_subsystem(self, name: str) -> HealthReport:
         """Evaluate and report a single subsystem's status and latency."""
         status = self._coordinator.get_status(name)
-        
+
         start_time = time.perf_counter()
         details = {}
-        
+
         if name in self._custom_checks:
             try:
                 details = self._custom_checks[name]()
@@ -45,7 +45,7 @@ class SubsystemHealthMonitor:
             details=details,
         )
 
-    def check_all(self) -> Dict[str, HealthReport]:
+    def check_all(self) -> dict[str, HealthReport]:
         """Aggregate health reports for all managed subsystems."""
         reports = {}
         for name in self._coordinator._components.keys():

@@ -2,12 +2,51 @@
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 import unicodedata
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger("velune.cognition.firewall")
+
+
+# Programmatically construct UNICODE_CONFUSABLES mapping
+UNICODE_CONFUSABLES = {}
+for i in range(26):
+    UNICODE_CONFUSABLES[chr(0x1D400 + i)] = chr(ord('A') + i)  # Bold Cap
+    UNICODE_CONFUSABLES[chr(0x1D41A + i)] = chr(ord('a') + i)  # Bold Lower
+    UNICODE_CONFUSABLES[chr(0x1D434 + i)] = chr(ord('A') + i)  # Italic Cap
+    UNICODE_CONFUSABLES[chr(0x1D44E + i)] = chr(ord('a') + i)  # Italic Lower
+    UNICODE_CONFUSABLES[chr(0x1D468 + i)] = chr(ord('A') + i)  # Bold Italic Cap
+    UNICODE_CONFUSABLES[chr(0x1D482 + i)] = chr(ord('a') + i)  # Bold Italic Lower
+    UNICODE_CONFUSABLES[chr(0x1D4A2 + i)] = chr(ord('A') + i)  # Script Cap
+    UNICODE_CONFUSABLES[chr(0x1D4B6 + i)] = chr(ord('a') + i)  # Script Lower
+    UNICODE_CONFUSABLES[chr(0x1D4D0 + i)] = chr(ord('A') + i)  # Bold Script Cap
+    UNICODE_CONFUSABLES[chr(0x1D4E4 + i)] = chr(ord('a') + i)  # Bold Script Lower
+    UNICODE_CONFUSABLES[chr(0x1D4FA + i)] = chr(ord('A') + i)  # Fraktur Cap
+    UNICODE_CONFUSABLES[chr(0x1D50E + i)] = chr(ord('a') + i)  # Fraktur Lower
+    UNICODE_CONFUSABLES[chr(0x1D538 + i)] = chr(ord('A') + i)  # Double-struck Cap
+    UNICODE_CONFUSABLES[chr(0x1D54E + i)] = chr(ord('a') + i)  # Double-struck Lower
+    UNICODE_CONFUSABLES[chr(0x1D56C + i)] = chr(ord('A') + i)  # Bold Fraktur Cap
+    UNICODE_CONFUSABLES[chr(0x1D580 + i)] = chr(ord('a') + i)  # Bold Fraktur Lower
+    UNICODE_CONFUSABLES[chr(0x1D5A0 + i)] = chr(ord('A') + i)  # Sans-serif Cap
+    UNICODE_CONFUSABLES[chr(0x1D5B4 + i)] = chr(ord('a') + i)  # Sans-serif Lower
+    UNICODE_CONFUSABLES[chr(0x1D5D4 + i)] = chr(ord('A') + i)  # Sans-serif Bold Cap
+    UNICODE_CONFUSABLES[chr(0x1D5E8 + i)] = chr(ord('a') + i)  # Sans-serif Bold Lower
+    UNICODE_CONFUSABLES[chr(0x1D608 + i)] = chr(ord('A') + i)  # Sans-serif Italic Cap
+    UNICODE_CONFUSABLES[chr(0x1D61C + i)] = chr(ord('a') + i)  # Sans-serif Italic Lower
+    UNICODE_CONFUSABLES[chr(0x1D63C + i)] = chr(ord('A') + i)  # Sans-serif Bold Italic Cap
+    UNICODE_CONFUSABLES[chr(0x1D650 + i)] = chr(ord('a') + i)  # Sans-serif Bold Italic Lower
+    UNICODE_CONFUSABLES[chr(0x1D670 + i)] = chr(ord('A') + i)  # Monospace Cap
+    UNICODE_CONFUSABLES[chr(0x1D684 + i)] = chr(ord('a') + i)  # Monospace Lower
+
+    # Fullwidth forms
+    UNICODE_CONFUSABLES[chr(0xFF21 + i)] = chr(ord('A') + i)
+    UNICODE_CONFUSABLES[chr(0xFF41 + i)] = chr(ord('a') + i)
+
+    # Enclosed alphanumerics
+    UNICODE_CONFUSABLES[chr(0x24B6 + i)] = chr(ord('A') + i)
+    UNICODE_CONFUSABLES[chr(0x24D0 + i)] = chr(ord('a') + i)
 
 
 class CognitiveFirewall:
@@ -36,7 +75,7 @@ class CognitiveFirewall:
 
     def _normalize_homoglyphs(self, text: str) -> str:
         # Map common Cyrillic, Greek, and other homoglyphs to Latin equivalents
-        homoglyphs = {
+        existing_homoglyphs = {
             'а': 'a', 'А': 'A',
             'в': 'b', 'В': 'B',
             'е': 'e', 'Е': 'E',
@@ -51,8 +90,7 @@ class CognitiveFirewall:
             'α': 'a', 'β': 'b', 'ε': 'e', 'κ': 'k', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x',
             'Ɩ': 'l', 'ɩ': 'i',
         }
-        trans_table = str.maketrans(homoglyphs)
-        return text.translate(trans_table)
+        return text.translate(str.maketrans({**existing_homoglyphs, **UNICODE_CONFUSABLES}))
 
     def scan_text(self, text: str) -> bool:
         """Scan a given string for potential prompt injection signatures.
@@ -65,7 +103,7 @@ class CognitiveFirewall:
         homoglyph_normalized = self._normalize_homoglyphs(normalized)
         # Also check ASCII-folded version
         ascii_folded = normalized.encode('ascii', 'ignore').decode('ascii')
-        
+
         for check_text in [text, normalized, homoglyph_normalized, ascii_folded]:
             for pattern in self.injection_patterns:
                 if re.search(pattern, check_text):
@@ -79,20 +117,20 @@ class CognitiveFirewall:
                     return False
         return True
 
-    def scan_conversation(self, messages: List[Dict]) -> bool:
+    def scan_conversation(self, messages: list[dict]) -> bool:
         """Scan full conversation history for injection patterns that span messages."""
         # Concatenate all user messages and scan combined text
         combined = " ".join(
-            msg["content"] for msg in messages 
+            msg["content"] for msg in messages
             if msg.get("role") == "user"
         )
-        
+
         # Multi-turn patterns: instruction appearing across turns
         multi_turn_patterns = [
             r"(?i)(from now on|starting now|going forward).*\n.*you (must|will|should|are)",
             r"(?i)(from now on|starting now|going forward).*you (must|will|should|are)",
         ]
-        
+
         for pattern in multi_turn_patterns:
             if re.search(pattern, combined):
                 logger.warning("Multi-turn split prompt injection attempt blocked: %s", pattern)
@@ -103,14 +141,14 @@ class CognitiveFirewall:
                 except Exception:
                     pass
                 return False
-        
+
         # Individual message scanning
         for msg in messages:
             if msg.get("role") == "system":
                 continue
             if not self.scan_text(msg.get("content", "")):
                 return False
-        
+
         return True
 
     def sanitize_content(self, text: str) -> str:
@@ -120,9 +158,14 @@ class CognitiveFirewall:
         sanitized = re.sub(r"(?i)\bignore\b\s+\bprevious\b\s+\binstructions\b", "i_g_n_o_r_e previous instructions", sanitized)
         sanitized = re.sub(r"(?i)\bignore\b\s+\babove\b\s+\binstructions\b", "i_g_n_o_r_e above instructions", sanitized)
         sanitized = re.sub(r"(?i)\bignore\b\s+\bbelow\b\s+\binstructions\b", "i_g_n_o_r_e below instructions", sanitized)
-        
+
         # Escape potential XML/HTML injection tags inside templates
+        # Preserve common code arrow operators
+        sanitized = sanitized.replace("->", "__ARROW_PLACEHOLDER__")
+        sanitized = sanitized.replace("=>", "__FATARROW_PLACEHOLDER__")
         sanitized = sanitized.replace("<", "&lt;").replace(">", "&gt;")
+        sanitized = sanitized.replace("__ARROW_PLACEHOLDER__", "->")
+        sanitized = sanitized.replace("__FATARROW_PLACEHOLDER__", "=>")
         return sanitized
 
     def wrap_workspace_content(self, content_name: str, content: str) -> str:
@@ -145,8 +188,8 @@ class CognitiveFirewall:
         Returns a dict indicating safety status, potential matched patterns, and a quarantined/neutralized content string.
         """
         is_safe = self.scan_text(content)
-        neutralized = self.sanitize_content(content)
-        
+        neutralized = content if is_safe else self.sanitize_content(content)
+
         return {
             "file_path": file_path,
             "is_safe": is_safe,

@@ -1,16 +1,13 @@
 """Repository cognition pipeline merging AST indices, Git history, and dependency graphs."""
 
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from velune.repository.analyzer import CodebaseAnalyzer
 from velune.repository.grapher import RepositoryGrapher
 from velune.repository.indexer import RepositoryIndexer
 from velune.repository.schemas import (
     RepositoryEdge,
-    RepositoryFile,
     RepositorySnapshot,
-    RepositorySymbol,
 )
 from velune.repository.tracker import GitTracker
 
@@ -41,7 +38,7 @@ class RepositoryCognitionService:
         self.grapher.resolve_import_dependencies(file_paths, snapshot.symbols)
 
         # Extract edges from grapher back to snapshot
-        edges: List[RepositoryEdge] = []
+        edges: list[RepositoryEdge] = []
         for src, tgt, key, data in self.grapher.graph.edges(keys=True, data=True):
             edges.append(
                 RepositoryEdge(
@@ -57,21 +54,21 @@ class RepositoryCognitionService:
         branch = self.tracker.get_active_branch()
         changes = self.tracker.get_uncommitted_changes()
         recent_commits = self.tracker.get_recent_commits(limit=5)
-        
+
         # Calculate file volatility (commits in last 90 days)
-        file_volatility: Dict[str, int] = {}
+        file_volatility: dict[str, int] = {}
         for f in snapshot.files:
             file_volatility[f.path] = self.tracker.get_file_volatility(f.path)
 
         # 5. Architectural layer and pattern analysis
         layers = self.analyzer.classify_architecture_layers(file_paths)
-        
+
         # Compile edges as tuple list for analyzer
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
 
         # Load file contents for framework scanner
-        code_files: Dict[str, str] = {}
+        code_files: dict[str, str] = {}
         for f in snapshot.files:
             # Only read small files under 100KB for safety
             if f.size_bytes < 100000:
@@ -105,6 +102,6 @@ class RepositoryCognitionService:
 
         return snapshot
 
-    def traverse(self, node_id: str, depth: int = 2) -> List[str]:
+    def traverse(self, node_id: str, depth: int = 2) -> list[str]:
         """Queries the RepositoryGrapher to discover neighboring code relationships from a starting node."""
         return self.grapher.traverse(node_id, depth)

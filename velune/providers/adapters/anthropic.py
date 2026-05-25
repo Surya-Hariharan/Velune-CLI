@@ -2,25 +2,30 @@
 
 from __future__ import annotations
 
-import httpx
 import json
 import os
 import time
-from typing import AsyncIterator, List, Optional
-from velune.providers.base import ModelProvider
+from collections.abc import AsyncIterator
+
+import httpx
+
+from velune.core.errors.provider import (
+    InferenceError,
+    ProviderAuthenticationError,
+)
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
-from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
+from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.core.errors.provider import ProviderConnectionError, ProviderAuthenticationError, InferenceError
+from velune.providers.base import ModelProvider
 
 
 class AnthropicProvider(ModelProvider):
     """Anthropic provider for Claude models."""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: str = "https://api.anthropic.com") -> None:
+    def __init__(self, api_key: str | None = None, base_url: str = "https://api.anthropic.com") -> None:
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self._base_url = base_url
-        self.client: Optional[httpx.AsyncClient] = None
+        self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(
             supports_streaming=True,
             supports_function_calling=True,
@@ -44,7 +49,7 @@ class AnthropicProvider(ModelProvider):
             }
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
 
-    async def list_models(self) -> List[ModelDescriptor]:
+    async def list_models(self) -> list[ModelDescriptor]:
         """List active Claude models."""
         await self.initialize()
         # Anthropic has static lists, or we can query their endpoints. Here we provide the standard suite.
@@ -181,7 +186,7 @@ class AnthropicProvider(ModelProvider):
         except httpx.HTTPError as e:
             raise InferenceError(f"Anthropic stream failed: {e}")
 
-    async def embed(self, texts: List[str], model_id: str) -> List[List[float]]:
+    async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         raise NotImplementedError("Anthropic provider does not support embeddings.")
 
     async def health_check(self) -> ProviderHealth:

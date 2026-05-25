@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
 import logging
-
-from velune.cognition.council.messages import ReviewerMessage, ChallengerMessage, CriticMessage
+from typing import Any
 
 logger = logging.getLogger("velune.cognition.arbitrator")
 
@@ -16,9 +14,9 @@ class ArbitrationResult:
     def __init__(
         self,
         requires_human_review: bool,
-        winning_claims: List[str],
+        winning_claims: list[str],
         overall_confidence: float,
-        flags: List[str],
+        flags: list[str],
         synthesis_instructions: str,
     ) -> None:
         self.requires_human_review = requires_human_review
@@ -27,7 +25,7 @@ class ArbitrationResult:
         self.flags = flags
         self.synthesis_instructions = synthesis_instructions
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "requires_human_review": self.requires_human_review,
             "winning_claims": self.winning_claims,
@@ -60,22 +58,22 @@ class CouncilArbitrator:
 
     def arbitrate(
         self,
-        plan_steps: List[str],
+        plan_steps: list[str],
         coder_proposal: str,
         reviewer_report: Any,
         challenger_report: Any,
-        scalability_report: Optional[Any] = None,
-        security_report: Optional[Any] = None,
-        performance_report: Optional[Any] = None,
-        maintainability_report: Optional[Any] = None,
-        critic_weights: Optional[Dict[str, float]] = None,
-        shi: Optional[float] = None,
+        scalability_report: Any | None = None,
+        security_report: Any | None = None,
+        performance_report: Any | None = None,
+        maintainability_report: Any | None = None,
+        critic_weights: dict[str, float] | None = None,
+        shi: float | None = None,
     ) -> ArbitrationResult:
         """Arbitrate the deliberations of the planner, coder, reviewer, challenger, and specialized critics."""
         logger.info("Council Arbitrator analyzing agent deliberations...")
-        
-        winning_claims: List[str] = []
-        flags: List[str] = []
+
+        winning_claims: list[str] = []
+        flags: list[str] = []
 
         # 1. Claim Extraction and Synthesis Instructions
         if isinstance(reviewer_report, dict):
@@ -86,13 +84,16 @@ class CouncilArbitrator:
             passed = reviewer_report.passed
             reviewer_confidence = reviewer_report.confidence_rating
             reviewer_issues = reviewer_report.critical_issues
-        
+
         if isinstance(challenger_report, dict):
             challenger_issues = challenger_report.get("failure_vectors", [])
             challenger_severity = challenger_report.get("severity_rating", 0.0)
-        else:
+        elif challenger_report is not None:
             challenger_issues = challenger_report.failure_vectors
             challenger_severity = challenger_report.severity_rating
+        else:
+            challenger_issues = []
+            challenger_severity = 0.0
 
         # 2. Extract specialized critic properties if they are provided
         critic_reports = []
@@ -115,7 +116,7 @@ class CouncilArbitrator:
             else:
                 is_passed = report.passed
                 issues = report.issues
-            
+
             if not is_passed:
                 failed_critics.append(name)
             for issue in issues:
@@ -124,15 +125,15 @@ class CouncilArbitrator:
         # 3. Contradiction Detection
         # E.g. Coder proposes complete success, but Reviewer, Challenger, or Critics find problems
         has_critical_failures = (
-            len(reviewer_issues) > 0 
+            len(reviewer_issues) > 0
             or (challenger_severity > 0.7 and len(challenger_issues) > 0)
             or len(failed_critics) > 0
         )
-        
+
         # Calculate agreement rate
         # If reviewer and all active critics passed, agreement is high.
         all_passed = passed and (len(failed_critics) == 0)
-        
+
         if all_passed and challenger_severity < 0.3:
             agreement_rate = 0.95
             logic_score = 0.9
@@ -166,7 +167,7 @@ class CouncilArbitrator:
             sum_critic_weights += w_critic
 
         self_reported = (sum_weighted_critic_scores + reviewer_confidence + (1.0 - challenger_severity)) / (sum_critic_weights + 2.0)
-        
+
         overall_confidence = self.calculate_calibrated_confidence(
             self_reported=self_reported,
             agreement_rate=agreement_rate,

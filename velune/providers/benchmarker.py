@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
-from typing import Dict, Any, List, Optional
+
 from velune.core.types.inference import InferenceRequest
 from velune.providers.base import ModelProvider
 
@@ -39,7 +38,7 @@ class ProviderBenchmarker:
         )
 
         start_time = time.perf_counter()
-        first_token_time: Optional[float] = None
+        first_token_time: float | None = None
         chars_received = 0
 
         try:
@@ -48,7 +47,7 @@ class ProviderBenchmarker:
                 if first_token_time is None and chunk.content:
                     first_token_time = time.perf_counter()
                     metrics.ttft_ms = (first_token_time - start_time) * 1000.0
-                
+
                 chars_received += len(chunk.content)
                 # Estimating tokens: 1 token ≈ 4 characters
                 metrics.tokens_generated = int(chars_received / 4.0)
@@ -70,11 +69,11 @@ class ProviderBenchmarker:
                 start_time = time.perf_counter()
                 response = await self.provider.infer(request)
                 end_time = time.perf_counter()
-                
+
                 metrics.total_latency_ms = (end_time - start_time) * 1000.0
                 metrics.ttft_ms = metrics.total_latency_ms  # No stream TTFT estimation
                 metrics.tokens_generated = response.tokens_used or int(len(response.content) / 4.0)
-                
+
                 duration = (end_time - start_time)
                 if duration > 0:
                     metrics.tps = metrics.tokens_generated / duration
@@ -85,7 +84,7 @@ class ProviderBenchmarker:
 
         return metrics
 
-    async def run_structured_probe(self) -> Dict[str, float]:
+    async def run_structured_probe(self) -> dict[str, float]:
         """Probe model capabilities in generating valid JSON format."""
         prompt = (
             "Return a JSON object representing a file list with keys 'files' (list of strings) and 'count' (integer). "
@@ -104,7 +103,7 @@ class ProviderBenchmarker:
         try:
             response = await self.provider.infer(request)
             content = response.content.strip()
-            
+
             # Clean possible markdown wrappers
             if content.startswith("```"):
                 lines = content.splitlines()
@@ -116,7 +115,7 @@ class ProviderBenchmarker:
             import json
             parsed = json.loads(content)
             json_valid = 1.0
-            
+
             if isinstance(parsed, dict) and "files" in parsed and "count" in parsed:
                 if isinstance(parsed["files"], list) and isinstance(parsed["count"], int):
                     structure_valid = 1.0
@@ -129,8 +128,8 @@ class ProviderBenchmarker:
         """Run all benchmark probes and aggregate metrics."""
         metrics = await self.run_latency_probe()
         struct_res = await self.run_structured_probe()
-        
+
         metrics.json_validity = struct_res["json_validity"]
         metrics.tool_accuracy = struct_res["structure_validity"]
-        
+
         return metrics

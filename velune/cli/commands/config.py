@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from typing import Any
 
 from velune.cli.context import CLIContext
 
@@ -25,9 +26,9 @@ def config_set(
     if not cli_context:
         console.print("[red]CLI context is uninitialized.[/red]")
         raise typer.Exit(1)
-        
+
     config_path = cli_context.config_path or (cli_context.workspace / "velune.toml")
-    
+
     # Load raw TOML
     import toml
     try:
@@ -38,7 +39,7 @@ def config_set(
     except Exception as e:
         console.print(f"[red]Failed to load existing config: {e}[/red]")
         data = {}
-        
+
     # Set the nested key
     parts = key.split(".")
     curr = data
@@ -46,7 +47,7 @@ def config_set(
         if part not in curr or not isinstance(curr[part], dict):
             curr[part] = {}
         curr = curr[part]
-        
+
     # Convert value to correct type (bool, int, float, str)
     typed_val: Any = value
     if value.lower() == "true":
@@ -61,9 +62,9 @@ def config_set(
                 typed_val = int(value)
         except ValueError:
             pass
-            
+
     curr[parts[-1]] = typed_val
-    
+
     # Save back
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,12 +86,12 @@ def config_get(
     if not cli_context:
         console.print("[red]CLI context is uninitialized.[/red]")
         raise typer.Exit(1)
-        
+
     # Fetch from the active loaded config object which is resolved and typed
     config = cli_context.config
     parts = key.split(".")
     curr: Any = config
-    
+
     for part in parts:
         if hasattr(curr, part):
             curr = getattr(curr, part)
@@ -99,7 +100,7 @@ def config_get(
         else:
             console.print(f"[red]Key '{key}' not found in active configuration.[/red]")
             raise typer.Exit(1)
-            
+
     console.print(f"[bold]{key}[/bold] = {curr}")
 
 

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Type, TypeVar
+from abc import ABC
+from typing import TypeVar
+
 from pydantic import BaseModel
+
 T = TypeVar('T', bound=BaseModel)
-import logging
 
-from velune.models.specializations import CouncilRole
-from velune.core.types.model import ModelDescriptor
-from velune.providers.base import ModelProvider
+from velune.core.trace import TracedLogger
 from velune.core.types.inference import InferenceRequest
+from velune.core.types.model import ModelDescriptor
+from velune.models.specializations import CouncilRole
+from velune.providers.base import ModelProvider
 
-logger = logging.getLogger("velune.cognition.council.base")
+logger = TracedLogger("velune.cognition.council.base")
 
 
 class BaseCouncilAgent(ABC):
@@ -33,44 +35,69 @@ class BaseCouncilAgent(ABC):
 
     async def deliberate(
         self,
-        context_history: List[Dict[str, str]],
+        context_history: list[dict[str, str]],
         temperature: float = 0.5,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> str:
         """Runs the deliberation round using the assigned LLM model provider."""
-        messages = [{"role": "system", "content": self.system_prompt}] + context_history
-        
-        from velune.cognition.firewall import CognitiveFirewall
-        firewall = CognitiveFirewall()
-        if not firewall.scan_conversation(messages):
-            logger.error("Prompt injection detected in Council message history")
-            raise ValueError("Security: Potential prompt injection detected in messages")
-        
-        request = InferenceRequest(
-            model_id=self.model.model_id,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        import asyncio
 
-        try:
-            logger.info("Agent %s (%s) initiating inference...", self.role.value, self.model.model_id)
-            response = await self.provider.infer(request)
-            return response.content
-        except Exception as e:
-            logger.error("deliberation failed for agent %s: %s", self.role.value, e)
-            return f"Deliberation failure inside agent {self.role.value}: {e}"
+        from velune.core.trace import TraceContext, _run_id
+
+        with TraceContext(
+            run_id=_run_id.get() or "unknown",
+            agent_id=self.role.value,
+        ):
+            messages = [{"role": "system", "content": self.system_prompt}] + context_history
+
+            from velune.cognition.firewall import CognitiveFirewall
+            firewall = CognitiveFirewall()
+            if not firewall.scan_conversation(messages):
+                logger.error("Prompt injection detected in Council message history")
+                raise ValueError("Security: Potential prompt injection detected in messages")
+
+            request = InferenceRequest(
+                model_id=self.model.model_id,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+
+            AGENT_TIMEOUTS = {
+                CouncilRole.PLANNER: 120.0,
+                CouncilRole.CODER: 180.0,
+                CouncilRole.REVIEWER: 120.0,
+                CouncilRole.CHALLENGER: 90.0,
+                CouncilRole.SYNTHESIZER: 120.0,
+            }
+
+            timeout = AGENT_TIMEOUTS.get(self.role, 120.0)
+
+            try:
+                logger.info("Agent %s (%s) initiating inference...", self.role.value, self.model.model_id)
+                response = await asyncio.wait_for(
+                    self.provider.infer(request),
+                    timeout=timeout,
+                )
+                logger.info("Inference complete: %d chars", len(response.content))
+                return response.content
+            except TimeoutError:
+                logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)
+                return f"[Agent {self.role.value} timed out — using empty response]"
+            except Exception as e:
+                logger.error("deliberation failed for agent %s: %s", self.role.value, e)
+                return f"Deliberation failure inside agent {self.role.value}: {e}"
 
     async def typed_deliberate(
         self,
-        context_history: List[Dict[str, str]],
-        response_type: Type[T],
+        context_history: list[dict[str, str]],
+        response_type: type[T],
         temperature: float = 0.5,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> T:
         """Runs deliberation and parses the output into a strongly-typed Pydantic model."""
         from pydantic import ValidationError
-        
+
         raw = await self.deliberate(context_history, temperature, max_tokens)
         cleaned = raw.strip()
         for prefix in ("```json", "```"):
@@ -79,12 +106,12 @@ class BaseCouncilAgent(ABC):
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3]
         cleaned = cleaned.strip()
-        
+
         try:
             return response_type.model_validate_json(cleaned)
         except (ValidationError, Exception) as e:
             logger.error(
-                "Agent %s returned unparseable response: %s\nRaw: %s", 
+                "Agent %s returned unparseable response: %s\nRaw: %s",
                 self.role.value, e, raw[:200]
             )
             try:

@@ -11,6 +11,5 @@ if sys.platform == "win32":
 
 from velune.cli.app import app
 
-
 if __name__ == "__main__":
     app()

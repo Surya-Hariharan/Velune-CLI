@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+
 import toml
 from pydantic import BaseModel, Field
 
@@ -27,7 +27,7 @@ class ContextConfig(BaseModel):
     """Context window budgeting settings."""
     max_tokens: int = 128000
     compression_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    priority_tiers: List[str] = Field(default_factory=lambda: ["critical", "high", "medium", "low"])
+    priority_tiers: list[str] = Field(default_factory=lambda: ["critical", "high", "medium", "low"])
 
 
 class MemoryConfig(BaseModel):
@@ -52,34 +52,43 @@ class ExecutionConfig(BaseModel):
     auto_snapshot: bool = True
     require_confirmation: bool = True
     dry_run_default: bool = False
+    low_resource_mode: bool = False
+    allowed_executables: list[str] = Field(
+        default_factory=lambda: [
+            "python", "python3", "pytest", "ruff", "mypy",
+            "git", "node", "npm", "cargo", "go",
+            "make", "cmake", "gcc", "clang",
+            "echo", "cat", "ls", "find", "grep"
+        ]
+    )
 
 
 class ProviderEntry(BaseModel):
     """Target address and API key names for LLM providers."""
-    api_key_env: Optional[str] = None
-    base_url: Optional[str] = None
+    api_key_env: str | None = None
+    base_url: str | None = None
 
 
 class ProvidersConfig(BaseModel):
     """Configuration for active and fallback models."""
     default_provider: str = "openai"
-    fallback_providers: List[str] = Field(default_factory=lambda: ["anthropic", "ollama"])
-    openai: Optional[ProviderEntry] = Field(
+    fallback_providers: list[str] = Field(default_factory=lambda: ["anthropic", "ollama"])
+    openai: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(api_key_env="OPENAI_API_KEY", base_url="https://api.openai.com/v1")
     )
-    anthropic: Optional[ProviderEntry] = Field(
+    anthropic: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(api_key_env="ANTHROPIC_API_KEY", base_url="https://api.anthropic.com")
     )
-    ollama: Optional[ProviderEntry] = Field(
+    ollama: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(base_url="http://localhost:11434")
     )
-    lmstudio: Optional[ProviderEntry] = Field(
+    lmstudio: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(base_url="http://localhost:1234/v1")
     )
-    llamacpp: Optional[ProviderEntry] = Field(
+    llamacpp: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(base_url="")
     )
-    huggingface: Optional[ProviderEntry] = Field(
+    huggingface: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(api_key_env="HF_TOKEN", base_url="https://api-inference.huggingface.co")
     )
 
@@ -117,10 +126,10 @@ def get_default_config() -> VeluneConfig:
 class ConfigLoader:
     """Loads and overlays configuration from TOML and Environment variables."""
 
-    def __init__(self, config_path: Optional[Path] = None) -> None:
+    def __init__(self, config_path: Path | None = None) -> None:
         self.config_path = config_path or self._find_config_path()
 
-    def _find_config_path(self) -> Optional[Path]:
+    def _find_config_path(self) -> Path | None:
         """Traverse upwards to locate velune.toml, or fall back to user home."""
         try:
             current_dir = Path.cwd()
@@ -153,7 +162,7 @@ class ConfigLoader:
     def load_with_env_overrides(self) -> VeluneConfig:
         """Inject API key strings directly from the environment variables specified in the config."""
         config = self.load()
-        
+
         # Override OpenAI key if env variable matches
         if config.providers.openai and config.providers.openai.api_key_env:
             key = os.getenv(config.providers.openai.api_key_env)
@@ -174,14 +183,14 @@ class ConfigService:
     """Workspace-aware configuration service."""
 
     workspace: Path
-    config_path: Optional[Path] = None
+    config_path: Path | None = None
 
     def load(self) -> VeluneConfig:
         """Load configuration using workspace priorities."""
         resolved = self._resolve_config_path()
         return ConfigLoader(resolved).load_with_env_overrides()
 
-    def _resolve_config_path(self) -> Optional[Path]:
+    def _resolve_config_path(self) -> Path | None:
         if self.config_path:
             return self.config_path
 

@@ -1,13 +1,17 @@
-"""Terminal execution tools."""
+from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from velune.execution.sandbox import SubprocessSandbox
+
 from velune.tools.base.tool import BaseTool
 
 
 class ExecuteCommand(BaseTool):
     """Tool for executing terminal commands."""
 
-    def __init__(self, sandbox: Optional['SubprocessSandbox'] = None, workspace_path: Optional[str] = None):
+    def __init__(self, sandbox: Optional['SubprocessSandbox'] = None, workspace_path: str | None = None):
         self._sandbox = sandbox
         self._workspace_path = workspace_path
 
@@ -20,18 +24,26 @@ class ExecuteCommand(BaseTool):
     async def execute(
         self,
         command: str,
-        directory: Optional[str] = None,
+        directory: str | None = None,
         timeout: int = 30,
     ) -> dict:
         """Execute a command."""
-        from velune.execution.sandbox import SubprocessSandbox
         from pathlib import Path
-        
+
+        from velune.core.errors.execution import SandboxError
+        from velune.execution.command_spec import CommandSpec
+        from velune.execution.sandbox import SubprocessSandbox
+
         workspace = Path(directory or self._workspace_path or Path.cwd())
         sandbox = self._sandbox or SubprocessSandbox(workspace)
-        
-        # This now goes through SubprocessSandbox._is_safe_command() check
-        result = sandbox.execute(command, cwd=Path(directory) if directory else None, timeout=float(timeout))
+
+        try:
+            spec = CommandSpec.from_string(command, cwd=workspace, timeout=float(timeout))
+        except SandboxError as e:
+            sandbox.emit_rejection(command, str(e))
+            raise e
+
+        result = sandbox.execute(spec)
         return {
             "exit_code": result.exit_code,
             "stdout": result.stdout,

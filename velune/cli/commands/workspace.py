@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 import typer
+from rich.box import ROUNDED
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from rich.box import ROUNDED
 
 from velune.cli.context import CLIContext
-from velune.core.async_runtime import run_async
 
 console = Console()
 workspace_cmd = typer.Typer(help="Workspace management commands")
@@ -40,12 +40,22 @@ def workspace_init(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
+    from velune.core.event_loop import submit
+    submit(_workspace_init_async(cli_context, path, velune_dir, force))
+
+
+async def _workspace_init_async(
+    cli_context: CLIContext,
+    path: Path,
+    velune_dir: Path,
+    force: bool,
+) -> None:
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
     repo_cognition = container.get("runtime.repository_cognition")
 
     # 3. Boot subsystems and compile index
-    run_async(lifecycle.startup())
+    await lifecycle.startup()
 
     console.print("[bold cyan]⠋[/bold cyan] Building Tree-sitter compiler AST indices and scanning imports...")
     with console.status("[bold magenta]⚡ Parsing symbols, dependencies, and git Authorship...[/bold magenta]") as status:
@@ -55,7 +65,7 @@ def workspace_init(
     num_files = len(snapshot.files)
     num_symbols = len(snapshot.symbols)
     num_edges = len(snapshot.edges)
-    
+
     languages = {}
     for f in snapshot.files:
         languages[f.language.value] = languages.get(f.language.value, 0) + 1
@@ -83,7 +93,7 @@ def workspace_init(
         )
     )
 
-    run_async(lifecycle.shutdown())
+    await lifecycle.shutdown()
 
 
 @workspace_cmd.command("status")
@@ -103,12 +113,21 @@ def workspace_status(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
+    from velune.core.event_loop import submit
+    submit(_workspace_status_async(cli_context, path, velune_dir))
+
+
+async def _workspace_status_async(
+    cli_context: CLIContext,
+    path: Path,
+    velune_dir: Path,
+) -> None:
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
     repo_cognition = container.get("runtime.repository_cognition")
 
-    run_async(lifecycle.startup())
-    
+    await lifecycle.startup()
+
     with console.status("[bold cyan]Querying cognitive index status...[/bold cyan]") as status:
         snapshot = repo_cognition.index(force=False)
 
@@ -124,7 +143,7 @@ def workspace_status(
                 (f"[bold]Indexed files count:[/bold] {num_files}\n"),
                 (f"[bold]Indexed symbols count:[/bold] {num_symbols}\n"),
                 (f"[bold]Git branch:[/bold] [magenta]{git_branch}[/magenta]\n"),
-                (f"[bold]Status:[/bold] [bold green]Active & Fully Primed[/bold green]")
+                ("[bold]Status:[/bold] [bold green]Active & Fully Primed[/bold green]")
             ),
             border_style="cyan",
             box=ROUNDED,
@@ -132,4 +151,4 @@ def workspace_status(
         )
     )
 
-    run_async(lifecycle.shutdown())
+    await lifecycle.shutdown()

@@ -1,7 +1,8 @@
 """Core agent type definitions."""
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -35,14 +36,14 @@ class AgentMessage(BaseModel):
     recipient: str
     content: Any
     timestamp: float
-    correlation_id: Optional[str] = None
+    correlation_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentResult(BaseModel):
     """Result from agent execution."""
     success: bool
-    output: Optional[Any] = None
-    error: Optional[str] = None
+    output: Any | None = None
+    error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    execution_time_ms: Optional[float] = None
+    execution_time_ms: float | None = None

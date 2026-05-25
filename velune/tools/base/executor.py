@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +19,7 @@ class ToolExecutionResult(BaseModel):
     tool_name: str
     success: bool
     output: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     attempts: int = 1
     duration_ms: float = 0.0
     timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
@@ -45,9 +45,9 @@ class ToolExecutionCoordinator:
         arguments: dict[str, Any],
         run_id: str,
         actor: str,
-        timeout: Optional[float] = None,
-        retries: Optional[int] = None,
-        granted_permissions: Optional[set[ToolPermission]] = None,
+        timeout: float | None = None,
+        retries: int | None = None,
+        granted_permissions: set[ToolPermission] | None = None,
     ) -> ToolExecutionResult:
         """Execute a tool with retries and structured tracing."""
 
@@ -81,7 +81,7 @@ class ToolExecutionCoordinator:
         run_timeout = timeout if timeout is not None else self.default_timeout
 
         start = time.perf_counter()
-        last_error: Optional[str] = None
+        last_error: str | None = None
 
         for attempt in range(1, max_attempts + 1):
             try:

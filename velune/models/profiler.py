@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List, Optional
+
 from pydantic import BaseModel, Field
-from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
+
+from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.providers.base import ModelProvider
-from velune.providers.benchmarker import ProviderBenchmarker, ModelBenchmarkMetrics
+from velune.providers.benchmarker import ModelBenchmarkMetrics, ProviderBenchmarker
 
 
 class ModelProfile(BaseModel):
@@ -27,25 +28,25 @@ class ModelProfiler:
     """Measures accuracy, response speed, and structure-matching capabilities."""
 
     def __init__(self) -> None:
-        self._profiles: Dict[str, ModelProfile] = {}
-        self._latency_samples: Dict[str, List[float]] = {}
+        self._profiles: dict[str, ModelProfile] = {}
+        self._latency_samples: dict[str, list[float]] = {}
 
     def record_execution(self, provider_id: str, model_id: str, latency_ms: float) -> None:
         """Record real-time execution latency to build statistical latency profiles."""
         key = f"{provider_id}/{model_id}"
         if key not in self._latency_samples:
             self._latency_samples[key] = []
-            
+
         samples = self._latency_samples[key]
         samples.append(latency_ms)
-        
+
         # Enforce rolling history bounds to prevent memory bloat
         if len(samples) > 100:
             samples.pop(0)
 
         sorted_samples = sorted(samples)
         n = len(sorted_samples)
-        
+
         avg_lat = sum(samples) / n
         p95_lat = sorted_samples[int(n * 0.95)] if n > 0 else avg_lat
 
@@ -67,7 +68,7 @@ class ModelProfiler:
     async def profile_model(self, provider: ModelProvider, descriptor: ModelDescriptor) -> ModelProfile:
         """Actively benchmark an operational provider model for performance and structure."""
         key = f"{descriptor.provider_id}/{descriptor.model_id}"
-        
+
         # Run benchmarks
         benchmarker = ProviderBenchmarker(provider, descriptor.model_id)
         metrics: ModelBenchmarkMetrics = await benchmarker.evaluate()
@@ -94,11 +95,11 @@ class ModelProfiler:
 
         return profile
 
-    def get_profile(self, provider_id: str, model_id: str) -> Optional[ModelProfile]:
+    def get_profile(self, provider_id: str, model_id: str) -> ModelProfile | None:
         """Look up the recorded profile for a model."""
         key = f"{provider_id}/{model_id}"
         return self._profiles.get(key)
 
-    def list_profiles(self) -> List[ModelProfile]:
+    def list_profiles(self) -> list[ModelProfile]:
         """Enumerate all active profiles."""
         return list(self._profiles.values())

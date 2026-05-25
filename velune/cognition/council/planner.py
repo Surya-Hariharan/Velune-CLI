@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
 import logging
 
-from velune.models.specializations import CouncilRole
-from velune.core.types.model import ModelDescriptor
-from velune.providers.base import ModelProvider
 from velune.cognition.council.base import BaseCouncilAgent
-from velune.core.types.task import TaskPlan, TaskStep, TaskStatus
 from velune.cognition.council.messages import PlannerMessage
+from velune.core.types.model import ModelDescriptor
+from velune.core.types.task import TaskPlan, TaskStatus, TaskStep
+from velune.models.specializations import CouncilRole
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.planner")
 
@@ -66,7 +65,7 @@ class PlannerAgent(BaseCouncilAgent):
     async def generate_plan(self, prompt: str, repo_context: str) -> TaskPlan:
         """Analyze goals and emit a verified TaskPlan."""
         logger.info("Planner generating execution plan...")
-        
+
         user_messages = [
             {
                 "role": "user",
@@ -75,7 +74,7 @@ class PlannerAgent(BaseCouncilAgent):
         ]
 
         result = await self.typed_deliberate(user_messages, PlannerMessage, temperature=0.2)
-        
+
         if result.parse_error:
             logger.error("Failed to parse Planner JSON output. Falling back to default single step. Error: %s", result.parse_error)
             # Create a fallback single-step plan

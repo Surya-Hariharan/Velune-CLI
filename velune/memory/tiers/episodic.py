@@ -10,7 +10,8 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from velune.memory.storage.sqlite_manager import SQLiteManager
@@ -20,28 +21,28 @@ logger = logging.getLogger("velune.memory.tiers.episodic")
 
 class EpisodicTurn(BaseModel):
     """An episodic conversation turn stored in SQLite."""
-    id: Optional[int] = None
+    id: int | None = None
     session_id: str
     role: str
     content: str
     timestamp: float
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class EpisodicStep(BaseModel):
     """An episodic execution step stored in SQLite."""
-    id: Optional[int] = None
+    id: int | None = None
     session_id: str
     step_name: str
     status: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: float
 
 
 class EpisodicMemoryTier:
     """Tier 2: Persisted SQLite storage for local episodic trace retrieval."""
 
-    def __init__(self, db_path: Path, sqlite_manager: Optional[SQLiteManager] = None) -> None:
+    def __init__(self, db_path: Path, sqlite_manager: SQLiteManager | None = None) -> None:
         self.db_path = db_path
         self.sqlite_manager = sqlite_manager or SQLiteManager(db_path)
         self._initialized = False
@@ -78,7 +79,7 @@ class EpisodicMemoryTier:
         except Exception as e:
             logger.error("Failed to initialize Episodic SQLite DB: %s", e)
 
-    def add_turn(self, session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    def add_turn(self, session_id: str, role: str, content: str, metadata: dict[str, Any] | None = None) -> None:
         """Add a conversation turn to SQLite episodic memory."""
         meta_str = json.dumps(metadata or {})
         now = time.time()
@@ -90,9 +91,9 @@ class EpisodicMemoryTier:
         except Exception as e:
             logger.error("Failed to insert episodic turn: %s", e)
 
-    def get_turns(self, session_id: str) -> List[EpisodicTurn]:
+    def get_turns(self, session_id: str) -> list[EpisodicTurn]:
         """Fetch all conversation turns for a session in chronological order."""
-        turns: List[EpisodicTurn] = []
+        turns: list[EpisodicTurn] = []
         try:
             rows = self.sqlite_manager.execute_read(
                 "SELECT id, session_id, role, content, timestamp, metadata FROM conversation_turns WHERE session_id = ? ORDER BY timestamp ASC",
@@ -111,7 +112,7 @@ class EpisodicMemoryTier:
             logger.error("Failed to query episodic turns: %s", e)
         return turns
 
-    def add_execution_step(self, session_id: str, step_name: str, status: str, payload: Optional[Dict[str, Any]] = None) -> None:
+    def add_execution_step(self, session_id: str, step_name: str, status: str, payload: dict[str, Any] | None = None) -> None:
         """Record an autonomous execution step to SQLite episodic memory."""
         payload_str = json.dumps(payload or {})
         now = time.time()
@@ -123,9 +124,9 @@ class EpisodicMemoryTier:
         except Exception as e:
             logger.error("Failed to insert episodic execution step: %s", e)
 
-    def get_execution_steps(self, session_id: str) -> List[EpisodicStep]:
+    def get_execution_steps(self, session_id: str) -> list[EpisodicStep]:
         """Fetch all execution steps for a session."""
-        steps: List[EpisodicStep] = []
+        steps: list[EpisodicStep] = []
         try:
             rows = self.sqlite_manager.execute_read(
                 "SELECT id, session_id, step_name, status, payload, timestamp FROM execution_steps WHERE session_id = ? ORDER BY timestamp ASC",

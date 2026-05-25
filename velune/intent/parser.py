@@ -7,7 +7,6 @@ from raw user commands.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Set
 
 
 class IntentSignalParser:
@@ -21,14 +20,14 @@ class IntentSignalParser:
             r"\b(analyze|inspect|read|explain|review)\b",
         ]
 
-    def parse(self, text: str) -> Dict[str, Any]:
+    def parse(self, text: str) -> dict[str, Any]:
         """Parse raw query and extract structured signal features."""
         # 1. Extract file paths / patterns
         # Matches patterns like src/main.py, test.js, README.md, etc.
         file_matches = re.findall(r"[\w\-\./]+\.[a-zA-Z]{2,4}", text)
-        
+
         # 2. Extract action verbs
-        actions: Set[str] = set()
+        actions: set[str] = set()
         for pattern in self.verb_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for m in matches:

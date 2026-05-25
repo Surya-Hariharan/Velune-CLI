@@ -1,19 +1,38 @@
-from velune.kernel.bootstrap import SubsystemModule, RuntimeEnvironment
+from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
+
 
 def _create_tool_registry(env: RuntimeEnvironment):
     import logging
-    from velune.tools.base.registry import ToolRegistry
+
     from velune.tools import (
-        ReadFile, ReadDirectory, WriteFile, CreateFile, DeleteFile,
-        GrepFiles, FindFiles, GitLog, GitDiff, GitBlame, GitStatus, GitBranch,
-        GitCommit, GitCheckout, ExecuteCommand, TerminalHistory,
-        SemanticCodeSearch, SymbolSearch, GoToDefinition, FindReferences, WebFetch
+        CreateFile,
+        DeleteFile,
+        ExecuteCommand,
+        FindFiles,
+        FindReferences,
+        GitBlame,
+        GitBranch,
+        GitCheckout,
+        GitCommit,
+        GitDiff,
+        GitLog,
+        GitStatus,
+        GoToDefinition,
+        GrepFiles,
+        ReadDirectory,
+        ReadFile,
+        SemanticCodeSearch,
+        SymbolSearch,
+        TerminalHistory,
+        WebFetch,
+        WriteFile,
     )
-    
+    from velune.tools.base.registry import ToolRegistry
+
     logger = logging.getLogger("velune.tools.module")
-    
+
     execution_executor = env.container.get("runtime.execution_executor")
-    
+
     tool_registry = ToolRegistry()
     execute_cmd_tool = ExecuteCommand(
         sandbox=execution_executor.sandbox,
@@ -31,7 +50,7 @@ def _create_tool_registry(env: RuntimeEnvironment):
     broken = tool_registry.list_broken_tools()
     if broken:
         logger.warning("Tools failed validation: %s", broken)
-        
+
     return tool_registry
 
 TOOL_MODULES = [

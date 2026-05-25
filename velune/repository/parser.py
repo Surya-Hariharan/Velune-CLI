@@ -3,7 +3,7 @@
 import ast
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from velune.repository.schemas import (
     RepositoryEdge,
@@ -14,11 +14,11 @@ from velune.repository.schemas import (
 
 # Optional imports for tree-sitter
 try:
-    from tree_sitter import Language, Parser
     import tree_sitter_go
     import tree_sitter_python
     import tree_sitter_rust
     import tree_sitter_typescript
+    from tree_sitter import Language, Parser
     HAS_TREE_SITTER = True
 except ImportError:
     HAS_TREE_SITTER = False
@@ -28,7 +28,7 @@ class ASTParser:
     """Multi-language AST and symbol parser with comprehensive fallbacks."""
 
     def __init__(self) -> None:
-        self.languages: Dict[str, Any] = {}
+        self.languages: dict[str, Any] = {}
         if HAS_TREE_SITTER:
             self._init_tree_sitter()
 
@@ -55,10 +55,10 @@ class ASTParser:
         except Exception:
             pass
 
-    def parse(self, file_path: Path, code: str) -> Tuple[List[RepositorySymbol], List[RepositoryEdge]]:
+    def parse(self, file_path: Path, code: str) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Parses source code from file_path, leveraging tree-sitter or fallbacks."""
         lang = self._detect_language(file_path)
-        
+
         # Try tree-sitter if available and initialized
         if HAS_TREE_SITTER and lang.value in self.languages:
             try:
@@ -70,7 +70,7 @@ class ASTParser:
         # Fallbacks
         if lang == RepositoryLanguage.PYTHON:
             return self._parse_python_ast(file_path, code)
-        
+
         return self._parse_regex(file_path, code, lang)
 
     def _detect_language(self, file_path: Path) -> RepositoryLanguage:
@@ -87,16 +87,16 @@ class ASTParser:
         }
         return mapping.get(suffix, RepositoryLanguage.UNKNOWN)
 
-    def _parse_tree_sitter(self, file_path: Path, code: str, lang: RepositoryLanguage) -> Tuple[List[RepositorySymbol], List[RepositoryEdge]]:
+    def _parse_tree_sitter(self, file_path: Path, code: str, lang: RepositoryLanguage) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Uses tree-sitter to parse the code and extract symbols and imports."""
         parser = Parser(self.languages[lang.value])
         tree = parser.parse(bytes(code, "utf8"))
-        
-        symbols: List[RepositorySymbol] = []
-        edges: List[RepositoryEdge] = []
+
+        symbols: list[RepositorySymbol] = []
+        edges: list[RepositoryEdge] = []
         file_path_str = str(file_path)
 
-        def walk(node: Any, parent_class: Optional[str] = None) -> None:
+        def walk(node: Any, parent_class: str | None = None) -> None:
             node_type = node.type
             name = ""
             kind = RepositorySymbolKind.UNKNOWN
@@ -237,20 +237,20 @@ class ASTParser:
         walk(tree.root_node)
         return symbols, edges
 
-    def _parse_python_ast(self, file_path: Path, code: str) -> Tuple[List[RepositorySymbol], List[RepositoryEdge]]:
+    def _parse_python_ast(self, file_path: Path, code: str) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Standard Python AST library fallback."""
         try:
             tree = ast.parse(code)
         except SyntaxError:
             return [], []
 
-        symbols: List[RepositorySymbol] = []
-        edges: List[RepositoryEdge] = []
+        symbols: list[RepositorySymbol] = []
+        edges: list[RepositoryEdge] = []
         file_path_str = str(file_path)
 
         class PythonVisitor(ast.NodeVisitor):
             def __init__(self) -> None:
-                self.class_stack: List[str] = []
+                self.class_stack: list[str] = []
 
             def visit_ClassDef(self, node: ast.ClassDef) -> None:
                 doc = ast.get_docstring(node)
@@ -323,7 +323,7 @@ class ASTParser:
         PythonVisitor().visit(tree)
         return symbols, edges
 
-    def _parse_regex(self, file_path: Path, code: str, lang: RepositoryLanguage) -> Tuple[List[RepositorySymbol], List[RepositoryEdge]]:
+    def _parse_regex(self, file_path: Path, code: str, lang: RepositoryLanguage) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Universal regex symbol extractor fallback."""
         patterns = {
             RepositoryLanguage.JAVASCRIPT: [
@@ -348,8 +348,8 @@ class ASTParser:
             ],
         }
 
-        symbols: List[RepositorySymbol] = []
-        edges: List[RepositoryEdge] = []
+        symbols: list[RepositorySymbol] = []
+        edges: list[RepositoryEdge] = []
         file_path_str = str(file_path)
 
         for pattern, kind in patterns.get(lang, []):
@@ -358,10 +358,10 @@ class ASTParser:
                 # Determine lines
                 start_char = match.start()
                 line_no = code[:start_char].count("\n") + 1
-                
+
                 if kind == RepositorySymbolKind.IMPORT:
                     edges.append(RepositoryEdge(source=file_path_str, target=value, edge_type="imports"))
-                
+
                 symbols.append(
                     RepositorySymbol(
                         name=value,

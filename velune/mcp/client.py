@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
+
 from mcp.types import Tool
-from velune.tools.base.tool import BaseTool, ToolPermission
+
+from velune.tools.base.tool import BaseTool
 
 
 class MCPToolWrapper(BaseTool):
@@ -30,7 +32,7 @@ class MCPToolWrapper(BaseTool):
         if not self.client.session:
             raise RuntimeError(f"Client for tool {self.get_name()} is not connected.")
         result = await self.client.session.call_tool(self.name, arguments=kwargs)
-        
+
         # CallToolResult structure holds content. Let's parse text contents.
         text_contents = []
         if hasattr(result, "content") and result.content:
@@ -57,8 +59,8 @@ class VeluneMCPClient:
 
     async def connect(self) -> list[dict]:
         """Connect and return available tools."""
-        from mcp.client.sse import sse_client
         from mcp import ClientSession
+        from mcp.client.sse import sse_client
 
         self._sse_ctx = sse_client(self.server_url)
         self._read, self._write = await self._sse_ctx.__aenter__()

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Optional
 import typer
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from velune.cognition.firewall import CognitiveFirewall
 from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
 
 from velune.cli.context import CLIContext
 from velune.cli.display.council_view import CouncilDisplayView
-from velune.core.async_runtime import run_async
 from velune.repository.schemas import RepositorySnapshot
 
 console = Console()
@@ -20,7 +19,8 @@ ask_cmd = typer.Typer(help="Interactive prompt entry point")
 
 def ask_command(
     ctx: typer.Context,
-    prompt: Optional[str] = typer.Argument(None, help="Question or task to route through Velune"),
+    prompt: str | None = typer.Argument(None, help="Question or task to route through Velune"),
+    council_tier: str | None = typer.Option(None, "--council-tier", help="Override council execution tier (instant, standard, full)"),
 ) -> None:
     """Deliberates with the Reasoning Council for conceptual answers and code reviews without execution."""
 
@@ -38,6 +38,11 @@ def ask_command(
             console.print("[yellow]Empty query. Exiting.[/yellow]")
             return
 
+    from velune.core.event_loop import submit
+    submit(_ask_command_async(cli_context, prompt, council_tier))
+
+
+async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier: str | None = None) -> None:
     # 1. Access services from DI container
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
@@ -48,8 +53,8 @@ def ask_command(
 
     # 2. Boot subsystems
     console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
-    run_async(lifecycle.startup())
-    run_async(model_registry.refresh())
+    await lifecycle.startup()
+    await model_registry.refresh()
 
     display = CouncilDisplayView(console)
     display.render_header(prompt)
@@ -58,17 +63,20 @@ def ask_command(
     roles = model_specialization.map_roles()
     display.render_role_assignments(roles)
 
+    from velune.cognition.firewall import CognitiveFirewall
+    firewall = CognitiveFirewall()
+
     # 4. Ingest and Scan AST Snapshot
-    snapshot: RepositorySnapshot = None
+    snapshot: RepositorySnapshot | None = None
     with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]") as status:
         snapshot = repo_cognition.index()
-    
-    formatted_snap = _format_snapshot_context(snapshot)
+
+    formatted_snap = _format_snapshot_context_safe(snapshot, firewall)
 
     # 5. deliberating debate loop
     council_res = None
     with console.status("[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]") as status:
-        council_res = run_async(orchestrator.execute_task(prompt, formatted_snap))
+        council_res = await orchestrator.execute_task(prompt, formatted_snap, council_tier=council_tier)
 
     arbitration = council_res["arbitration"]
     final_summary = council_res["final_summary"]
@@ -87,17 +95,20 @@ def ask_command(
     display.render_synthesized_response(final_summary)
 
     # 7. Shutdown
-    run_async(lifecycle.shutdown())
+    await lifecycle.shutdown()
 
 
-def _format_snapshot_context(snapshot: RepositorySnapshot) -> str:
-    """Format snapshot metadata context for query prompt."""
-    lines = []
-    lines.append(f"Repository Root: {snapshot.root_path}")
-    lines.append("\nCodebase Files:")
-    for f in snapshot.files[:25]:  # limit to prompt sizing
-        lines.append(f"  - {f.path} ({f.language.value})")
+def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: CognitiveFirewall) -> str:
+    """Format snapshot metadata context for query prompt securely."""
+    lines = [f"Repository Root: {snapshot.root_path}"]
+    lines.append("Codebase Files:")
+    for f in snapshot.files[:25]:
+        # Only expose path and language — no raw symbol names or content
+        risk_marker = " [⚠ injection-risk]" if f.metadata.get("injection_risk") else ""
+        lines.append(f"  - {f.path} ({f.language.value}){risk_marker}")
+        # Symbol names are safe to expose (identifiers, not content)
         if f.symbols:
-            syms = [s.name for s in f.symbols[:3]]
-            lines.append(f"    Symbols: {', '.join(syms)}")
+            safe_syms = [s.name for s in f.symbols[:3] if s.name.isidentifier()]
+            if safe_syms:
+                lines.append(f"    Symbols: {', '.join(safe_syms)}")
     return "\n".join(lines)

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import sys
-import shutil
 import os
+import shutil
+import sys
 import tempfile
 from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -18,11 +19,11 @@ doctor_cmd = typer.Typer(help="Environment health diagnostics")
 def check(
     fix: bool = typer.Option(False, "--fix", help="Attempt to fix issues automatically"),
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
-):
+) -> None:
     """Run Velune environment health checks."""
     if fix:
         console.print("[yellow]Attempting automatic fixes...[/yellow]")
-        
+
         # Fix 1: Create .velune/ directory
         velune_dir = Path.cwd() / ".velune"
         if not velune_dir.exists():
@@ -31,20 +32,21 @@ def check(
                 console.print("[green]✓ Created .velune/ directory.[/green]")
             except Exception as e:
                 console.print(f"[red]✗ Failed to create .velune/: {e}[/red]")
-        
+
         # Fix 2: Create default velune.toml if missing
         config_file = Path.cwd() / "velune.toml"
         if not config_file.exists():
             try:
+                import toml  # type: ignore[import-untyped]
+
                 from velune.kernel.config import get_default_config
-                import toml
                 default_config = get_default_config()
                 with open(config_file, "w") as f:
                     toml.dump(default_config.model_dump(), f)
                 console.print("[green]✓ Created default velune.toml config file.[/green]")
             except Exception as e:
                 console.print(f"[red]✗ Failed to create default velune.toml: {e}[/red]")
-                
+
         # Fix 3: Initialize databases
         db_file = velune_dir / "velune_cognitive_core.db"
         try:
@@ -53,7 +55,7 @@ def check(
             console.print("[green]✓ SQLite database successfully initialized.[/green]")
         except Exception as e:
             console.print(f"[red]✗ Failed to initialize SQLite database: {e}[/red]")
-            
+
         console.print("[yellow]Re-running checks after fixes...[/yellow]\n")
 
     checks = [
@@ -73,7 +75,7 @@ def check(
         _check_gpu,
         _check_vram,
     ]
-    
+
     results = []
     for check_fn in checks:
         try:
@@ -81,14 +83,14 @@ def check(
             results.append(result)
         except Exception as e:
             results.append({"name": check_fn.__name__.replace("_check_", "").replace("_", " ").title(), "status": "error", "message": str(e)})
-    
+
     if json_output:
         import json
         print(json.dumps(results, indent=2))
         return
-    
+
     _render_results(results)
-    
+
     failures = [r for r in results if r["status"] == "fail"]
     if failures:
         console.print(f"\n[red]✗ {len(failures)} check(s) failed.[/red]")
@@ -102,7 +104,7 @@ def _check_python_version() -> dict:
     clean_version = sys.version.replace('\n', ' ')
     if version >= (3, 11):
         return {"name": "Python Version", "status": "ok", "message": f"{clean_version}"}
-    return {"name": "Python Version", "status": "fail", 
+    return {"name": "Python Version", "status": "fail",
             "message": f"Python {version.major}.{version.minor} < 3.11. Install Python 3.11+. Details: {clean_version}"}
 
 def _check_core_dependencies() -> dict:
@@ -113,7 +115,7 @@ def _check_core_dependencies() -> dict:
             __import__(dep)
         except ImportError:
             missing.append(dep)
-            
+
     if not missing:
         return {"name": "Core Dependencies", "status": "ok", "message": "All core dependencies installed."}
     return {"name": "Core Dependencies", "status": "fail", "message": f"Missing core dependencies: {', '.join(missing)}"}
@@ -201,9 +203,10 @@ def _check_config() -> dict:
     config_file = Path.cwd() / "velune.toml"
     if not config_file.exists():
         return {"name": "velune.toml Config File", "status": "warn", "message": "No velune.toml found in current workspace. Using defaults."}
-    
+
     try:
-        import toml
+        import toml  # type: ignore[import-untyped]
+
         from velune.kernel.config import VeluneConfig
         data = toml.load(config_file)
         VeluneConfig(**data)
@@ -213,12 +216,12 @@ def _check_config() -> dict:
 
 def _check_treesitter() -> dict:
     try:
-        from tree_sitter import Language
-        import tree_sitter_python
-        import tree_sitter_typescript
         import tree_sitter_go
+        import tree_sitter_python
         import tree_sitter_rust
-        
+        import tree_sitter_typescript
+        from tree_sitter import Language
+
         langs = []
         for name, mod in [("python", tree_sitter_python), ("typescript", tree_sitter_typescript), ("go", tree_sitter_go), ("rust", tree_sitter_rust)]:
             try:
@@ -270,10 +273,10 @@ def _render_results(results: list) -> None:
     table.add_column("Check", style="bold")
     table.add_column("Status")
     table.add_column("Details")
-    
-    status_styles = {"ok": "[green]✓ OK[/green]", "warn": "[yellow]⚠ WARN[/yellow]", 
+
+    status_styles = {"ok": "[green]✓ OK[/green]", "warn": "[yellow]⚠ WARN[/yellow]",
                      "fail": "[red]✗ FAIL[/red]", "error": "[red]✗ ERROR[/red]"}
-    
+
     for result in results:
         table.add_row(
             result["name"],

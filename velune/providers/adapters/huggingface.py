@@ -2,24 +2,30 @@
 
 from __future__ import annotations
 
-import httpx
 import os
 import time
-from typing import AsyncIterator, List, Optional
-from velune.providers.base import ModelProvider
+import json
+from collections.abc import AsyncIterator
+
+import httpx
+
+from velune.core.errors.provider import (
+    InferenceError,
+    ProviderAuthenticationError,
+)
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
-from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
+from velune.core.types.model import ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.core.errors.provider import ProviderConnectionError, ProviderAuthenticationError, InferenceError
+from velune.providers.base import ModelProvider
 
 
 class HuggingFaceProvider(ModelProvider):
     """Hugging Face provider for serverless Inference API."""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: str = "https://api-inference.huggingface.co") -> None:
+    def __init__(self, api_key: str | None = None, base_url: str = "https://api-inference.huggingface.co") -> None:
         self._api_key = api_key or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
         self._base_url = base_url
-        self.client: Optional[httpx.AsyncClient] = None
+        self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(
             supports_streaming=True,
             supports_function_calling=False,
@@ -39,7 +45,7 @@ class HuggingFaceProvider(ModelProvider):
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
 
-    async def list_models(self) -> List[ModelDescriptor]:
+    async def list_models(self) -> list[ModelDescriptor]:
         """Fetch list of local cached Hugging Face models."""
         from velune.providers.discovery.huggingface import HuggingFaceDiscovery
         discovery = HuggingFaceDiscovery()
@@ -53,7 +59,7 @@ class HuggingFaceProvider(ModelProvider):
         try:
             # Map standard messages to conversational prompt
             prompt = self._format_messages_to_prompt(request.messages)
-            
+
             payload = {
                 "inputs": prompt,
                 "parameters": {
@@ -129,7 +135,7 @@ class HuggingFaceProvider(ModelProvider):
         except httpx.HTTPError as e:
             raise InferenceError(f"Hugging Face Inference streaming failed: {e}")
 
-    async def embed(self, texts: List[str], model_id: str) -> List[List[float]]:
+    async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         """Batch embeddings generation using HF feature-extraction pipeline."""
         await self.initialize()
         assert self.client is not None
@@ -138,7 +144,7 @@ class HuggingFaceProvider(ModelProvider):
             response = await self.client.post(model_path, json={"inputs": texts, "options": {"wait_for_model": True}})
             response.raise_for_status()
             embeddings = response.json()
-            
+
             # Embeddings could be 1D or 2D/3D depending on token poolings. Ensure we return 2D floats.
             if isinstance(embeddings, list) and len(embeddings) > 0:
                 if isinstance(embeddings[0], list):
@@ -157,7 +163,7 @@ class HuggingFaceProvider(ModelProvider):
         except httpx.HTTPError as e:
             raise InferenceError(f"Hugging Face embedding failed: {e}")
 
-    def _format_messages_to_prompt(self, messages: List[dict]) -> str:
+    def _format_messages_to_prompt(self, messages: list[dict]) -> str:
         """Utility to stitch general messages into standard chat-template prompt representation."""
         prompt = ""
         for msg in messages:

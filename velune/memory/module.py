@@ -1,5 +1,6 @@
-from velune.kernel.bootstrap import SubsystemModule, RuntimeEnvironment
-from pathlib import Path
+
+from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
+
 
 def _create_sqlite_manager(env: RuntimeEnvironment):
     from velune.memory.storage.sqlite_manager import SQLiteManager
@@ -34,6 +35,14 @@ def _create_graph_tier(env: RuntimeEnvironment):
     db_path = velune_dir / "velune_cognitive_core.db"
     sqlite_manager = env.container.get("runtime.sqlite_manager")
     return GraphMemoryTier(db_path, sqlite_manager=sqlite_manager)
+
+def _create_lineage_tier(env: RuntimeEnvironment):
+    from velune.memory.tiers.lineage import LineageMemoryTier
+    sqlite_manager = env.container.get("runtime.sqlite_manager")
+    return LineageMemoryTier(
+        db_path=env.workspace / ".velune" / "velune_cognitive_core.db",
+        sqlite_manager=sqlite_manager,
+    )
 
 def _create_archive_tier(env: RuntimeEnvironment):
     from velune.memory.tiers.archive import LongTermArchiveTier
@@ -89,6 +98,12 @@ MEMORY_MODULES = [
         name="graph_memory",
         factory=_create_graph_tier,
         container_key="runtime.graph_memory",
+        dependencies=["runtime.sqlite_manager"],
+    ),
+    SubsystemModule(
+        name="lineage_memory",
+        factory=_create_lineage_tier,
+        container_key="runtime.lineage_memory",
         dependencies=["runtime.sqlite_manager"],
     ),
     SubsystemModule(

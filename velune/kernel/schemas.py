@@ -1,9 +1,10 @@
 """Strictly-typed schemas for the Cognitive Kernel."""
 
+import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Optional
-import uuid
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -24,8 +25,8 @@ class Event(BaseModel):
     event_type: str
     timestamp: float = Field(default_factory=lambda: datetime.now(tz=UTC).timestamp())
     source: str
-    data: Dict[str, Any] = Field(default_factory=dict)
-    correlation_id: Optional[str] = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    correlation_id: str | None = None
 
     class Config:
         frozen = True
@@ -35,5 +36,5 @@ class HealthReport(BaseModel):
     """A report for individual subsystem health."""
     status: ComponentStatus
     latency_ms: float = 0.0
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
     last_check: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))

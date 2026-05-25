@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("velune.cognition.evolution")
 
@@ -41,7 +41,7 @@ class EvolutionTimelineReporter:
             A Markdown-formatted engineering changelog string.  Returns a
             placeholder message when no snapshots exist yet.
         """
-        snapshots: List[Dict[str, Any]] = self.lineage_memory.get_evolution_timeline(subsystem)
+        snapshots: list[dict[str, Any]] = self.lineage_memory.get_evolution_timeline(subsystem)
 
         if not snapshots:
             return (
@@ -50,7 +50,7 @@ class EvolutionTimelineReporter:
                 "> Snapshots are captured automatically after successful execution passes.\n"
             )
 
-        lines: List[str] = [
+        lines: list[str] = [
             f"# Subsystem Evolution Timeline: `{subsystem}`\n",
             f"**Total Snapshots Recorded**: {len(snapshots)}\n",
             "---\n",
@@ -70,8 +70,8 @@ class EvolutionTimelineReporter:
 
             lines += [
                 "## Architectural Health Trends\n",
-                f"| Metric | Oldest Snapshot | Latest Snapshot | Trend |",
-                f"|--------|----------------|----------------|-------|",
+                "| Metric | Oldest Snapshot | Latest Snapshot | Trend |",
+                "|--------|----------------|----------------|-------|",
                 f"| LCOM Average | {oldest['lcom_average']:.2f} | {latest['lcom_average']:.2f} | {lcom_trend} |",
                 f"| Coupling Ratio | {oldest['coupling_ratio']:.3f} | {latest['coupling_ratio']:.3f} | {coupling_trend} |",
                 f"| Debt Items | {oldest['debt_items_count']} | {latest['debt_items_count']} | {debt_trend} |",
@@ -118,7 +118,7 @@ class EvolutionTimelineReporter:
         lcom_average: float,
         coupling_ratio: float,
         debt_items_count: int,
-        milestone: Optional[str] = None,
+        milestone: str | None = None,
         rationale_summary: str = "",
     ) -> None:
         """Log a new monthly snapshot for a subsystem.

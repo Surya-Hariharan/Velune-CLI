@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
+from typing import Any
+
+from rich.box import ROUNDED
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.tree import Tree
 from rich.text import Text
-from rich.box import ROUNDED
+from rich.tree import Tree
+
 
 class MemoryDisplayView:
     """Beautiful Rich-based UI components to visualize Velune's 5-tier Hierarchical Memory system."""
@@ -16,7 +18,7 @@ class MemoryDisplayView:
     def __init__(self, console: Console) -> None:
         self.console = console
 
-    def render_memory_architecture(self, stats: Dict[str, Any]) -> None:
+    def render_memory_architecture(self, stats: dict[str, Any]) -> None:
         """Render a magnificent visual map of the memory tiers and active index statistics."""
         self.console.print(
             Panel(
@@ -36,7 +38,7 @@ class MemoryDisplayView:
             )
         )
 
-    def render_memory_records_table(self, records: List[Dict[str, Any]], memory_type: str) -> None:
+    def render_memory_records_table(self, records: list[dict[str, Any]], memory_type: str) -> None:
         """Render a structured table showing registered records across specific memory tiers."""
         table = Table(
             title=f"[bold green]Registered Memory Records ({memory_type.capitalize()})[/bold green]",
@@ -63,12 +65,12 @@ class MemoryDisplayView:
         self.console.print(table)
         self.console.print()
 
-    def render_knowledge_graph(self, entities: List[Dict[str, Any]], relations: List[Dict[str, Any]]) -> None:
+    def render_knowledge_graph(self, entities: list[dict[str, Any]], relations: list[dict[str, Any]]) -> None:
         """Render a beautiful hierarchical tree of knowledge graph entities and their relational links."""
         root = Tree("[bold cyan]🌐 Graphiti Knowledge Graph Root[/bold cyan]")
 
         # Index entities by type for rendering
-        by_type: Dict[str, List[Dict[str, Any]]] = {}
+        by_type: dict[str, list[dict[str, Any]]] = {}
         for ent in entities:
             etype = ent.get("type", "entity").upper()
             if etype not in by_type:
@@ -81,7 +83,7 @@ class MemoryDisplayView:
                 name = item.get("name", item.get("id", "Unknown"))
                 importance = item.get("importance", 1.0)
                 item_node = type_node.add(f"[cyan]{name}[/cyan] [dim](imp: {importance:.2f})[/dim]")
-                
+
                 # Find relations where this item is the source
                 for rel in relations:
                     if rel.get("source") == item.get("id"):

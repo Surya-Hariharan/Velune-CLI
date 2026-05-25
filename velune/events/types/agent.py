@@ -1,7 +1,7 @@
 """Agent event types."""
 
 from dataclasses import dataclass
-from typing import Dict, Any
+
 from velune.events.bus.engine import Event
 
 

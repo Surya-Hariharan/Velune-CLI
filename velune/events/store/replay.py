@@ -1,7 +1,8 @@
 """Event replay for debugging."""
 
 import asyncio
-from typing import Optional, Callable
+from collections.abc import Callable
+
 from velune.events.bus.engine import Event
 from velune.events.store.log import EventLog
 
@@ -15,7 +16,7 @@ class EventReplayer:
     async def replay_all(self, handler: Callable[[Event], None]) -> None:
         """Replay all events from the log."""
         events = await self.event_log.read_all()
-        
+
         for event in events:
             try:
                 if asyncio.iscoroutinefunction(handler):
@@ -28,7 +29,7 @@ class EventReplayer:
     async def replay_since(self, timestamp: float, handler: Callable[[Event], None]) -> None:
         """Replay events since a timestamp."""
         events = await self.event_log.read_all()
-        
+
         for event in events:
             if event.timestamp >= timestamp:
                 try:

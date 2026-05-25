@@ -1,6 +1,5 @@
 """Events → workspace cognition updates."""
 
-from typing import Optional
 from velune.events.bus.engine import Event
 from velune.workspace.cognition.model import LiveCognitionModel
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
 import logging
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("velune.plugins.hooks")
 
@@ -12,7 +13,7 @@ class PluginHookDispatcher:
     """Manages subscription and invocation of custom plugin callbacks during execution."""
 
     def __init__(self) -> None:
-        self._hooks: Dict[str, List[Callable[..., Any]]] = {
+        self._hooks: dict[str, list[Callable[..., Any]]] = {
             "pre_execute": [],
             "post_retrieve": [],
             "on_arbitrate": [],
@@ -26,7 +27,7 @@ class PluginHookDispatcher:
         else:
             logger.warning("Attempted to register callback for unknown hook point: %s", hook_name)
 
-    async def trigger(self, hook_name: str, *args: Any, **kwargs: Any) -> List[Any]:
+    async def trigger(self, hook_name: str, *args: Any, **kwargs: Any) -> list[Any]:
         """Trigger all registered callbacks for a hook name, capturing results."""
         if hook_name not in self._hooks:
             return []
@@ -44,5 +45,5 @@ class PluginHookDispatcher:
             except Exception as e:
                 logger.error("Error executing callback for hook %s: %s", hook_name, e)
                 results.append(None)
-        
+
         return results

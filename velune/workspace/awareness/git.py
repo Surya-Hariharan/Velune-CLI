@@ -1,8 +1,7 @@
 """Git state awareness."""
 
-from pathlib import Path
-from typing import Optional
 import subprocess
+from pathlib import Path
 
 
 class GitAwareness:
@@ -11,7 +10,7 @@ class GitAwareness:
     def __init__(self, workspace_path: Path):
         self.workspace_path = workspace_path
 
-    def get_branch(self) -> Optional[str]:
+    def get_branch(self) -> str | None:
         """Get current git branch."""
         try:
             result = subprocess.run(
@@ -25,7 +24,7 @@ class GitAwareness:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
 
-    def get_commit_hash(self) -> Optional[str]:
+    def get_commit_hash(self) -> str | None:
         """Get current commit hash."""
         try:
             result = subprocess.run(

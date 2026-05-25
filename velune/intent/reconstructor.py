@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
-from velune.providers.base import ModelProvider
+
+from velune.intent.hypothesis import HypothesisGenerator, IntentHypothesis
 from velune.intent.parser import IntentSignalParser
 from velune.intent.temporal import TemporalResolver
-from velune.intent.hypothesis import HypothesisGenerator, IntentHypothesis
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.intent.reconstructor")
 
@@ -22,9 +22,9 @@ class IntentReconstructor:
 
     def __init__(
         self,
-        parser: Optional[IntentSignalParser] = None,
-        temporal_resolver: Optional[TemporalResolver] = None,
-        hypothesis_gen: Optional[HypothesisGenerator] = None,
+        parser: IntentSignalParser | None = None,
+        temporal_resolver: TemporalResolver | None = None,
+        hypothesis_gen: HypothesisGenerator | None = None,
     ) -> None:
         self.parser = parser or IntentSignalParser()
         self.temporal_resolver = temporal_resolver or TemporalResolver()
@@ -35,7 +35,7 @@ class IntentReconstructor:
         raw_query: str,
         provider: ModelProvider,
         model_id: str,
-        git_status_output: Optional[str] = None,
+        git_status_output: str | None = None,
     ) -> IntentHypothesis:
         """
         Reconstruct a rich, explicit goal hypothesis from ambiguous inputs using LLM arbitration.
@@ -43,10 +43,10 @@ class IntentReconstructor:
         # 1. Parse linguistic signals and temporal offsets
         signals = self.parser.parse(raw_query)
         temporal_offset = self.temporal_resolver.resolve(raw_query)
-        
+
         # 2. Heuristically generate candidates
         candidates = self.hypothesis_gen.generate_candidates(signals, temporal_offset)
-        
+
         # 3. Formulate LLM prompt to select/synthesize the ultimate goal
         prompt = (
             "You are a Cognitive Intent Reconstructor. Resolve this ambiguous user query into a single structured, "
@@ -66,15 +66,15 @@ class IntentReconstructor:
         try:
             logger.info("Executing LLM-driven intent reconstruction using model %s...", model_id)
             response = await provider.complete(prompt=prompt, model=model_id)
-            
+
             content = response.text.strip()
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
-                
+
             data = json.loads(content)
-            
+
             reconstructed = IntentHypothesis(
                 goal_description=data.get("goal_description", raw_query),
                 confidence=float(data.get("confidence", 0.8)),
@@ -82,7 +82,7 @@ class IntentReconstructor:
                 target_files=data.get("target_files", signals.get("target_files", [])),
                 action_plan=data.get("action_plan", ["Decompose goal", "sandbox execution", "validate outcome"]),
             )
-            
+
             logger.info("Intent successfully reconstructed: %s (confidence: %.2f)", reconstructed.goal_description, reconstructed.confidence)
             return reconstructed
         except Exception as e:

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from typing import List, Optional, Dict, Any
-import py_compile
 import logging
+import py_compile
+from pathlib import Path
+from typing import Any
 
-from velune.core.errors.execution import ValidationError
 from velune.execution.sandbox import SubprocessSandbox
 
 logger = logging.getLogger("velune.execution.validator")
@@ -17,7 +15,7 @@ logger = logging.getLogger("velune.execution.validator")
 class ValidationResult:
     """The structured output of a post-execution validation check."""
 
-    def __init__(self, success: bool, errors: List[str], details: Dict[str, Any]) -> None:
+    def __init__(self, success: bool, errors: list[str], details: dict[str, Any]) -> None:
         self.success = success
         self.errors = errors
         self.details = details
@@ -29,20 +27,20 @@ class ValidationResult:
 class PostExecutionValidator:
     """Validates filesystem expectations, syntax boundaries, and test compilations."""
 
-    def __init__(self, workspace_path: Path, sandbox: Optional[SubprocessSandbox] = None) -> None:
+    def __init__(self, workspace_path: Path, sandbox: SubprocessSandbox | None = None) -> None:
         self.workspace_path = Path(workspace_path).resolve()
         self.sandbox = sandbox or SubprocessSandbox(self.workspace_path)
 
     def validate(
         self,
-        expected_files: List[Path],
-        syntax_check_files: List[Path],
-        test_command: Optional[str] = None,
+        expected_files: list[Path],
+        syntax_check_files: list[Path],
+        test_command: str | None = None,
         test_timeout: float = 30.0,
     ) -> ValidationResult:
         """Runs the validation rules, reporting all errors."""
-        errors: List[str] = []
-        details: Dict[str, Any] = {}
+        errors: list[str] = []
+        details: dict[str, Any] = {}
 
         # 1. Verify Expected Files exist and are non-empty
         logger.info("Validating presence of expected files...")
@@ -86,7 +84,16 @@ class PostExecutionValidator:
         if test_command:
             logger.info("Running post-execution tests: %s", test_command)
             try:
-                res = self.sandbox.execute(test_command, timeout=test_timeout)
+                from velune.core.errors.execution import SandboxError
+                from velune.execution.command_spec import CommandSpec
+
+                try:
+                    spec = CommandSpec.from_string(test_command, cwd=self.workspace_path, timeout=test_timeout)
+                except SandboxError as e:
+                    self.sandbox.emit_rejection(test_command, str(e))
+                    raise e
+
+                res = self.sandbox.execute(spec)
                 details["test_execution"] = res.to_dict()
                 if res.exit_code != 0:
                     errors.append(

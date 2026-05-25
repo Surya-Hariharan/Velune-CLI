@@ -1,10 +1,23 @@
 """Foundational primitives and contracts."""
 
-from velune.core.types import *
-from velune.core.config import *
+from velune.core.config.defaults import get_default_config
+from velune.core.config.loader import ConfigLoader
 from velune.core.errors import *
 from velune.core.registry import *
-from velune.kernel.registry import ServiceContainer, inject, get_container
+from velune.core.types import *
+from velune.kernel.config import (
+    ContextConfig,
+    ExecutionConfig,
+    MemoryConfig,
+    ProjectConfig,
+    ProviderEntry,
+    ProvidersConfig,
+    RetrievalConfig,
+    TelemetryConfig,
+    VeluneConfig,
+    WorkspaceConfig,
+)
+from velune.kernel.registry import ServiceContainer, get_container, inject
 
 __all__ = [
     # Types

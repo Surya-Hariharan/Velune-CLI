@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-import httpx
 import json
-import time
 import logging
-from typing import AsyncIterator, List, Optional
-from velune.providers.base import ModelProvider
+import time
+from collections.abc import AsyncIterator
+
+import httpx
+
+from velune.core.errors.provider import InferenceError, ProviderConnectionError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
-from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
+from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.core.errors.provider import ProviderConnectionError, InferenceError
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.providers.adapters.ollama")
 
@@ -21,7 +23,7 @@ class OllamaProvider(ModelProvider):
 
     def __init__(self, base_url: str = "http://localhost:11434") -> None:
         self._base_url = base_url
-        self.client: Optional[httpx.AsyncClient] = None
+        self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(
             supports_streaming=True,
             supports_function_calling=False,
@@ -38,7 +40,7 @@ class OllamaProvider(ModelProvider):
         if not self.client:
             self.client = httpx.AsyncClient(base_url=self._base_url, timeout=300.0)
 
-    async def list_models(self) -> List[ModelDescriptor]:
+    async def list_models(self) -> list[ModelDescriptor]:
         """Fetch models from active Ollama endpoint."""
         await self.initialize()
         assert self.client is not None
@@ -46,8 +48,8 @@ class OllamaProvider(ModelProvider):
             response = await self.client.get("/api/tags")
             response.raise_for_status()
             data = response.json()
-            
-            descriptors: List[ModelDescriptor] = []
+
+            descriptors: list[ModelDescriptor] = []
             for item in data.get("models", []):
                 descriptors.append(
                     ModelDescriptor(
@@ -99,7 +101,7 @@ class OllamaProvider(ModelProvider):
 
             if latency > 30000.0:
                 logger.warning(
-                    "Slow inference on %s (%.1fs). Consider a smaller model for your hardware.", 
+                    "Slow inference on %s (%.1fs). Consider a smaller model for your hardware.",
                     request.model_id, latency / 1000.0
                 )
 
@@ -148,11 +150,11 @@ class OllamaProvider(ModelProvider):
         except httpx.HTTPError as e:
             raise InferenceError(f"Ollama streaming failed: {e}")
 
-    async def embed(self, texts: List[str], model_id: str) -> List[List[float]]:
+    async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         """Batch embedding generation."""
         await self.initialize()
         assert self.client is not None
-        embeddings: List[List[float]] = []
+        embeddings: list[list[float]] = []
         try:
             for text in texts:
                 resp = await self.client.post("/api/embeddings", json={"model": model_id, "prompt": text})

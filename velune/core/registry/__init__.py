@@ -1,11 +1,11 @@
 """Global component registry."""
 
+from velune.core.registry.bindings import register_default_bindings
 from velune.kernel.registry import (
     ServiceContainer,
-    inject,
     get_container,
+    inject,
 )
-from velune.core.registry.bindings import register_default_bindings
 
 __all__ = [
     "ServiceContainer",

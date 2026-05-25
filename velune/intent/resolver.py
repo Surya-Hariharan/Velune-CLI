@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+
 from velune.intent.hypothesis import IntentHypothesis
 
 logger = logging.getLogger("velune.intent.resolver")
@@ -23,7 +23,7 @@ class IntentResolver:
         if hypothesis.confidence >= self.confidence_threshold:
             logger.info("Hypothesis approved for execution (confidence %.2f >= %.2f)", hypothesis.confidence, self.confidence_threshold)
             return True
-            
+
         logger.warning("Hypothesis confidence too low (%.2f < %.2f). User clarification is recommended.", hypothesis.confidence, self.confidence_threshold)
         return False
 
@@ -44,10 +44,10 @@ class ActiveIntentTracker:
 
     def __init__(self, hypothesis: IntentHypothesis) -> None:
         self.hypothesis = hypothesis
-        self.completed_steps: List[str] = []
+        self.completed_steps: list[str] = []
         self.current_step_index = 0
 
-    def get_current_step(self) -> Optional[str]:
+    def get_current_step(self) -> str | None:
         """Fetch the active step description from the action plan."""
         plan = self.hypothesis.action_plan
         if 0 <= self.current_step_index < len(plan):

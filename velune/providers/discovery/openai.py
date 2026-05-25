@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import os
+
 import httpx
-from typing import List
-from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
+
+from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 
 
 class OpenAIDiscovery:
@@ -17,9 +19,9 @@ class OpenAIDiscovery:
         """Discover models from OpenAI."""
         if not self.api_key:
             return []
-        
+
         models = []
-        
+
         try:
             headers = {"Authorization": f"Bearer {self.api_key}"}
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -29,7 +31,7 @@ class OpenAIDiscovery:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 for model in data.get("data", []):
                     if "gpt" in model["id"].lower():
                         descriptor = self._parse_model(model)
@@ -37,15 +39,15 @@ class OpenAIDiscovery:
                             models.append(descriptor)
         except Exception:
             pass
-        
+
         return models
 
     def _parse_model(self, model_data: dict) -> ModelDescriptor:
         """Parse model data into descriptor."""
         model_id = model_data["id"]
-        
+
         capabilities = self._classify_capabilities(model_id)
-        
+
         # Determine context length and cost
         if "gpt-4" in model_id:
             context_length = 128000
@@ -56,7 +58,7 @@ class OpenAIDiscovery:
         else:
             context_length = 4096
             cost_per_1k = 0.001
-        
+
         return ModelDescriptor(
             model_id=model_id,
             provider_id=self.provider_id,
@@ -75,7 +77,7 @@ class OpenAIDiscovery:
     def _classify_capabilities(self, model_id: str) -> ModelCapabilityProfile:
         """Classify capabilities for OpenAI models."""
         profile = ModelCapabilityProfile()
-        
+
         if "gpt-4" in model_id:
             profile.coding = CapabilityLevel.STRONG
             profile.reasoning = CapabilityLevel.EXCEPTIONAL
@@ -91,5 +93,5 @@ class OpenAIDiscovery:
             profile.summarization = CapabilityLevel.CAPABLE
             profile.instruction_following = CapabilityLevel.CAPABLE
             profile.tool_use = CapabilityLevel.CAPABLE
-        
+
         return profile

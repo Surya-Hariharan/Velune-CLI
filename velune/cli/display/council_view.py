@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
+from typing import Any
+
+from rich.box import ROUNDED
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.columns import Columns
 from rich.text import Text
-from rich.box import ROUNDED
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from velune.cognition.council.planner import TaskPlan
 from velune.models.specializations import CouncilRole
+
 
 class CouncilDisplayView:
     """Beautiful Rich-based UI components to visualize Reasoning Council deliberations."""
@@ -36,7 +36,7 @@ class CouncilDisplayView:
             )
         )
 
-    def render_role_assignments(self, assignments: Dict[CouncilRole, Any]) -> None:
+    def render_role_assignments(self, assignments: dict[CouncilRole, Any]) -> None:
         """Render a table displaying mapped specialized models for the council."""
         table = Table(
             title="[bold cyan]Mapped Council Specializations[/bold cyan]",
@@ -124,7 +124,7 @@ class CouncilDisplayView:
         content = []
         content.append(f"[bold]Verification Status:[/bold] {status_text}")
         content.append(f"[bold]Confidence Rating:[/bold] {confidence:.2f}")
-        
+
         if issues:
             content.append("\n[bold red]⚠️ Critical Issues Detected:[/bold red]")
             for issue in issues:
@@ -152,10 +152,10 @@ class CouncilDisplayView:
             vectors = report.failure_vectors
 
         border_style = "yellow" if severity > 0.4 else "dim"
-        
+
         content = []
         content.append(f"[bold]Adversarial Severity Rating:[/bold] [bold red]{severity:.2f}[/bold red] / 1.00")
-        
+
         if vectors:
             content.append("\n[bold yellow]⚡ Failure Vectors Simulated:[/bold yellow]")
             for vec in vectors:
@@ -200,11 +200,11 @@ class CouncilDisplayView:
             border_style = "red"
 
         status_text = "[bold red]YES (Blocked / Escalate)[/bold red]" if review_required else "[bold green]NO (Autonomous Pass)[/bold green]"
-        
+
         content = []
         content.append(f"[bold]Calibrated Council Confidence Score:[/bold] {conf_str}")
         content.append(f"[bold]Escalate to Human-in-the-Loop Review:[/bold] {status_text}")
-        
+
         if flags:
             content.append(f"[bold red]System Flags Raised:[/bold red] {', '.join(flags)}")
 
@@ -214,7 +214,7 @@ class CouncilDisplayView:
                 content.append(f"  [cyan]✓[/cyan] {claim}")
 
         if synthesis_inst:
-            content.append(f"\n[bold dim]Arbitrator Instructions for Synthesizer:[/bold dim]")
+            content.append("\n[bold dim]Arbitrator Instructions for Synthesizer:[/bold dim]")
             content.append(f"[dim]{synthesis_inst}[/dim]")
 
         self.console.print(

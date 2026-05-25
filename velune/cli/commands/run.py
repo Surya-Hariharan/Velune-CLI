@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
 from velune.cli.context import CLIContext
-from velune.cli.display.council_view import CouncilDisplayView
-from velune.core.async_runtime import run_async
+from velune.cognition.firewall import CognitiveFirewall
 from velune.repository.schemas import RepositorySnapshot
 
 console = Console()
@@ -30,6 +27,16 @@ def run_command(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
+    from velune.core.event_loop import submit
+    submit(_run_command_async(cli_context, task, dry_run, force))
+
+
+async def _run_command_async(
+    cli_context: CLIContext,
+    task: str,
+    dry_run: bool,
+    force: bool,
+) -> None:
     # 1. Access modern services from the DI container
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
@@ -39,26 +46,26 @@ def run_command(
 
     # 2. Boot up Cognitive OS Subsystems
     console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
-    run_async(lifecycle.startup())
-    
+    await lifecycle.startup()
+
     # 3. Refresh model catalog scan to assign specialized seats
     console.print("[bold cyan]⠋[/bold cyan] Probing system hardware and local/remote providers...")
-    run_async(model_registry.refresh())
-    
+    await model_registry.refresh()
+
     console.print()
     console.print(Panel(f"[bold green]Task Auth:[/bold green] {task}", border_style="cyan", title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]"))
 
     # 4. Stream Multi-Agent Council Deliberation & Execution Graph
     console.print("[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n")
-    
+
     from velune.orchestration.schemas import ExecutionStatus
-    
+
     async def stream_runner():
         milestones = []
         async for milestone in orchestration_engine.stream(task):
             console.print(f"  [bold cyan]•[/bold cyan] {milestone}")
             milestones.append(milestone)
-        
+
         # Parse run_id from milestones (format: "[run_id] milestone_name")
         run_id = None
         for m in milestones:
@@ -67,13 +74,13 @@ def run_command(
                 break
         return orchestration_engine.get_state(run_id) if run_id else None
 
-    state = run_async(stream_runner())
+    state = await stream_runner()
 
     # 5. Display Task Execution Results
     console.print()
     if state is None:
         console.print("[bold red]✗ Pipeline failed to initialize state.[/bold red]")
-        run_async(lifecycle.shutdown())
+        await lifecycle.shutdown()
         return
 
     success = state.status == ExecutionStatus.COMPLETED
@@ -114,34 +121,20 @@ def run_command(
         )
 
     # 6. Graceful Shutdown
-    run_async(lifecycle.shutdown())
+    await lifecycle.shutdown()
 
 
-def _format_snapshot_context(snapshot: RepositorySnapshot) -> str:
-    """Format the RepositorySnapshot as a clean text summary context for the planner/coder agents."""
-    lines = []
-    lines.append(f"Repository Root: {snapshot.root_path}")
-    lines.append("\nCodebase Files:")
-    for f in snapshot.files[:40]:  # limit to first 40 files for prompt sizing
-        lines.append(f"  - {f.path} ({f.language.value}, {f.size_bytes} bytes)")
+def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: CognitiveFirewall) -> str:
+    """Format the RepositorySnapshot securely as a text summary context for the planner/coder agents."""
+    lines = [f"Repository Root: {snapshot.root_path}"]
+    lines.append("Codebase Files:")
+    for f in snapshot.files[:25]:
+        # Only expose path and language — no raw symbol names or content
+        risk_marker = " [⚠ injection-risk]" if f.metadata.get("injection_risk") else ""
+        lines.append(f"  - {f.path} ({f.language.value}){risk_marker}")
+        # Symbol names are safe to expose (identifiers, not content)
         if f.symbols:
-            syms = [f"{s.kind.value} {s.name}" for s in f.symbols[:5]]
-            lines.append(f"    Symbols (subset): {', '.join(syms)}")
-    
-    if len(snapshot.files) > 40:
-        lines.append(f"  ... and {len(snapshot.files) - 40} other files.")
-
-    summary = snapshot.summary
-    if summary:
-        git = summary.get("git", {})
-        if git:
-            lines.append(f"\nGit status:")
-            lines.append(f"  Active Branch: {git.get('active_branch')}")
-            lines.append(f"  Uncommitted changes count: {git.get('uncommitted_changes_count')}")
-        arch = summary.get("architecture", {})
-        if arch:
-            lines.append(f"\nCodebase footprint:")
-            lines.append(f"  Frameworks: {arch.get('frameworks_detected')}")
-            lines.append(f"  Layer volumes: {arch.get('layers')}")
-
+            safe_syms = [s.name for s in f.symbols[:3] if s.name.isidentifier()]
+            if safe_syms:
+                lines.append(f"    Symbols: {', '.join(safe_syms)}")
     return "\n".join(lines)

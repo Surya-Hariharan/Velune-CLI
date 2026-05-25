@@ -1,6 +1,5 @@
 """Web fetch tools."""
 
-from typing import Optional
 from velune.tools.base.tool import BaseTool
 from velune.tools.web.validator import validate_url
 
@@ -21,11 +20,11 @@ class WebFetch(BaseTool):
     ) -> str:
         """Fetch content from URL."""
         import httpx
-        
+
         is_valid, error = validate_url(url)
         if not is_valid:
             raise ValueError(f"URL validation failed: {error}")
-        
+
         async with httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,

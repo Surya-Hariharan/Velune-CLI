@@ -1,9 +1,8 @@
 """Fusion orchestrator merging BM25, Qdrant vectors, and dependency graphs."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from velune.kernel.registry import ComponentRegistry
-from velune.providers.base import ModelProvider
 from velune.retrieval.graph import GraphRetriever
 from velune.retrieval.keyword import BM25Retriever
 from velune.retrieval.reranker import ContextReranker
@@ -17,30 +16,36 @@ class HybridRetriever:
     Primary interface: await retrieve(). search() is sync-only.
     """
 
-    def __init__(self, location: str = ":memory:", client: Optional[Any] = None) -> None:
+    def __init__(self, location: str = ":memory:", client: Any | None = None) -> None:
         self.registry = ComponentRegistry()
         self.vector_retriever = VectorRetriever(location=location, client=client)
         self.lexical_retriever = BM25Retriever()
         self.graph_retriever = GraphRetriever()
         self.reranker = ContextReranker()
 
-    def add_documents(self, docs: List[Any]) -> None:
-        """Adds and indexes documents in both vector and lexical subsystems."""
+    def add_documents(self, docs: list[Any]) -> None:
+        """Adds and indexes documents in both vector and lexical subsystems.
+
+        All documents must have a pre-computed embedding.
+        """
         # Index in Lexical (BM25)
         self.lexical_retriever.add_documents(docs)
-        
+
         # Index in Vector (Qdrant)
         for doc in docs:
-            # If doc does not have an embedding, try to generate one via ModelProvider
+            # Require embedding to be pre-computed (make embedding field required, not optional)
             if not doc.embedding:
-                doc.embedding = self._generate_embedding(doc.content)
+                raise ValueError(
+                    f"Document {doc.id} must have a pre-computed embedding. "
+                    "All callers of add_documents() must pre-compute embeddings using await before calling."
+                )
             self.vector_retriever.upsert(doc)
 
     async def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Performs full hybrid retrieval, merges candidate pools, and reranks."""
-        lexical_hits: List[RetrievalHit] = []
-        vector_hits: List[RetrievalHit] = []
-        graph_hits: List[RetrievalHit] = []
+        lexical_hits: list[RetrievalHit] = []
+        vector_hits: list[RetrievalHit] = []
+        graph_hits: list[RetrievalHit] = []
 
         # 1. Execute Lexical search (BM25)
         if query.lexical_weight > 0.0:
@@ -74,7 +79,7 @@ class HybridRetriever:
                 name = hit.document.metadata.get("name")
                 if name:
                     seed_nodes.append(name)
-                    
+
             for node in set(seed_nodes):
                 try:
                     gh = self.graph_retriever.retrieve(node, depth=1, top_k=5)
@@ -83,13 +88,13 @@ class HybridRetriever:
                     pass
 
         # 4. Fusion and Deduplication
-        merged_hits_map: Dict[str, RetrievalHit] = {}
-        
+        merged_hits_map: dict[str, RetrievalHit] = {}
+
         # Helper to blend weights into score
         def merge_hit(hit: RetrievalHit, weight: float) -> None:
             doc_id = hit.document.id
             weighted_score = hit.score * weight
-            
+
             if doc_id in merged_hits_map:
                 # Combine scores from multiple search strategies
                 existing = merged_hits_map[doc_id]
@@ -148,32 +153,35 @@ class HybridRetriever:
             pass  # No running loop, safe to use asyncio.run()
         return asyncio.run(self.retrieve(query))
 
-    def _deterministic_fallback_embedding(self, text: str) -> List[float]:
+    def _deterministic_fallback_embedding(self, text: str) -> list[float]:
         """Sophisticated deterministic fallback embedding vector."""
         res = [0.0] * 1536
         for idx, char in enumerate(text[:300]):
             res[idx % 1536] += ord(char) / 256.0
         return res
 
-    async def _generate_embedding_async(self, text: str) -> List[float]:
-        """Generates embedding asynchronously using the registered ModelProvider, or falls back to a deterministic vector."""
+    async def _generate_embedding_async(self, text: str) -> list[float]:
+        """Generates embedding asynchronously using the registered ModelProvider, or falls back to a deterministic vector.
+
+        INTERNAL ONLY.
+        """
         try:
             from velune.kernel.registry import get_container
             container = get_container()
             if container.has("runtime.provider_registry"):
                 provider_registry = container.get("runtime.provider_registry")
                 config = container.get("runtime.config") if container.has("runtime.config") else None
-                
+
                 provider_name = "openai"
                 if config and hasattr(config, "providers") and config.providers:
                     provider_name = config.providers.default_provider
-                
+
                 provider = provider_registry.get(provider_name)
                 if provider:
                     model_id = "text-embedding-3-small"
                     if provider_name == "ollama":
                         model_id = "nomic-embed-text"
-                    
+
                     res = await provider.embed([text], model_id=model_id)
                     emb = res[0] if res else None
                     if emb:
@@ -183,21 +191,7 @@ class HybridRetriever:
             logging.getLogger("velune.retrieval.hybrid").warning(
                 "Failed to generate embedding using ModelProvider: %s. Falling back to deterministic embedding.", e
             )
-            
+
         return self._deterministic_fallback_embedding(text)
 
-    def _generate_embedding(self, text: str) -> List[float]:
-        """Generates embedding synchronously using the registered ModelProvider, or falls back to a deterministic vector."""
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-            
-        if loop and loop.is_running():
-            return self._deterministic_fallback_embedding(text)
-        else:
-            try:
-                return asyncio.run(self._generate_embedding_async(text))
-            except Exception:
-                return self._deterministic_fallback_embedding(text)
+

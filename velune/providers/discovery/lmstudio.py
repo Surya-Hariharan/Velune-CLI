@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import httpx
-from typing import List
-from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
+
+from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 
 
 class LMStudioDiscovery:
@@ -14,29 +15,29 @@ class LMStudioDiscovery:
     async def discover(self) -> list[ModelDescriptor]:
         """Discover models from LM Studio."""
         models = []
-        
+
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(f"{self.base_url}/v1/models")
                 response.raise_for_status()
                 data = response.json()
-                
+
                 for model in data.get("data", []):
                     descriptor = self._parse_model(model)
                     if descriptor:
                         models.append(descriptor)
         except Exception:
             pass
-        
+
         return models
 
     def _parse_model(self, model_data: dict) -> ModelDescriptor:
         """Parse model data into descriptor."""
         model_id = model_data["id"]
-        
+
         # LM Studio doesn't provide detailed info, use heuristics
         capabilities = self._classify_capabilities(model_id)
-        
+
         return ModelDescriptor(
             model_id=model_id,
             provider_id=self.provider_id,
@@ -55,17 +56,17 @@ class LMStudioDiscovery:
     def _classify_capabilities(self, model_id: str) -> ModelCapabilityProfile:
         """Classify model capabilities based on name."""
         model_lower = model_id.lower()
-        
+
         profile = ModelCapabilityProfile()
-        
+
         # Basic capability classification
         if any(name in model_lower for name in ["coder", "code"]):
             profile.coding = CapabilityLevel.CAPABLE
         else:
             profile.coding = CapabilityLevel.BASIC
-        
+
         profile.reasoning = CapabilityLevel.BASIC
         profile.instruction_following = CapabilityLevel.CAPABLE
         profile.summarization = CapabilityLevel.BASIC
-        
+
         return profile

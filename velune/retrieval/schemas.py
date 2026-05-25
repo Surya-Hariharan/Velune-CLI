@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class RetrievalDocument(BaseModel):
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     namespace: str = "default"
-    embedding: Optional[list[float]] = None
+    embedding: list[float] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
@@ -43,7 +43,7 @@ class RetrievalQuery(BaseModel):
 
     text: str
     top_k: int = Field(default=10, ge=1, le=100)
-    namespace: Optional[str] = None
+    namespace: str | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     vector_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     lexical_weight: float = Field(default=0.3, ge=0.0, le=1.0)

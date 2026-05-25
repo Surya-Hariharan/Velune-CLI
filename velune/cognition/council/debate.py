@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+
 
 @dataclass
 class DebateConfig:
@@ -11,7 +11,7 @@ class DebateConfig:
     critical_issue_hard_stop: bool = True  # Stop if reviewer flags critical security issue
 
 def calculate_max_debate_turns(
-    initial_objections: List[str],
+    initial_objections: list[str],
     critic_reports: dict,
     task_complexity: str,  # "simple" | "structural"
     base_max: int = 3,
@@ -24,21 +24,21 @@ def calculate_max_debate_turns(
     """
     if not initial_objections:
         return 0  # No debate needed
-    
+
     turns = base_max
-    
+
     # Security objections always get extra turn
     security_failed = not critic_reports.get("security", {}).get("passed", True)
     if security_failed:
         turns = max(turns, 4)
-    
+
     # High challenger severity adds turn
     challenger_severity = critic_reports.get("challenger", {}).get("severity_rating", 0.0)
     if challenger_severity > 0.8:
         turns += 1
-    
+
     # Simple tasks cap lower
     if task_complexity == "simple":
         turns = min(turns, 2)
-    
+
     return min(turns, 5)  # Hard cap at 5

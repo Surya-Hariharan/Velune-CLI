@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import time
-from typing import AsyncIterator, List, Optional
-from velune.providers.base import ModelProvider
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
+
+from velune.core.errors.provider import InferenceError, ProviderConnectionError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
-from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
+from velune.core.types.model import ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.core.errors.provider import ProviderConnectionError, InferenceError
+from velune.providers.base import ModelProvider
 
 
 class LlamaCppProvider(ModelProvider):
     """Llama.cpp provider for running in-process GGUF models."""
 
-    def __init__(self, models_dir: Optional[str] = None) -> None:
+    def __init__(self, models_dir: str | None = None) -> None:
         self._models_dir = Path(models_dir) if models_dir else Path.home() / "models"
         self._loaded_models = {}
         self._capabilities = ProviderCapabilities(
@@ -44,12 +46,12 @@ class LlamaCppProvider(ModelProvider):
         path = Path(model_id)
         if path.is_absolute() and path.exists():
             return path
-        
+
         # Check relative to home
         home_path = Path.home() / model_id
         if home_path.exists():
             return home_path
-        
+
         # Check relative to models_dir
         models_dir_path = self._models_dir / model_id
         if models_dir_path.exists():
@@ -82,8 +84,8 @@ class LlamaCppProvider(ModelProvider):
 
         from llama_cpp import Llama
         model_path = self._resolve_model_path(model_id)
-        
-        # Load the model in-memory. 
+
+        # Load the model in-memory.
         # Using typical defaults, letting it use GPU if compiled with CUDA/metal.
         llm = Llama(
             model_path=str(model_path),
@@ -94,29 +96,29 @@ class LlamaCppProvider(ModelProvider):
         self._loaded_models[model_id] = llm
         return llm
 
-    async def list_models(self) -> List[ModelDescriptor]:
+    async def list_models(self) -> list[ModelDescriptor]:
         """List local GGUF models."""
         await self.initialize()
-        
+
         from velune.providers.discovery.gguf import GGUFDiscovery
         discovery = GGUFDiscovery()
         discovery.search_paths = [self._models_dir] + discovery.search_paths
-        
+
         return await discovery.discover()
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         """Non-blocking in-process inference using asyncio thread offloading."""
         await self.initialize()
         start = time.perf_counter()
-        
+
         try:
             # Resolve model context window size
             ctx_len = request.max_tokens or 4096
             llm = await asyncio.to_thread(self._get_model, request.model_id, ctx_len)
-            
+
             # Map standard messages to llama_cpp chat completions format
             messages = [{"role": msg.get("role"), "content": msg.get("content")} for msg in request.messages]
-            
+
             completion = await asyncio.to_thread(
                 llm.create_chat_completion,
                 messages=messages,
@@ -125,10 +127,10 @@ class LlamaCppProvider(ModelProvider):
                 top_p=request.top_p,
                 stream=False,
             )
-            
+
             latency = (time.perf_counter() - start) * 1000.0
             choice = completion["choices"][0]
-            
+
             return InferenceResponse(
                 content=choice["message"]["content"] or "",
                 model_id=request.model_id,
@@ -142,12 +144,12 @@ class LlamaCppProvider(ModelProvider):
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         """Streaming chat completions in non-blocking fashion."""
         await self.initialize()
-        
+
         try:
             ctx_len = request.max_tokens or 4096
             llm = await asyncio.to_thread(self._get_model, request.model_id, ctx_len)
             messages = [{"role": msg.get("role"), "content": msg.get("content")} for msg in request.messages]
-            
+
             # Run the generator in a thread pool and yield chunks back to async loop
             def run_stream():
                 return llm.create_chat_completion(
@@ -157,38 +159,38 @@ class LlamaCppProvider(ModelProvider):
                     top_p=request.top_p,
                     stream=True,
                 )
-            
+
             stream_gen = await asyncio.to_thread(run_stream)
-            
+
             # Helper to fetch next item synchronously in thread
             def next_chunk(iterator):
                 try:
                     return next(iterator)
                 except StopIteration:
                     return None
-            
+
             while True:
                 chunk = await asyncio.to_thread(next_chunk, stream_gen)
                 if chunk is None:
                     break
-                
+
                 choice = chunk["choices"][0]
                 delta = choice.get("delta", {})
                 content = delta.get("content", "")
                 finish = choice.get("finish_reason")
-                
+
                 yield StreamChunk(
                     content=content,
                     finish_reason=finish,
                 )
-                
+
         except Exception as e:
             raise InferenceError(f"Local llama.cpp streaming failed: {e}")
 
-    async def embed(self, texts: List[str], model_id: str) -> List[List[float]]:
+    async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         """Generate batch embeddings in-process."""
         await self.initialize()
-        
+
         try:
             llm = await asyncio.to_thread(self._get_model, model_id)
             embeddings = []

@@ -7,10 +7,10 @@ conformity, signature correctness, and import existence.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import os
 import sys
-import importlib.util
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 
 class ReasoningVerifier:
@@ -20,10 +20,10 @@ class ReasoningVerifier:
     regressions and syntax issues.
     """
 
-    def __init__(self, workspace_root: Optional[str] = None) -> None:
+    def __init__(self, workspace_root: str | None = None) -> None:
         self.workspace_root = workspace_root or os.getcwd()
 
-    def analyze_proposed_imports(self, proposed_code: str) -> Dict[str, Any]:
+    def analyze_proposed_imports(self, proposed_code: str) -> dict[str, Any]:
         """
         Detects potential hallucinated imports in proposed Python code.
         Checks if standard libraries, installed packages, or local workspace modules exist.
@@ -37,7 +37,7 @@ class ReasoningVerifier:
                 "issues": [f"Syntax Error in proposed code: {e.msg} at line {e.lineno}"],
             }
 
-        imported_modules: Set[str] = set()
+        imported_modules: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for name in node.names:
@@ -50,7 +50,7 @@ class ReasoningVerifier:
             # 1. Check if it's standard library or currently imported
             if mod_name in sys.builtin_module_names:
                 continue
-            
+
             # Try to resolve module spec
             spec = None
             try:
@@ -74,7 +74,7 @@ class ReasoningVerifier:
             "issues": issues,
         }
 
-    def analyze_contradictions(self, proposed_code: str, existing_code: str) -> Dict[str, Any]:
+    def analyze_contradictions(self, proposed_code: str, existing_code: str) -> dict[str, Any]:
         """
         Compares proposed code against existing code to identify signature mismatches,
         duplicate function/class definitions, or structural contradictions.
@@ -97,8 +97,8 @@ class ReasoningVerifier:
             return {"success": True, "issues": []}
 
         # Extract functions/classes from both trees
-        def extract_definitions(tree: ast.AST) -> Dict[str, Any]:
-            defs: Dict[str, Any] = {}
+        def extract_definitions(tree: ast.AST) -> dict[str, Any]:
+            defs: dict[str, Any] = {}
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
                     args_count = len(node.args.args)
@@ -159,12 +159,12 @@ class ReasoningVerifier:
             "issues": issues,
         }
 
-    def audit_patch(self, file_path: str, proposed_code: str, existing_code: str) -> Dict[str, Any]:
+    def audit_patch(self, file_path: str, proposed_code: str, existing_code: str) -> dict[str, Any]:
         """
         Runs complete contradiction, import hallucination, and general syntax audits.
         """
         is_python = file_path.endswith(".py")
-        
+
         if not is_python:
             return {
                 "passed": True,

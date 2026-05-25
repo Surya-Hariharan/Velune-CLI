@@ -1,7 +1,6 @@
 """Capability classification engine."""
 
-from typing import Dict
-from velune.core.types.model import ModelDescriptor, ModelCapabilityProfile, CapabilityLevel
+from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 
 
 class CapabilityClassifier:
@@ -21,38 +20,38 @@ class CapabilityClassifier:
         """Classify capabilities for a model."""
         profile = ModelCapabilityProfile()
         model_lower = model.model_id.lower()
-        
+
         # Name-based classification
         for capability, patterns in self.name_patterns.items():
             if any(pattern in model_lower for pattern in patterns):
                 setattr(profile, capability, self._infer_level(model_lower, capability))
-        
+
         # Architecture-based inference
         if "moe" in model_lower or "mixture-of-experts" in model_lower:
             profile.reasoning = max(profile.reasoning, CapabilityLevel.CAPABLE)
-        
+
         # GGUF metadata parsing
         if model.metadata.get("gguf_metadata"):
             self._parse_gguf_metadata(model.metadata["gguf_metadata"], profile)
-        
+
         return profile
 
     def _infer_level(self, model_id: str, capability: str) -> CapabilityLevel:
         """Infer capability level from model name."""
         model_lower = model_id.lower()
-        
+
         # Strong indicators
         if any(indicator in model_lower for indicator in ["v2", "latest", "pro"]):
             return CapabilityLevel.STRONG
-        
+
         # Capable indicators
         if any(indicator in model_lower for indicator in ["coder", "instruct"]):
             return CapabilityLevel.CAPABLE
-        
+
         # Basic indicators
         if capability == "reasoning" and "r1" in model_lower:
             return CapabilityLevel.EXCEPTIONAL
-        
+
         return CapabilityLevel.BASIC
 
     def _parse_gguf_metadata(self, metadata: dict, profile: ModelCapabilityProfile) -> None:
@@ -63,7 +62,7 @@ class CapabilityClassifier:
             profile.long_context = CapabilityLevel.CAPABLE
         elif context_length >= 8000:
             profile.long_context = CapabilityLevel.BASIC
-        
+
         # Check parameter count for capability inference
         param_count = metadata.get("parameter_count", 0)
         if param_count >= 70e9:  # 70B+

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
 import logging
+from typing import Any
 
-from velune.models.specializations import CouncilRole
-from velune.core.types.model import ModelDescriptor
-from velune.providers.base import ModelProvider
 from velune.cognition.council.base import BaseCouncilAgent
+from velune.core.types.model import ModelDescriptor
+from velune.models.specializations import CouncilRole
+from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.synthesizer")
 
@@ -43,9 +43,9 @@ class SynthesizerAgent(BaseCouncilAgent):
     async def synthesize(
         self,
         task: str,
-        winning_claims: List[str],
+        winning_claims: list[str],
         plan: str,
-        audit_reports: List[Dict[str, Any]],
+        audit_reports: list[dict[str, Any]],
         context: str,
     ) -> str:
         """Assembles all council outputs into a premium walk-through response."""

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("velune.cognition.tradeoff")
 
@@ -19,7 +19,7 @@ logger = logging.getLogger("velune.cognition.tradeoff")
 # Default evaluation axes and their weights (must sum to 1.0).
 # Weights can be overridden at construction time.
 # ─────────────────────────────────────────────────────────────────────────────
-DEFAULT_AXES: Dict[str, float] = {
+DEFAULT_AXES: dict[str, float] = {
     "performance": 0.25,       # CPU / latency / throughput
     "maintainability": 0.25,   # LCOM, coupling, readability
     "safety": 0.20,            # thread / memory / exception safety
@@ -33,7 +33,7 @@ class TemOption:
     """A single architectural alternative registered in the matrix."""
 
     name: str
-    metrics: Dict[str, float]          # axis -> score in [0.0, 1.0]
+    metrics: dict[str, float]          # axis -> score in [0.0, 1.0]
     notes: str = ""
     weighted_score: float = field(default=0.0, init=False)
 
@@ -58,13 +58,13 @@ class TradeoffEvaluationMatrix:
     def __init__(
         self,
         task_id: str,
-        axes: Optional[Dict[str, float]] = None,
-        lineage_memory: Optional[Any] = None,
+        axes: dict[str, float] | None = None,
+        lineage_memory: Any | None = None,
     ) -> None:
         self.task_id = task_id
-        self.axes: Dict[str, float] = axes or DEFAULT_AXES
+        self.axes: dict[str, float] = axes or DEFAULT_AXES
         self.lineage_memory = lineage_memory
-        self.options: List[TemOption] = []
+        self.options: list[TemOption] = []
         self._evaluated = False
 
         # Normalise weights so rounding errors do not penalise scores.
@@ -79,9 +79,9 @@ class TradeoffEvaluationMatrix:
     def add_option(
         self,
         name: str,
-        metrics: Dict[str, float],
+        metrics: dict[str, float],
         notes: str = "",
-    ) -> "TradeoffEvaluationMatrix":
+    ) -> TradeoffEvaluationMatrix:
         """Register a competing architectural alternative.
 
         Args:
@@ -151,7 +151,7 @@ class TradeoffEvaluationMatrix:
         sorted_opts = sorted(self.options, key=lambda o: o.weighted_score, reverse=True)
         winner = sorted_opts[0]
 
-        lines: List[str] = [
+        lines: list[str] = [
             f"# Trade-off Evaluation Report: `{self.task_id}`\n",
             f"**Evaluation Timestamp**: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n",
             "## Evaluation Axes & Weights\n",
@@ -193,7 +193,7 @@ class TradeoffEvaluationMatrix:
 
         return "\n".join(lines)
 
-    def get_rankings(self) -> List[Dict[str, Any]]:
+    def get_rankings(self) -> list[dict[str, Any]]:
         """Return all options sorted by weighted score, descending.
 
         Returns:

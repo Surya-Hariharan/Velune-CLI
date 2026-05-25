@@ -2,8 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Optional
-from datetime import datetime
+
 from velune.events.bus.engine import Event
 
 
@@ -22,18 +21,18 @@ class EventLog:
             "timestamp": event.timestamp,
             "source": event.source,
         }
-        
+
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
 
     async def read_all(self) -> list[Event]:
         """Read all events from the log."""
         events = []
-        
+
         if not self.log_path.exists():
             return events
-        
-        with open(self.log_path, "r", encoding="utf-8") as f:
+
+        with open(self.log_path, encoding="utf-8") as f:
             for line in f:
                 if line.strip():
                     data = json.loads(line)
@@ -45,7 +44,7 @@ class EventLog:
                             source=data["source"],
                         )
                     )
-        
+
         return events
 
     async def clear(self) -> None:

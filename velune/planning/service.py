@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Optional
+from typing import Any
 
 from velune.core.types.task import TaskPlan, TaskStatus, TaskStep
 
@@ -16,7 +16,7 @@ class AdaptivePlanningService:
         self,
         task_id: str,
         prompt: str,
-        repository_summary: Optional[dict[str, Any]] = None,
+        repository_summary: dict[str, Any] | None = None,
         max_steps: int = 10,
     ) -> TaskPlan:
         """Create an initial dependency-aware execution plan."""
@@ -29,7 +29,7 @@ class AdaptivePlanningService:
         ordered = merged[: max_steps if max_steps > 0 else 1]
 
         task_steps: list[TaskStep] = []
-        previous_id: Optional[str] = None
+        previous_id: str | None = None
         for index, step in enumerate(ordered, start=1):
             step_id = f"{task_id}-step-{index}"
             task_steps.append(

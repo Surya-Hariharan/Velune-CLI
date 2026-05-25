@@ -10,7 +10,7 @@ import gzip
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("velune.memory.tiers.archive")
 
@@ -25,22 +25,22 @@ class LongTermArchiveTier:
     def archive_session(
         self,
         session_id: str,
-        turns: List[Dict[str, Any]],
-        steps: List[Dict[str, Any]],
-        facts: Optional[List[Dict[str, Any]]] = None,
+        turns: list[dict[str, Any]],
+        steps: list[dict[str, Any]],
+        facts: list[dict[str, Any]] | None = None,
     ) -> Path:
         """
         Serialize and compress session memory frames to a local gzip archive.
         """
         archive_path = self.archive_dir / f"session_{session_id}.json.gz"
-        
+
         payload = {
             "session_id": session_id,
             "turns": turns,
             "steps": steps,
             "facts": facts or [],
         }
-        
+
         try:
             json_data = json.dumps(payload, indent=2).encode("utf-8")
             with gzip.open(archive_path, "wb") as f:
@@ -48,10 +48,10 @@ class LongTermArchiveTier:
             logger.info("Successfully archived cold memory session %s to %s", session_id, archive_path)
         except Exception as e:
             logger.error("Failed to write compressed archive for session %s: %s", session_id, e)
-            
+
         return archive_path
 
-    def load_archive(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def load_archive(self, session_id: str) -> dict[str, Any] | None:
         """
         Decompress and retrieve historical session logs.
         """
@@ -68,7 +68,7 @@ class LongTermArchiveTier:
             logger.error("Failed to load/decompress session archive %s: %s", session_id, e)
             return None
 
-    def list_archived_sessions(self) -> List[str]:
+    def list_archived_sessions(self) -> list[str]:
         """List all session IDs that have long-term archives available."""
         sessions = []
         for file in self.archive_dir.glob("session_*.json.gz"):

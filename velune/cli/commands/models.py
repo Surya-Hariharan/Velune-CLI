@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from velune.cli.context import CLIContext
-from velune.core.async_runtime import run_async
 
 console = Console()
 
@@ -27,10 +28,8 @@ def models_scan(
         console.print("[red]Model discovery service is unavailable.[/red]")
         raise typer.Exit(code=1)
 
-    if provider:
-        records = run_async(discovery.scan_provider(provider_id=provider))
-    else:
-        records = run_async(discovery.scan_all())
+    from velune.core.event_loop import submit
+    records = submit(_models_scan_async(discovery, provider))
 
     table = Table(title="Discovered Models")
     table.add_column("Provider", style="cyan")
@@ -39,6 +38,7 @@ def models_scan(
     table.add_column("Speed", style="blue")
     table.add_column("Context", style="yellow")
     table.add_column("Embedding", style="white")
+    table.add_column("Status", style="bold")
 
     from velune.core.types.model import CapabilityLevel
 
@@ -51,16 +51,24 @@ def models_scan(
             "summarization": record.capabilities.summarization,
             "tool_use": record.capabilities.tool_use,
         }
-        
+
         highest_cap = "general"
         highest_level = CapabilityLevel.NONE
         for cap_name, level in capabilities_map.items():
             if level > highest_level:
                 highest_level = level
                 highest_cap = cap_name
-                
+
         specialization = highest_cap if highest_level > CapabilityLevel.NONE else "general"
         embedding_supported = "yes" if record.capabilities.embedding > CapabilityLevel.NONE else "no"
+
+        validated = record.metadata.get("validated")
+        if validated is None:
+            status = "[dim]cached[/dim]"
+        elif validated:
+            status = "[green]●[/green]"
+        else:
+            status = "[red]✗ offline[/red]"
 
         table.add_row(
             record.provider_id,
@@ -69,15 +77,23 @@ def models_scan(
             record.speed_tier,
             str(record.context_length),
             embedding_supported,
+            status,
         )
 
     console.print(table)
-    
+
     total = len(records)
     providers = set(r.provider_id for r in records)
     console.print(
         f"[dim]Discovered {total} model(s) across {len(providers)} provider(s).[/dim]"
     )
+
+
+async def _models_scan_async(discovery: Any, provider: str | None) -> Any:
+    if provider:
+        return await discovery.scan_provider(provider_id=provider)
+    else:
+        return await discovery.scan_all()
 
 
 @models_cmd.command("list")
@@ -104,7 +120,7 @@ def models_list(ctx: typer.Context) -> None:
                 level = getattr(record.capabilities, cap_name, None)
                 if level and level > CapabilityLevel.NONE:
                     capabilities.append(f"{cap_name} ({level.name})")
-            
+
             table.add_row(
                 record.model_id,
                 record.display_name,
@@ -126,8 +142,8 @@ def models_list(ctx: typer.Context) -> None:
         free_gb = gpu_info.get("vram_free_gb")
         if free_gb is not None:
             console.print(f"[dim]Available VRAM: {free_gb:.1f}GB[/dim]")
-            
-            over_budget = [m for m in records if 
+
+            over_budget = [m for m in records if
                            m.vram_required_gb and m.vram_required_gb > free_gb]
             if over_budget:
                 console.print(f"[yellow]⚠ {len(over_budget)} models exceed available VRAM[/yellow]")
@@ -199,9 +215,20 @@ def models_benchmark(
         console.print("[yellow]No models registered for benchmarking.[/yellow]")
         return
 
+    from velune.core.event_loop import submit
+    submit(_models_benchmark_async(cli_context, registry, provider_registry, models_to_probe))
+
+
+async def _models_benchmark_async(
+    cli_context: CLIContext,
+    registry: Any,
+    provider_registry: Any,
+    models_to_probe: list[Any],
+) -> None:
     from pathlib import Path
-    from velune.models.profile_cache import ModelProfileCache
+
     from velune.models.probes import ModelProber
+    from velune.models.profile_cache import ModelProfileCache
 
     profile_cache = ModelProfileCache(Path(".velune") / "model_profiles.json")
 
@@ -222,7 +249,7 @@ def models_benchmark(
         console.print(f"Benchmarking model [bold cyan]{model.model_id}[/bold cyan] via [bold magenta]{model.provider_id}[/bold magenta]...")
 
         prober = ModelProber(provider, model.model_id)
-        results = run_async(prober.run_all_probes())
+        results = await prober.run_all_probes()
 
         # Save to cache
         profile_cache.set(model.model_id, model.provider_id, results)
@@ -249,4 +276,3 @@ def models_benchmark(
         )
 
     console.print(table)
-

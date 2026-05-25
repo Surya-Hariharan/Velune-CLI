@@ -1,7 +1,7 @@
 """Core inference type definitions."""
 
-from enum import Enum
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -10,16 +10,16 @@ class InferenceRequest(BaseModel):
     model_id: str
     messages: list[dict[str, str]]
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: Optional[int] = None
+    max_tokens: int | None = None
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
-    stop_sequences: Optional[list[str]] = None
+    stop_sequences: list[str] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class StreamChunk(BaseModel):
     """A chunk of streamed inference response."""
     content: str
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

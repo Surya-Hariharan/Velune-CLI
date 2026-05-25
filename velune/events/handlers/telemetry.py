@@ -1,6 +1,5 @@
 """Events → telemetry."""
 
-from typing import Optional
 from velune.events.bus.engine import Event
 
 

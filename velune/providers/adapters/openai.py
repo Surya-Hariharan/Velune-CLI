@@ -2,25 +2,31 @@
 
 from __future__ import annotations
 
-import httpx
 import json
 import os
 import time
-from typing import AsyncIterator, List, Optional
-from velune.providers.base import ModelProvider
+from collections.abc import AsyncIterator
+
+import httpx
+
+from velune.core.errors.provider import (
+    InferenceError,
+    ProviderAuthenticationError,
+    ProviderConnectionError,
+)
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
-from velune.core.types.model import CapabilityLevel, ModelCapability, ModelDescriptor
+from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.core.errors.provider import ProviderConnectionError, ProviderAuthenticationError, InferenceError
+from velune.providers.base import ModelProvider
 
 
 class OpenAIProvider(ModelProvider):
     """OpenAI provider for GPT chat and embedding models."""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: str = "https://api.openai.com/v1") -> None:
+    def __init__(self, api_key: str | None = None, base_url: str = "https://api.openai.com/v1") -> None:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY")
         self._base_url = base_url
-        self.client: Optional[httpx.AsyncClient] = None
+        self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(
             supports_streaming=True,
             supports_function_calling=True,
@@ -40,7 +46,7 @@ class OpenAIProvider(ModelProvider):
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
 
-    async def list_models(self) -> List[ModelDescriptor]:
+    async def list_models(self) -> list[ModelDescriptor]:
         """Fetch list of models and filter chat options."""
         await self.initialize()
         assert self.client is not None
@@ -48,8 +54,8 @@ class OpenAIProvider(ModelProvider):
             response = await self.client.get("/models")
             response.raise_for_status()
             data = response.json()
-            
-            descriptors: List[ModelDescriptor] = []
+
+            descriptors: list[ModelDescriptor] = []
             for item in data.get("data", []):
                 m_id = item["id"]
                 if "gpt" in m_id.lower() or "o1" in m_id.lower():
@@ -144,7 +150,7 @@ class OpenAIProvider(ModelProvider):
         except httpx.HTTPError as e:
             raise InferenceError(f"OpenAI stream failed: {e}")
 
-    async def embed(self, texts: List[str], model_id: str) -> List[List[float]]:
+    async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         """Generate batch embeddings."""
         await self.initialize()
         assert self.client is not None

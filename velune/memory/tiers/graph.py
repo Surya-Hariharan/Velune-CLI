@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from velune.memory.storage.sqlite_manager import SQLiteManager
@@ -21,7 +22,7 @@ class GraphNode(BaseModel):
     """A single entity node in the Knowledge Graph."""
     id: str
     node_type: str  # e.g., 'file', 'symbol', 'concept', 'author'
-    properties: Dict[str, Any] = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphEdge(BaseModel):
@@ -29,13 +30,13 @@ class GraphEdge(BaseModel):
     source: str
     target: str
     relation_type: str  # e.g., 'depends_on', 'calls', 'authored_by'
-    properties: Dict[str, Any] = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphMemoryTier:
     """Tier 4: Structured entity-relationship store representing codebase and cognitive dependencies."""
 
-    def __init__(self, db_path: Path, sqlite_manager: Optional[SQLiteManager] = None) -> None:
+    def __init__(self, db_path: Path, sqlite_manager: SQLiteManager | None = None) -> None:
         self.db_path = db_path
         self.sqlite_manager = sqlite_manager or SQLiteManager(db_path)
         self._init_db()
@@ -88,7 +89,7 @@ class GraphMemoryTier:
         except Exception as e:
             logger.error("Failed to initialize Graph Database: %s", e)
 
-    def add_node(self, node_id: str, node_type: str, properties: Optional[Dict[str, Any]] = None) -> None:
+    def add_node(self, node_id: str, node_type: str, properties: dict[str, Any] | None = None) -> None:
         """Insert or update a node in the graph."""
         props_str = json.dumps(properties or {})
         try:
@@ -105,7 +106,7 @@ class GraphMemoryTier:
         except Exception as e:
             logger.error("Failed to add node %s: %s", node_id, e)
 
-    def add_edge(self, source_id: str, target_id: str, relation_type: str, properties: Optional[Dict[str, Any]] = None) -> None:
+    def add_edge(self, source_id: str, target_id: str, relation_type: str, properties: dict[str, Any] | None = None) -> None:
         """Create a directed edge between two existing nodes."""
         props_str = json.dumps(properties or {})
         try:
@@ -121,7 +122,7 @@ class GraphMemoryTier:
         except Exception as e:
             logger.error("Failed to add edge from %s to %s: %s", source_id, target_id, e)
 
-    def get_node(self, node_id: str) -> Optional[GraphNode]:
+    def get_node(self, node_id: str) -> GraphNode | None:
         """Fetch a specific node by its identifier."""
         try:
             rows = self.sqlite_manager.execute_read("SELECT id, node_type, properties FROM graph_nodes WHERE id = ?", (node_id,))
@@ -136,9 +137,9 @@ class GraphMemoryTier:
             logger.error("Failed to query node %s: %s", node_id, e)
         return None
 
-    def get_neighbors(self, node_id: str) -> List[Tuple[GraphNode, str, GraphEdge]]:
+    def get_neighbors(self, node_id: str) -> list[tuple[GraphNode, str, GraphEdge]]:
         """Find all neighboring nodes and their edge relations."""
-        neighbors: List[Tuple[GraphNode, str, GraphEdge]] = []
+        neighbors: list[tuple[GraphNode, str, GraphEdge]] = []
         try:
             # Query outgoing connections
             rows = self.sqlite_manager.execute_read(
@@ -150,7 +151,7 @@ class GraphMemoryTier:
                 """,
                 (node_id,)
             )
-            
+
             for row in rows:
                 target_node = GraphNode(
                     id=row["id"],
@@ -168,21 +169,21 @@ class GraphMemoryTier:
             logger.error("Failed to query graph neighbors for %s: %s", node_id, e)
         return neighbors
 
-    def find_shortest_path(self, start_id: str, end_id: str, max_depth: int = 4) -> Optional[List[str]]:
+    def find_shortest_path(self, start_id: str, end_id: str, max_depth: int = 4) -> list[str] | None:
         """BFS search to identify the shortest relationship path between two concepts."""
         if start_id == end_id:
             return [start_id]
-            
-        queue: List[List[str]] = [[start_id]]
+
+        queue: list[list[str]] = [[start_id]]
         visited = {start_id}
-        
+
         while queue:
             path = queue.pop(0)
             node = path[-1]
-            
+
             if len(path) > max_depth:
                 continue
-                
+
             neighbors = self.get_neighbors(node)
             for neighbor_node, direction, _ in neighbors:
                 n_id = neighbor_node.id
@@ -191,7 +192,7 @@ class GraphMemoryTier:
                 if n_id not in visited:
                     visited.add(n_id)
                     queue.append(path + [n_id])
-                    
+
         return None
 
     def upsert_entity(self, entity_id: str, entity_type: str, **properties: Any) -> None:
@@ -208,8 +209,8 @@ class GraphMemoryTier:
         task_id: str,
         node_type: str,
         status: str,
-        parameters: Dict[str, Any],
-        outcome: Optional[str] = None,
+        parameters: dict[str, Any],
+        outcome: str | None = None,
     ) -> None:
         """Record a step in the execution lineage graph."""
         import time
@@ -249,7 +250,7 @@ class GraphMemoryTier:
         except Exception as e:
             logger.error("Failed to record execution edge from %s to %s: %s", source_id, target_id, e)
 
-    def query_execution_lineage(self, file_path: str) -> List[Dict[str, Any]]:
+    def query_execution_lineage(self, file_path: str) -> list[dict[str, Any]]:
         """
         Query historical execution lineage to identify prior attempts to modify a file
         and why they succeeded or failed.

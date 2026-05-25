@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
 
-from velune.orchestration.schemas import OrchestrationState
 from velune.cognition.verification import ReasoningVerifier
+from velune.orchestration.schemas import OrchestrationState
 
 
 class ExecutionValidator:
     """Validates state quality before allowing orchestration to finalize."""
 
-    def __init__(self, reasoning_verifier: Optional[ReasoningVerifier] = None) -> None:
+    def __init__(self, reasoning_verifier: ReasoningVerifier | None = None) -> None:
         self.verifier = reasoning_verifier or ReasoningVerifier()
 
     def validate(self, state: OrchestrationState) -> list[str]:
