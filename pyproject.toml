@@ -32,7 +32,6 @@ dependencies = [
     "platformdirs>=4.2.0",
     
     # Async
-    "asyncio>=3.4.3",
     "aiofiles>=23.2.1",
     
     # Providers
@@ -42,13 +41,7 @@ dependencies = [
     
 
     
-    # Orchestration
-    "langgraph>=0.0.20",
-    "langchain>=0.1.0",
-    "langchain-core>=0.1.0",
-    
     # Memory
-    "graphiti-core>=0.1.0",
     "qdrant-client>=1.7.0",
     
 
@@ -91,6 +84,8 @@ dev = [
     "mypy>=1.8.0",
     "pre-commit>=3.6.0",
 ]
+gguf = ["gguf>=0.6.0"]
+langgraph = ["langgraph>=0.2.0"]
 
 [project.scripts]
 velune = "velune.main:app"

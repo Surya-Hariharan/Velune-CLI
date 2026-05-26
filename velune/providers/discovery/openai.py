@@ -79,19 +79,19 @@ class OpenAIDiscovery:
         profile = ModelCapabilityProfile()
 
         if "gpt-4" in model_id:
-            profile.coding = CapabilityLevel.STRONG
-            profile.reasoning = CapabilityLevel.EXCEPTIONAL
-            profile.planning = CapabilityLevel.EXCEPTIONAL
-            profile.summarization = CapabilityLevel.STRONG
-            profile.instruction_following = CapabilityLevel.EXCEPTIONAL
-            profile.tool_use = CapabilityLevel.EXCEPTIONAL
-            profile.long_context = CapabilityLevel.STRONG
+            profile.coding = CapabilityLevel.ADVANCED
+            profile.reasoning = CapabilityLevel.EXPERT
+            profile.planning = CapabilityLevel.EXPERT
+            profile.summarization = CapabilityLevel.ADVANCED
+            profile.instruction_following = CapabilityLevel.EXPERT
+            profile.tool_use = CapabilityLevel.EXPERT
+            profile.long_context = CapabilityLevel.ADVANCED
         elif "gpt-3.5" in model_id:
-            profile.coding = CapabilityLevel.CAPABLE
-            profile.reasoning = CapabilityLevel.CAPABLE
-            profile.planning = CapabilityLevel.CAPABLE
-            profile.summarization = CapabilityLevel.CAPABLE
-            profile.instruction_following = CapabilityLevel.CAPABLE
-            profile.tool_use = CapabilityLevel.CAPABLE
+            profile.coding = CapabilityLevel.INTERMEDIATE
+            profile.reasoning = CapabilityLevel.INTERMEDIATE
+            profile.planning = CapabilityLevel.INTERMEDIATE
+            profile.summarization = CapabilityLevel.INTERMEDIATE
+            profile.instruction_following = CapabilityLevel.INTERMEDIATE
+            profile.tool_use = CapabilityLevel.INTERMEDIATE
 
         return profile

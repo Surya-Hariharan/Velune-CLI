@@ -61,12 +61,12 @@ class LMStudioDiscovery:
 
         # Basic capability classification
         if any(name in model_lower for name in ["coder", "code"]):
-            profile.coding = CapabilityLevel.CAPABLE
+            profile.coding = CapabilityLevel.INTERMEDIATE
         else:
             profile.coding = CapabilityLevel.BASIC
 
         profile.reasoning = CapabilityLevel.BASIC
-        profile.instruction_following = CapabilityLevel.CAPABLE
+        profile.instruction_following = CapabilityLevel.INTERMEDIATE
         profile.summarization = CapabilityLevel.BASIC
 
         return profile

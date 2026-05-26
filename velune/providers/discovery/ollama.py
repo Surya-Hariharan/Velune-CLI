@@ -143,34 +143,34 @@ class OllamaDiscovery:
 
         # Coding capability
         if any(name in model_lower for name in ["coder", "code", "deepseek-coder", "qwen-coder"]):
-            profile.coding = CapabilityLevel.STRONG
+            profile.coding = CapabilityLevel.ADVANCED
         elif any(name in model_lower for name in ["llama", "mistral", "qwen"]):
-            profile.coding = CapabilityLevel.CAPABLE
+            profile.coding = CapabilityLevel.INTERMEDIATE
 
         # Reasoning capability
         if any(name in model_lower for name in ["r1", "reason", "deepseek-r1"]):
-            profile.reasoning = CapabilityLevel.STRONG
+            profile.reasoning = CapabilityLevel.ADVANCED
         elif any(name in model_lower for name in ["qwq", "qwen"]):
-            profile.reasoning = CapabilityLevel.CAPABLE
+            profile.reasoning = CapabilityLevel.INTERMEDIATE
 
         # Planning capability
-        if profile.reasoning >= CapabilityLevel.CAPABLE:
-            profile.planning = CapabilityLevel.CAPABLE
+        if profile.reasoning >= CapabilityLevel.INTERMEDIATE:
+            profile.planning = CapabilityLevel.INTERMEDIATE
 
         # Summarization
         if any(name in model_lower for name in ["llama", "mistral"]):
-            profile.summarization = CapabilityLevel.CAPABLE
+            profile.summarization = CapabilityLevel.INTERMEDIATE
 
         # Instruction following
         if "instruct" in model_lower or "chat" in model_lower:
-            profile.instruction_following = CapabilityLevel.CAPABLE
+            profile.instruction_following = CapabilityLevel.INTERMEDIATE
 
         # Long context
         if any(name in model_lower for name in ["long", "32k", "128k"]):
-            profile.long_context = CapabilityLevel.CAPABLE
+            profile.long_context = CapabilityLevel.INTERMEDIATE
 
         # Tool use
-        if profile.instruction_following >= CapabilityLevel.CAPABLE:
-            profile.tool_use = CapabilityLevel.CAPABLE
+        if profile.instruction_following >= CapabilityLevel.INTERMEDIATE:
+            profile.tool_use = CapabilityLevel.INTERMEDIATE
 
         return profile

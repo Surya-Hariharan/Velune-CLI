@@ -13,9 +13,9 @@ class CapabilityBenchmark:
         model_lower = model_id.lower()
 
         if any(name in model_lower for name in ["coder", "deepseek-coder"]):
-            return CapabilityLevel.STRONG
+            return CapabilityLevel.ADVANCED
         elif any(name in model_lower for name in ["llama", "mistral"]):
-            return CapabilityLevel.CAPABLE
+            return CapabilityLevel.INTERMEDIATE
 
         return CapabilityLevel.BASIC
 
@@ -24,9 +24,9 @@ class CapabilityBenchmark:
         model_lower = model_id.lower()
 
         if any(name in model_lower for name in ["r1", "qwq", "deepseek-r1"]):
-            return CapabilityLevel.EXCEPTIONAL
+            return CapabilityLevel.EXPERT
         elif any(name in model_lower for name in ["qwen"]):
-            return CapabilityLevel.CAPABLE
+            return CapabilityLevel.INTERMEDIATE
 
         return CapabilityLevel.BASIC
 
@@ -38,7 +38,7 @@ class CapabilityBenchmark:
         profile.reasoning = await self.benchmark_reasoning(model_id)
 
         # Infer other capabilities
-        if profile.reasoning >= CapabilityLevel.CAPABLE:
-            profile.planning = CapabilityLevel.CAPABLE
+        if profile.reasoning >= CapabilityLevel.INTERMEDIATE:
+            profile.planning = CapabilityLevel.INTERMEDIATE
 
         return profile

@@ -30,9 +30,6 @@ class CapabilityLevel(IntEnum):
     INTERMEDIATE = 2
     ADVANCED = 3
     EXPERT = 4
-    CAPABLE = 2
-    STRONG = 3
-    EXCEPTIONAL = 4
 
 
 class ModelCapabilityProfile(BaseModel):

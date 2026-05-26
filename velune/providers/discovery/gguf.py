@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
+
+logger = logging.getLogger("velune.providers.discovery.gguf")
 
 
 class GGUFDiscovery:
@@ -75,6 +78,12 @@ class GGUFDiscovery:
                 tags=["local", "gguf"],
                 metadata={"gguf_metadata": metadata},
             )
+        except ImportError:
+            logger.warning(
+                "gguf package not installed. Install with: pip install velune[gguf] "
+                "to enable GGUF model discovery."
+            )
+            return None
         except Exception:
             return None
 
@@ -103,7 +112,7 @@ class GGUFDiscovery:
         profile = ModelCapabilityProfile()
 
         if any(name in filename_lower for name in ["coder", "code"]):
-            profile.coding = CapabilityLevel.CAPABLE
+            profile.coding = CapabilityLevel.INTERMEDIATE
         else:
             profile.coding = CapabilityLevel.BASIC
 

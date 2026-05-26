@@ -75,7 +75,7 @@ class OpenAIProvider(ModelProvider):
                                 "instruction_following": CapabilityLevel.EXPERT,
                                 "multimodal": CapabilityLevel.ADVANCED,
                                 "tool_use": CapabilityLevel.EXPERT,
-                                "long_context": CapabilityLevel.STRONG,
+                                "long_context": CapabilityLevel.ADVANCED,
                             },
                             is_local=False,
                         )

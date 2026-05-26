@@ -8,10 +8,10 @@ from velune.core.errors.execution import (
     ValidationError,
 )
 from velune.core.errors.memory import (
-    MemoryConsolidationError,
-    MemoryError,
-    MemoryRetrievalError,
-    MemoryStoreError,
+    VeluneMemoryConsolidationError,
+    VeluneMemoryError,
+    VeluneMemoryRetrievalError,
+    VeluneMemoryStoreError,
 )
 from velune.core.errors.orchestration import (
     AgentExecutionError,
@@ -41,10 +41,10 @@ __all__ = [
     "PipelineExecutionError",
     "StateTransitionError",
     "CheckpointError",
-    "MemoryError",
-    "MemoryStoreError",
-    "MemoryRetrievalError",
-    "MemoryConsolidationError",
+    "VeluneMemoryError",
+    "VeluneMemoryStoreError",
+    "VeluneMemoryRetrievalError",
+    "VeluneMemoryConsolidationError",
     "ExecutionError",
     "SandboxError",
     "SnapshotError",

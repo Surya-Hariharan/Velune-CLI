@@ -60,4 +60,4 @@ class BaseTool(ABC):
     def validate_input(self, payload: dict[str, Any]) -> None:
         """Validate tool input before execution."""
 
-        del payload
+        pass

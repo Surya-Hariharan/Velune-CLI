@@ -246,13 +246,13 @@ class WorkspaceEvolutionWatcher:
                     if self.grapher and hasattr(self.grapher, "index_file"):
                         self.grapher.index_file(file_path, symbols)
 
-                    # Trigger Subsystem Health and Architecture Drift Alarm (ADA)
-                    try:
-                        from velune.cognition.architecture import ArchitectureCognitionAgent
-                        agent = ArchitectureCognitionAgent(workspace_root=str(self.root_path))
-                        agent.audit_architecture(str(file_path), code)
-                    except Exception as e:
-                        logger.error("Failed to execute background ADA/SHI audit on %s: %s", rel_path, e)
+                    # Architecture audit available via: velune audit <directory>
+                    # Removed from file watcher hot path for performance. See BATCH-02 remediation.
+                    logger.debug(
+                        "File indexed: %s (%d symbols). Architecture audit available via 'velune audit'.",
+                        rel_path,
+                        len(symbols),
+                    )
 
                     logger.debug("Successfully performed incremental AST index for %s", rel_path)
             except Exception as e:
@@ -270,27 +270,13 @@ class WorkspaceEvolutionWatcher:
             except Exception:
                 pass
 
-        # 3. Publish notification on the event bus if available
         if self.event_bus:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self.event_bus.emit(
-                        "repository.file_changed",
-                        {
-                            "path": rel_path,
-                            "event": event_type,
-                            "timestamp": time.time()
-                        }
-                    ))
-                else:
-                    asyncio.run(self.event_bus.emit(
-                        "repository.file_changed",
-                        {
-                            "path": rel_path,
-                            "event": event_type,
-                            "timestamp": time.time()
-                        }
-                    ))
-            except Exception:
-                pass
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.event_bus.emit(
+                    "repository.file_changed",
+                    {"path": rel_path, "event": event_type, "timestamp": time.time()}
+                ))
+            except RuntimeError:
+                # No running loop in this thread context; skip event emission
+                logger.debug("No running event loop for file change event: %s", rel_path)

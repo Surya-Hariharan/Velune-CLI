@@ -51,28 +51,28 @@ class AnthropicDiscovery:
         profile = ModelCapabilityProfile()
 
         if "opus" in model_id:
-            profile.coding = CapabilityLevel.STRONG
-            profile.reasoning = CapabilityLevel.EXCEPTIONAL
-            profile.planning = CapabilityLevel.EXCEPTIONAL
-            profile.summarization = CapabilityLevel.EXCEPTIONAL
-            profile.instruction_following = CapabilityLevel.EXCEPTIONAL
-            profile.tool_use = CapabilityLevel.EXCEPTIONAL
-            profile.long_context = CapabilityLevel.STRONG
+            profile.coding = CapabilityLevel.ADVANCED
+            profile.reasoning = CapabilityLevel.EXPERT
+            profile.planning = CapabilityLevel.EXPERT
+            profile.summarization = CapabilityLevel.EXPERT
+            profile.instruction_following = CapabilityLevel.EXPERT
+            profile.tool_use = CapabilityLevel.EXPERT
+            profile.long_context = CapabilityLevel.ADVANCED
         elif "sonnet" in model_id:
-            profile.coding = CapabilityLevel.STRONG
-            profile.reasoning = CapabilityLevel.STRONG
-            profile.planning = CapabilityLevel.STRONG
-            profile.summarization = CapabilityLevel.STRONG
-            profile.instruction_following = CapabilityLevel.STRONG
-            profile.tool_use = CapabilityLevel.STRONG
-            profile.long_context = CapabilityLevel.STRONG
+            profile.coding = CapabilityLevel.ADVANCED
+            profile.reasoning = CapabilityLevel.ADVANCED
+            profile.planning = CapabilityLevel.ADVANCED
+            profile.summarization = CapabilityLevel.ADVANCED
+            profile.instruction_following = CapabilityLevel.ADVANCED
+            profile.tool_use = CapabilityLevel.ADVANCED
+            profile.long_context = CapabilityLevel.ADVANCED
         elif "haiku" in model_id:
-            profile.coding = CapabilityLevel.CAPABLE
-            profile.reasoning = CapabilityLevel.CAPABLE
-            profile.planning = CapabilityLevel.CAPABLE
-            profile.summarization = CapabilityLevel.CAPABLE
-            profile.instruction_following = CapabilityLevel.CAPABLE
-            profile.tool_use = CapabilityLevel.CAPABLE
-            profile.long_context = CapabilityLevel.CAPABLE
+            profile.coding = CapabilityLevel.INTERMEDIATE
+            profile.reasoning = CapabilityLevel.INTERMEDIATE
+            profile.planning = CapabilityLevel.INTERMEDIATE
+            profile.summarization = CapabilityLevel.INTERMEDIATE
+            profile.instruction_following = CapabilityLevel.INTERMEDIATE
+            profile.tool_use = CapabilityLevel.INTERMEDIATE
+            profile.long_context = CapabilityLevel.INTERMEDIATE
 
         return profile

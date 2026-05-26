@@ -59,7 +59,7 @@ class HuggingFaceDiscovery:
         profile = ModelCapabilityProfile()
 
         if any(name in model_lower for name in ["coder", "code"]):
-            profile.coding = CapabilityLevel.CAPABLE
+            profile.coding = CapabilityLevel.INTERMEDIATE
 
         profile.reasoning = CapabilityLevel.BASIC
         profile.instruction_following = CapabilityLevel.BASIC

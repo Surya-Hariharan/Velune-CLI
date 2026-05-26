@@ -1,21 +1,21 @@
 """Memory-related errors."""
 
 
-class MemoryError(Exception):
+class VeluneMemoryError(Exception):
     """Base exception for memory errors."""
     pass
 
 
-class MemoryStoreError(MemoryError):
+class VeluneMemoryStoreError(VeluneMemoryError):
     """Raised when memory store operation fails."""
     pass
 
 
-class MemoryRetrievalError(MemoryError):
+class VeluneMemoryRetrievalError(VeluneMemoryError):
     """Raised when memory retrieval fails."""
     pass
 
 
-class MemoryConsolidationError(MemoryError):
+class VeluneMemoryConsolidationError(VeluneMemoryError):
     """Raised when memory consolidation fails."""
     pass

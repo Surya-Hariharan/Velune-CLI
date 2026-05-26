@@ -63,7 +63,7 @@ class OllamaProvider(ModelProvider):
                             "planning": CapabilityLevel.BASIC,
                             "summarization": CapabilityLevel.INTERMEDIATE,
                             "embedding": CapabilityLevel.INTERMEDIATE,
-                            "instruction_following": CapabilityLevel.CAPABLE,
+                            "instruction_following": CapabilityLevel.INTERMEDIATE,
                             "multimodal": CapabilityLevel.NONE,
                             "tool_use": CapabilityLevel.NONE,
                             "long_context": CapabilityLevel.NONE,

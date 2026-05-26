@@ -28,7 +28,7 @@ class CapabilityClassifier:
 
         # Architecture-based inference
         if "moe" in model_lower or "mixture-of-experts" in model_lower:
-            profile.reasoning = max(profile.reasoning, CapabilityLevel.CAPABLE)
+            profile.reasoning = max(profile.reasoning, CapabilityLevel.INTERMEDIATE)
 
         # GGUF metadata parsing
         if model.metadata.get("gguf_metadata"):
@@ -42,15 +42,15 @@ class CapabilityClassifier:
 
         # Strong indicators
         if any(indicator in model_lower for indicator in ["v2", "latest", "pro"]):
-            return CapabilityLevel.STRONG
+            return CapabilityLevel.ADVANCED
 
         # Capable indicators
         if any(indicator in model_lower for indicator in ["coder", "instruct"]):
-            return CapabilityLevel.CAPABLE
+            return CapabilityLevel.INTERMEDIATE
 
         # Basic indicators
         if capability == "reasoning" and "r1" in model_lower:
-            return CapabilityLevel.EXCEPTIONAL
+            return CapabilityLevel.EXPERT
 
         return CapabilityLevel.BASIC
 
@@ -59,11 +59,11 @@ class CapabilityClassifier:
         # Check for long context
         context_length = metadata.get("context_length", 0)
         if context_length >= 32000:
-            profile.long_context = CapabilityLevel.CAPABLE
+            profile.long_context = CapabilityLevel.INTERMEDIATE
         elif context_length >= 8000:
             profile.long_context = CapabilityLevel.BASIC
 
         # Check parameter count for capability inference
         param_count = metadata.get("parameter_count", 0)
         if param_count >= 70e9:  # 70B+
-            profile.reasoning = max(profile.reasoning, CapabilityLevel.CAPABLE)
+            profile.reasoning = max(profile.reasoning, CapabilityLevel.INTERMEDIATE)
