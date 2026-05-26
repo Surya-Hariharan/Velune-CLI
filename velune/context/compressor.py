@@ -92,11 +92,18 @@ class ContextCompressor:
 
         if provider is not None:
             try:
+                from velune.core.types.inference import InferenceRequest
+                infer_request = InferenceRequest(
+                    model_id=model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,  # Very low temperature for deterministic compression
+                    max_tokens=target_token_budget * 2,  # Allow headroom
+                )
                 response = await asyncio.wait_for(
-                    provider.complete(prompt=prompt, model=model_id),
+                    provider.infer(infer_request),
                     timeout=15.0  # Don't block forever
                 )
-                compressed = response.text.strip()
+                compressed = response.content.strip()
                 logger.info("LLM compression successful: %d → %d tokens",
                             current_tokens, estimate_tokens(compressed))
             except (TimeoutError, Exception) as e:

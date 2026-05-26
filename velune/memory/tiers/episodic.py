@@ -76,8 +76,9 @@ class EpisodicMemoryTier:
             self.sqlite_manager.execute_script(schema_sql)
             self._initialized = True
             logger.info("Successfully initialized Episodic SQLite DB via SQLiteManager")
-        except Exception as e:
-            logger.error("Failed to initialize Episodic SQLite DB: %s", e)
+        except (TimeoutError, RuntimeError) as e:
+            logger.critical("Failed to initialize database schema: %s", e)
+            raise
 
     def add_turn(self, session_id: str, role: str, content: str, metadata: dict[str, Any] | None = None) -> None:
         """Add a conversation turn to SQLite episodic memory."""

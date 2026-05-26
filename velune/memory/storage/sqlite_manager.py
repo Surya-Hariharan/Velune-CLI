@@ -19,7 +19,7 @@ class SQLiteManager:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._write_queue: queue.Queue[tuple[str, tuple, threading.Event | None]] = queue.Queue()
+        self._write_queue: queue.Queue = queue.Queue()
         self._is_running = True
         self._write_thread = threading.Thread(target=self._process_writes, daemon=True)
         self._write_thread.start()
@@ -47,16 +47,48 @@ class SQLiteManager:
         self._write_queue.put((query, params, None))
 
     def execute_write_sync(self, query: str, params: tuple = ()) -> None:
-        """Queue a write operation and wait for completion."""
+        """Queue a write operation and wait for completion.
+        
+        Raises:
+            TimeoutError: If write doesn't complete within 10 seconds.
+                This indicates write thread death or severe queue backup.
+            RuntimeError: If the write fails with a database error.
+        """
         done = threading.Event()
-        self._write_queue.put((query, params, done))
-        done.wait(timeout=10.0)
+        error_holder: list[Exception] = []
+        self._write_queue.put((query, params, done, error_holder))
+        
+        completed = done.wait(timeout=10.0)
+        if not completed:
+            raise TimeoutError(
+                f"SQLite write queue timeout after 10s. "
+                f"Queue depth: {self._write_queue.qsize()}. "
+                f"Write thread alive: {self._write_thread.is_alive()}. "
+                f"Query: {query[:100]}"
+            )
+        if error_holder:
+            raise error_holder[0]
 
     def execute_write_many(self, queries: list[tuple[str, tuple]]) -> None:
-        """Batch multiple writes as a single atomic transaction."""
+        """Batch multiple writes as a single atomic transaction.
+        
+        Raises:
+            TimeoutError: If batch write doesn't complete within 15 seconds.
+            RuntimeError: If the batch write fails.
+        """
         done = threading.Event()
-        self._write_queue.put(("__BATCH__", queries, done))
-        done.wait(timeout=15.0)
+        error_holder: list[Exception] = []
+        self._write_queue.put(("__BATCH__", queries, done, error_holder))
+        
+        completed = done.wait(timeout=15.0)
+        if not completed:
+            raise TimeoutError(
+                f"SQLite batch write timeout after 15s. "
+                f"Batch size: {len(queries)}. "
+                f"Queue depth: {self._write_queue.qsize()}."
+            )
+        if error_holder:
+            raise error_holder[0]
 
     def execute_read(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:
         """Execute a read query. Thread-safe with WAL mode."""
@@ -65,26 +97,58 @@ class SQLiteManager:
             return cursor.fetchall()
 
     def execute_script(self, script: str) -> None:
-        """Execute a DDL script (CREATE TABLE, CREATE INDEX, etc.)."""
+        """Execute a DDL script (CREATE TABLE, CREATE INDEX, etc.).
+        
+        Raises:
+            TimeoutError: If script doesn't complete within 10 seconds.
+            RuntimeError: If the script fails.
+        """
         done = threading.Event()
-        self._write_queue.put((script, None, done))  # None params = script mode
-        done.wait(timeout=10.0)
+        error_holder: list[Exception] = []
+        self._write_queue.put((script, None, done, error_holder))
+        
+        completed = done.wait(timeout=10.0)
+        if not completed:
+            raise TimeoutError(f"SQLite script timeout after 10s.")
+        if error_holder:
+            raise error_holder[0]
 
     def _process_writes(self) -> None:
         while self._is_running:
             try:
                 item = self._write_queue.get(timeout=0.5)
-                query, params, done_event = item
-                self._do_write(query, params)
-                if done_event:
-                    done_event.set()
+                # Support both 3-tuple (fire-and-forget) and 4-tuple (with error capture)
+                if len(item) == 4:
+                    query, params, done_event, error_holder = item
+                else:
+                    query, params, done_event = item
+                    error_holder = None
+                
+                try:
+                    self._do_write(query, params)
+                except Exception as write_error:
+                    logger.error(
+                        "SQLite write error (query: %s): %s",
+                        str(query)[:80],
+                        write_error
+                    )
+                    if error_holder is not None:
+                        error_holder.append(
+                            RuntimeError(f"SQLite write failed: {write_error}")
+                        )
+                finally:
+                    if done_event:
+                        done_event.set()
+                
                 self._write_queue.task_done()
+                
             except queue.Empty:
                 continue
             except Exception as e:
-                logger.error("SQLite write error: %s", e)
+                logger.error("SQLite write thread error: %s", e)
 
     def _do_write(self, query: str, params: Any | None) -> None:
+        last_error: Exception | None = None
         for attempt in range(3):
             try:
                 conn = sqlite3.connect(str(self.db_path), timeout=30.0)
@@ -101,11 +165,14 @@ class SQLiteManager:
                 conn.close()
                 return
             except sqlite3.OperationalError as e:
+                last_error = e
                 if "locked" in str(e) and attempt < 2:
                     time.sleep(0.1 * (attempt + 1))
                     continue
                 logger.error("Write failed after %d attempts: %s", attempt + 1, e)
                 break
+        if last_error is not None:
+            raise last_error
 
     async def initialize(self) -> None:
         """Lifecycle start, no-op since thread starts in __init__."""

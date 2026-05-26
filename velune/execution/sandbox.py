@@ -224,7 +224,7 @@ class SubprocessSandbox:
                     except psutil.NoSuchProcess:
                         pass
 
-                time.sleep(0.05)
+                time.sleep(0.05)  # OK: runs in thread via asyncio.to_thread(), not event loop
         except Exception as e:
             if process.poll() is None:
                 process.kill()

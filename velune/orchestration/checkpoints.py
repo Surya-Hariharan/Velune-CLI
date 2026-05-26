@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from velune.orchestration.schemas import OrchestrationState
+
+logger = logging.getLogger("velune.orchestration.checkpoints")
 
 
 @dataclass(slots=True)
@@ -94,8 +97,12 @@ class SQLiteCheckpointStore:
             CREATE INDEX IF NOT EXISTS idx_checkpoints_run_id ON checkpoints(run_id)
         """
         if self.sqlite_manager is not None:
-            self.sqlite_manager.execute_script(create_table_query)
-            self.sqlite_manager.execute_script(create_index_query)
+            try:
+                self.sqlite_manager.execute_script(create_table_query)
+                self.sqlite_manager.execute_script(create_index_query)
+            except (TimeoutError, RuntimeError) as e:
+                logger.critical("Failed to initialize database schema: %s", e)
+                raise
         else:
             with self._get_connection() as conn:
                 conn.execute(create_table_query)
@@ -119,13 +126,17 @@ class SQLiteCheckpointStore:
             sequence = count + 1
             checkpoint_id = f"{run_id}:cp:{sequence:04d}"
 
-            self.sqlite_manager.execute_write_sync(
-                """
-                INSERT OR REPLACE INTO checkpoints (checkpoint_id, run_id, node_name, created_at, state_json)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (checkpoint_id, run_id, node_name, created_at, state_json),
-            )
+            try:
+                self.sqlite_manager.execute_write_sync(
+                    """
+                    INSERT OR REPLACE INTO checkpoints (checkpoint_id, run_id, node_name, created_at, state_json)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (checkpoint_id, run_id, node_name, created_at, state_json),
+                )
+            except (TimeoutError, RuntimeError) as e:
+                logger.error("Checkpoint save failed: %s", e)
+                raise
             return checkpoint_id
         else:
             with self._get_connection() as conn:

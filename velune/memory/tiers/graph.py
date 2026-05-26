@@ -86,8 +86,9 @@ class GraphMemoryTier:
             """
             self.sqlite_manager.execute_script(schema_sql)
             logger.info("Successfully initialized Graph Database via SQLiteManager")
-        except Exception as e:
-            logger.error("Failed to initialize Graph Database: %s", e)
+        except (TimeoutError, RuntimeError) as e:
+            logger.critical("Failed to initialize database schema: %s", e)
+            raise
 
     def add_node(self, node_id: str, node_type: str, properties: dict[str, Any] | None = None) -> None:
         """Insert or update a node in the graph."""

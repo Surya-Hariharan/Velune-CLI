@@ -82,7 +82,11 @@ class CognitivePerformanceAnalytics:
                 pattern TEXT NOT NULL
             );
         """
-        self.sqlite_manager.execute_script(script)
+        try:
+            self.sqlite_manager.execute_script(script)
+        except (TimeoutError, RuntimeError) as e:
+            logger.critical("Failed to initialize database schema: %s", e)
+            raise
 
     def record_metrics(
         self,

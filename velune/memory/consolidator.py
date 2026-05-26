@@ -95,10 +95,17 @@ class MemoryConsolidator:
 
         try:
             logger.info("Distilling episodic memory via model %s...", model_id)
-            response = await provider.complete(prompt=prompt, model=model_id)
+            from velune.core.types.inference import InferenceRequest
+            infer_request = InferenceRequest(
+                model_id=model_id,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,  # Low temperature for factual extraction
+                max_tokens=2000,
+            )
+            response = await provider.infer(infer_request)
 
             # Simple JSON extraction
-            content = response.text.strip()
+            content = response.content.strip()
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:

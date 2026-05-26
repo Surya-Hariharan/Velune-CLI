@@ -102,8 +102,9 @@ class LineageMemoryTier:
             """
             self.sqlite_manager.execute_script(script)
             logger.info("Lineage database successfully initialized at %s", self.db_path)
-        except Exception as e:
-            logger.error("Failed to initialize lineage database: %s", e)
+        except (TimeoutError, RuntimeError) as e:
+            logger.critical("Failed to initialize database schema: %s", e)
+            raise
 
     # =====================================================================
     # Writer Interfaces (Enqueued Asynchronously through SQLiteManager)
@@ -151,7 +152,11 @@ class LineageMemoryTier:
                 )
                 queries.append((alt_query, alt_params))
 
-        self.sqlite_manager.execute_write_many(queries)
+        try:
+            self.sqlite_manager.execute_write_many(queries)
+        except (TimeoutError, RuntimeError) as e:
+            logger.error("Checkpoint save failed: %s", e)
+            raise
 
     def log_failed_experiment(
         self,

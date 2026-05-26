@@ -79,7 +79,9 @@ class CognitiveBus:
         Emits an event and suspends execution until a correlating event returns.
         Uses event.event_id as the correlation key.
         """
-        future: asyncio.Future[KernelEvent] = asyncio.get_event_loop().create_future()
+        # Safe to use asyncio.get_running_loop() because emit_and_wait is an async method
+        # and is guaranteed to run inside an active event loop context.
+        future: asyncio.Future[KernelEvent] = asyncio.get_running_loop().create_future()
         # Register the future under the emitted event's ID as the expected correlation ID
         self._pending_responses[event.event_id] = future
 

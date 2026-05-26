@@ -65,9 +65,16 @@ class IntentReconstructor:
 
         try:
             logger.info("Executing LLM-driven intent reconstruction using model %s...", model_id)
-            response = await provider.complete(prompt=prompt, model=model_id)
+            from velune.core.types.inference import InferenceRequest
+            infer_request = InferenceRequest(
+                model_id=model_id,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1500,
+            )
+            response = await provider.infer(infer_request)
 
-            content = response.text.strip()
+            content = response.content.strip()
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:

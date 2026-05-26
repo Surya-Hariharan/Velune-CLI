@@ -26,59 +26,62 @@ class BackgroundTaskRegistry:
         coro: Awaitable[T],
         timeout_seconds: float = 60.0,
         on_error: Callable[[Exception], None] | None = None,
-    ) -> asyncio.Task:
-        """Submit a named background task with timeout and error capture."""
+    ) -> asyncio.Task | None:
+        """Submit a named background task. Returns None if no running event loop."""
         from velune.core.event_loop import get_loop
-
+        loop = get_loop()
+        
         async def _wrapped() -> Any:
             start_time = time.perf_counter()
             try:
                 result = await asyncio.wait_for(coro, timeout=timeout_seconds)
                 duration = time.perf_counter() - start_time
-                logger.debug("Background task '%s' completed successfully in %.4fs", name, duration)
+                logger.debug("Background task '%s' completed in %.4fs", name, duration)
                 return result
             except TimeoutError:
                 logger.warning("Background task '%s' timed out after %.1fs", name, timeout_seconds)
             except asyncio.CancelledError:
-                duration = time.perf_counter() - start_time
-                logger.debug("Background task '%s' was cancelled after %.4fs", name, duration)
+                logger.debug("Background task '%s' cancelled", name)
                 raise
             except Exception as exc:
                 logger.error("Background task '%s' failed: %s", name, exc)
                 if on_error:
                     try:
                         on_error(exc)
-                    except Exception as inner_err:
-                        logger.error("Error handler for task '%s' failed: %s", name, inner_err)
+                    except Exception as inner:
+                        logger.error("Error handler for task '%s' failed: %s", name, inner)
             finally:
                 with self._lock:
                     self._tasks.pop(name, None)
-
-        loop = get_loop()
-        event = threading.Event()
-        task = None
-
-        def _create():
-            nonlocal task
-            task = loop.create_task(_wrapped(), name=name)
-            with self._lock:
-                self._tasks[name] = task
-            event.set()
-
+        
         try:
-            current_loop = asyncio.get_running_loop()
+            # Running inside async context — create task directly
+            # asyncio.get_running_loop() is correct here because we are inside a try block
+            # that explicitly handles RuntimeError if called from a non-async thread.
+            running_loop = asyncio.get_running_loop()
+            if running_loop is loop:
+                task = loop.create_task(_wrapped(), name=name)
+                with self._lock:
+                    self._tasks[name] = task
+                return task
         except RuntimeError:
-            current_loop = None
-
-        if current_loop is loop or not loop.is_running():
-            task = loop.create_task(_wrapped(), name=name)
+            pass
+        
+        # Called from non-async thread — schedule on application loop
+        task_holder: list[asyncio.Task] = []
+        scheduled = threading.Event()
+        
+        def _create_on_loop():
+            t = loop.create_task(_wrapped(), name=name)
             with self._lock:
-                self._tasks[name] = task
-        else:
-            loop.call_soon_threadsafe(_create)
-            event.wait(timeout=5.0)  # Wait for creation thread-safely
-
-        return task
+                self._tasks[name] = t
+            task_holder.append(t)
+            scheduled.set()
+        
+        loop.call_soon_threadsafe(_create_on_loop)
+        scheduled.wait(timeout=2.0)  # Reduced from 5s — task creation is instant
+        
+        return task_holder[0] if task_holder else None
 
     async def cancel_all(self, timeout: float = 5.0) -> None:
         """Cancel all pending tasks and wait for completion."""

@@ -122,20 +122,34 @@ class HybridRetriever:
         )
 
     def search_sync(self, query: RetrievalQuery) -> RetrievalResult:
-        """Synchronously execute hybrid retrieval."""
+        """Synchronous retrieval. DEPRECATED: use await retrieve() in async contexts.
+        
+        This method creates a new event loop for synchronous callers. Do NOT call 
+        from within a running event loop — use 'await self.retrieve(query)' instead.
+        
+        Raises:
+            RuntimeError: If called from within a running event loop.
+        """
         import asyncio
-        import concurrent.futures
+        import warnings
+        warnings.warn(
+            "HybridRetriever.search_sync() is deprecated and will be removed in a future version. "
+            "Use 'await retriever.retrieve(query)' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(lambda: asyncio.run(self.retrieve(query)))
-                return future.result()
-        else:
-            return asyncio.run(self.retrieve(query))
+            asyncio.get_running_loop()
+            raise RuntimeError(
+                "HybridRetriever.search_sync() cannot be called from an async context. "
+                "Use 'await retriever.retrieve(query)' instead."
+            )
+        except RuntimeError as e:
+            if "cannot be called" in str(e):
+                raise
+            # No running loop — safe to use asyncio.run()
+        
+        return asyncio.run(self.retrieve(query))
 
     def search(self, query: RetrievalQuery) -> RetrievalResult:
         """Synchronous interface. Do NOT call from within a running event loop.
