@@ -27,10 +27,26 @@ class GitCommit(BaseTool):
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
 
+        import asyncio
+        import functools
         if add_all:
-            subprocess.run(["git", "add", "."], cwd=root_path, check=True)
+            await asyncio.to_thread(
+                functools.partial(
+                    subprocess.run,
+                    ["git", "add", "."],
+                    cwd=root_path,
+                    check=True,
+                )
+            )
 
-        subprocess.run(["git", "commit", "-m", message], cwd=root_path, check=True)
+        await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                ["git", "commit", "-m", message],
+                cwd=root_path,
+                check=True,
+            )
+        )
 
         return f"Committed: {message}"
 
@@ -82,7 +98,16 @@ class GitCheckout(BaseTool):
             cmd.append("-b")
         cmd.append(branch)
 
-        subprocess.run(cmd, cwd=root_path, check=True)
+        import asyncio
+        import functools
+        await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                cmd,
+                cwd=root_path,
+                check=True,
+            )
+        )
 
         return f"Checked out: {branch}"
 

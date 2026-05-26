@@ -1,6 +1,6 @@
 """Events → memory updates."""
 
-from velune.events.bus.engine import Event
+from velune.kernel.schemas import Event as KernelEvent
 from velune.memory.lifecycle import MemoryLifecycleCoordinator
 
 
@@ -10,7 +10,7 @@ class MemoryEventHandler:
     def __init__(self, memory_coordinator: MemoryLifecycleCoordinator):
         self.memory_coordinator = memory_coordinator
 
-    async def handle_file_created(self, event: Event) -> None:
+    async def handle_file_created(self, event: KernelEvent) -> None:
         """Handle file created event."""
         working = self.memory_coordinator.consolidator.working
         if working:
@@ -23,7 +23,7 @@ class MemoryEventHandler:
                 payload={"file_path": event.data.get("file_path")}
             )
 
-    async def handle_file_modified(self, event: Event) -> None:
+    async def handle_file_modified(self, event: KernelEvent) -> None:
         """Handle file modified event."""
         working = self.memory_coordinator.consolidator.working
         if working:
@@ -36,7 +36,7 @@ class MemoryEventHandler:
                 payload={"file_path": event.data.get("file_path")}
             )
 
-    async def handle_command_executed(self, event: Event) -> None:
+    async def handle_command_executed(self, event: KernelEvent) -> None:
         """Handle command executed event."""
         working = self.memory_coordinator.consolidator.working
         if working:
@@ -49,7 +49,7 @@ class MemoryEventHandler:
                 payload={"command": event.data.get("command")}
             )
 
-    async def handle_task_completed(self, event: Event) -> None:
+    async def handle_task_completed(self, event: KernelEvent) -> None:
         """Handle task completed event."""
         session_id = event.data.get("session_id") or "default"
         episodic = self.memory_coordinator.consolidator.episodic

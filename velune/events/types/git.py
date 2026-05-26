@@ -1,13 +1,16 @@
 """Git event types."""
 
 from dataclasses import dataclass
-
-from velune.events.bus.engine import Event
+from typing import Any
 
 
 @dataclass
-class CommitCreated(Event):
+class CommitCreated:
     """Event emitted when a commit is created."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
     commit_hash: str
     author: str
     message: str
@@ -15,13 +18,21 @@ class CommitCreated(Event):
 
 
 @dataclass
-class BranchChanged(Event):
+class BranchChanged:
     """Event emitted when the branch is changed."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
     old_branch: str
     new_branch: str
 
 
 @dataclass
-class StashPushed(Event):
+class StashPushed:
     """Event emitted when a stash is pushed."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
     stash_ref: str

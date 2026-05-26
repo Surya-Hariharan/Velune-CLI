@@ -1,7 +1,8 @@
 """Event-driven cognition system."""
 
-from velune.events.bus.engine import Event, EventBus
-from velune.events.bus.router import EventRouter
+# Migration compatibility exports
+from velune.kernel.bus import CognitiveBus as EventBus
+from velune.kernel.schemas import Event
 from velune.events.handlers.cognition import CognitionEventHandler
 from velune.events.handlers.index import IndexEventHandler
 from velune.events.handlers.memory import MemoryEventHandler
@@ -17,7 +18,6 @@ from velune.events.types.terminal import CommandExecuted, ErrorOccurred, TestRan
 __all__ = [
     "EventBus",
     "Event",
-    "EventRouter",
     "FileCreated",
     "FileModified",
     "FileDeleted",

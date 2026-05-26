@@ -1,6 +1,6 @@
 """Events → workspace cognition updates."""
 
-from velune.events.bus.engine import Event
+from velune.kernel.schemas import Event as KernelEvent
 from velune.workspace.cognition.model import LiveCognitionModel
 
 
@@ -10,15 +10,15 @@ class CognitionEventHandler:
     def __init__(self, cognition_model: LiveCognitionModel):
         self.cognition_model = cognition_model
 
-    async def handle_task_created(self, event: Event) -> None:
+    async def handle_task_created(self, event: KernelEvent) -> None:
         """Handle task created event."""
         self.cognition_model.set_task(event.data.get("task_id"))
 
-    async def handle_task_completed(self, event: Event) -> None:
+    async def handle_task_completed(self, event: KernelEvent) -> None:
         """Handle task completed event."""
         self.cognition_model.clear_task()
 
-    async def handle_agent_started(self, event: Event) -> None:
+    async def handle_agent_started(self, event: KernelEvent) -> None:
         """Handle agent started event."""
         self.cognition_model.set_metadata(
             f"agent_{event.data.get('agent_id')}",
@@ -29,7 +29,7 @@ class CognitionEventHandler:
             },
         )
 
-    async def handle_agent_completed(self, event: Event) -> None:
+    async def handle_agent_completed(self, event: KernelEvent) -> None:
         """Handle agent completed event."""
         agent_id = event.data.get("agent_id")
         metadata = self.cognition_model.get_metadata(f"agent_{agent_id}")

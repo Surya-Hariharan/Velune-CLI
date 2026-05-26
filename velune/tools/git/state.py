@@ -22,11 +22,16 @@ class GitStatus(BaseTool):
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
 
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=root_path,
-            capture_output=True,
-            text=True,
+        import asyncio
+        import functools
+        result = await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                ["git", "status", "--porcelain"],
+                cwd=root_path,
+                capture_output=True,
+                text=True,
+            )
         )
 
         status = {
@@ -82,20 +87,28 @@ class GitBranch(BaseTool):
             raise ValueError("Not a git repository")
 
         # Get current branch
-        current_result = subprocess.run(
-            ["git", "branch", "--show-current"],
-            cwd=root_path,
-            capture_output=True,
-            text=True,
+        import asyncio
+        import functools
+        current_result = await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                ["git", "branch", "--show-current"],
+                cwd=root_path,
+                capture_output=True,
+                text=True,
+            )
         )
         current_branch = current_result.stdout.strip()
 
         # Get all branches
-        all_result = subprocess.run(
-            ["git", "branch", "-a"],
-            cwd=root_path,
-            capture_output=True,
-            text=True,
+        all_result = await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                ["git", "branch", "-a"],
+                cwd=root_path,
+                capture_output=True,
+                text=True,
+            )
         )
 
         branches = []

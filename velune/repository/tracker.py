@@ -151,3 +151,63 @@ class GitTracker:
             errors="ignore"
         )
         return res.stdout
+
+    async def _run_git_async(self, args: list[str]) -> str:
+        """Async version of _run_git using asyncio.to_thread."""
+        import asyncio
+        import functools
+        cmd = ["git"] + args
+        try:
+            result = await asyncio.to_thread(
+                functools.partial(
+                    subprocess.run,
+                    cmd,
+                    cwd=self.root_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                )
+            )
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Git command failed: {' '.join(cmd)}: {e.stderr}") from e
+
+    def get_all_file_volatility(self, days: int = 90) -> dict[str, int]:
+        """Get commit counts for ALL files in a single git log call.
+        
+        Returns:
+            dict mapping relative file path → commit count in last {days} days.
+            Empty dict if not a git repo.
+        """
+        if not self.is_git:
+            return {}
+        try:
+            result = self._run_git([
+                "log",
+                f"--since={days} days ago",
+                "--pretty=format:",
+                "--name-only",
+            ])
+            
+            counts: dict[str, int] = {}
+            for line in result.splitlines():
+                line = line.strip()
+                if line:  # Skip empty lines (between commits)
+                    # Normalize paths to use forward-slashes (consistent across all platforms)
+                    normalized_line = line.replace("\\", "/")
+                    counts[normalized_line] = counts.get(normalized_line, 0) + 1
+            return counts
+        except subprocess.CalledProcessError as e:
+            import logging
+            logging.getLogger("velune.repository.tracker").warning(
+                "Git log batch volatility failed with process error: %s", e
+            )
+            return {}
+        except Exception as e:
+            import logging
+            logging.getLogger("velune.repository.tracker").error(
+                "Unexpected error in get_all_file_volatility: %s", e
+            )
+            return {}

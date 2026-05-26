@@ -26,11 +26,16 @@ class GitLog(BaseTool):
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
 
-        result = subprocess.run(
-            ["git", "log", f"-{limit}", "--pretty=format:%H|%an|%ad|%s", "--date=iso"],
-            cwd=root_path,
-            capture_output=True,
-            text=True,
+        import asyncio
+        import functools
+        result = await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                ["git", "log", f"-{limit}", "--pretty=format:%H|%an|%ad|%s", "--date=iso"],
+                cwd=root_path,
+                capture_output=True,
+                text=True,
+            )
         )
 
         commits = []
@@ -87,11 +92,16 @@ class GitDiff(BaseTool):
         if file_path:
             cmd.append(file_path)
 
-        result = subprocess.run(
-            cmd,
-            cwd=root_path,
-            capture_output=True,
-            text=True,
+        import asyncio
+        import functools
+        result = await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                cmd,
+                cwd=root_path,
+                capture_output=True,
+                text=True,
+            )
         )
 
         return result.stdout
@@ -133,11 +143,16 @@ class GitBlame(BaseTool):
         if not (root_path / ".git").exists():
             raise ValueError("Not a git repository")
 
-        result = subprocess.run(
-            ["git", "blame", file_path],
-            cwd=root_path,
-            capture_output=True,
-            text=True,
+        import asyncio
+        import functools
+        result = await asyncio.to_thread(
+            functools.partial(
+                subprocess.run,
+                ["git", "blame", file_path],
+                cwd=root_path,
+                capture_output=True,
+                text=True,
+            )
         )
 
         lines = []

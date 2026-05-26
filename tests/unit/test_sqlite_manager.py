@@ -1,4 +1,4 @@
-"""Unit tests for SQLiteManager write error propagation (Batch 04)."""
+"""Unit tests for SQLiteManager write queue correctness and error safety (Batch 13)."""
 
 from __future__ import annotations
 
@@ -24,12 +24,12 @@ def _make_manager(tmp_path: Path) -> SQLiteManager:
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — execute_write_sync raises TimeoutError when queue is never drained
+# Tests
 # ---------------------------------------------------------------------------
 
 
 def test_write_sync_propagates_timeout(tmp_path: Path) -> None:
-    """TimeoutError must be raised (not swallowed) when the write thread stalls."""
+    """TimeoutError must be raised when the write thread stalls."""
     manager = _make_manager(tmp_path)
 
     # Stop the background thread so nothing is ever dequeued.
@@ -39,7 +39,7 @@ def test_write_sync_propagates_timeout(tmp_path: Path) -> None:
     # Patch done.wait to expire immediately so the test doesn't take 10 s.
     original_wait = threading.Event.wait
 
-    def fast_wait(self: threading.Event, timeout: float | None = None) -> bool:  # noqa: ANN001
+    def fast_wait(self: threading.Event, timeout: float | None = None) -> bool:
         return False  # simulate timeout
 
     with patch.object(threading.Event, "wait", fast_wait):
@@ -47,17 +47,10 @@ def test_write_sync_propagates_timeout(tmp_path: Path) -> None:
             manager.execute_write_sync("INSERT INTO t VALUES (1)", ())
 
     msg = str(exc_info.value)
-    assert "Queue depth" in msg or "queue" in msg.lower(), (
-        "TimeoutError message should contain queue depth info"
-    )
+    assert "Queue depth" in msg or "queue" in msg.lower()
 
 
-# ---------------------------------------------------------------------------
-# Test 2 — execute_write_sync propagates DB errors as RuntimeError
-# ---------------------------------------------------------------------------
-
-
-def test_write_sync_propagates_db_error(tmp_path: Path) -> None:
+def test_execute_write_sync_propagates_errors(tmp_path: Path) -> None:
     """RuntimeError must surface when _do_write raises sqlite3.OperationalError."""
     manager = _make_manager(tmp_path)
 
@@ -74,12 +67,7 @@ def test_write_sync_propagates_db_error(tmp_path: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Test 3 — execute_write_sync happy path (real in-memory equivalent)
-# ---------------------------------------------------------------------------
-
-
-def test_write_sync_success_path(tmp_path: Path) -> None:
+def test_execute_write_sync_success(tmp_path: Path) -> None:
     """No exception must be raised for a valid DDL + DML roundtrip."""
     manager = _make_manager(tmp_path)
 
@@ -93,13 +81,8 @@ def test_write_sync_success_path(tmp_path: Path) -> None:
     assert rows[0]["id"] == 42
 
 
-# ---------------------------------------------------------------------------
-# Test 4 — execute_write (fire-and-forget) never raises even on DB error
-# ---------------------------------------------------------------------------
-
-
-def test_fire_and_forget_still_works(tmp_path: Path) -> None:
-    """execute_write must not raise; errors are only logged."""
+def test_fire_and_forget_does_not_raise(tmp_path: Path) -> None:
+    """execute_write (fire-and-forget) must not raise; errors are only logged."""
     manager = _make_manager(tmp_path)
 
     with patch.object(
@@ -112,15 +95,21 @@ def test_fire_and_forget_still_works(tmp_path: Path) -> None:
 
     # Give the write thread a moment to process the item.
     time.sleep(0.2)
-    # If we reach here without an exception the test passes.
 
 
-# ---------------------------------------------------------------------------
-# Test 5 — write thread survives an error; subsequent writes succeed
-# ---------------------------------------------------------------------------
+def test_execute_read_returns_rows(tmp_path: Path) -> None:
+    """Verify that execute_read queries successfully retrieve sqlite3.Row results."""
+    manager = _make_manager(tmp_path)
+    manager.execute_script("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, content TEXT)")
+    manager.execute_write_sync("INSERT INTO notes (content) VALUES (?)", ("Hello World",))
+    
+    rows = manager.execute_read("SELECT * FROM notes")
+    assert len(rows) == 1
+    assert rows[0]["content"] == "Hello World"
+    assert rows[0]["id"] == 1
 
 
-def test_write_thread_survives_errors(tmp_path: Path) -> None:
+def test_write_thread_survives_error(tmp_path: Path) -> None:
     """The write thread must remain alive after a write failure."""
     manager = _make_manager(tmp_path)
 
@@ -130,7 +119,7 @@ def test_write_thread_survives_errors(tmp_path: Path) -> None:
     call_count = 0
     original_do_write = manager._do_write
 
-    def fail_once(query: str, params: object) -> None:  # noqa: ANN001
+    def fail_once(query: str, params: object) -> None:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -149,4 +138,4 @@ def test_write_thread_survives_errors(tmp_path: Path) -> None:
     manager.execute_write_sync("INSERT INTO t VALUES (2)", ())
     rows = manager.execute_read("SELECT id FROM t ORDER BY id")
     ids = [r["id"] for r in rows]
-    assert 2 in ids, f"Expected row 2 after recovery, got: {ids}"
+    assert 2 in ids

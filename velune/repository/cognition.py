@@ -55,10 +55,15 @@ class RepositoryCognitionService:
         changes = self.tracker.get_uncommitted_changes()
         recent_commits = self.tracker.get_recent_commits(limit=5)
 
-        # Calculate file volatility (commits in last 90 days)
+        # Calculate file volatility using single batched git log (200 files → 1 subprocess)
+        all_volatility = self.tracker.get_all_file_volatility(days=90)
         file_volatility: dict[str, int] = {}
         for f in snapshot.files:
-            file_volatility[f.path] = self.tracker.get_file_volatility(f.path)
+            # Match both forward-slash and backslash path variants
+            file_volatility[f.path] = (
+                all_volatility.get(f.path, 0) or
+                all_volatility.get(f.path.replace("/", "\\"), 0)
+            )
 
         # 5. Architectural layer and pattern analysis
         layers = self.analyzer.classify_architecture_layers(file_paths)

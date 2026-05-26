@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from velune.events.bus.engine import Event, EventBus
+from velune.kernel.bus import CognitiveBus
+from velune.kernel.schemas import Event as KernelEvent
 from velune.memory.lifecycle import MemoryArtifact, MemoryLifecycleCoordinator
 from velune.memory.tiers.graph import GraphMemoryTier
 from velune.orchestration.schemas import (
@@ -27,6 +30,37 @@ from velune.retrieval.hybrid import HybridRetriever
 from velune.retrieval.schemas import RetrievalQuery
 from velune.tools.base.executor import ToolExecutionCoordinator
 from velune.tools.base.registry import ToolRegistry
+from velune.core.types.inference import InferenceRequest
+
+logger = logging.getLogger("velune.orchestration.engine")
+
+REASONING_TIMEOUT = 60.0
+PLANNING_TIMEOUT = 60.0
+
+REASONING_PROMPT_TEMPLATE = """You are the Reasoning Engine for an autonomous software engineering system.
+
+TASK: {prompt}
+
+WORKSPACE: {workspace}
+
+EXECUTION PLAN:
+{plan_summary}
+
+RETRIEVED CONTEXT (top matches from codebase):
+{context_text}
+
+Your job: Analyze the task and context. Produce a concrete execution strategy.
+
+Respond with a JSON object:
+{{
+  "strategy": "2-3 sentence description of the execution approach",
+  "key_files": ["list of files most likely to need modification"],
+  "risks": ["list of 1-3 potential issues to watch for"],
+  "requires_tools": true/false,
+  "confidence": 0.0-1.0
+}}
+
+Respond with ONLY the JSON object. No markdown. No explanation."""
 
 try:
     from langgraph.graph import END, StateGraph
@@ -45,7 +79,7 @@ class LangGraphOrchestrationEngine:
         memory_lifecycle: MemoryLifecycleCoordinator,
         graph_memory: GraphMemoryTier,
         tool_registry: ToolRegistry,
-        event_bus: EventBus | None = None,
+        event_bus: CognitiveBus | None = None,
         workspace_path: Path | None = None,
     ) -> None:
         self.retrieval = retrieval
@@ -54,7 +88,7 @@ class LangGraphOrchestrationEngine:
         self.graph_memory = graph_memory
         self.tool_registry = tool_registry
         self.tool_executor = ToolExecutionCoordinator(tool_registry=tool_registry)
-        self.event_bus = event_bus or EventBus()
+        self.event_bus = event_bus or CognitiveBus()
 
         self.planner = AdaptivePlanningService()
         self.validator = ExecutionValidator()
@@ -115,8 +149,7 @@ class LangGraphOrchestrationEngine:
         )
         self._states[run_id] = state
 
-        if not self.event_bus._running:
-            await self.event_bus.start()
+
 
         await self._publish("orchestration.started", run_id, {"prompt": request.prompt})
 
@@ -297,19 +330,43 @@ class LangGraphOrchestrationEngine:
         if self._check_interrupt(state):
             return state
 
+        import os
+        use_llm = os.environ.get("VELUNE_LLM_ORCHESTRATION", "false").lower() == "true"
+
         task_id = str(state.task_state.get("task_id") or self._task_id(state.request.prompt))
-        plan = self.planner.create_plan(
-            task_id=task_id,
-            prompt=state.request.prompt,
-            repository_summary=state.repository_state,
-        )
+
+        if use_llm:
+            provider = self._get_reasoning_provider()
+            model_id = self._get_model_id_for_role("planner")
+            if provider is not None:
+                plan = await self.planner.create_plan_with_llm(
+                    task_id=task_id,
+                    prompt=state.request.prompt,
+                    provider=provider,
+                    model_id=model_id,
+                    repository_summary=state.repository_state,
+                )
+            else:
+                plan = self.planner.create_plan(
+                    task_id=task_id,
+                    prompt=state.request.prompt,
+                    repository_summary=state.repository_state,
+                )
+        else:
+            plan = self.planner.create_plan(
+                task_id=task_id,
+                prompt=state.request.prompt,
+                repository_summary=state.repository_state,
+            )
+
         state.task_plan = plan
         state.task_state["plan_steps"] = len(plan.steps)
         state.agent_messages.append(
             AgentMessage(
                 sender="planner",
                 receiver="retriever",
-                content=f"Plan generated with {len(plan.steps)} steps",
+                content=f"Plan generated: {len(plan.steps)} steps",
+                metadata={"strategy": plan.metadata.get("strategy", "keyword")},
             )
         )
         await self._checkpoint("planning", state)
@@ -341,21 +398,106 @@ class LangGraphOrchestrationEngine:
         if self._check_interrupt(state):
             return state
 
-        hit_count = len(state.retrieval_result.hits) if state.retrieval_result else 0
-        plan_steps = len(state.task_plan.steps) if state.task_plan else 0
-        reasoning = (
-            f"Execution strategy for '{state.request.prompt}': "
-            f"{plan_steps} planned steps with {hit_count} retrieval candidates. "
-            "Proceed with bounded tool execution and validation-first loops."
+        import os
+        use_llm = os.environ.get("VELUNE_LLM_ORCHESTRATION", "false").lower() == "true"
+
+        def apply_legacy_reasoning():
+            hit_count = len(state.retrieval_result.hits) if state.retrieval_result else 0
+            plan_steps = len(state.task_plan.steps) if state.task_plan else 0
+            reasoning = (
+                f"Execution strategy for '{state.request.prompt}': "
+                f"{plan_steps} planned steps with {hit_count} retrieval candidates. "
+                "Proceed with bounded tool execution and validation-first loops."
+            )
+            state.output = reasoning
+            state.execution_state["reasoning"] = reasoning
+            state.execution_state["requires_tools"] = True
+
+        if not use_llm:
+            apply_legacy_reasoning()
+            await self._checkpoint("reasoning", state)
+            return state
+
+        # LLM-backed reasoning node
+        provider = self._get_reasoning_provider()
+        if provider is None:
+            logger.warning("No provider available for reasoning node; using deterministic fallback")
+            apply_legacy_reasoning()
+            await self._checkpoint("reasoning", state)
+            return state
+
+        # Build reasoning context from retrieval hits
+        context_snippets = []
+        if state.retrieval_result:
+            for hit in state.retrieval_result.hits[:5]:  # Top 5 hits only
+                snippet = hit.document.content[:500]  # Truncate for context
+                context_snippets.append(f"[{hit.source.value}] {snippet}")
+
+        context_text = "\n---\n".join(context_snippets) if context_snippets else "No context retrieved."
+
+        plan_summary = ""
+        if state.task_plan:
+            plan_summary = "\n".join([
+                f"  {i+1}. [{step.agent_role}] {step.description}"
+                for i, step in enumerate(state.task_plan.steps[:10])
+            ])
+
+        reasoning_prompt = REASONING_PROMPT_TEMPLATE.format(
+            prompt=state.request.prompt,
+            workspace=state.request.workspace,
+            plan_summary=plan_summary or "No plan generated yet.",
+            context_text=context_text,
         )
-        state.output = reasoning
-        state.execution_state["reasoning"] = reasoning
-        state.execution_state["requires_tools"] = True
+
+        try:
+            model_id = self._get_model_id_for_role("reasoning")
+            request = InferenceRequest(
+                model_id=model_id,
+                messages=[{"role": "user", "content": reasoning_prompt}],
+                temperature=0.3,
+                max_tokens=500,
+            )
+            response = await asyncio.wait_for(
+                provider.infer(request),
+                timeout=REASONING_TIMEOUT,
+            )
+
+            # Parse JSON response
+            content = response.content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.split("```")[0].strip()
+
+            reasoning_data = json.loads(content)
+            strategy = reasoning_data.get("strategy", "Proceed with standard execution.")
+
+            state.output = strategy
+            state.execution_state["reasoning"] = strategy
+            state.execution_state["requires_tools"] = reasoning_data.get("requires_tools", True)
+            state.execution_state["key_files"] = reasoning_data.get("key_files", [])
+            state.execution_state["risks"] = reasoning_data.get("risks", [])
+            state.execution_state["confidence"] = reasoning_data.get("confidence", 0.7)
+
+        except asyncio.TimeoutError:
+            logger.warning("Reasoning node LLM timeout; using empty strategy")
+            apply_legacy_reasoning()
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning("Reasoning node JSON parse error: %s; using raw response", e)
+            logger.debug("Raw reasoning response: %s", response.content if 'response' in locals() else "")
+            state.execution_state["reasoning"] = response.content[:500] if 'response' in locals() else "Parse error"
+            state.execution_state["requires_tools"] = True
+        except Exception as e:
+            logger.error("Reasoning node LLM call failed: %s", e)
+            apply_legacy_reasoning()
+
         state.agent_messages.append(
             AgentMessage(
                 sender="reasoner",
                 receiver="execution",
-                content="Reasoning complete, tool execution authorized",
+                content="Reasoning complete",
+                metadata={"strategy_length": len(state.execution_state.get("reasoning") or "")},
             )
         )
         await self._checkpoint("reasoning", state)
@@ -546,13 +688,12 @@ class LangGraphOrchestrationEngine:
         )
 
     async def _publish(self, event_type: str, run_id: str, payload: dict[str, Any]) -> None:
-        event = Event(
+        event = KernelEvent(
             event_type=event_type,
             data={"run_id": run_id, **payload},
-            timestamp=datetime.now(tz=UTC).timestamp(),
             source="orchestration",
         )
-        await self.event_bus.publish(event)
+        await self.event_bus.emit(event)
 
     def _result_from_state(self, state: OrchestrationState) -> OrchestrationResult:
         return OrchestrationResult(
@@ -575,3 +716,35 @@ class LangGraphOrchestrationEngine:
     def _task_id(self, prompt: str) -> str:
         compact = "-".join(prompt.lower().split())[:48]
         return compact or "task"
+
+    def _get_reasoning_provider(self):
+        """Get the best available provider for reasoning tasks."""
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.provider_registry"):
+                registry = container.get("runtime.provider_registry")
+                config = container.get("runtime.config") if container.has("runtime.config") else None
+                provider_name = "openai"
+                if config and hasattr(config, "providers"):
+                    provider_name = config.providers.default_provider
+                return registry.get(provider_name)
+        except Exception as e:
+            logger.debug("Could not get reasoning provider: %s", e)
+        return None
+
+    def _get_model_id_for_role(self, role: str) -> str:
+        """Get configured model ID for a given role, with fallback."""
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.model_registry"):
+                registry = container.get("runtime.model_registry")
+                config = container.get("runtime.config") if container.has("runtime.config") else None
+                provider_name = config.providers.default_provider if config else "openai"
+                models = registry.get_by_provider(provider_name)
+                if models:
+                    return models[0].model_id
+        except Exception:
+            pass
+        return "gpt-4o-mini"  # Safe fallback

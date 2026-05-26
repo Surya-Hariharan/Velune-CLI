@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+import logging
 import re
 from typing import Any
 
 from velune.core.types.task import TaskPlan, TaskStatus, TaskStep
+from velune.core.types.inference import InferenceRequest
+
+logger = logging.getLogger("velune.planning.service")
+
+PLANNING_TIMEOUT = 60.0
+
+PLANNING_PROMPT_TEMPLATE = """You are a software engineering task planner.
+
+TASK: {prompt}
+{context}
+
+Create a concrete execution plan with {max_steps} or fewer steps.
+
+Each step must be actionable by one of these agents:
+- planner: gather context, analyze requirements
+- retriever: search codebase for relevant files
+- coder: write or modify code files  
+- debugger: diagnose and fix errors
+- reviewer: validate correctness and quality
+- memory: record findings and results
+
+Respond with ONLY a JSON array:
+[
+  {{"id": "step-1", "description": "specific action", "agent_role": "coder", "dependencies": []}},
+  {{"id": "step-2", "description": "specific action", "agent_role": "reviewer", "dependencies": ["step-1"]}}
+]
+
+Be specific. Mention actual file names if they can be inferred. No placeholders."""
 
 
 class AdaptivePlanningService:
@@ -53,6 +84,84 @@ class AdaptivePlanningService:
                 "repository_signals": repository_summary or {},
             },
         )
+
+    async def create_plan_with_llm(
+        self,
+        task_id: str,
+        prompt: str,
+        provider,
+        model_id: str,
+        repository_summary: dict | None = None,
+        max_steps: int = 10,
+    ) -> TaskPlan:
+        """Create a plan using LLM for intelligent task decomposition.
+        
+        Falls back to keyword-based planning if LLM call fails.
+        """
+        context = ""
+        if repository_summary:
+            files = repository_summary.get("total_files", 0) or repository_summary.get("files", 0)
+            symbols = repository_summary.get("total_symbols", 0) or repository_summary.get("symbols", 0)
+            langs = repository_summary.get("languages", {})
+            context = f"Repository: {files} files, {symbols} symbols. Languages: {langs}"
+        
+        context_str = f"CODEBASE CONTEXT: {context}" if context else ""
+        planning_prompt = PLANNING_PROMPT_TEMPLATE.format(
+            prompt=prompt,
+            context=context_str,
+            max_steps=max_steps,
+        )
+        
+        try:
+            request = InferenceRequest(
+                model_id=model_id,
+                messages=[{"role": "user", "content": planning_prompt}],
+                temperature=0.2,
+                max_tokens=1000,
+            )
+            response = await asyncio.wait_for(provider.infer(request), timeout=PLANNING_TIMEOUT)
+            
+            content = response.content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.split("```")[0].strip()
+            
+            steps_data = json.loads(content)
+            
+            task_steps = []
+            for step_data in steps_data[:max_steps]:
+                task_steps.append(TaskStep(
+                    id=f"{task_id}-{step_data.get('id', f'step-{len(task_steps)+1}')}",
+                    description=step_data.get("description", ""),
+                    agent_role=step_data.get("agent_role", "coder"),
+                    status=TaskStatus.PENDING,
+                    dependencies=step_data.get("dependencies", []),
+                    metadata={},
+                ))
+            
+            return TaskPlan(
+                task_id=task_id,
+                steps=task_steps,
+                metadata={
+                    "strategy": "llm_decomposed",
+                    "prompt_fingerprint": self._fingerprint(prompt),
+                    "repository_signals": repository_summary or {},
+                },
+            )
+        
+        except Exception as e:
+            logger.warning(
+                "LLM planning failed (%s), falling back to keyword-based planning: %s",
+                type(e).__name__, e
+            )
+            return self.create_plan(
+                task_id=task_id,
+                prompt=prompt,
+                repository_summary=repository_summary,
+                max_steps=max_steps,
+            )
 
     def replan(
         self,

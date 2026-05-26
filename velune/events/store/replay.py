@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Callable
 
-from velune.events.bus.engine import Event
+from velune.kernel.schemas import Event as KernelEvent
 from velune.events.store.log import EventLog
 
 
@@ -13,7 +13,7 @@ class EventReplayer:
     def __init__(self, event_log: EventLog):
         self.event_log = event_log
 
-    async def replay_all(self, handler: Callable[[Event], None]) -> None:
+    async def replay_all(self, handler: Callable[[KernelEvent], None]) -> None:
         """Replay all events from the log."""
         events = await self.event_log.read_all()
 
@@ -26,7 +26,7 @@ class EventReplayer:
             except Exception:
                 pass
 
-    async def replay_since(self, timestamp: float, handler: Callable[[Event], None]) -> None:
+    async def replay_since(self, timestamp: float, handler: Callable[[KernelEvent], None]) -> None:
         """Replay events since a timestamp."""
         events = await self.event_log.read_all()
 

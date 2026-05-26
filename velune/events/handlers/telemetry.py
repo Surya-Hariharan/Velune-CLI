@@ -1,6 +1,6 @@
 """Events → telemetry."""
 
-from velune.events.bus.engine import Event
+from velune.kernel.schemas import Event as KernelEvent
 
 
 class TelemetryEventHandler:
@@ -9,7 +9,7 @@ class TelemetryEventHandler:
     def __init__(self):
         self._event_counts: dict[str, int] = {}
 
-    async def handle_event(self, event: Event) -> None:
+    async def handle_event(self, event: KernelEvent) -> None:
         """Handle any event for telemetry."""
         event_type = event.event_type
         self._event_counts[event_type] = self._event_counts.get(event_type, 0) + 1
