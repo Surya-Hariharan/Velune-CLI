@@ -3,7 +3,6 @@
 from velune.core.config.defaults import get_default_config
 from velune.core.config.loader import ConfigLoader
 from velune.core.errors import *
-from velune.core.registry import *
 from velune.core.types import *
 from velune.kernel.config import (
     ContextConfig,
@@ -88,5 +87,4 @@ __all__ = [
     "ServiceContainer",
     "inject",
     "get_container",
-    "register_default_bindings",
 ]

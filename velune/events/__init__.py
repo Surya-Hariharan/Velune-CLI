@@ -8,7 +8,6 @@ from velune.events.handlers.index import IndexEventHandler
 from velune.events.handlers.memory import MemoryEventHandler
 from velune.events.handlers.telemetry import TelemetryEventHandler
 from velune.events.store.log import EventLog
-from velune.events.store.replay import EventReplayer
 from velune.events.types.agent import AgentCompleted, AgentFailed, AgentStarted
 from velune.events.types.filesystem import FileCreated, FileDeleted, FileModified
 from velune.events.types.git import BranchChanged, CommitCreated, StashPushed
@@ -38,5 +37,4 @@ __all__ = [
     "IndexEventHandler",
     "TelemetryEventHandler",
     "EventLog",
-    "EventReplayer",
 ]

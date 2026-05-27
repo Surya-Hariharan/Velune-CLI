@@ -31,9 +31,6 @@ dependencies = [
     "rich>=13.7.0",
     "platformdirs>=4.2.0",
     
-    # Async
-    "aiofiles>=23.2.1",
-    
     # Providers
     "openai>=1.10.0",
     "anthropic>=0.18.0",
@@ -61,17 +58,12 @@ dependencies = [
     # Execution
     "psutil>=5.9.0",
     
-    # Events
-    "pyee>=11.0.0",
-    
     # Telemetry
     "opentelemetry-api>=1.22.0",
     "opentelemetry-sdk>=1.22.0",
     "opentelemetry-exporter-otlp>=1.22.0",
     
     # Utilities
-    "python-dateutil>=2.8.2",
-    "tenacity>=8.2.0",
     "orjson>=3.9.0",
     "tiktoken>=0.5.0",
     "mcp>=1.0.0",

@@ -68,6 +68,7 @@ __pypackages__/
 
 # Project-specific local artifacts
 .velune/
+qdrant_db/
 
 # SQLite lock files and journals
 *.db-wal

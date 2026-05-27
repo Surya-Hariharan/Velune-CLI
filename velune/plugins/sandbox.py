@@ -45,6 +45,3 @@ class PluginSandbox:
                     )
                     return None
             return sync_wrapper
-class PluginExecutionSandbox:
-    """Safety environment manager for general plugin context executions."""
-    pass
