@@ -111,3 +111,47 @@ def test_dict_serialization() -> None:
     
     loaded = CommandSpec.from_dict(d)
     assert loaded == spec
+
+
+def test_malicious_path_rejected(tmp_path, monkeypatch):
+    """Executable in untrusted directory must be rejected."""
+    # Force platform to not be win32 to test the logic
+    monkeypatch.setattr("sys.platform", "linux")
+    
+    malicious_python = tmp_path / "python"
+    malicious_python.write_text("#!/bin/sh\necho evil")
+    malicious_python.chmod(0o755)
+    
+    import shutil
+    import os
+    original_which = shutil.which
+    
+    # Mock shutil.which to find the malicious python
+    def mock_which(cmd, mode=os.F_OK | os.X_OK, path=None):
+        if cmd == "python":
+            return str(malicious_python)
+        return original_which(cmd, mode, path)
+        
+    monkeypatch.setattr("shutil.which", mock_which)
+    
+    original_path = os.environ["PATH"]
+    os.environ["PATH"] = f"{tmp_path}:{original_path}"
+    
+    try:
+        spec = CommandSpec.from_string("python --version", cwd=Path.cwd())
+        with pytest.raises(SandboxError, match="untrusted path"):
+            spec.validate()
+    finally:
+        os.environ["PATH"] = original_path
+
+
+def test_system_python_trusted(monkeypatch):
+    """System Python must pass trust check."""
+    import sys
+    import shutil
+    if sys.platform == "win32":
+        monkeypatch.setattr("shutil.which", lambda cmd: "C:\\Windows\\System32\\echo.exe" if cmd == "echo" else shutil.which(cmd))
+    
+    spec = CommandSpec.from_string("echo hello", cwd=Path.cwd())
+    # Should not raise for system echo
+    spec.validate()

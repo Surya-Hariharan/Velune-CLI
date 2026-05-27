@@ -1,10 +1,15 @@
 """BM25 Lexical retrieval layer for exact keyword matches."""
 
+import logging
 import re
+import threading
+import time
 
 from rank_bm25 import BM25Okapi
 
 from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalSource
+
+logger = logging.getLogger("velune.retrieval.keyword")
 
 
 class BM25Retriever:
@@ -14,17 +19,53 @@ class BM25Retriever:
         self.documents: list[RetrievalDocument] = []
         self.corpus: list[list[str]] = []
         self.bm25: BM25Okapi | None = None
+        self._dirty: bool = False  # True when corpus needs rebuild
+        self._rebuild_lock = threading.Lock()
+
+    @property
+    def index_size(self) -> int:
+        return len(self.documents)
 
     def add_documents(self, docs: list[RetrievalDocument]) -> None:
-        """Appends new documents to the lexical index corpus and rebuilds the BM25 model."""
+        """Appends new documents to the lexical index corpus and marks the index as dirty."""
+        for doc in docs:
+            self.documents.append(doc)
+            self.corpus.append(self._tokenize(doc.content))
+        self._dirty = True
+        self.bm25 = None  # Invalidate current index
+        logger.debug("BM25 index marked dirty: %d total documents", len(self.documents))
+
+    def add_documents_batch(self, docs: list[RetrievalDocument]) -> None:
+        """More efficient batch add — tokenizes new documents and appends them to corpus."""
+        new_tokens = [self._tokenize(doc.content) for doc in docs]
         self.documents.extend(docs)
-        self.corpus = [self._tokenize(doc.content) for doc in self.documents]
-        if self.corpus:
+        self.corpus.extend(new_tokens)
+        self._dirty = True
+        self.bm25 = None
+        logger.debug("BM25 index marked dirty: %d total documents", len(self.documents))
+
+    def _ensure_index(self) -> None:
+        """Rebuild BM25 index if dirty. Thread-safe."""
+        if not self._dirty or not self.corpus:
+            return
+        with self._rebuild_lock:
+            if not self._dirty:  # Double-check after acquiring lock
+                return
+            start_time = time.time()
             self.bm25 = BM25Okapi(self.corpus)
+            self._dirty = False
+            elapsed = time.time() - start_time
+            logger.debug("BM25 index rebuilt: %d documents, %.3fs", len(self.documents), elapsed)
 
     def retrieve(self, query: str, top_k: int = 10, namespace: str | None = None) -> list[RetrievalHit]:
         """Queries the BM25 lexical index and scores candidates."""
-        if not self.bm25 or not self.documents:
+        if not self.documents:
+            return []
+
+        if self._dirty:
+            self._ensure_index()
+
+        if not self.bm25:
             return []
 
         tokens = self._tokenize(query)

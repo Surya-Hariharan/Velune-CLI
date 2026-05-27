@@ -37,6 +37,9 @@ Respond with ONLY a JSON array:
   {{"id": "step-2", "description": "specific action", "agent_role": "reviewer", "dependencies": ["step-1"]}}
 ]
 
+IMPORTANT: Use simple stable IDs like 'step-1', 'step-2', etc.
+Dependencies MUST reference IDs of other steps in this exact list.
+
 Be specific. Mention actual file names if they can be inferred. No placeholders."""
 
 
@@ -130,16 +133,42 @@ class AdaptivePlanningService:
             
             steps_data = json.loads(content)
             
+            # Build mapping from LLM-generated ID to prefixed ID
+            id_mapping: dict[str, str] = {}
+            for step_data in steps_data[:max_steps]:
+                original_id = step_data.get("id", f"step-{len(id_mapping)+1}")
+                prefixed_id = f"{task_id}-{original_id}"
+                id_mapping[original_id] = prefixed_id
+            
+            logger.debug("LLM plan ID mapping constructed: %s", id_mapping)
+            
             task_steps = []
             for step_data in steps_data[:max_steps]:
+                original_id = step_data.get("id", f"step-{len(task_steps)+1}")
+                prefixed_id = id_mapping[original_id]
+                
+                # Remap dependencies using the mapping table
+                raw_deps = step_data.get("dependencies", [])
+                remapped_deps = [id_mapping[d] for d in raw_deps if d in id_mapping]
+                
+                unmapped = [d for d in raw_deps if d not in id_mapping]
+                if unmapped:
+                    logger.warning(
+                        "LLM plan step '%s' references unknown deps: %s",
+                        original_id, unmapped
+                    )
+                
                 task_steps.append(TaskStep(
-                    id=f"{task_id}-{step_data.get('id', f'step-{len(task_steps)+1}')}",
+                    id=prefixed_id,
                     description=step_data.get("description", ""),
                     agent_role=step_data.get("agent_role", "coder"),
                     status=TaskStatus.PENDING,
-                    dependencies=step_data.get("dependencies", []),
+                    dependencies=remapped_deps,  # Now correctly prefixed
                     metadata={},
                 ))
+            
+            total_edges = sum(len(step.dependencies) for step in task_steps)
+            logger.info("LLM plan created: %d steps, %d dependency edges", len(task_steps), total_edges)
             
             return TaskPlan(
                 task_id=task_id,

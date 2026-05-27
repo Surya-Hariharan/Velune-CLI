@@ -7,7 +7,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from velune.memory.tiers.lineage import LineageMemoryTier
 
@@ -66,6 +66,10 @@ class CouncilOrchestrator:
 
         from velune.cognition.firewall import CognitiveFirewall
         self.firewall = CognitiveFirewall()
+
+        self.max_wall_time_seconds = float(
+            os.environ.get("VELUNE_COUNCIL_MAX_SECONDS", "600")  # 10 minutes default
+        )
 
 
     def _get_or_refresh_style_profile(self, target_file: str) -> dict[str, Any] | None:
@@ -138,8 +142,90 @@ class CouncilOrchestrator:
 
         return False
 
-    async def execute_task(self, prompt: str, repo_context: str, council_tier: str | None = None) -> dict[str, Any]:
-        """Orchestrate a complete council deliberation pass for a task prompt."""
+    async def execute_task(
+        self,
+        prompt: str,
+        repo_context: str,
+        council_tier: str | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """Orchestrate a complete council deliberation pass for a task prompt with wall-time limit."""
+        # Calculate/classify tier first so that we know the tier in case of timeout
+        roles = self.mapper.map_roles()
+        coder_model = roles.get(CouncilRole.CODER)
+        estimated_tps = 8.0  # conservative default
+        if coder_model:
+            profile = self.mapper.profiler.get_profile(coder_model.provider_id, coder_model.model_id)
+            if profile and profile.tps > 0.0:
+                estimated_tps = profile.tps
+
+        if council_tier:
+            try:
+                tier = CouncilTier(council_tier.lower())
+            except ValueError:
+                tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+        else:
+            tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+
+        # Dynamic low-resource optimization mode
+        low_resource = (
+            (self.config and self.config.execution.low_resource_mode) or
+            os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
+        )
+        
+        if low_resource and tier == CouncilTier.FULL:
+            tier = CouncilTier.STANDARD
+
+        tier_str = tier.value
+
+        try:
+            return await asyncio.wait_for(
+                self._execute_task_inner(
+                    prompt=prompt,
+                    repo_context=repo_context,
+                    council_tier=council_tier,
+                    progress_callback=progress_callback,
+                ),
+                timeout=self.max_wall_time_seconds
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Council wall-time limit reached (%.0fs). "
+                "Returning partial result.",
+                self.max_wall_time_seconds
+            )
+            return self._build_timeout_result(prompt, tier_str)
+
+    def _build_timeout_result(self, prompt: str, tier: str = "full") -> dict[str, Any]:
+        from velune.cognition.council.messages import ReviewerMessage
+        return {
+            "tier": tier,
+            "task_plan": None,
+            "coder_proposal": None,
+            "reviewer_report": ReviewerMessage(passed=False, critical_issues=["Council execution timed out."], confidence_rating=0.0),
+            "challenger_report": None,
+            "scalability_report": None,
+            "security_report": None,
+            "performance_report": None,
+            "maintainability_report": None,
+            "arbitration": {
+                "overall_confidence": 0.0,
+                "requires_human_review": True,
+                "flags": ["TIMEOUT"],
+                "winning_claims": [],
+                "synthesis_instructions": "",
+            },
+            "final_summary": f"Council execution timed out. Partial analysis: (None)",
+        }
+
+    async def _execute_task_inner(
+        self,
+        prompt: str,
+        repo_context: str,
+        council_tier: str | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """Internal execution body of the orchestrator task."""
         import uuid
 
         from velune.core.trace import TraceContext
@@ -195,17 +281,17 @@ class CouncilOrchestrator:
             start_time = time.time()
             try:
                 if tier == CouncilTier.INSTANT:
-                    result = await self._execute_instant(prompt, repo_context)
+                    result = await self._execute_instant(prompt, repo_context, progress_callback)
                 elif tier == CouncilTier.STANDARD:
-                    result = await self._execute_standard(prompt, repo_context)
+                    result = await self._execute_standard(prompt, repo_context, progress_callback)
                 else:
-                    result = await self._execute_full(prompt, repo_context)
+                    result = await self._execute_full(prompt, repo_context, progress_callback)
                 return result
             finally:
                 elapsed_time = time.time() - start_time
                 logger.info("Executed %s tier in %.2fs", tier.value, elapsed_time)
 
-    async def _execute_instant(self, prompt: str, repo_context: str) -> dict[str, Any]:
+    async def _execute_instant(self, prompt: str, repo_context: str, progress_callback: Callable[[str], None] | None = None) -> dict[str, Any]:
         """FAST PATH INSTANT: Coder only, no debate, no review, but still runs CognitiveFirewall scan on repo context."""
         logger.info("[COUNCIL - INSTANT] Executing Instant single-agent Coder path...")
 
@@ -232,6 +318,10 @@ class CouncilOrchestrator:
             provider=self.provider_registry.get_or_raise(coder_model.provider_id),
         )
 
+        logger.info("Council Phase: Coder")
+        if progress_callback:
+            progress_callback("[Coder] Designing code implementation...")
+
         coder_proposal = await coder.write_code(
             prompt=prompt,
             current_code=repo_context,
@@ -249,7 +339,12 @@ class CouncilOrchestrator:
             "final_summary": coder_proposal,
         }
 
-    async def _execute_standard(self, prompt: str, repo_context: str) -> dict[str, Any]:
+    async def _execute_standard(
+        self,
+        prompt: str,
+        repo_context: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         """STANDARD PATH: Planner + Coder + Reviewer + Synthesizer (No Challenger, no specialized critics, Max 1 debate turn)"""
         logger.info("[COUNCIL - STANDARD] Executing Standard Coder + Reviewer path...")
 
@@ -284,10 +379,16 @@ class CouncilOrchestrator:
         )
 
         # 1. Generate plan
+        logger.info("Council Phase: Planner")
+        if progress_callback:
+            progress_callback("[Planner] Decomposing task...")
         task_plan = await planner.generate_plan(prompt, repo_context)
         plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
 
         # 2. Generate code
+        logger.info("Council Phase: Coder")
+        if progress_callback:
+            progress_callback("[Coder] Designing code implementation...")
         coder_proposal = await coder.write_code(
             prompt=prompt,
             current_code=repo_context,
@@ -296,6 +397,9 @@ class CouncilOrchestrator:
         )
 
         # 3. Review code
+        logger.info("Council Phase: Reviewer")
+        if progress_callback:
+            progress_callback("[Reviewer] Reviewing code proposal...")
         reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
 
         # Max 1 debate turn
@@ -326,6 +430,9 @@ class CouncilOrchestrator:
             reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
 
         # 4. Arbitration
+        logger.info("Council Phase: Arbitration")
+        if progress_callback:
+            progress_callback("[Arbitration] Arbitrating proposal...")
         arbitration = self.arbitrator.arbitrate(
             plan_steps=[s.description for s in task_plan.steps],
             coder_proposal=coder_proposal,
@@ -338,6 +445,9 @@ class CouncilOrchestrator:
         )
 
         # 5. Synthesize Walkthrough
+        logger.info("Council Phase: Synthesis")
+        if progress_callback:
+            progress_callback("[Synthesis] Synthesizing final summary...")
         final_summary = await synthesizer.synthesize(
             task=prompt,
             winning_claims=arbitration.winning_claims,
@@ -366,7 +476,12 @@ class CouncilOrchestrator:
             "final_summary": final_summary,
         }
 
-    async def _execute_full(self, prompt: str, repo_context: str) -> dict[str, Any]:
+    async def _execute_full(
+        self,
+        prompt: str,
+        repo_context: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt (FULL tier)."""
         logger.info("Reasoning Council starting execution in FULL tier for goal: %s", prompt)
 
@@ -489,10 +604,16 @@ class CouncilOrchestrator:
         )
 
         # 4. Deliberation Phase A: Planner compiles DAG Execution Plan
+        logger.info("Council Phase: Planner")
+        if progress_callback:
+            progress_callback("[Planner] Decomposing task...")
         logger.info("[COUNCIL - PLANNER] Decomposing task into steps...")
         task_plan = await planner.generate_plan(prompt, enriched_repo_context)
 
         # 5. Deliberation Phase B: Coder generates solution proposal
+        logger.info("Council Phase: Coder")
+        if progress_callback:
+            progress_callback("[Coder] Designing code implementation...")
         plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
         logger.info("[COUNCIL - CODER] Designing code implementation...")
         coder_proposal = await coder.write_code(
@@ -503,6 +624,9 @@ class CouncilOrchestrator:
         )
 
         # 6. Deliberation Phase C & D: Concurrent Review and Parallel Critics Council
+        logger.info("Council Phase: Reviewer+Challenger")
+        if progress_callback:
+            progress_callback("[Reviewer+Challenger] Running parallel review and critique...")
         logger.info("[COUNCIL - PARALLEL] Launching parallel adversarial review & 4 specialized critics...")
 
         reviewer_task = reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
@@ -578,6 +702,9 @@ class CouncilOrchestrator:
 
                 while debate_turn <= max_debate_turns:
                     logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
+                    logger.info("Council Phase: Debate turn %d", debate_turn)
+                    if progress_callback:
+                        progress_callback(f"[Debate] Running debate turn {debate_turn}...")
                     turns_required = debate_turn
 
                     objections_text = "\n".join([f"- {obj}" for obj in objections])
@@ -700,6 +827,9 @@ class CouncilOrchestrator:
             )
 
         # 8. Council Arbitration and Confidence Fusion
+        logger.info("Council Phase: Arbitration")
+        if progress_callback:
+            progress_callback("[Arbitration] Arbitrating proposal...")
         logger.info("[COUNCIL - ARBITRATION] Evaluating agent votes and contradictions...")
         arbitration = self.arbitrator.arbitrate(
             plan_steps=[s.description for s in task_plan.steps],
@@ -720,6 +850,9 @@ class CouncilOrchestrator:
         )
 
         # 9. Final Response Synthesis
+        logger.info("Council Phase: Synthesis")
+        if progress_callback:
+            progress_callback("[Synthesis] Synthesizing final summary...")
         logger.info("[COUNCIL - SYNTHESIS] Rendering walk-through response...")
         final_summary = await synthesizer.synthesize(
             task=prompt,

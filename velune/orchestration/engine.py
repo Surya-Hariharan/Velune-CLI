@@ -306,8 +306,31 @@ class LangGraphOrchestrationEngine:
         if self._check_interrupt(state):
             return state
 
-        workspace = Path(state.request.workspace)
-        snapshot = self.repository_cognition.index(workspace)
+        import time
+        force_reindex = state.request.metadata.get("force_reindex", False)
+        
+        logger.info(
+            "Repository index: force=%s, workspace=%s",
+            force_reindex,
+            self.repository_cognition.root_path
+        )
+        logger.info(
+            "Repository index: force=%s, cache=%s",
+            force_reindex,
+            'hit' if not force_reindex else 'bypassed'
+        )
+        
+        start_time = time.perf_counter()
+        snapshot = self.repository_cognition.index(force=force_reindex)
+        elapsed = time.perf_counter() - start_time
+        
+        logger.info("Repository index completed in %.2fs", elapsed)
+        logger.info(
+            "Repository index completed in %.2fs (%d files)",
+            elapsed,
+            len(snapshot.files)
+        )
+
         state.repository_snapshot = snapshot
         state.repository_state = snapshot.summary
         state.context_state = {

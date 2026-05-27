@@ -7,6 +7,7 @@ summaries, and payload-filtered contextual searches.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from qdrant_client import QdrantClient
@@ -72,6 +73,20 @@ class SemanticMemoryTier:
         except Exception as e:
             logger.error("Failed to create collection %s: %s", collection_name, e)
 
+    def _clean_id(self, p_id: int | str) -> int | str:
+        """Ensure the point ID is a valid Qdrant ID: a 64-bit int or a valid UUID string."""
+        if isinstance(p_id, int):
+            return p_id
+        if isinstance(p_id, str):
+            try:
+                # Check if it is a valid UUID
+                uuid.UUID(p_id)
+                return p_id
+            except ValueError:
+                # Deterministic UUID string from arbitrary string
+                return str(uuid.uuid5(uuid.NAMESPACE_DNS, p_id))
+        return hash(p_id) % (2**63 - 1)
+
     def upsert_points(
         self,
         collection_name: str,
@@ -80,10 +95,15 @@ class SemanticMemoryTier:
         payloads: list[dict[str, Any]],
     ) -> None:
         """Upsert structural code or memory embedding points into the collection."""
+        if vectors:
+            dims = {len(v) for v in vectors}
+            if len(dims) > 1:
+                raise ValueError(f"Mixed embedding dimensions in batch: {dims}")
+
         points = []
         for i, (p_id, vec, pay) in enumerate(zip(ids, vectors, payloads)):
             # Ensure unique IDs are formatted correctly
-            point_id = p_id if isinstance(p_id, (int, str)) else i
+            point_id = self._clean_id(p_id) if p_id is not None else i
             points.append(
                 qmodels.PointStruct(
                     id=point_id,
@@ -124,12 +144,12 @@ class SemanticMemoryTier:
             q_filter = qmodels.Filter(must=conditions)
 
         try:
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name=collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=limit,
                 query_filter=q_filter,
-            )
+            ).points
 
             output = []
             for item in results:
@@ -149,9 +169,10 @@ class SemanticMemoryTier:
     def delete_points(self, collection_name: str, ids: list[int | str]) -> None:
         """Delete specific vectors by their identifier."""
         try:
+            cleaned_ids = [self._clean_id(p_id) for p_id in ids]
             self.client.delete(
                 collection_name=collection_name,
-                points_selector=qmodels.PointIdsList(points=ids),
+                points_selector=qmodels.PointIdsList(points=cleaned_ids),
             )
         except Exception as e:
             logger.error("Failed to delete points in %s: %s", collection_name, e)

@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from velune.context.window import estimate_tokens
 from velune.providers.base import ModelProvider
+
+if TYPE_CHECKING:
+    from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
 logger = logging.getLogger("velune.context.compressor")
 
@@ -18,6 +22,7 @@ class ContextCompressor:
     def __init__(self, analytics: CognitivePerformanceAnalytics | None = None) -> None:
         from velune.telemetry.cognition import CognitivePerformanceAnalytics
         self.analytics = analytics or CognitivePerformanceAnalytics()
+
 
 
     async def compress(

@@ -73,13 +73,24 @@ class BaseCouncilAgent(ABC):
 
             timeout = AGENT_TIMEOUTS.get(self.role, 120.0)
 
+            import time
+            start = time.perf_counter()
             try:
                 logger.info("Agent %s (%s) initiating inference...", self.role.value, self.model.model_id)
                 response = await asyncio.wait_for(
                     self.provider.infer(request),
                     timeout=timeout,
                 )
-                logger.info("Inference complete: %d chars", len(response.content))
+                elapsed = time.perf_counter() - start
+                logger.info(
+                    "Agent %s completed in %.1fs (%d chars)",
+                    self.role.value, elapsed, len(response.content)
+                )
+                if elapsed > 60.0:
+                    logger.warning(
+                        "Agent %s took %.1fs (>60s)",
+                        self.role.value, elapsed
+                    )
                 return response.content
             except TimeoutError:
                 logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -75,6 +76,7 @@ class SQLiteCheckpointStore:
                 conn.commit()
 
     def save(self, run_id: str, node_name: str, state: OrchestrationState) -> str:
+        checkpoint_id = f"{run_id}:cp:{node_name}:{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(tz=UTC).isoformat()
 
         # Serialize OrchestrationState using pydantic support
@@ -84,17 +86,10 @@ class SQLiteCheckpointStore:
             state_json = state.json()
 
         if self.sqlite_manager is not None:
-            rows = self.sqlite_manager.execute_read(
-                "SELECT COUNT(*) as count FROM checkpoints WHERE run_id = ?", (run_id,)
-            )
-            count = rows[0]["count"] if rows else 0
-            sequence = count + 1
-            checkpoint_id = f"{run_id}:cp:{sequence:04d}"
-
             try:
                 self.sqlite_manager.execute_write_sync(
                     """
-                    INSERT OR REPLACE INTO checkpoints (checkpoint_id, run_id, node_name, created_at, state_json)
+                    INSERT INTO checkpoints (checkpoint_id, run_id, node_name, created_at, state_json)
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (checkpoint_id, run_id, node_name, created_at, state_json),
@@ -106,12 +101,6 @@ class SQLiteCheckpointStore:
         else:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM checkpoints WHERE run_id = ?", (run_id,))
-                count = cursor.fetchone()[0]
-
-                sequence = count + 1
-                checkpoint_id = f"{run_id}:cp:{sequence:04d}"
-
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO checkpoints (checkpoint_id, run_id, node_name, created_at, state_json)
@@ -125,7 +114,7 @@ class SQLiteCheckpointStore:
     def latest(self, run_id: str) -> OrchestrationState | None:
         if self.sqlite_manager is not None:
             rows = self.sqlite_manager.execute_read(
-                "SELECT state_json FROM checkpoints WHERE run_id = ? ORDER BY checkpoint_id DESC LIMIT 1",
+                "SELECT state_json FROM checkpoints WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
                 (run_id,),
             )
             if not rows:
@@ -139,7 +128,7 @@ class SQLiteCheckpointStore:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT state_json FROM checkpoints WHERE run_id = ? ORDER BY checkpoint_id DESC LIMIT 1",
+                    "SELECT state_json FROM checkpoints WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
                     (run_id,),
                 )
                 row = cursor.fetchone()
@@ -154,7 +143,7 @@ class SQLiteCheckpointStore:
     def list_ids(self, run_id: str) -> list[str]:
         if self.sqlite_manager is not None:
             rows = self.sqlite_manager.execute_read(
-                "SELECT checkpoint_id FROM checkpoints WHERE run_id = ? ORDER BY checkpoint_id ASC",
+                "SELECT checkpoint_id FROM checkpoints WHERE run_id = ? ORDER BY created_at ASC",
                 (run_id,),
             )
             return [row["checkpoint_id"] for row in rows]
@@ -162,7 +151,7 @@ class SQLiteCheckpointStore:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT checkpoint_id FROM checkpoints WHERE run_id = ? ORDER BY checkpoint_id ASC",
+                    "SELECT checkpoint_id FROM checkpoints WHERE run_id = ? ORDER BY created_at ASC",
                     (run_id,),
                 )
                 return [row["checkpoint_id"] for row in cursor.fetchall()]

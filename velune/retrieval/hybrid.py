@@ -1,6 +1,8 @@
-"""Fusion orchestrator merging BM25, Qdrant vectors, and dependency graphs."""
-
+import logging
+import os
 from typing import Any
+
+logger = logging.getLogger("velune.retrieval.hybrid")
 
 from velune.kernel.registry import ComponentRegistry
 from velune.retrieval.graph import GraphRetriever
@@ -61,9 +63,12 @@ class HybridRetriever:
             try:
                 # Generate embedding for the query
                 emb = await self._generate_embedding_async(query.text)
-                vector_hits = self.vector_retriever.retrieve(
-                    emb, top_k=query.top_k, namespace=query.namespace
-                )
+                if emb is not None:  # Only do vector search if real embedding
+                    vector_hits = self.vector_retriever.retrieve(
+                        emb, top_k=query.top_k, namespace=query.namespace
+                    )
+                else:
+                    logger.info("Vector retrieval skipped — no embedding available")
             except Exception:
                 pass
 
@@ -167,6 +172,14 @@ class HybridRetriever:
             pass  # No running loop, safe to use asyncio.run()
         return asyncio.run(self.retrieve(query))
 
+    async def check_embedding_available(self) -> bool:
+        """Returns True if a real embedding provider is available."""
+        try:
+            test_emb = await self._generate_embedding_async("test")
+            return test_emb is not None
+        except Exception:
+            return False
+
     def _deterministic_fallback_embedding(self, text: str) -> list[float]:
         """Sophisticated deterministic fallback embedding vector."""
         res = [0.0] * 1536
@@ -174,7 +187,7 @@ class HybridRetriever:
             res[idx % 1536] += ord(char) / 256.0
         return res
 
-    async def _generate_embedding_async(self, text: str) -> list[float]:
+    async def _generate_embedding_async(self, text: str) -> list[float] | None:
         """Generates embedding asynchronously using the registered ModelProvider, or falls back to a deterministic vector.
 
         INTERNAL ONLY.
@@ -199,6 +212,7 @@ class HybridRetriever:
                     res = await provider.embed([text], model_id=model_id)
                     emb = res[0] if res else None
                     if emb:
+                        logger.debug("Generated embedding: dim=%d, provider=%s", len(emb), provider_name)
                         return emb
         except Exception as e:
             import logging
@@ -206,6 +220,21 @@ class HybridRetriever:
                 "Failed to generate embedding using ModelProvider: %s. Falling back to deterministic embedding.", e
             )
 
-        return self._deterministic_fallback_embedding(text)
+        # No provider available
+        allow_fallback = os.environ.get("VELUNE_ALLOW_FALLBACK_EMBEDDING", "false").lower() == "true"
+        if allow_fallback:
+            logger.warning(
+                "Using character-frequency fallback embedding. "
+                "Semantic retrieval results will be degraded. "
+                "Install an embedding model (e.g., ollama pull nomic-embed-text) "
+                "or set OPENAI_API_KEY to enable real embeddings."
+            )
+            return self._deterministic_fallback_embedding(text)
+
+        logger.warning(
+            "No embedding provider available. Vector retrieval disabled. "
+            "Set VELUNE_ALLOW_FALLBACK_EMBEDDING=true to enable degraded mode."
+        )
+        return None
 
 

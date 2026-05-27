@@ -49,6 +49,15 @@ for i in range(26):
     UNICODE_CONFUSABLES[chr(0x24D0 + i)] = chr(ord('a') + i)
 
 
+MULTILINE_INJECTION_PATTERNS = [
+    r"(?is)from\s+now\s+on[.,\s].*?you\s+(must|will|should|are)",
+    r"(?is)ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|context)",
+    r"(?is)disregard\s+(all\s+)?(previous|prior)\s+(instructions|rules)",
+    r"(?is)your\s+(new\s+)?(real\s+)?(purpose|task|goal|instructions)\s+is",
+    r"(?is)act\s+as\s+(if\s+you\s+are|a|an)\s+.{0,50}(different|not|no longer)",
+]
+
+
 class CognitiveFirewall:
     """Shields agent instruction templates and workspace reading from prompt injections and spillover."""
 
@@ -151,13 +160,18 @@ class CognitiveFirewall:
 
         return True
 
-    def sanitize_content(self, text: str) -> str:
+    def sanitize_content(self, text: str, is_code: bool = False) -> str:
         """Neutralize malicious injection blocks in text by escaping structure tags and keywords."""
         sanitized = text
         # Neutralize common markdown system-directive keywords by adding slight spacing or escaping
         sanitized = re.sub(r"(?i)\bignore\b\s+\bprevious\b\s+\binstructions\b", "i_g_n_o_r_e previous instructions", sanitized)
         sanitized = re.sub(r"(?i)\bignore\b\s+\babove\b\s+\binstructions\b", "i_g_n_o_r_e above instructions", sanitized)
         sanitized = re.sub(r"(?i)\bignore\b\s+\bbelow\b\s+\binstructions\b", "i_g_n_o_r_e below instructions", sanitized)
+
+        if is_code:
+            # For code: DO NOT HTML-escape < and >
+            # These are valid Python syntax
+            return sanitized
 
         # Escape potential XML/HTML injection tags inside templates
         # Preserve common code arrow operators
@@ -174,20 +188,62 @@ class CognitiveFirewall:
         This prevents raw contents from escaping their boundaries and being interpreted 
         as active LLM instructions.
         """
-        escaped_name = self.sanitize_content(content_name)
-        escaped_content = self.sanitize_content(content)
+        is_code = False
+        if content_name.endswith((".py", ".ts", ".js", ".go", ".rs")):
+            is_code = True
+
+        escaped_name = self.sanitize_content(content_name, is_code=False)
+        escaped_content = self.sanitize_content(content, is_code=is_code)
         return (
-            f"<workspace_file_content name=\"{escaped_name}\">\n"
-            f"{escaped_content}\n"
-            f"</workspace_file_content>"
+            f'<workspace_file_content name="{escaped_name}">\n'
+            f'{escaped_content}\n'
+            f'</workspace_file_content>'
         )
 
+    def _extract_injectable_strings(self, code: str) -> list[str]:
+        """Extract strings likely to contain injected instructions."""
+        import ast
+        extracted = []
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                # Docstrings (module, class, function)
+                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                    if isinstance(node.value.value, str):
+                        extracted.append(node.value.value)
+                # String assignments (README patterns)
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                            extracted.append(node.value.value)
+        except SyntaxError:
+            # Non-Python: scan raw text with multiline patterns
+            extracted.append(code)
+        return extracted
+
     def scan_file_for_injection(self, file_path: str, content: str) -> dict[str, Any]:
-        """Perform a complete security scan on a workspace file before ingestion.
+        """Perform a complete security security scan on a workspace file before ingestion.
         
         Returns a dict indicating safety status, potential matched patterns, and a quarantined/neutralized content string.
         """
+        # Existing single-line scan
         is_safe = self.scan_text(content)
+        
+        if is_safe:
+            # Additional multi-line scan for embedded strings
+            injectable_strings = self._extract_injectable_strings(content)
+            for s in injectable_strings:
+                for pattern in MULTILINE_INJECTION_PATTERNS:
+                    if re.search(pattern, s):
+                        logger.warning(
+                            "SECURITY: Multi-line injection detected in %s: %s",
+                            file_path, pattern[:50]
+                        )
+                        is_safe = False
+                        break
+                if not is_safe:
+                    break
+        
         neutralized = content if is_safe else self.sanitize_content(content)
 
         return {

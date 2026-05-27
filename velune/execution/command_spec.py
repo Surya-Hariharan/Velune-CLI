@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,31 @@ ALLOWED_EXECUTABLES = frozenset({
     "make", "cmake", "gcc", "clang",
     "echo", "cat", "ls", "find", "grep",
 })
+
+
+TRUSTED_PATH_PREFIXES: frozenset[str] = frozenset({
+    "/usr/bin/", "/usr/local/bin/", "/bin/", "/usr/sbin/",
+    # macOS
+    "/opt/homebrew/bin/", "/usr/local/opt/",
+    # Common Python virtual env locations (relative)
+    ".venv/bin/", "venv/bin/",
+})
+
+
+def _is_trusted_path(resolved_path: Path) -> bool:
+    """Verify executable is in a trusted system directory."""
+    path_str = str(resolved_path)
+    # Allow paths in trusted system directories
+    for prefix in TRUSTED_PATH_PREFIXES:
+        if path_str.startswith(prefix):
+            return True
+    # Allow paths containing .venv (virtual environments)
+    if ".venv" in path_str or "venv/bin" in path_str:
+        return True
+    # Allow Windows paths
+    if sys.platform == "win32":
+        return True  # Windows PATH hijacking is different threat model
+    return False
 
 
 @dataclass(frozen=True)
@@ -45,6 +71,13 @@ class CommandSpec:
         # Must be an absolute path to a real binary, not a shell builtin
         if not resolved.is_absolute():
             raise SandboxError(f"Executable resolves to non-absolute path: {resolved}")
+
+        # Verify trusted path
+        if not _is_trusted_path(resolved):
+            raise SandboxError(
+                f"Executable '{self.executable}' resolved to untrusted path: {resolved}. "
+                f"Possible PATH hijacking. Expected path in: {TRUSTED_PATH_PREFIXES}"
+            )
 
     def to_argv(self) -> list[str]:
         """Convert specification into ready-to-run argv list with resolved executable path."""
