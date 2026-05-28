@@ -1,4 +1,3 @@
-
 from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 
@@ -44,32 +43,11 @@ def _create_lineage_tier(env: RuntimeEnvironment):
         sqlite_manager=sqlite_manager,
     )
 
-def _create_archive_tier(env: RuntimeEnvironment):
-    from velune.memory.tiers.archive import LongTermArchiveTier
-    velune_dir = env.workspace / ".velune"
-    velune_dir.mkdir(parents=True, exist_ok=True)
-    archive_dir = velune_dir / "archive"
-    return LongTermArchiveTier(archive_dir)
-
-def _create_memory_consolidator(env: RuntimeEnvironment):
-    from velune.memory.consolidator import MemoryConsolidator
-    working_tier = env.container.get("runtime.working_memory")
-    episodic_tier = env.container.get("runtime.episodic_memory")
-    semantic_tier = env.container.get("runtime.semantic_memory")
-    graph_tier = env.container.get("runtime.graph_memory")
-    archive_tier = env.container.get("runtime.archive_memory")
-    return MemoryConsolidator(
-        working_tier=working_tier,
-        episodic_tier=episodic_tier,
-        semantic_tier=semantic_tier,
-        graph_tier=graph_tier,
-        archive_tier=archive_tier,
-    )
-
 def _create_memory_lifecycle(env: RuntimeEnvironment):
     from velune.memory.lifecycle import MemoryLifecycleCoordinator
-    consolidator = env.container.get("runtime.memory_consolidator")
-    return MemoryLifecycleCoordinator(consolidator)
+    working_tier = env.container.get("runtime.working_memory")
+    episodic_tier = env.container.get("runtime.episodic_memory")
+    return MemoryLifecycleCoordinator(working_tier, episodic_tier)
 
 MEMORY_MODULES = [
     SubsystemModule(
@@ -107,27 +85,10 @@ MEMORY_MODULES = [
         dependencies=["runtime.sqlite_manager"],
     ),
     SubsystemModule(
-        name="archive_memory",
-        factory=_create_archive_tier,
-        container_key="runtime.archive_memory",
-    ),
-    SubsystemModule(
-        name="memory_consolidator",
-        factory=_create_memory_consolidator,
-        container_key="runtime.memory_consolidator",
-        dependencies=[
-            "runtime.working_memory",
-            "runtime.episodic_memory",
-            "runtime.semantic_memory",
-            "runtime.graph_memory",
-            "runtime.archive_memory",
-        ],
-    ),
-    SubsystemModule(
         name="memory_lifecycle",
         factory=_create_memory_lifecycle,
         container_key="runtime.memory_lifecycle",
         lifecycle_key="memory",
-        dependencies=["runtime.memory_consolidator"],
+        dependencies=["runtime.working_memory", "runtime.episodic_memory"],
     ),
 ]

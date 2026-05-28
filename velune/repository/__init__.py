@@ -9,11 +9,9 @@ from velune.repository.schemas import (
     RepositorySymbol,
     RepositorySymbolKind,
 )
-from velune.repository.watcher import WorkspaceEvolutionWatcher
 
 __all__ = [
     "RepositoryCognitionService",
-    "WorkspaceEvolutionWatcher",
     "RepositoryLanguage",
     "RepositorySymbolKind",
     "RepositorySymbol",
