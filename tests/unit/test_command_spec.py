@@ -155,3 +155,31 @@ def test_system_python_trusted(monkeypatch):
     spec = CommandSpec.from_string("echo hello", cwd=Path.cwd())
     # Should not raise for system echo
     spec.validate()
+
+
+def test_validate_uses_runtime_config_when_no_override_provided(monkeypatch) -> None:
+    """Verify that validate() loads the allowed_executables from config if not passed."""
+    # Create a custom config with only "special_command" allowed
+    from velune.kernel.config import VeluneConfig, ExecutionConfig
+    custom_config = VeluneConfig(
+        execution=ExecutionConfig(
+            allowed_executables=["special_command"]
+        )
+    )
+    
+    # Patch ConfigLoader.load to return our custom config
+    from velune.kernel.config import ConfigLoader
+    monkeypatch.setattr(ConfigLoader, "load", lambda self: custom_config)
+    
+    # Now, CommandSpec for "special_command" should succeed when validate is called without args
+    spec_ok = CommandSpec(executable="special_command", args=(), cwd=Path("/tmp"))
+    with patch("shutil.which", return_value="/usr/bin/special_command"):
+        with patch("pathlib.Path.resolve", return_value=Path("/usr/bin/special_command")):
+            with patch("pathlib.Path.is_absolute", return_value=True):
+                # Should not raise SandboxError because "special_command" is allowed by the config
+                spec_ok.validate()
+                
+    # CommandSpec for "python" (which is in ALLOWED_EXECUTABLES but not in custom_config) should fail
+    spec_fail = CommandSpec(executable="python", args=(), cwd=Path("/tmp"))
+    with pytest.raises(SandboxError, match="is not in the allowed list"):
+        spec_fail.validate()

@@ -1,6 +1,7 @@
 """Built-in Velune CLI command modules."""
 
 from velune.cli.commands.ask import ask_cmd, ask_command
+from velune.cli.commands.chat import chat_command
 from velune.cli.commands.config import config_cmd
 from velune.cli.commands.daemon import daemon_cmd
 from velune.cli.commands.doctor import doctor_cmd
@@ -13,6 +14,7 @@ from velune.cli.commands.workspace import workspace_cmd
 __all__ = [
     "ask_cmd",
     "ask_command",
+    "chat_command",
     "config_cmd",
     "memory_cmd",
     "models_cmd",

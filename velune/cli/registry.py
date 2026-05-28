@@ -11,6 +11,7 @@ import typer
 
 from velune.cli.commands import (
     ask_command,
+    chat_command,
     config_cmd,
     daemon_cmd,
     doctor_cmd,
@@ -25,6 +26,7 @@ from velune.kernel.registry import ServiceContainer
 
 BUILTIN_COMMAND_MODULES: Sequence[str] = (
     "velune.cli.commands.ask",
+    "velune.cli.commands.chat",
     "velune.cli.commands.run",
     "velune.cli.commands.models",
     "velune.cli.commands.workspace",
@@ -55,6 +57,7 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     """Attach all built-in and plugin command groups to the app."""
 
     app.command(name="ask")(ask_command)
+    app.command(name="chat")(chat_command)
     app.command(name="run")(run_command)
     app.command(name="mcp-serve")(mcp_serve)
     app.add_typer(models_cmd, name="models")

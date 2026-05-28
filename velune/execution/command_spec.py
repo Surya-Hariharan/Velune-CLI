@@ -56,7 +56,16 @@ class CommandSpec:
 
     def validate(self, allowed_executables: frozenset[str] | None = None) -> None:
         """Validate the executable basename against allowlists and system path boundaries."""
-        allowed = ALLOWED_EXECUTABLES if allowed_executables is None else allowed_executables
+        if allowed_executables is None:
+            try:
+                from velune.kernel.config import ConfigLoader
+                config = ConfigLoader().load()
+                allowed = frozenset(config.execution.allowed_executables)
+            except Exception:
+                allowed = ALLOWED_EXECUTABLES
+        else:
+            allowed = allowed_executables
+
         if self.executable not in allowed:
             raise SandboxError(
                 f"Executable '{self.executable}' is not in the allowed list. "
