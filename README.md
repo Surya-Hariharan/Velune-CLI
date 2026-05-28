@@ -5,8 +5,10 @@
 <!-- Cinematic Widescreen Banner -->
 <img src="assets/images/velune-banner.svg" alt="Velune Cinematic Banner" width="100%" style="border-radius: 8px; margin-bottom: 20px;" />
 
-### Fully Local, Privacy-First Autonomous AI Coding Agent for Codebase Comprehension & Execution
-*Designed as a secure, local-first alternative to Claude Code, powered by your local Ollama models.*
+### Local-first Autonomous Code Companion
+Velune is a privacy-focused, developer-centric CLI that understands your codebase, reasons about changes, and applies them safely—without leaving your machine.
+
+Designed for maintainers who need reliable, auditable, and reversible code edits driven by local models (Ollama, LM Studio, or configured fallbacks).
 
 ---
 
@@ -24,18 +26,13 @@
 
 ## 👁️ System Vision
 
-Velune is a systems-grade, local-first AI coding companion designed to treat a software codebase as a **first-class source of structured, indexable knowledge**. Rather than serving as an ad-hoc wrapper over cloud APIs, Velune runs entirely on your local machine, leveraging **Ollama** and **LM Studio** models to comprehend repositories, analyze AST structures, and autonomously execute complex coding changes within a secured developer sandbox.
+Velune treats a codebase as structured knowledge: parseable, searchable, and safely writable. It brings deterministic planning and local model reasoning together so you can automate non-trivial code edits with confidence.
 
-> [!NOTE]
-> **The Problem:** Modern cloud-based AI tools leak proprietary codebase intellectual property, suffer from heavy context-window drift, and require active internet connections.
-> 
-> **The Solution:** A privacy-first CLI runtime fusing codebase cognition, hybrid vector-graph memory networks, and deterministic task-planning to execute safe, transactional local repository updates.
-
-### Why Velune is technically unique:
-- **Zero Data Leakage:** All source files, syntax trees, vector embeddings, and LLM reasoning cycles stay bounded to your local CPU/GPU.
-- **Transactional Safety:** Workspace changes are compiled into dry-run blueprints, verified against pre-conditions, and executed in bounded subshells, allowing git-backed workspace rollbacks in case of execution anomalies.
-- **Unified Vector-Graph Memory:** Combines BM25 lexical scanning, local Qdrant semantic vector search, and a topological knowledge graph to supply models with high-fidelity codebase context without blowing token budgets.
-- **Concurrently Resilient:** Built on Python's non-blocking `asyncio` core loop to coordinate multiple model debate pipelines without locking up your workstation.
+Core principles:
+- **Privacy-first:** All analysis and model interactions occur locally by default.
+- **Auditable changes:** Proposed plans are presented for review, and edits are applied inside a sandboxed, git-backed transaction.
+- **Practical memory:** A hybrid of lexical and vector search (BM25 + Qdrant) provides compact, relevant context to models.
+- **Robust concurrency:** Async execution coordinates parallel reasoning agents without blocking development workflows.
 
 ---
 
@@ -76,89 +73,110 @@ flowchart TD
 
 ### Request & Execution Lifecycle
 
-The swimlane trace below outlines a single command invocation (e.g., `velune run 'refactor database connector'`) from initialization to sandbox commit:
+This section describes the canonical lifecycle for a `velune run` request, broken into discrete phases with clear inputs, outputs, and safety checks.
+
+Phases
+- Intake & Parse — The CLI accepts a natural-language task and resolves preliminary intent and scope. Output: a parsed task object and heuristic cost estimate.
+- Context Retrieval — The repository cognition core (AST parsers + hybrid retrievers) selects relevant files, symbols, and short context snippets. Output: ranked context bundle.
+- Planning & Synthesis — A multi-role council (planner, coder, reviewer) synthesizes a stepwise execution plan with preconditions, rollbacks, and tests. Output: proposed plan blueprint.
+- Human Review & Authorization — The proposed plan is presented to the operator for approval or modification. No changes occur until approved.
+- Transactional Execution (Sandboxed) — Velune creates a git-backed transaction (stash/branch), executes edits inside an isolated sandbox with strict IO and network guards, and runs verification steps.
+- Verification & Checkpointing — Tests and post-condition checks run; successful steps are checkpointed. Failures trigger automated rollback procedures.
+- Commit / Finalize — On success, changes are committed (or a patch is emitted); on failure, the workspace is restored and a diagnostic report is produced.
+
+Design guarantees & safeguards
+- Human-in-the-loop: The system never writes without explicit approval (configurable for CI with `--force`).
+- Sandboxed writes: All runtime modifications occur inside `SubprocessSandbox` with explicit write-path allowlists and time/memory limits.
+- Network hygiene: Any external fetch is gated by DNS/IP validation to prevent SSRF or local-network leaks.
+- Auditability: Plans, diffs, and checkpoints are logged locally for replay and forensic inspection.
+
+Simplified lifecycle diagram
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    actor Developer as Operator (CLI)
-    participant CLI as CLI Runtime & Kernel
-    participant Memory as Vector-Graph Memory Core
-    participant Council as Reasoning Council
-    participant Sandbox as Subprocess Sandbox
-    participant Git as Local Git Workspace
+        participant Dev as Developer
+        participant CLI as CLI
+        participant Repo as RepoCognition
+        participant Council as Council
+        participant Sandbox as Sandbox
+        participant Git as Git
 
-    Developer->>CLI: velune run "Task Description"
-    activate CLI
-    CLI->>CLI: Boot Subsystems & Check GPU VRAM
-    CLI->>Memory: Query Codebase AST & Hybrid Reranker
-    activate Memory
-    Memory-->>CLI: Return Context-Compressed Snippets
-    deconstruct Memory
-    
-    CLI->>Council: Seat Specializations (Planner, Coder, Reviewer)
-    activate Council
-    Council->>Council: Deliberation Debate Loop (Preconditions)
-    Council-->>CLI: Synthesize Execution Plan Blueprint
-    deconstruct Council
-    
-    CLI->>Developer: Display Proposed Plan Blueprint
-    Developer-->>CLI: Human Authorization Approved
-    
-    CLI->>Git: Take Transactional Stash / Snapshot
-    CLI->>Sandbox: Execute Write / Test Code commands
-    activate Sandbox
-    Sandbox->>Sandbox: Sandbox Isolation Checks (SSRF + Boundary Filters)
-    Sandbox-->>CLI: Action Outputs & Verify Exit Codes
-    deconstruct Sandbox
-    
-    alt Verification Success
-        CLI->>Developer: Render Success Report (Run ID, Checkpoints)
-    else Verification Failed / Sandbox Crash
-        CLI->>Git: Rollback Workspace State to Pre-run Stash
-        CLI-->>Developer: Rollback Report (Validation Errors)
-    end
-    deconstruct CLI
+        Dev->>CLI: velune run "<task>"
+        CLI->>Repo: retrieve context (AST, embeddings)
+        Repo-->>CLI: context bundle
+        CLI->>Council: generate plan
+        Council-->>CLI: plan blueprint
+        CLI->>Dev: show plan & request approval
+        Dev-->>CLI: approve
+        CLI->>Git: create transactional snapshot
+        CLI->>Sandbox: execute plan (isolated)
+        Sandbox-->>CLI: results + verification
+        alt success
+            CLI->>Git: commit changes
+            CLI->>Dev: success report
+        else failure
+            CLI->>Git: rollback snapshot
+            CLI->>Dev: failure report
+        end
 ```
+
+Example operator commands
+
+Preview mode (no writes):
+```bash
+velune run "Refactor cli/app.py to expose json telemetry format" --dry-run
+```
+
+Full execution (interactive):
+```bash
+velune run "Refactor cli/app.py to expose json telemetry format"
+```
+
+If you'd like, I can expand this section further with a state diagram, timing expectations for each phase, or a small end-to-end log sample. 
 
 ---
 
 ## ⚡ Cinematic CLI Demonstration
 
-To experience Velune's autonomous workspace refactoring in high fidelity, we recommend reviewing our recording:
+A concise, reproducible example showing how Velune proposes a plan, asks
+for approval, and executes changes safely in a sandboxed transaction.
 
+Command
+```bash
+velune run "Refactor cli/app.py to expose json telemetry format"
 ```
-+-----------------------------------------------------------------------------+
-|  $ velune run "Refactor cli/app.py to expose json telemetry format"         |
-|  ⠋ Bootstrapping Cognitive Operating System kernel...                       |
-|  ⠋ Probing system hardware and local/remote providers...                    |
-|                                                                             |
-|  [Velune Stateful Execution Pipeline]                                       |
-|  Task Auth: Refactor cli/app.py to expose json telemetry format              |
-|  🧠 Streaming LangGraph stateful execution & checkpoint pipeline...        |
-|                                                                             |
-|    • [run_98f8] Initializing codebase tree-sitter snapshot...               |
-|    • [run_98f8] Seating specialized council (Planner = llama3.2)             |
-|    • [run_98f8] Formulating multi-agent code-generation plan...             |
-|                                                                             |
-|  ================================== PROPOSED PLAN ========================  |
-|  Step 1: Modify velune/cli/app.py to accept --json parameter.               |
-|  Step 2: Append CLIContext serialization support.                           |
-|  Step 3: Run diagnostic tests with 'velune doctor check' in sandbox.        |
-|  =========================================================================  |
-|                                                                             |
-|  Apply changes autonomously? (y/n): y                                       |
-|  ✓ Stashed pre-run workspace state successfully.                            |
-|  ⚡ Executing in Secured Sandbox Container...                                |
-|  ✓ [run_98f8] STATEFUL AUTONOMOUS EXECUTION COMPLETED                       |
-|                                                                             |
-|  Run ID: run_98f8                                                           |
-|  Plan Steps: 3 steps processed                                              |
-|  Retry Attempts: 0                                                          |
-|  Checkpoints Saved: 2                                                       |
-+-----------------------------------------------------------------------------+
+
+Trimmed sample output
+```text
+[velune] Booting kernel and probing providers...
+[velune] Proposing plan:
+    1) Modify velune/cli/app.py to accept --json
+    2) Add CLIContext serialization support
+    3) Run diagnostics in sandbox
+Proceed? (y/n): y
+[velune] Stashed workspace state.
+[velune] Executing plan in sandbox...
+[velune] Execution completed. Run ID: run_98f8
 ```
-*(Interactive recordings and high-resolution terminal loops are maintained statically under `assets/readme/`)*
+
+What this demonstrates
+- Plan generation with transparent steps presented for review.
+- Human approval flow before any workspace modification.
+- Sandboxed execution with git-backed rollback and checkpoints.
+
+Reproduce locally (safe preview)
+```bash
+# ensure dev environment
+pip install -e .[dev]
+velune workspace init
+
+# preview the plan without applying changes
+velune run "Refactor cli/app.py to expose json telemetry format" --dry-run
+```
+
+Notes
+- The real interactive run includes richer logs and telemetry; use `--dry-run` to preview safely.
+- Full recordings and example transcripts are available under `assets/readme/` when present.
 
 ---
 
@@ -176,50 +194,62 @@ Velune packs a production-ready toolkit tailored for local code synthesis and di
 
 ---
 
-## ⚡ Quick Start (Under 60 Seconds)
+## ⚡ Quick Start
 
-Velune is engineered for immediate onboarding. Bootstrap your codebase assistant with zero external cloud dependencies.
+Get Velune running in a few commands.
 
-### 1. Prerequisites
-Verify you have **Python >= 3.11** and **Git** installed:
+Prerequisites: Python >= 3.11, Git, and a local model provider if you plan to run local inference (recommended: Ollama).
+
+Install and prepare:
 ```bash
-python --version
-git --version
-```
-
-### 2. Install Velune
-Install the package locally in edit mode with dev dependencies:
-```bash
-# Clone the repository
+# Clone and enter
 git clone https://github.com/Surya-Hariharan/Velune-CLI.git
 cd Velune-CLI
 
-# Create virtual environment and install
+# Create virtualenv and install
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
 pip install -e .[dev]
-```
 
-### 3. Spin Up Your Local Provider (Ollama)
-Ensure Ollama is running, then pull our recommended lightweight model profiles:
-```bash
-# Pull the recommended planning/reasoning model
+# Optional: pull recommended local models (Ollama)
 ollama pull llama3.2
-
-# Pull the recommended high-performance coding model
 ollama pull qwen2.5-coder:7b
-```
 
-### 4. Initialize and Audit Workspace
-Initialize Velune's local indices and run an environment audit to verify compatibility:
-```bash
-# Initialize vector and AST index storage
+# Initialize and audit
 velune workspace init
-
-# Run system health diagnostics
 velune doctor check
 ```
 
+## 🛠️ Development & Contributing
+
+This project welcomes contributors. See `CONTRIBUTING.md` for full guidelines; here are the most common commands when developing locally.
+
+```bash
+# Install dev dependencies
+pip install -e .[dev]
+
+# Lint and format checks
+ruff check .
+black --check .
+isort --check-only .
+
+# Run tests (fast)
+pytest tests/unit -q
+
+# Run full test suite
+pytest tests -q
+```
+
+Want to contribute? Open a focused PR, include tests, and reference the related issue. Maintain clear commit messages and keep changes small and reviewable.
+
+### Get Involved
+
+- Join conversations by opening issues or PRs.
+- Report security issues using the private Security Advisory on GitHub. See `SECURITY.md`.
+- Star the repo if you find Velune useful — it helps the project grow.
 ---
 
 ## 💻 CLI & Command Reference
