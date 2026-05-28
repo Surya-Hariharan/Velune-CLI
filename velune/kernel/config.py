@@ -105,6 +105,12 @@ class MCPConfig(BaseModel):
     servers: dict[str, str] = Field(default_factory=dict)
 
 
+class CognitionConfig(BaseModel):
+    """Cognitive routing and agent council settings."""
+    max_council_tier: str = "full"  # instant, minimal, standard, full
+    default_tier_override: str = "auto"  # auto, instant, minimal, standard, full
+
+
 class VeluneConfig(BaseModel):
     """Root configuration tree."""
     project: ProjectConfig = Field(default_factory=ProjectConfig)
@@ -116,6 +122,7 @@ class VeluneConfig(BaseModel):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    cognition: CognitionConfig = Field(default_factory=CognitionConfig)
 
 
 def get_default_config() -> VeluneConfig:

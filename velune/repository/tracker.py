@@ -138,6 +138,26 @@ class GitTracker:
         except Exception:
             return False
 
+    def apply_stash(self) -> bool:
+        """Applies the last stashed state, keeping it in the stash list."""
+        if not self.is_git:
+            return False
+        try:
+            self._run_git(["stash", "apply"])
+            return True
+        except Exception:
+            return False
+
+    def drop_stash(self) -> bool:
+        """Drops the last stashed state from the stash list."""
+        if not self.is_git:
+            return False
+        try:
+            self._run_git(["stash", "drop"])
+            return True
+        except Exception:
+            return False
+
     def _run_git(self, args: list[str]) -> str:
         """Helper to safely execute git subprocess commands in the repository root."""
         cmd = ["git"] + args

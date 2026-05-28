@@ -147,6 +147,13 @@ class ExecutionExecutor:
                     step.status = TaskStatus.FAILED
                     break
 
+                # Success! Drop the stash if git is active and successful
+                if checkpoint_state.get("git_active") and checkpoint_state.get("git_stash_success"):
+                    try:
+                        self.rollback_manager.git_tracker.drop_stash()
+                    except Exception as e:
+                        logger.warning("Could not drop stash after successful step execution: %s", e)
+
                 # Success! Mark completed
                 step.status = TaskStatus.COMPLETED
                 steps_completed += 1

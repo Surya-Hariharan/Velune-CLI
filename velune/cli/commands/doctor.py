@@ -74,6 +74,7 @@ def check(
         _check_git,
         _check_gpu,
         _check_vram,
+        _check_model_benchmarks,
     ]
 
     results = []
@@ -267,6 +268,18 @@ def _check_vram() -> dict:
         return {"name": "Available VRAM", "status": "warn", "message": "Unified or CPU-only memory in use."}
     except Exception as e:
         return {"name": "Available VRAM", "status": "warn", "message": f"Failed to query VRAM: {e}"}
+
+def _check_model_benchmarks() -> dict:
+    profile_path = Path.cwd() / ".velune" / "model_profiles.json"
+    if profile_path.exists():
+        try:
+            import json
+            data = json.loads(profile_path.read_text())
+            if data:
+                return {"name": "Empirical Model Benchmarks", "status": "ok", "message": f"Cached capability profiles found for {len(data)} model(s)."}
+        except Exception:
+            pass
+    return {"name": "Empirical Model Benchmarks", "status": "warn", "message": "No empirical model capability benchmarks cached. Run: velune models scan --probe"}
 
 def _render_results(results: list) -> None:
     table = Table(title="Velune Environment Check", show_header=True)

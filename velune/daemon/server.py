@@ -44,6 +44,8 @@ class VeluneDaemon:
             return await self._handle_ask(request)
         elif command == "models_list":
             return await self._handle_models_list(request)
+        elif command == "probe_model":
+            return await self._handle_probe_model(request)
         elif command == "ping":
             return {"status": "ok", "pid": os.getpid()}
         return {"error": f"Unknown command: {command}"}
@@ -54,10 +56,43 @@ class VeluneDaemon:
 
     async def _handle_models_list(self, request: dict) -> dict:
         try:
-            models = self.runtime.container.get("models.registry").list_models()
+            models = self.runtime.container.get("runtime.model_registry").list_all()
             return {"status": "success", "models": [m.to_dict() if hasattr(m, "to_dict") else str(m) for m in models]}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    async def _handle_probe_model(self, request: dict) -> dict:
+        model_id = request.get("model_id")
+        provider_id = request.get("provider_id")
+        if not model_id or not provider_id:
+            return {"status": "error", "message": "Missing model_id or provider_id"}
+
+        async def run_probe():
+            try:
+                provider_reg = self.runtime.container.get("runtime.provider_registry")
+                provider = provider_reg.get(provider_id)
+                if not provider:
+                    return
+
+                from velune.models.probes import ModelProber
+                from velune.models.profile_cache import ModelProfileCache
+                profile_cache = ModelProfileCache(self.workspace / ".velune" / "model_profiles.json")
+
+                prober = ModelProber(provider, model_id)
+                results = await prober.run_all_probes()
+                profile_cache.set(model_id, provider_id, results)
+
+                # Also apply in-memory to daemon's registry
+                registry = self.runtime.container.get("runtime.model_registry")
+                if registry:
+                    model = registry.get(model_id, provider_id)
+                    if model:
+                        registry._apply_probe_results(model, results)
+            except Exception:
+                pass
+
+        asyncio.create_task(run_probe())
+        return {"status": "success", "message": f"Started probing for model {model_id} in daemon background."}
 
 if __name__ == "__main__":
     import sys

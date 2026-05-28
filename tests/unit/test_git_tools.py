@@ -129,3 +129,56 @@ async def test_git_tool_does_not_block_event_loop(git_repo: Path):
     )
 
     assert not loop_blocked, "The event loop was blocked by the GitStatus.execute call."
+
+
+def test_rollback_manager_preserves_uncommitted_changes(git_repo: Path):
+    """Verify that RollbackManager.rollback() preserves pre-existing uncommitted changes when restoring target files."""
+    from velune.execution.rollback import RollbackManager
+    
+    # 1. Setup pre-existing uncommitted changes (tracked modify + untracked new file)
+    readme_path = git_repo / "README.md"
+    readme_path.write_text("# Test Repo\nUncommitted user change\n", encoding="utf-8")
+    
+    untracked_path = git_repo / "untracked_user_file.txt"
+    untracked_path.write_text("untracked user content", encoding="utf-8")
+    
+    # Target file we plan to edit and track in rollback
+    target_path = git_repo / "src" / "main.py"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("original target content", encoding="utf-8")
+    
+    # Commit the target file so it's tracked
+    subprocess.run(["git", "add", "src/main.py"], cwd=git_repo, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "Add target"], cwd=git_repo, capture_output=True, check=True)
+    
+    # 2. Instantiate RollbackManager and save state before a failed sandbox command
+    manager = RollbackManager(git_repo)
+    checkpoint_state = manager.save_state(
+        checkpoint_id="test-cp-1",
+        files_to_track=[Path("src/main.py")]
+    )
+    
+    assert checkpoint_state["git_active"] is True
+    assert checkpoint_state["git_stash_success"] is True
+    
+    # 3. Modify target file (simulating the failed command execution)
+    target_path.write_text("failed command changes", encoding="utf-8")
+    
+    # Create an untracked command artifact
+    artifact_path = git_repo / "failed_command_artifact.tmp"
+    artifact_path.write_text("should be deleted by clean", encoding="utf-8")
+    
+    # 4. Trigger rollback
+    manager.rollback(checkpoint_state)
+    
+    # 5. Assertions
+    # Tracked failed modifications should be reverted to original
+    assert target_path.read_text(encoding="utf-8") == "original target content"
+    
+    # Failed command untracked artifact should be deleted
+    assert not artifact_path.exists()
+    
+    # PRE-EXISTING UNCOMMITTED CHANGES MUST BE FULLY PRESERVED!
+    assert readme_path.read_text(encoding="utf-8") == "# Test Repo\nUncommitted user change\n"
+    assert untracked_path.exists()
+    assert untracked_path.read_text(encoding="utf-8") == "untracked user content"

@@ -38,9 +38,9 @@ class RollbackManager:
             # We can create a stash snapshot as an extra safety measure
             git_stash_success = self.git_tracker.create_stash(f"velune-pre-{checkpoint_id}")
             if git_stash_success:
-                # Immediately pop it back so files remain visible for execution
-                # We just want a stash to exist in git log if we need to hard reset to it
-                self.git_tracker.pop_stash()
+                # Apply it back so files remain visible for execution
+                # We keep the stash entry active in git stash list for transaction safety
+                self.git_tracker.apply_stash()
 
         return {
             "checkpoint_id": checkpoint_id,
@@ -60,6 +60,9 @@ class RollbackManager:
                 logger.info("Executing Git rollback: resetting tracked files and cleaning untracked artifacts...")
                 self.git_tracker._run_git(["reset", "--hard", "HEAD"])
                 self.git_tracker._run_git(["clean", "-fd"])
+                if checkpoint_data.get("git_stash_success"):
+                    logger.info("Restoring pre-execution uncommitted changes from stash...")
+                    self.git_tracker.pop_stash()
                 logger.info("Git rollback and workspace cleaning successfully completed.")
             except Exception as e:
                 logger.warning("Git reset/clean rollback failed, attempting file-based copy recovery: %s", e)

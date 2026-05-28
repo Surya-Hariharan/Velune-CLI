@@ -62,13 +62,26 @@ class ModelCapabilityRegistry:
                     if responsive:
                         model.metadata["validated"] = True
                         try:
-                            from velune.kernel.registry import get_container
-                            task_reg = get_container().get("runtime.task_registry")
-                            task_reg.submit(
-                                name=f"full_probe_{model.model_id}",
-                                coro=self._probe_model_background(model, profile_cache),
-                                timeout_seconds=120.0,
-                            )
+                            from velune.daemon.client import DaemonClient
+                            if DaemonClient.is_running():
+                                # Delegate background probing to the active persistent Velune daemon!
+                                # Using create_task to fire-and-forget the IPC dispatch call
+                                asyncio.create_task(
+                                    DaemonClient.send_command(
+                                        "probe_model",
+                                        model_id=model.model_id,
+                                        provider_id=model.provider_id,
+                                    )
+                                )
+                                logger.info("Delegated full probing of model %s to the active Velune daemon process.", model.model_id)
+                            else:
+                                from velune.kernel.registry import get_container
+                                task_reg = get_container().get("runtime.task_registry")
+                                task_reg.submit(
+                                    name=f"full_probe_{model.model_id}",
+                                    coro=self._probe_model_background(model, profile_cache),
+                                    timeout_seconds=120.0,
+                                )
                         except Exception:
                             pass
                     else:

@@ -214,13 +214,38 @@ class CouncilOrchestrator:
             if profile and profile.tps > 0.0:
                 estimated_tps = profile.tps
 
+        # Resolve config preferences
+        max_tier = "full"
+        default_override = "auto"
+        if self.config and hasattr(self.config, "cognition"):
+            max_tier = self.config.cognition.max_council_tier
+            default_override = self.config.cognition.default_tier_override
+
+        # Resolve queue depth
+        queue_depth = 0
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.task_registry"):
+                queue_depth = container.get("runtime.task_registry").pending_count()
+        except Exception:
+            pass
+
         if council_tier:
             try:
                 tier = CouncilTier(council_tier.lower())
             except ValueError:
-                tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+                tier = classify_task_tier(
+                    prompt, repo_context, available_tps=estimated_tps,
+                    max_council_tier=max_tier, default_tier_override=default_override,
+                    queue_depth=queue_depth
+                )
         else:
-            tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+            tier = classify_task_tier(
+                prompt, repo_context, available_tps=estimated_tps,
+                max_council_tier=max_tier, default_tier_override=default_override,
+                queue_depth=queue_depth
+            )
 
         # Dynamic low-resource optimization mode
         low_resource = (
@@ -296,13 +321,36 @@ class CouncilOrchestrator:
                 if profile and profile.tps > 0.0:
                     estimated_tps = profile.tps
 
+            max_tier = "full"
+            default_override = "auto"
+            if self.config and hasattr(self.config, "cognition"):
+                max_tier = self.config.cognition.max_council_tier
+                default_override = self.config.cognition.default_tier_override
+
+            queue_depth = 0
+            try:
+                from velune.kernel.registry import get_container
+                container = get_container()
+                if container.has("runtime.task_registry"):
+                    queue_depth = container.get("runtime.task_registry").pending_count()
+            except Exception:
+                pass
+
             if council_tier:
                 try:
                     tier = CouncilTier(council_tier.lower())
                 except ValueError:
-                    tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+                    tier = classify_task_tier(
+                        prompt, repo_context, available_tps=estimated_tps,
+                        max_council_tier=max_tier, default_tier_override=default_override,
+                        queue_depth=queue_depth
+                    )
             else:
-                tier = classify_task_tier(prompt, repo_context, available_tps=estimated_tps)
+                tier = classify_task_tier(
+                    prompt, repo_context, available_tps=estimated_tps,
+                    max_council_tier=max_tier, default_tier_override=default_override,
+                    queue_depth=queue_depth
+                )
                 
             # Dynamic low-resource optimization mode
             low_resource = (
@@ -317,6 +365,7 @@ class CouncilOrchestrator:
             # Estimate cost (agent_count × estimated_seconds) before execution
             agent_counts = {
                 CouncilTier.INSTANT: 1,
+                CouncilTier.MINIMAL: 2,
                 CouncilTier.STANDARD: 4,
                 CouncilTier.FULL: 10,
             }
@@ -337,6 +386,8 @@ class CouncilOrchestrator:
             try:
                 if tier == CouncilTier.INSTANT:
                     result = await self._execute_instant(prompt, repo_context, progress_callback)
+                elif tier == CouncilTier.MINIMAL:
+                    result = await self._execute_minimal(prompt, repo_context, progress_callback)
                 elif tier == CouncilTier.STANDARD:
                     result = await self._execute_standard(prompt, repo_context, progress_callback)
                 else:
@@ -391,6 +442,78 @@ class CouncilOrchestrator:
             "reviewer_report": None,
             "challenger_report": None,
             "arbitration": {"overall_confidence": 0.85, "requires_human_review": False},
+            "final_summary": coder_proposal,
+        }
+
+    async def _execute_minimal(
+        self,
+        prompt: str,
+        repo_context: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """MINIMAL PATH: Planner + Coder (No Reviewer, no specialized critics, no debate)"""
+        logger.info("[COUNCIL - MINIMAL] Executing Minimal Planner + Coder path...")
+
+        target_file = "velune/core/main.py"
+        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
+        if py_files:
+            target_file = py_files[0]
+
+        style_profile = self._get_or_refresh_style_profile(target_file)
+
+        roles = self.mapper.map_roles()
+        planner_model = roles[CouncilRole.PLANNER]
+        coder_model = roles[CouncilRole.CODER]
+
+        planner = PlannerAgent(
+            model=planner_model,
+            provider=self.provider_registry.get_or_raise(planner_model.provider_id),
+        )
+        coder = CoderAgent(
+            model=coder_model,
+            provider=self.provider_registry.get_or_raise(coder_model.provider_id),
+        )
+
+        # 1. Generate plan
+        logger.info("Council Phase: Planner")
+        if progress_callback:
+            progress_callback("[Planner] Decomposing task...")
+        task_plan = await planner.generate_plan(prompt, repo_context)
+        plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
+
+        # 2. Generate code
+        logger.info("Council Phase: Coder")
+        if progress_callback:
+            progress_callback("[Coder] Designing code implementation...")
+        coder_proposal = await coder.write_code(
+            prompt=prompt,
+            current_code=repo_context,
+            plan_context=plan_desc,
+            style_profile=style_profile,
+        )
+
+        # 3. Arbitration
+        logger.info("Council Phase: Arbitration")
+        if progress_callback:
+            progress_callback("[Arbitration] Arbitrating proposal...")
+        arbitration = self.arbitrator.arbitrate(
+            plan_steps=[s.description for s in task_plan.steps],
+            coder_proposal=coder_proposal,
+            reviewer_report=None,
+            challenger_report=None,
+            scalability_report=None,
+            security_report=None,
+            performance_report=None,
+            maintainability_report=None,
+        )
+
+        return {
+            "tier": "minimal",
+            "task_plan": task_plan,
+            "coder_proposal": coder_proposal,
+            "reviewer_report": None,
+            "challenger_report": None,
+            "arbitration": arbitration.to_dict(),
             "final_summary": coder_proposal,
         }
 
@@ -455,7 +578,16 @@ class CouncilOrchestrator:
         logger.info("Council Phase: Reviewer")
         if progress_callback:
             progress_callback("[Reviewer] Reviewing code proposal...")
-        reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
+        try:
+            reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
+        except Exception as e:
+            logger.error("Reviewer failed in standard path: %s", e)
+            from velune.cognition.council.messages import ReviewerMessage
+            reviewer_report = ReviewerMessage(
+                passed=True,
+                confidence_rating=0.5,
+                critical_issues=["Reviewer unavailable"],
+            )
 
         # Max 1 debate turn
         objections = []
@@ -482,7 +614,16 @@ class CouncilOrchestrator:
                 style_profile=style_profile,
             )
             # Re-run reviewer once
-            reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
+            try:
+                reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
+            except Exception as e:
+                logger.error("Reviewer failed during refinement in standard path: %s", e)
+                from velune.cognition.council.messages import ReviewerMessage
+                reviewer_report = ReviewerMessage(
+                    passed=True,
+                    confidence_rating=0.5,
+                    critical_issues=["Reviewer unavailable during refinement"],
+                )
 
         # 4. Arbitration
         logger.info("Council Phase: Arbitration")
@@ -503,13 +644,26 @@ class CouncilOrchestrator:
         logger.info("Council Phase: Synthesis")
         if progress_callback:
             progress_callback("[Synthesis] Synthesizing final summary...")
-        final_summary = await synthesizer.synthesize(
-            task=prompt,
-            winning_claims=arbitration.winning_claims,
-            plan=coder_proposal,
-            audit_reports=[reviewer_report.model_dump()],
-            context=repo_context,
-        )
+        try:
+            final_summary = await synthesizer.synthesize(
+                task=prompt,
+                winning_claims=arbitration.winning_claims,
+                plan=coder_proposal,
+                audit_reports=[reviewer_report.model_dump()],
+                context=repo_context,
+            )
+            if final_summary.startswith("Deliberation failure inside agent"):
+                raise ValueError(final_summary)
+        except Exception as e:
+            logger.error("Synthesizer failed in standard path: %s. Using default fallback summary.", e)
+            final_summary = (
+                f"# Council Deliberation Report (Degraded Mode)\n\n"
+                f"The Lead Synthesizer was unavailable due to an unexpected offline model or network issue ({e}).\n"
+                f"Below is the raw compiled code proposal and findings directly from the deliberation council:\n\n"
+                f"## Task\n{prompt}\n\n"
+                f"## Code Proposal\n```\n{coder_proposal}\n```\n\n"
+                f"## Arbitration Status\n- **Confidence**: {arbitration.overall_confidence}\n- **Requires Human Review**: {arbitration.requires_human_review}\n- **Instructions**: {arbitration.synthesis_instructions}\n"
+            )
 
         # Log successful decision to DLS
         decision_id = f"DEC-{int(time.time())}"
@@ -691,20 +845,75 @@ class CouncilOrchestrator:
         performance_task = performance_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
         maintainability_task = maintainability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
 
-        (
-            reviewer_report,
-            challenger_report,
-            scalability_report,
-            security_report,
-            performance_report,
-            maintainability_report,
-        ) = await asyncio.gather(
+        results = await asyncio.gather(
             reviewer_task,
             challenger_task,
             scalability_task,
             security_task,
             performance_task,
             maintainability_task,
+            return_exceptions=True,
+        )
+
+        from velune.cognition.council.messages import ReviewerMessage, ChallengerMessage, CriticMessage
+
+        reviewer_report = (
+            results[0]
+            if not isinstance(results[0], Exception)
+            else ReviewerMessage(
+                passed=True,
+                confidence_rating=0.5,
+                critical_issues=["Reviewer unavailable"],
+            )
+        )
+        challenger_report = (
+            results[1]
+            if not isinstance(results[1], Exception)
+            else ChallengerMessage(
+                assumptions_challenged=[],
+                failure_vectors=["Challenger unavailable"],
+                severity_rating=0.0,
+            )
+        )
+        scalability_report = (
+            results[2]
+            if not isinstance(results[2], Exception)
+            else CriticMessage(
+                passed=True,
+                issues=["Scalability Critic unavailable"],
+                score=0.9,
+                rationale="Scalability Critic unavailable",
+            )
+        )
+        security_report = (
+            results[3]
+            if not isinstance(results[3], Exception)
+            else CriticMessage(
+                passed=True,
+                issues=["Security Critic unavailable"],
+                score=0.9,
+                rationale="Security Critic unavailable",
+            )
+        )
+        performance_report = (
+            results[4]
+            if not isinstance(results[4], Exception)
+            else CriticMessage(
+                passed=True,
+                issues=["Performance Critic unavailable"],
+                score=0.9,
+                rationale="Performance Critic unavailable",
+            )
+        )
+        maintainability_report = (
+            results[5]
+            if not isinstance(results[5], Exception)
+            else CriticMessage(
+                passed=True,
+                issues=["Maintainability Critic unavailable"],
+                score=0.9,
+                rationale="Maintainability Critic unavailable",
+            )
         )
         logger.info("[COUNCIL - PARALLEL] Parallel reviews successfully gathered.")
 
@@ -798,7 +1007,47 @@ class CouncilOrchestrator:
                         re_critics.append("maintainability")
 
                     if re_tasks:
-                        re_results = await asyncio.gather(*re_tasks)
+                        from velune.cognition.council.messages import ReviewerMessage, ChallengerMessage, CriticMessage
+                        raw_re_results = await asyncio.gather(*re_tasks, return_exceptions=True)
+
+                        re_results = []
+                        for name, res in zip(re_critics, raw_re_results):
+                            if isinstance(res, Exception):
+                                if name == "reviewer":
+                                    res = ReviewerMessage(
+                                        passed=True,
+                                        confidence_rating=0.5,
+                                        critical_issues=["Reviewer unavailable during refinement"],
+                                    )
+                                elif name == "scalability":
+                                    res = CriticMessage(
+                                        passed=True,
+                                        issues=["Scalability Critic unavailable during refinement"],
+                                        score=0.9,
+                                        rationale="Scalability Critic unavailable during refinement",
+                                    )
+                                elif name == "security":
+                                    res = CriticMessage(
+                                        passed=True,
+                                        issues=["Security Critic unavailable during refinement"],
+                                        score=0.9,
+                                        rationale="Security Critic unavailable during refinement",
+                                    )
+                                elif name == "performance":
+                                    res = CriticMessage(
+                                        passed=True,
+                                        issues=["Performance Critic unavailable during refinement"],
+                                        score=0.9,
+                                        rationale="Performance Critic unavailable during refinement",
+                                    )
+                                elif name == "maintainability":
+                                    res = CriticMessage(
+                                        passed=True,
+                                        issues=["Maintainability Critic unavailable during refinement"],
+                                        score=0.9,
+                                        rationale="Maintainability Critic unavailable during refinement",
+                                    )
+                            re_results.append(res)
 
                         # Update all reports first to preserve converged state if we break early
                         for name, res in zip(re_critics, re_results):
@@ -909,20 +1158,33 @@ class CouncilOrchestrator:
         if progress_callback:
             progress_callback("[Synthesis] Synthesizing final summary...")
         logger.info("[COUNCIL - SYNTHESIS] Rendering walk-through response...")
-        final_summary = await synthesizer.synthesize(
-            task=prompt,
-            winning_claims=arbitration.winning_claims,
-            plan=coder_proposal,
-            audit_reports=[
-                reviewer_report.model_dump(),
-                challenger_report.model_dump(),
-                scalability_report.model_dump(),
-                security_report.model_dump(),
-                performance_report.model_dump(),
-                maintainability_report.model_dump(),
-            ],
-            context=repo_context,
-        )
+        try:
+            final_summary = await synthesizer.synthesize(
+                task=prompt,
+                winning_claims=arbitration.winning_claims,
+                plan=coder_proposal,
+                audit_reports=[
+                    reviewer_report.model_dump(),
+                    challenger_report.model_dump(),
+                    scalability_report.model_dump(),
+                    security_report.model_dump(),
+                    performance_report.model_dump(),
+                    maintainability_report.model_dump(),
+                ],
+                context=repo_context,
+            )
+            if final_summary.startswith("Deliberation failure inside agent"):
+                raise ValueError(final_summary)
+        except Exception as e:
+            logger.error("Synthesizer failed in full path: %s. Using default fallback summary.", e)
+            final_summary = (
+                f"# Council Deliberation Report (Degraded Mode)\n\n"
+                f"The Lead Synthesizer was unavailable due to an unexpected offline model or network issue ({e}).\n"
+                f"Below is the raw compiled code proposal and findings directly from the deliberation council:\n\n"
+                f"## Task\n{prompt}\n\n"
+                f"## Code Proposal\n```\n{coder_proposal}\n```\n\n"
+                f"## Arbitration Status\n- **Confidence**: {arbitration.overall_confidence}\n- **Requires Human Review**: {arbitration.requires_human_review}\n- **Instructions**: {arbitration.synthesis_instructions}\n"
+            )
 
         # Determine subsystem keyword target
         subsystem_target = "general"

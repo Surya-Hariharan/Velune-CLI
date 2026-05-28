@@ -19,17 +19,56 @@ models_cmd = typer.Typer(help="Model management commands")
 def models_scan(
     ctx: typer.Context,
     provider: str = typer.Option(None, "--provider", "-p", help="Specific provider to scan"),
+    probe: bool = typer.Option(False, "--probe", help="Run empirical capability probes synchronously and cache results"),
 ) -> None:
     """Scan for available models."""
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
-    discovery = cli_context.container.get("runtime.model_discovery") if cli_context else None
-
-    if discovery is None:
-        console.print("[red]Model discovery service is unavailable.[/red]")
+    if cli_context is None:
+        if ctx.obj and getattr(ctx.obj, "json_mode", False):
+            import json
+            print(json.dumps({"error": "Model discovery service is unavailable"}))
+        else:
+            console.print("[red]Model discovery service is unavailable.[/red]")
         raise typer.Exit(code=1)
 
     from velune.core.event_loop import submit
-    records = submit(_models_scan_async(discovery, provider))
+    records = submit(_models_scan_async(cli_context, provider, probe))
+
+    from velune.core.types.model import CapabilityLevel
+
+    if cli_context.json_mode:
+        import json
+        out = []
+        for record in records:
+            capabilities_map = {
+                "coding": record.capabilities.coding,
+                "reasoning": record.capabilities.reasoning,
+                "planning": record.capabilities.planning,
+                "summarization": record.capabilities.summarization,
+                "tool_use": record.capabilities.tool_use,
+            }
+            highest_cap = "general"
+            highest_level = CapabilityLevel.NONE
+            for cap_name, level in capabilities_map.items():
+                if level > highest_level:
+                    highest_level = level
+                    highest_cap = cap_name
+            specialization = highest_cap if highest_level > CapabilityLevel.NONE else "general"
+            embedding_supported = record.capabilities.embedding > CapabilityLevel.NONE
+            validated = record.metadata.get("validated")
+            status = "cached" if validated is None else ("online" if validated else "offline")
+
+            out.append({
+                "provider_id": record.provider_id,
+                "model_id": record.model_id,
+                "specialization": specialization,
+                "speed_tier": record.speed_tier,
+                "context_length": record.context_length,
+                "embedding_supported": embedding_supported,
+                "status": status,
+            })
+        print(json.dumps(out))
+        return
 
     table = Table(title="Discovered Models")
     table.add_column("Provider", style="cyan")
@@ -40,10 +79,7 @@ def models_scan(
     table.add_column("Embedding", style="white")
     table.add_column("Status", style="bold")
 
-    from velune.core.types.model import CapabilityLevel
-
     for record in records:
-        # Dynamically infer highest specialization from capability profile
         capabilities_map = {
             "coding": record.capabilities.coding,
             "reasoning": record.capabilities.reasoning,
@@ -89,11 +125,87 @@ def models_scan(
     )
 
 
-async def _models_scan_async(discovery: Any, provider: str | None) -> Any:
-    if provider:
-        return await discovery.scan_provider(provider_id=provider)
-    else:
-        return await discovery.scan_all()
+async def _models_scan_async(
+    cli_context: CLIContext,
+    provider_id: str | None,
+    probe: bool
+) -> Any:
+    container = cli_context.container
+    lifecycle = container.get("runtime.lifecycle")
+    discovery = container.get("runtime.model_discovery")
+    provider_registry = container.get("runtime.provider_registry")
+
+    if probe:
+        await lifecycle.startup()
+
+    try:
+        if provider_id:
+            records = await discovery.scan_provider(provider_id=provider_id)
+        else:
+            records = await discovery.scan_all()
+
+        if probe:
+            from pathlib import Path
+            from velune.models.probes import ModelProber, FastProbe
+            from velune.models.profile_cache import ModelProfileCache
+
+            profile_cache = ModelProfileCache(Path(".velune") / "model_profiles.json")
+            fast_probe = FastProbe()
+
+            if not cli_context.json_mode:
+                console.print("[bold cyan]⠋[/bold cyan] Probing discovered models synchronously...")
+
+            probe_tasks = []
+            valid_records = []
+
+            for record in records:
+                provider = provider_registry.get(record.provider_id)
+                if provider:
+                    valid_records.append(record)
+                    probe_tasks.append(fast_probe.ping(provider, record.model_id))
+
+            if valid_records:
+                import asyncio
+                responsiveness = await asyncio.gather(*probe_tasks, return_exceptions=True)
+
+                empirical_probe_tasks = []
+                probing_models = []
+
+                for record, is_responsive in zip(valid_records, responsiveness):
+                    if is_responsive is True:
+                        provider = provider_registry.get(record.provider_id)
+                        prober = ModelProber(provider, record.model_id)
+                        probing_models.append((record, prober))
+                        empirical_probe_tasks.append(prober.run_all_probes())
+                        record.metadata["validated"] = True
+                    else:
+                        record.metadata["validated"] = False
+
+                if empirical_probe_tasks:
+                    if not cli_context.json_mode:
+                        console.print(f"[bold magenta]⚡ Running empirical capability probes for {len(empirical_probe_tasks)} active model(s)...[/bold magenta]")
+                    results = await asyncio.gather(*empirical_probe_tasks, return_exceptions=True)
+
+                    for (record, prober), result in zip(probing_models, results):
+                        if isinstance(result, Exception):
+                            if not cli_context.json_mode:
+                                console.print(f"[red]✗[/red] Probe failed for {record.model_id}: {result}")
+                            continue
+
+                        profile_cache.set(record.model_id, record.provider_id, result)
+
+                        registry = container.get("runtime.model_registry")
+                        if registry:
+                            registry._apply_probe_results(record, result)
+                            registry.register(record)
+
+            if not cli_context.json_mode:
+                console.print("[bold green]✓[/bold green] Empirical benchmarks completed and cached.")
+
+        return records
+    finally:
+        if probe:
+            await lifecycle.shutdown()
 
 
 @models_cmd.command("list")
@@ -101,6 +213,27 @@ def models_list(ctx: typer.Context) -> None:
     """List registered models."""
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
     registry = cli_context.container.get("runtime.model_registry") if cli_context else None
+
+    if cli_context and cli_context.json_mode:
+        import json
+        out = []
+        if registry is not None:
+            from velune.core.types.model import CapabilityLevel
+            records = registry.list_all()
+            for record in records:
+                capabilities = []
+                for cap_name in ["coding", "reasoning", "planning", "summarization", "tool_use", "long_context"]:
+                    level = getattr(record.capabilities, cap_name, None)
+                    if level and level > CapabilityLevel.NONE:
+                        capabilities.append(cap_name)
+                out.append({
+                    "model_id": record.model_id,
+                    "display_name": record.display_name,
+                    "provider_id": record.provider_id,
+                    "capabilities": capabilities,
+                })
+        print(json.dumps(out))
+        return
 
     table = Table(title="Registered Models")
     table.add_column("ID", style="cyan")
@@ -160,7 +293,11 @@ def models_assign(
     orchestrator = cli_context.container.get("runtime.council_orchestrator") if cli_context else None
 
     if orchestrator is None:
-        console.print("[red]Council orchestrator is unavailable.[/red]")
+        if cli_context and cli_context.json_mode:
+            import json
+            print(json.dumps({"error": "Council orchestrator is unavailable"}))
+        else:
+            console.print("[red]Council orchestrator is unavailable.[/red]")
         raise typer.Exit(code=1)
 
     mapper = orchestrator.mapper
@@ -168,18 +305,26 @@ def models_assign(
         from velune.models.specializations import CouncilRole
         council_role = CouncilRole(role.lower())
     except ValueError:
-        console.print(f"[red]Invalid role '{role}'. Must be one of: planner, coder, reviewer, challenger, synthesizer[/red]")
+        if cli_context and cli_context.json_mode:
+            import json
+            print(json.dumps({"error": f"Invalid role '{role}'"}))
+        else:
+            console.print(f"[red]Invalid role '{role}'. Must be one of: planner, coder, reviewer, challenger, synthesizer[/red]")
         raise typer.Exit(code=1)
 
     # Check if model exists
     registry = cli_context.container.get("runtime.model_registry") if cli_context else None
     if registry:
         descriptor = registry.get(model_id)
-        if not descriptor:
+        if not descriptor and not (cli_context and cli_context.json_mode):
             console.print(f"[yellow]Warning: Model '{model_id}' is not currently registered/discovered.[/yellow]")
 
     mapper.overrides[council_role] = model_id
-    console.print(f"[green]Successfully assigned role '{council_role.value}' to model '{model_id}' for the current runtime context.[/green]")
+    if cli_context and cli_context.json_mode:
+        import json
+        print(json.dumps({"success": True, "role": council_role.value, "model_id": model_id}))
+    else:
+        console.print(f"[green]Successfully assigned role '{council_role.value}' to model '{model_id}' for the current runtime context.[/green]")
 
 
 @models_cmd.command("benchmark")
@@ -190,14 +335,22 @@ def models_benchmark(
     """Run capability probes on a specific model or all registered models."""
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
     if not cli_context:
-        console.print("[red]CLI context is unavailable.[/red]")
+        if ctx.obj and getattr(ctx.obj, "json_mode", False):
+            import json
+            print(json.dumps({"error": "CLI context is unavailable"}))
+        else:
+            console.print("[red]CLI context is unavailable.[/red]")
         raise typer.Exit(code=1)
 
     registry = cli_context.container.get("runtime.model_registry")
     provider_registry = cli_context.container.get("runtime.provider_registry")
 
     if registry is None or provider_registry is None:
-        console.print("[red]Model registry or provider registry is unavailable.[/red]")
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"error": "Model registry or provider registry is unavailable"}))
+        else:
+            console.print("[red]Model registry or provider registry is unavailable.[/red]")
         raise typer.Exit(code=1)
 
     # Get the models to benchmark
@@ -205,14 +358,22 @@ def models_benchmark(
     if model_id:
         model = registry.get(model_id)
         if not model:
-            console.print(f"[red]Model '{model_id}' is not registered.[/red]")
+            if cli_context.json_mode:
+                import json
+                print(json.dumps({"error": f"Model '{model_id}' is not registered"}))
+            else:
+                console.print(f"[red]Model '{model_id}' is not registered.[/red]")
             raise typer.Exit(code=1)
         models_to_probe.append(model)
     else:
         models_to_probe = registry.list_all()
 
     if not models_to_probe:
-        console.print("[yellow]No models registered for benchmarking.[/yellow]")
+        if cli_context.json_mode:
+            import json
+            print(json.dumps([]))
+        else:
+            console.print("[yellow]No models registered for benchmarking.[/yellow]")
         return
 
     from velune.core.event_loop import submit
@@ -226,6 +387,7 @@ async def _models_benchmark_async(
     models_to_probe: list[Any],
 ) -> None:
     from pathlib import Path
+    import json
 
     from velune.models.probes import ModelProber
     from velune.models.profile_cache import ModelProfileCache
@@ -240,13 +402,17 @@ async def _models_benchmark_async(
     table.add_column("Instruction Score (Lat)", style="yellow")
     table.add_column("Source", style="white")
 
+    json_results = []
+
     for model in models_to_probe:
         provider = provider_registry.get(model.provider_id)
         if not provider:
-            console.print(f"[yellow]Skipping model '{model.model_id}': Provider '{model.provider_id}' is not active or available.[/yellow]")
+            if not cli_context.json_mode:
+                console.print(f"[yellow]Skipping model '{model.model_id}': Provider '{model.provider_id}' is not active or available.[/yellow]")
             continue
 
-        console.print(f"Benchmarking model [bold cyan]{model.model_id}[/bold cyan] via [bold magenta]{model.provider_id}[/bold magenta]...")
+        if not cli_context.json_mode:
+            console.print(f"Benchmarking model [bold cyan]{model.model_id}[/bold cyan] via [bold magenta]{model.provider_id}[/bold magenta]...")
 
         prober = ModelProber(provider, model.model_id)
         results = await prober.run_all_probes()
@@ -260,19 +426,33 @@ async def _models_benchmark_async(
         reasoning = results["reasoning"]
         instruction = results["instruction"]
 
-        def format_result(res) -> str:
-            if res.latency_ms < 0:
-                return "[red]Failed[/red]"
-            color = "green" if res.passed else "yellow"
-            return f"[{color}]{res.score:.2f}[/{color}] ({res.latency_ms:.0f}ms)"
+        if cli_context.json_mode:
+            json_results.append({
+                "model_id": model.model_id,
+                "provider_id": model.provider_id,
+                "results": {
+                    "coding": {"score": coding.score, "latency_ms": coding.latency_ms, "passed": coding.passed},
+                    "reasoning": {"score": reasoning.score, "latency_ms": reasoning.latency_ms, "passed": reasoning.passed},
+                    "instruction": {"score": instruction.score, "latency_ms": instruction.latency_ms, "passed": instruction.passed}
+                }
+            })
+        else:
+            def format_result(res) -> str:
+                if res.latency_ms < 0:
+                    return "[red]Failed[/red]"
+                color = "green" if res.passed else "yellow"
+                return f"[{color}]{res.score:.2f}[/{color}] ({res.latency_ms:.0f}ms)"
 
-        table.add_row(
-            model.model_id,
-            model.provider_id,
-            format_result(coding),
-            format_result(reasoning),
-            format_result(instruction),
-            "empirical (forced)",
-        )
+            table.add_row(
+                model.model_id,
+                model.provider_id,
+                format_result(coding),
+                format_result(reasoning),
+                format_result(instruction),
+                "empirical (forced)",
+            )
 
-    console.print(table)
+    if cli_context.json_mode:
+        print(json.dumps(json_results))
+    else:
+        console.print(table)

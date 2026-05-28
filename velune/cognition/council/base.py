@@ -17,6 +17,9 @@ from velune.providers.base import ModelProvider
 
 logger = TracedLogger("velune.cognition.council.base")
 
+import asyncio
+_live_lock = asyncio.Lock()
+
 
 class BaseCouncilAgent(ABC):
     """Base interface for specialized deliberation models within the Reasoning Council."""
@@ -77,21 +80,101 @@ class BaseCouncilAgent(ABC):
             start = time.perf_counter()
             try:
                 logger.info("Agent %s (%s) initiating inference...", self.role.value, self.model.model_id)
-                response = await asyncio.wait_for(
-                    self.provider.infer(request),
-                    timeout=timeout,
-                )
+
+                supports_streaming = False
+                try:
+                    capabilities = self.provider.get_capabilities()
+                    supports_streaming = getattr(capabilities, "supports_streaming", False)
+                except Exception:
+                    pass
+
+                if not hasattr(self.provider, "stream"):
+                    supports_streaming = False
+
+                if supports_streaming:
+                    import sys
+                    from rich.live import Live
+                    from rich.panel import Panel
+                    from rich.markdown import Markdown
+                    from rich.console import Console
+
+                    console = Console()
+                    is_interactive = sys.stdout.isatty()
+
+                    acquired = False
+                    if is_interactive:
+                        if not _live_lock.locked():
+                            await _live_lock.acquire()
+                            acquired = True
+
+                    async def run_streaming():
+                        full_content = []
+                        role_name = self.role.value.capitalize()
+
+                        AGENT_COLORS = {
+                            CouncilRole.PLANNER: "magenta",
+                            CouncilRole.CODER: "green",
+                            CouncilRole.REVIEWER: "yellow",
+                            CouncilRole.CHALLENGER: "red",
+                            CouncilRole.SYNTHESIZER: "cyan",
+                        }
+                        color = AGENT_COLORS.get(self.role, "cyan")
+                        panel_title = f"[bold {color}]🧠 {role_name} Agent Deliberating...[/bold {color}] ([dim]{self.model.model_id}[/dim])"
+
+                        if acquired:
+                            panel = Panel(
+                                "",
+                                title=panel_title,
+                                border_style=color,
+                                padding=(1, 2),
+                                subtitle="[dim]Streaming response...[/dim]",
+                                subtitle_align="right"
+                            )
+                            with Live(panel, console=console, refresh_per_second=10, transient=False) as live:
+                                async for chunk in self.provider.stream(request):
+                                    full_content.append(chunk.content)
+                                    current_text = "".join(full_content)
+                                    panel = Panel(
+                                        Markdown(current_text),
+                                        title=panel_title,
+                                        border_style=color,
+                                        padding=(1, 2),
+                                        subtitle=f"[dim]Streaming: {len(current_text)} chars[/dim]",
+                                        subtitle_align="right"
+                                    )
+                                    live.update(panel)
+                        else:
+                            async for chunk in self.provider.stream(request):
+                                full_content.append(chunk.content)
+
+                        return "".join(full_content)
+
+                    try:
+                        content = await asyncio.wait_for(
+                            run_streaming(),
+                            timeout=timeout,
+                        )
+                    finally:
+                        if acquired:
+                            _live_lock.release()
+                else:
+                    response = await asyncio.wait_for(
+                        self.provider.infer(request),
+                        timeout=timeout,
+                    )
+                    content = response.content
+
                 elapsed = time.perf_counter() - start
                 logger.info(
                     "Agent %s completed in %.1fs (%d chars)",
-                    self.role.value, elapsed, len(response.content)
+                    self.role.value, elapsed, len(content)
                 )
                 if elapsed > 60.0:
                     logger.warning(
                         "Agent %s took %.1fs (>60s)",
                         self.role.value, elapsed
                     )
-                return response.content
+                return content
             except TimeoutError:
                 logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)
                 return f"[Agent {self.role.value} timed out — using empty response]"

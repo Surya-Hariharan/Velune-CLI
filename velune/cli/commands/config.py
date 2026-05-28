@@ -24,7 +24,11 @@ def config_set(
     """Set a configuration value in velune.toml."""
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
     if not cli_context:
-        console.print("[red]CLI context is uninitialized.[/red]")
+        if ctx.obj and getattr(ctx.obj, "json_mode", False):
+            import json
+            print(json.dumps({"error": "CLI context is uninitialized"}))
+        else:
+            console.print("[red]CLI context is uninitialized.[/red]")
         raise typer.Exit(1)
 
     config_path = cli_context.config_path or (cli_context.workspace / "velune.toml")
@@ -37,7 +41,11 @@ def config_set(
         else:
             data = {}
     except Exception as e:
-        console.print(f"[red]Failed to load existing config: {e}[/red]")
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"error": f"Failed to load existing config: {e}"}))
+        else:
+            console.print(f"[red]Failed to load existing config: {e}[/red]")
         data = {}
 
     # Set the nested key
@@ -70,9 +78,17 @@ def config_set(
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w") as f:
             toml.dump(data, f)
-        console.print(f"[green]✓ Successfully set [bold]{key}[/bold] to [bold]{typed_val}[/bold] in {config_path}[/green]")
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"success": True, "key": key, "value": typed_val, "path": str(config_path)}))
+        else:
+            console.print(f"[green]✓ Successfully set [bold]{key}[/bold] to [bold]{typed_val}[/bold] in {config_path}[/green]")
     except Exception as e:
-        console.print(f"[red]Failed to save config: {e}[/red]")
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"error": f"Failed to save config: {e}"}))
+        else:
+            console.print(f"[red]Failed to save config: {e}[/red]")
         raise typer.Exit(1)
 
 
@@ -84,7 +100,11 @@ def config_get(
     """Get a configuration value."""
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
     if not cli_context:
-        console.print("[red]CLI context is uninitialized.[/red]")
+        if ctx.obj and getattr(ctx.obj, "json_mode", False):
+            import json
+            print(json.dumps({"error": "CLI context is uninitialized"}))
+        else:
+            console.print("[red]CLI context is uninitialized.[/red]")
         raise typer.Exit(1)
 
     # Fetch from the active loaded config object which is resolved and typed
@@ -98,10 +118,18 @@ def config_get(
         elif isinstance(curr, dict) and part in curr:
             curr = curr[part]
         else:
-            console.print(f"[red]Key '{key}' not found in active configuration.[/red]")
+            if cli_context.json_mode:
+                import json
+                print(json.dumps({"error": f"Key '{key}' not found in active configuration"}))
+            else:
+                console.print(f"[red]Key '{key}' not found in active configuration.[/red]")
             raise typer.Exit(1)
 
-    console.print(f"[bold]{key}[/bold] = {curr}")
+    if cli_context.json_mode:
+        import json
+        print(json.dumps({"key": key, "value": curr}))
+    else:
+        console.print(f"[bold]{key}[/bold] = {curr}")
 
 
 @config_cmd.command("show")
@@ -110,20 +138,45 @@ def config_show(ctx: typer.Context) -> None:
     cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
 
     if cli_context is None:
-        console.print(Panel.fit("Configuration not yet loaded.", title="Configuration"))
+        if ctx.obj and getattr(ctx.obj, "json_mode", False):
+            import json
+            print(json.dumps({"error": "Configuration not yet loaded"}))
+        else:
+            console.print(Panel.fit("Configuration not yet loaded.", title="Configuration"))
         return
 
     config = cli_context.config
-    console.print(
-        Panel.fit(
-            f"project.name = {config.project.name}\n"
-            f"project.version = {config.project.version}\n"
-            f"providers.default = {config.providers.default_provider}\n"
-            f"workspace.index_on_init = {config.workspace.index_on_init}\n"
-            f"workspace.watch_files = {config.workspace.watch_files}\n"
-            f"workspace.git_aware = {config.workspace.git_aware}\n"
-            f"telemetry.enabled = {config.telemetry.enabled}\n"
-            f"telemetry.log_level = {config.telemetry.log_level}",
-            title="Configuration",
+    if cli_context.json_mode:
+        import json
+        print(json.dumps({
+            "project": {
+                "name": config.project.name,
+                "version": config.project.version,
+            },
+            "providers": {
+                "default": config.providers.default_provider,
+            },
+            "workspace": {
+                "index_on_init": config.workspace.index_on_init,
+                "watch_files": config.workspace.watch_files,
+                "git_aware": config.workspace.git_aware,
+            },
+            "telemetry": {
+                "enabled": config.telemetry.enabled,
+                "log_level": config.telemetry.log_level,
+            }
+        }))
+    else:
+        console.print(
+            Panel.fit(
+                f"project.name = {config.project.name}\n"
+                f"project.version = {config.project.version}\n"
+                f"providers.default = {config.providers.default_provider}\n"
+                f"workspace.index_on_init = {config.workspace.index_on_init}\n"
+                f"workspace.watch_files = {config.workspace.watch_files}\n"
+                f"workspace.git_aware = {config.workspace.git_aware}\n"
+                f"telemetry.enabled = {config.telemetry.enabled}\n"
+                f"telemetry.log_level = {config.telemetry.log_level}",
+                title="Configuration",
+            )
         )
-    )

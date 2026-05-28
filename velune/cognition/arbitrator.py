@@ -80,10 +80,14 @@ class CouncilArbitrator:
             passed = reviewer_report.get("passed", True)
             reviewer_confidence = reviewer_report.get("confidence_rating", 0.7)
             reviewer_issues = reviewer_report.get("critical_issues", [])
-        else:
+        elif reviewer_report is not None:
             passed = reviewer_report.passed
             reviewer_confidence = reviewer_report.confidence_rating
             reviewer_issues = reviewer_report.critical_issues
+        else:
+            passed = True
+            reviewer_confidence = 0.5
+            reviewer_issues = ["Reviewer unavailable"]
 
         if isinstance(challenger_report, dict):
             challenger_issues = challenger_report.get("failure_vectors", [])

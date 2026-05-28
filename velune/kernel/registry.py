@@ -60,17 +60,11 @@ class ServiceContainer:
 
     def hot_swap(self, name: str, replacement: Any) -> None:
         """Dynamically replace an active service instance or registry factory."""
-        if name in self._singletons:
-            logger.info("Hot-swapping concrete service instance: '%s'", name)
-            self._singletons[name] = replacement
-        elif name in self._factories:
-            logger.info("Hot-swapping singleton factory: '%s'", name)
-            self._factories[name] = lambda: replacement
-            if name in self._services:
-                self._services[name] = replacement
-        else:
-            logger.info("Registering hot-swapped service from scratch: '%s'", name)
-            self._singletons[name] = replacement
+        logger.info("Hot-swapping service: '%s'", name)
+        self._singletons.pop(name, None)
+        self._factories.pop(name, None)
+        self._services.pop(name, None)  # Clear cached singleton too
+        self._singletons[name] = replacement
 
     def get(self, name: str) -> Any:
         """Retrieve a service instance by key. Resolves lazy factories if needed."""

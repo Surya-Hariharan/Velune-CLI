@@ -66,47 +66,54 @@ class PlannerAgent(BaseCouncilAgent):
         """Analyze goals and emit a verified TaskPlan."""
         logger.info("Planner generating execution plan...")
 
-        user_messages = [
-            {
-                "role": "user",
-                "content": f"USER PROMPT: {prompt}\n\nREPOSITORY DETAILS AND CONTEXT:\n{repo_context}",
-            }
-        ]
+        try:
+            user_messages = [
+                {
+                    "role": "user",
+                    "content": f"USER PROMPT: {prompt}\n\nREPOSITORY DETAILS AND CONTEXT:\n{repo_context}",
+                }
+            ]
 
-        result = await self.typed_deliberate(user_messages, PlannerMessage, temperature=0.2)
+            result = await self.typed_deliberate(user_messages, PlannerMessage, temperature=0.2)
 
-        if result.parse_error:
-            logger.error("Failed to parse Planner JSON output. Falling back to default single step. Error: %s", result.parse_error)
-            # Create a fallback single-step plan
-            fallback_step = TaskStep(
-                id="execute_goal",
-                description=f"Attempt to complete goal: {prompt}",
-                agent_role="coder",
-                status=TaskStatus.PENDING,
-                metadata={
-                    "command": f"echo Running fallbacks for: {prompt}",
-                    "timeout": 60.0,
-                },
-            )
-            return TaskPlan(
-                task_id="task-fallback",
-                steps=[fallback_step],
-            )
+            if result.parse_error:
+                logger.error("Failed to parse Planner JSON output. Falling back to default single step. Error: %s", result.parse_error)
+                # Create a fallback single-step plan
+                return self._create_fallback_plan(prompt)
 
-        steps = []
-        for s in result.steps:
-            steps.append(
-                TaskStep(
-                    id=s.get("id", "step-unknown"),
-                    description=s.get("description", ""),
-                    agent_role=s.get("agent_role", "coder"),
-                    status=TaskStatus.PENDING,
-                    dependencies=s.get("dependencies", []),
-                    metadata=s.get("metadata", {}),
+            steps = []
+            for s in result.steps:
+                steps.append(
+                    TaskStep(
+                        id=s.get("id", "step-unknown"),
+                        description=s.get("description", ""),
+                        agent_role=s.get("agent_role", "coder"),
+                        status=TaskStatus.PENDING,
+                        dependencies=s.get("dependencies", []),
+                        metadata=s.get("metadata", {}),
+                    )
                 )
-            )
 
+            return TaskPlan(
+                task_id=result.task_id or "task-main",
+                steps=steps,
+            )
+        except Exception as e:
+            logger.error("Exception during generate_plan: %s. Falling back to default single step.", e)
+            return self._create_fallback_plan(prompt)
+
+    def _create_fallback_plan(self, prompt: str) -> TaskPlan:
+        fallback_step = TaskStep(
+            id="execute_goal",
+            description=f"Attempt to complete goal: {prompt}",
+            agent_role="coder",
+            status=TaskStatus.PENDING,
+            metadata={
+                "command": f"echo Running fallbacks for: {prompt}",
+                "timeout": 60.0,
+            },
+        )
         return TaskPlan(
-            task_id=result.task_id or "task-main",
-            steps=steps,
+            task_id="task-fallback",
+            steps=[fallback_step],
         )

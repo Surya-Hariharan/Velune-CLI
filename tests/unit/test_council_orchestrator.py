@@ -103,3 +103,59 @@ async def test_progress_callback_called():
     
     assert len(progress_events) > 0
     assert any("Planner" in e or "Coder" in e for e in progress_events)
+
+@pytest.mark.asyncio
+async def test_council_graceful_degradation_on_exception(monkeypatch):
+    """Council must complete successfully with degraded defaults when model is offline mid-execution."""
+    from velune.cognition.council.reviewer import ReviewerAgent
+    from velune.cognition.council.synthesizer import SynthesizerAgent
+    monkeypatch.setattr(
+        ReviewerAgent,
+        "review",
+        AsyncMock(side_effect=RuntimeError("Reviewer model went offline mid-deliberation!"))
+    )
+    monkeypatch.setattr(
+        SynthesizerAgent,
+        "synthesize",
+        AsyncMock(side_effect=RuntimeError("Synthesizer model went offline mid-synthesis!"))
+    )
+
+    class MockFailingProvider:
+        async def infer(self, request):
+            system_prompt = request.messages[0]["content"] if request.messages else ""
+            mock_response = MagicMock()
+            if "Respond with ONLY a JSON array" in request.messages[-1]["content"] or "json" in system_prompt.lower():
+                if "Adversarial Challenger" in system_prompt:
+                    mock_response.content = '{"assumptions_challenged": [], "failure_vectors": [], "severity_rating": 0.0}'
+                elif "Lead Planner" in system_prompt:
+                    mock_response.content = '{"task_id": "task-main", "steps": [{"id": "step-1", "description": "Write code", "agent_role": "coder", "dependencies": []}]}'
+                elif "Critic" in system_prompt or "Security" in system_prompt or "Scalability" in system_prompt or "Performance" in system_prompt or "Maintainability" in system_prompt:
+                    mock_response.content = '{"passed": true, "issues": [], "score": 0.95, "rationale": "Perfect"}'
+                else:
+                    mock_response.content = '{"passed": true, "critical_issues": [], "suggestions": [], "confidence_rating": 0.9}'
+            else:
+                mock_response.content = "Mock fallback response code"
+            return mock_response
+
+    provider = MockFailingProvider()
+    registry = MockProviderRegistry(provider)
+    mapper = MockModelSpecializationMapper()
+    
+    orchestrator = build_test_orchestrator()
+    orchestrator.provider_registry = registry
+    
+    result = await orchestrator.execute_task(
+        prompt="upgrade database",
+        repo_context="some context",
+        council_tier="full"
+    )
+    
+    assert result["tier"] == "full"
+    assert result["reviewer_report"] is not None
+    assert result["reviewer_report"].passed is True
+    assert result["reviewer_report"].critical_issues == ["Reviewer unavailable"]
+    assert result["reviewer_report"].confidence_rating == 0.5
+    assert result["arbitration"] is not None
+    assert result["arbitration"]["overall_confidence"] < 0.95
+    assert result["final_summary"] is not None
+    assert "unavailable" in result["final_summary"].lower() or "degraded" in result["final_summary"].lower()

@@ -21,6 +21,7 @@ class CLIContext:
     config_path: Path | None
     verbose: bool
     runtime: RuntimeContext
+    json_mode: bool = False
 
     @property
     def console(self) -> Console:
@@ -42,6 +43,7 @@ class DaemonCLIContext:
     workspace: Path
     config_path: Path | None = None
     verbose: bool = False
+    json_mode: bool = False
 
     @property
     def console(self) -> Console:

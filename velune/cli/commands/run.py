@@ -45,25 +45,37 @@ async def _run_command_async(
     config = cli_context.config
 
     # 2. Boot up Cognitive OS Subsystems
-    console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
+    if not cli_context.json_mode:
+        console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
     await lifecycle.startup()
 
     # 3. Refresh model catalog scan to assign specialized seats
-    console.print("[bold cyan]⠋[/bold cyan] Probing system hardware and local/remote providers...")
+    if not cli_context.json_mode:
+        console.print("[bold cyan]⠋[/bold cyan] Probing system hardware and local/remote providers...")
     await model_registry.refresh()
 
-    console.print()
-    console.print(Panel(f"[bold green]Task Auth:[/bold green] {task}", border_style="cyan", title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]"))
+    # Onboarding preflight check gate
+    from velune.cli.commands.preflight import run_preflight_check
+    if not await run_preflight_check(container, console if not cli_context.json_mode else None):
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"error": "Preflight check failed. Ensure workspace is initialized and models are scanned."}))
+        await lifecycle.shutdown()
+        return
 
-    # 4. Stream Multi-Agent Council Deliberation & Execution Graph
-    console.print("[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n")
+    if not cli_context.json_mode:
+        console.print()
+        console.print(Panel(f"[bold green]Task Auth:[/bold green] {task}", border_style="cyan", title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]"))
+        # 4. Stream Multi-Agent Council Deliberation & Execution Graph
+        console.print("[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n")
 
     from velune.orchestration.schemas import ExecutionStatus
 
     async def stream_runner():
         milestones = []
         async for milestone in orchestration_engine.stream(task):
-            console.print(f"  [bold cyan]•[/bold cyan] {milestone}")
+            if not cli_context.json_mode:
+                console.print(f"  [bold cyan]•[/bold cyan] {milestone}")
             milestones.append(milestone)
 
         # Parse run_id from milestones (format: "[run_id] milestone_name")
@@ -77,9 +89,14 @@ async def _run_command_async(
     state = await stream_runner()
 
     # 5. Display Task Execution Results
-    console.print()
+    if not cli_context.json_mode:
+        console.print()
     if state is None:
-        console.print("[bold red]✗ Pipeline failed to initialize state.[/bold red]")
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"error": "Pipeline failed to initialize state."}))
+        else:
+            console.print("[bold red]✗ Pipeline failed to initialize state.[/bold red]")
         await lifecycle.shutdown()
         return
 
@@ -88,37 +105,50 @@ async def _run_command_async(
     plan_steps = len(state.task_plan.steps) if state.task_plan else 0
     checkpoints_count = len(state.checkpoints)
 
-    if success:
-        console.print(
-            Panel(
-                Text.assemble(
-                    ("[bold green]✓ STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"),
-                    (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
-                    (f"Plan Steps: [bold white]{plan_steps}[/bold white] steps processed\n"),
-                    (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
-                    (f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"),
-                    ("[bold green]Synthesized Output:[/bold green]\n"),
-                    (state.output or "Execution completed successfully.")
-                ),
-                border_style="green",
-                title="[bold green]Success Report[/bold green]"
-            )
-        )
+    if cli_context.json_mode:
+        import json
+        print(json.dumps({
+            "success": success,
+            "run_id": state.run_id,
+            "plan_steps": plan_steps,
+            "retry_attempts": attempts_count,
+            "checkpoints_saved": checkpoints_count,
+            "output": state.output or "Execution completed successfully.",
+            "error": state.error,
+            "validation_issues": state.validation_issues or [],
+        }))
     else:
-        console.print(
-            Panel(
-                Text.assemble(
-                    ("[bold red]✗ AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"),
-                    (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
-                    (f"Failure Reason: [bold red]{state.error or 'Validation/Execution mismatch'}[/bold red]\n"),
-                    (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
-                    (f"Validation Issues: [bold yellow]{', '.join(state.validation_issues) if state.validation_issues else 'None'}[/bold yellow]\n\n"),
-                    ("[yellow]State checkpointer stashed checkpoints, and Git workspace states have been preserved/rolled back.[/yellow]")
-                ),
-                border_style="red",
-                title="[bold red]Rollback Execution Report[/bold red]"
+        if success:
+            console.print(
+                Panel(
+                    Text.assemble(
+                        ("[bold green]✓ STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"),
+                        (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
+                        (f"Plan Steps: [bold white]{plan_steps}[/bold white] steps processed\n"),
+                        (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
+                        (f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"),
+                        ("[bold green]Synthesized Output:[/bold green]\n"),
+                        (state.output or "Execution completed successfully.")
+                    ),
+                    border_style="green",
+                    title="[bold green]Success Report[/bold green]"
+                )
             )
-        )
+        else:
+            console.print(
+                Panel(
+                    Text.assemble(
+                        ("[bold red]✗ AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"),
+                        (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
+                        (f"Failure Reason: [bold red]{state.error or 'Validation/Execution mismatch'}[/bold red]\n"),
+                        (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
+                        (f"Validation Issues: [bold yellow]{', '.join(state.validation_issues) if state.validation_issues else 'None'}[/bold yellow]\n\n"),
+                        ("[yellow]State checkpointer stashed checkpoints, and Git workspace states have been preserved/rolled back.[/yellow]")
+                    ),
+                    border_style="red",
+                    title="[bold red]Rollback Execution Report[/bold red]"
+                )
+            )
 
     # 6. Graceful Shutdown
     await lifecycle.shutdown()

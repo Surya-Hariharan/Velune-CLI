@@ -32,6 +32,10 @@ def ask_command(
         raise typer.BadParameter("CLI context was not properly initialized")
 
     if not prompt:
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"error": "Prompt argument is required in JSON mode"}))
+            raise typer.Exit(code=1)
         # Prompt user interactively if no prompt argument is given
         prompt = typer.prompt("What would you like to ask Velune?")
         if not prompt:
@@ -52,47 +56,77 @@ async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier:
     orchestrator = container.get("runtime.council_orchestrator")
 
     # 2. Boot subsystems
-    console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
+    if not cli_context.json_mode:
+        console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
     await lifecycle.startup()
     await model_registry.refresh()
 
-    display = CouncilDisplayView(console)
-    display.render_header(prompt)
+    # Onboarding preflight check gate
+    from velune.cli.commands.preflight import run_preflight_check
+    if not await run_preflight_check(container, console if not cli_context.json_mode else None):
+        if cli_context.json_mode:
+            import json
+            print(json.dumps({"error": "Preflight check failed. Ensure workspace is initialized and models are scanned."}))
+        await lifecycle.shutdown()
+        return
+
+    if not cli_context.json_mode:
+        display = CouncilDisplayView(console)
+        display.render_header(prompt)
 
     # 3. Map role specializations
     roles = model_specialization.map_roles()
-    display.render_role_assignments(roles)
+    if not cli_context.json_mode:
+        display.render_role_assignments(roles)
 
     from velune.cognition.firewall import CognitiveFirewall
     firewall = CognitiveFirewall()
 
     # 4. Ingest and Scan AST Snapshot
     snapshot: RepositorySnapshot | None = None
-    with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]") as status:
+    if not cli_context.json_mode:
+        with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]") as status:
+            snapshot = repo_cognition.index()
+    else:
         snapshot = repo_cognition.index()
 
     formatted_snap = _format_snapshot_context_safe(snapshot, firewall)
 
     # 5. deliberating debate loop
     council_res = None
-    with console.status("[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]") as status:
+    if not cli_context.json_mode:
+        with console.status("[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]") as status:
+            council_res = await orchestrator.execute_task(prompt, formatted_snap, council_tier=council_tier)
+    else:
         council_res = await orchestrator.execute_task(prompt, formatted_snap, council_tier=council_tier)
 
     arbitration = council_res["arbitration"]
     final_summary = council_res["final_summary"]
 
-    # 6. Render reports
-    display.render_step_header("Council Reviewer", "🔍")
-    display.render_reviewer_report(council_res["reviewer_report"])
+    if cli_context.json_mode:
+        import json
+        roles_dict = {role.value: model_id for role, model_id in roles.items()}
+        print(json.dumps({
+            "prompt": prompt,
+            "roles": roles_dict,
+            "reviewer_report": council_res["reviewer_report"],
+            "challenger_report": council_res["challenger_report"],
+            "arbitration": arbitration,
+            "final_summary": final_summary,
+        }))
+    else:
+        # 6. Render reports
+        display.render_step_header("Council Reviewer", "🔍")
+        display.render_reviewer_report(council_res["reviewer_report"])
 
-    display.render_step_header("Council Challenger", "⚡")
-    display.render_challenger_report(council_res["challenger_report"])
+        display.render_step_header("Council Challenger", "⚡")
+        display.render_challenger_report(council_res["challenger_report"])
 
-    display.render_step_header("Arbitration Engine", "⚖️")
-    display.render_arbitration_result(arbitration)
+        display.render_step_header("Arbitration Engine", "⚖️")
+        display.render_arbitration_result(arbitration)
 
-    display.render_step_header("Council Synthesizer", "🚀")
-    display.render_synthesized_response(final_summary)
+        display.render_step_header("Council Synthesizer", "🚀")
+        display.render_synthesized_response(final_summary)
 
     # 7. Shutdown
     await lifecycle.shutdown()

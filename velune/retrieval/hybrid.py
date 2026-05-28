@@ -205,6 +205,17 @@ class HybridRetriever:
 
                 provider = provider_registry.get(provider_name)
                 if provider:
+                    try:
+                        caps = provider.get_capabilities()
+                        if not caps.supports_embeddings:
+                            logger.info(
+                                "Provider %s does not support embeddings. Skipping vector embedding generation.",
+                                provider_name
+                            )
+                            return None
+                    except Exception as e:
+                        logger.warning("Could not query capabilities for provider %s: %s", provider_name, e)
+
                     model_id = "text-embedding-3-small"
                     if provider_name == "ollama":
                         model_id = "nomic-embed-text"

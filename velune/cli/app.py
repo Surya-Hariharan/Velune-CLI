@@ -98,11 +98,16 @@ def create_app() -> typer.Typer:
         config_path: Path | None = typer.Option(None, "--config", "-c", help="Explicit velune.toml path"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
         version: bool = typer.Option(False, "--version", help="Show version and exit"),
+        json_mode: bool = typer.Option(False, "--json", help="Enable machine-readable JSON output mode"),
     ) -> None:
         """Initialize process-wide runtime state for every CLI invocation."""
 
         if version:
-            Console().print(f"Velune v{__version__}")
+            if json_mode:
+                import json
+                print(json.dumps({"version": __version__}))
+            else:
+                Console().print(f"Velune v{__version__}")
             raise typer.Exit()
 
         from velune.cli.context import DaemonCLIContext
@@ -116,6 +121,7 @@ def create_app() -> typer.Typer:
                 workspace=workspace,
                 config_path=config_path,
                 verbose=verbose,
+                json_mode=json_mode,
             )
             return
 
@@ -126,23 +132,33 @@ def create_app() -> typer.Typer:
             config_path=config_path,
             verbose=verbose,
             runtime=runtime,
+            json_mode=json_mode,
         )
 
         if ctx.invoked_subcommand is None:
-            _show_startup_animation(runtime.console, workspace, config_path)
-            runtime.console.print(
-                Panel(
-                    "\n".join(
-                        [
-                            "[bold]Velune is ready.[/bold]",
-                            f"Workspace: {workspace}",
-                            f"Config: {config_path or 'auto-discovered'}",
-                            "Use [bold]velune ask[/bold], [bold]velune models scan[/bold], or [bold]velune memory stats[/bold] to start.",
-                        ]
-                    ),
-                    title="Startup",
+            if json_mode:
+                import json
+                print(json.dumps({
+                    "status": "ready",
+                    "workspace": str(workspace),
+                    "config_path": str(config_path) if config_path else None,
+                    "version": __version__
+                }))
+            else:
+                _show_startup_animation(runtime.console, workspace, config_path)
+                runtime.console.print(
+                    Panel(
+                        "\n".join(
+                            [
+                                "[bold]Velune is ready.[/bold]",
+                                f"Workspace: {workspace}",
+                                f"Config: {config_path or 'auto-discovered'}",
+                                "Use [bold]velune ask[/bold], [bold]velune models scan[/bold], or [bold]velune memory stats[/bold] to start.",
+                            ]
+                        ),
+                        title="Startup",
+                    )
                 )
-            )
 
     register_commands(app, ServiceContainer())
     return app
