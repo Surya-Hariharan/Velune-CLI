@@ -30,8 +30,6 @@ from velune.cognition.council.planner import PlannerAgent
 from velune.cognition.council.reviewer import ReviewerAgent
 from velune.cognition.council.synthesizer import SynthesizerAgent
 from velune.cognition.council.tiers import CouncilTier, classify_task_tier
-from velune.cognition.evolution import EvolutionTimelineReporter
-from velune.cognition.tradeoff import TradeoffEvaluationMatrix
 from velune.core.trace import TracedLogger
 from velune.models.specializations import CouncilRole, ModelSpecializationMapper
 from velune.providers.registry import ProviderRegistry
@@ -61,7 +59,6 @@ class CouncilOrchestrator:
 
         db_path = lineage_db_path or Path(".velune") / "velune_cognitive_core.db"
         self.lineage_memory = LineageMemoryTier(db_path, sqlite_manager=sqlite_manager)
-        self.evolution_reporter = EvolutionTimelineReporter(self.lineage_memory)
         self.analytics = analytics or CognitivePerformanceAnalytics(sqlite_manager=sqlite_manager)
 
         from velune.cognition.firewall import CognitiveFirewall
@@ -915,68 +912,7 @@ class CouncilOrchestrator:
                 ]
             )
 
-            # ── Phase 5: TEM evaluation of winning proposal vs. fast-path alternatives ──
-            try:
-                tem = TradeoffEvaluationMatrix(
-                    task_id=decision_id,
-                    lineage_memory=self.lineage_memory,
-                )
-                tem.add_option(
-                    name="Council Proposal (Multi-Agent)",
-                    metrics={
-                        "performance": min(1.0, arbitration.overall_confidence),
-                        "maintainability": 1.0 - (len(objections) / 6.0),
-                        "safety": 0.85 if not objections else 0.60,
-                        "scalability": 0.75,
-                        "simplicity": 0.65,
-                    },
-                    notes="Multi-agent council deliberation with critic review.",
-                )
-                tem.add_option(
-                    name="Fast-Path Alternative (Single-Agent)",
-                    metrics={
-                        "performance": 0.70,
-                        "maintainability": 0.60,
-                        "safety": 0.55,
-                        "scalability": 0.50,
-                        "simplicity": 0.90,
-                    },
-                    notes="Direct single-agent execution without debate or review.",
-                )
-                tem_winner = tem.select_optimal()
-                logger.info(
-                    "[COUNCIL - TEM] Trade-off matrix selected: '%s' (score=%.4f)",
-                    tem_winner.name,
-                    tem_winner.weighted_score,
-                )
-            except Exception as tem_err:
-                logger.warning("TEM evaluation skipped: %s", tem_err)
-
-            # ── Phase 5: Evolution timeline snapshot ──
-            try:
-                if py_files:
-                    snap_dir = os.path.dirname(py_files[0])
-                else:
-                    snap_dir = subsystem_target
-
-                shi_score = self.architecture_agent.calculate_shi(snap_dir) if os.path.exists(snap_dir) else 0.0
-                coupling = self.architecture_agent.calculate_coupling_ratio(snap_dir) if os.path.exists(snap_dir) else 0.0
-                debt_count = len(self.architecture_agent.ledger.get_items())
-
-                self.evolution_reporter.snapshot_current_health(
-                    subsystem=subsystem_target,
-                    lcom_average=max(0.0, round(1.0 - shi_score, 3)),
-                    coupling_ratio=coupling,
-                    debt_items_count=debt_count,
-                    milestone=None,
-                    rationale_summary=final_summary[:300],
-                )
-                logger.info(
-                    "[COUNCIL - EVOLUTION] Architecture snapshot logged for '%s'.",
-                    subsystem_target,
-                )
-            except Exception as evo_err:
-                logger.warning("Evolution snapshot skipped: %s", evo_err)
+            pass
 
         logger.info("Reasoning Council deliberation fully completed")
         return {

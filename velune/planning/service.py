@@ -54,13 +54,9 @@ class AdaptivePlanningService:
         max_steps: int = 10,
     ) -> TaskPlan:
         """Create an initial dependency-aware execution plan."""
-
         normalized = prompt.strip()
         base_steps = self._default_steps(normalized)
-        scoped_steps = self._repository_aware_steps(repository_summary or {})
-
-        merged = self._dedupe_steps(base_steps + scoped_steps)
-        ordered = merged[: max_steps if max_steps > 0 else 1]
+        ordered = base_steps[: max_steps if max_steps > 0 else 1]
 
         task_steps: list[TaskStep] = []
         previous_id: str | None = None
@@ -228,94 +224,13 @@ class AdaptivePlanningService:
         return TaskPlan(task_id=plan.task_id, steps=updated_steps, metadata=metadata)
 
     def _default_steps(self, prompt: str) -> list[dict[str, Any]]:
-        keywords = prompt.lower()
-
-        steps: list[dict[str, Any]] = [
-            {
-                "description": "Reconstruct intent and collect active workspace context",
-                "agent_role": "planner",
-            },
-            {
-                "description": "Retrieve repository and memory evidence relevant to the task",
-                "agent_role": "retriever",
-            },
-            {
-                "description": "Formulate solution strategy and risk boundaries",
-                "agent_role": "reasoner",
-            },
+        return [
+            {"description": "Gather project requirements and stage constraints.", "agent_role": "planner"},
+            {"description": "Retrieve repository and memory evidence relevant to the task.", "agent_role": "retriever"},
+            {"description": "Implement and stage task-aligned code changes.", "agent_role": "coder"},
+            {"description": "Review implementation quality, edge cases, and safety.", "agent_role": "reviewer"},
+            {"description": "Persist useful execution signals into memory.", "agent_role": "memory"},
         ]
-
-        if any(token in keywords for token in ["fix", "bug", "error", "failure"]):
-            steps.append(
-                {
-                    "description": "Implement a focused code patch for the suspected fault",
-                    "agent_role": "coder",
-                }
-            )
-            steps.append(
-                {
-                    "description": "Run validation checks and debugging probes",
-                    "agent_role": "debugger",
-                }
-            )
-        else:
-            steps.append(
-                {
-                    "description": "Implement and stage task-aligned code changes",
-                    "agent_role": "coder",
-                }
-            )
-
-        steps.extend(
-            [
-                {
-                    "description": "Review implementation quality, edge cases, and safety",
-                    "agent_role": "reviewer",
-                },
-                {
-                    "description": "Persist useful execution signals into memory",
-                    "agent_role": "memory",
-                },
-            ]
-        )
-
-        return steps
-
-    def _repository_aware_steps(self, summary: dict[str, Any]) -> list[dict[str, Any]]:
-        files = int(summary.get("files", 0) or 0)
-        symbols = int(summary.get("symbols", 0) or 0)
-
-        steps: list[dict[str, Any]] = []
-        if files > 500:
-            steps.append(
-                {
-                    "description": "Partition execution by subsystem boundaries before code edits",
-                    "agent_role": "planner",
-                    "metadata": {"reason": "large_repository"},
-                }
-            )
-
-        if symbols > 1500:
-            steps.append(
-                {
-                    "description": "Prioritize symbol-level retrieval to reduce context drift",
-                    "agent_role": "retriever",
-                    "metadata": {"reason": "high_symbol_density"},
-                }
-            )
-
-        return steps
-
-    def _dedupe_steps(self, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        seen: set[str] = set()
-        deduped: list[dict[str, Any]] = []
-        for step in steps:
-            key = re.sub(r"\s+", " ", step["description"].strip().lower())
-            if key in seen:
-                continue
-            deduped.append(step)
-            seen.add(key)
-        return deduped
 
     def _fingerprint(self, prompt: str) -> str:
         return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]

@@ -142,22 +142,3 @@ class ContextCompressor:
         logger.info("Compressed context successfully with guardrails using %s.", method)
         return reconstructed
 
-class ContextBudgetManager:
-    """Manages the token budget allocation for context assembly."""
-
-    def __init__(self, max_tokens: int = 8192) -> None:
-        self.max_tokens = max_tokens
-        # Budget allocations (ratios)
-        self.working_ratio = 0.20      # Chronological conversation turns
-        self.episodic_ratio = 0.20     # SQLite execution logs / steps
-        self.semantic_ratio = 0.30     # Relevant code vectors / facts
-        self.repository_ratio = 0.30   # AST structures / git diffs
-
-    def allocate(self) -> dict[str, int]:
-        """Convert allocation ratios to precise token counts."""
-        return {
-            "working": int(self.max_tokens * self.working_ratio),
-            "episodic": int(self.max_tokens * self.episodic_ratio),
-            "semantic": int(self.max_tokens * self.semantic_ratio),
-            "repository": int(self.max_tokens * self.repository_ratio),
-        }
