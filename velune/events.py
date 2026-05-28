@@ -1,19 +1,35 @@
-"""Async typed event bus for event-first cognition."""
+"""Unified event types and CognitiveBus for Velune system."""
 
 from __future__ import annotations
 
 import asyncio
 import fnmatch
 import logging
+import uuid
 from collections.abc import AsyncIterator, Callable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
-from velune.kernel.schemas import Event as KernelEvent
+from pydantic import BaseModel, Field
 
-logger = logging.getLogger("velune.kernel.bus")
+logger = logging.getLogger("velune.events")
 
-EventHandler = Callable[[KernelEvent], None | Any]
+
+class Event(BaseModel):
+    """The central message token in the event bus."""
+    event_id: str = Field(default_factory=lambda: f"evt-{uuid.uuid4().hex[:12]}")
+    event_type: str
+    timestamp: float = Field(default_factory=lambda: datetime.now(tz=UTC).timestamp())
+    source: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    correlation_id: str | None = None
+
+    class Config:
+        frozen = True
+
+
+EventHandler = Callable[[Event], None | Any]
 
 
 class Subscription:
@@ -34,25 +50,22 @@ class CognitiveBus:
 
     def __init__(self) -> None:
         self._subscribers: dict[str, set[EventHandler]] = {}
-        self._queue: asyncio.Queue[KernelEvent] = asyncio.Queue()
+        self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._running: bool = False
         self._dispatch_task: asyncio.Task | None = None
-        self._history: list[KernelEvent] = []
-        self._pending_responses: dict[str, asyncio.Future[KernelEvent]] = {}
+        self._history: list[Event] = []
+        self._pending_responses: dict[str, asyncio.Future[Event]] = {}
 
-    async def emit(self, event: KernelEvent) -> None:
+    async def emit(self, event: Event) -> None:
         """Enqueue/Publish a kernel event to the bus."""
-        # Record to history for replay capability
         self._history.append(event)
 
-        # Resolve any correlation wait futures
         if event.correlation_id and event.correlation_id in self._pending_responses:
             future = self._pending_responses[event.correlation_id]
             if not future.done():
                 future.set_result(event)
 
         if not self._running:
-            # Fallback direct dispatch if loop isn't active
             await self._dispatch_immediate(event)
             return
 
@@ -74,15 +87,9 @@ class CognitiveBus:
                 del self._subscribers[event_type]
             logger.debug("Unsubscribed from pattern '%s'", event_type)
 
-    async def emit_and_wait(self, event: KernelEvent, timeout: float = 5.0) -> KernelEvent:
-        """
-        Emits an event and suspends execution until a correlating event returns.
-        Uses event.event_id as the correlation key.
-        """
-        # Safe to use asyncio.get_running_loop() because emit_and_wait is an async method
-        # and is guaranteed to run inside an active event loop context.
-        future: asyncio.Future[KernelEvent] = asyncio.get_running_loop().create_future()
-        # Register the future under the emitted event's ID as the expected correlation ID
+    async def emit_and_wait(self, event: Event, timeout: float = 5.0) -> Event:
+        """Emits an event and suspends execution until a correlating event returns."""
+        future: asyncio.Future[Event] = asyncio.get_running_loop().create_future()
         self._pending_responses[event.event_id] = future
 
         await self.emit(event)
@@ -96,12 +103,11 @@ class CognitiveBus:
         finally:
             self._pending_responses.pop(event.event_id, None)
 
-    async def replay(self, from_timestamp: datetime) -> AsyncIterator[KernelEvent]:
+    async def replay(self, from_timestamp: datetime) -> AsyncIterator[Event]:
         """Asynchronously stream events in history since from_timestamp."""
         target_timestamp = from_timestamp.timestamp()
         filtered_events = [evt for evt in self._history if evt.timestamp >= target_timestamp]
 
-        # Sort in chronological order
         sorted_events = sorted(filtered_events, key=lambda x: x.timestamp)
         for event in sorted_events:
             yield event
@@ -124,7 +130,6 @@ class CognitiveBus:
             except asyncio.CancelledError:
                 pass
 
-        # Process remaining items in queue
         while not self._queue.empty():
             try:
                 event = self._queue.get_nowait()
@@ -146,7 +151,7 @@ class CognitiveBus:
             except Exception as e:
                 logger.error("Error in event bus dispatch loop: %s", e)
 
-    async def _dispatch_immediate(self, event: KernelEvent) -> None:
+    async def _dispatch_immediate(self, event: Event) -> None:
         """Match event type and invoke all registered subscriber handlers."""
         handlers_to_run = self._find_matching_handlers(event.event_type)
         if not handlers_to_run:
@@ -165,7 +170,7 @@ class CognitiveBus:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _run_async_handler(self, handler: EventHandler, event: KernelEvent) -> None:
+    async def _run_async_handler(self, handler: EventHandler, event: Event) -> None:
         """Helper to run a coroutine handler with clean error capture."""
         try:
             await handler(event)
@@ -185,3 +190,182 @@ class CognitiveBus:
 class EventBus(CognitiveBus):
     """Fallback alias for compatibility with existing modules."""
     pass
+
+
+# ---------------------------------------------------------------------------
+# Consolidated Event Types Dataclasses
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentStarted:
+    """Event emitted when an agent starts."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    agent_id: str
+    agent_role: str
+    task_id: str
+
+
+@dataclass
+class AgentCompleted:
+    """Event emitted when an agent completes."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    agent_id: str
+    agent_role: str
+    task_id: str
+    duration_ms: float
+
+
+@dataclass
+class AgentFailed:
+    """Event emitted when an agent fails."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    agent_id: str
+    agent_role: str
+    task_id: str
+    error_message: str
+
+
+@dataclass
+class FileCreated:
+    """Event emitted when a file is created."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    file_path: str
+    file_size: int
+
+
+@dataclass
+class FileModified:
+    """Event emitted when a file is modified."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    file_path: str
+    file_size: int
+
+
+@dataclass
+class FileDeleted:
+    """Event emitted when a file is deleted."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    file_path: str
+
+
+@dataclass
+class CommitCreated:
+    """Event emitted when a commit is created."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    commit_hash: str
+    author: str
+    message: str
+    branch: str
+
+
+@dataclass
+class BranchChanged:
+    """Event emitted when the branch is changed."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    old_branch: str
+    new_branch: str
+
+
+@dataclass
+class StashPushed:
+    """Event emitted when a stash is pushed."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    stash_ref: str
+
+
+@dataclass
+class TaskCreated:
+    """Event emitted when a task is created."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    task_id: str
+    description: str
+    priority: int
+
+
+@dataclass
+class TaskCompleted:
+    """Event emitted when a task is completed."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    task_id: str
+    success: bool
+    duration_ms: float
+
+
+@dataclass
+class PlanUpdated:
+    """Event emitted when a plan is updated."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    task_id: str
+    steps_count: int
+
+
+@dataclass
+class CommandExecuted:
+    """Event emitted when a command is executed."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    command: str
+    exit_code: int
+    duration_ms: float
+
+
+@dataclass
+class ErrorOccurred:
+    """Event emitted when an error occurs."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    error_type: str
+    error_message: str
+    stack_trace: str
+
+
+@dataclass
+class TestRan:
+    """Event emitted when a test is run."""
+    event_type: str
+    data: dict[str, Any]
+    timestamp: float
+    source: str
+    test_name: str
+    passed: bool
+    duration_ms: float

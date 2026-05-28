@@ -12,7 +12,7 @@ import pytest
 from rich.console import Console
 
 from velune.cli.app import _show_startup_animation
-from velune.kernel.bus import CognitiveBus
+from velune.events import CognitiveBus
 from velune.kernel.schemas import Event as KernelEvent
 from velune.retrieval.hybrid import HybridRetriever
 from velune.retrieval.schemas import RetrievalQuery, RetrievalResult

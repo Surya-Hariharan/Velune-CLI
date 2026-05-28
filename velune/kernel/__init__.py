@@ -1,6 +1,6 @@
 """Cognitive Kernel (the OS layer for Velune)."""
 
-from velune.kernel.bus import CognitiveBus, EventBus, EventHandler, Subscription
+from velune.events import CognitiveBus, EventBus, EventHandler, Subscription
 from velune.kernel.config import (
     ConfigLoader,
     ConfigService,

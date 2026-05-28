@@ -217,37 +217,13 @@ class CognitivePerformanceAnalytics:
         logger.debug("Recorded critic vote for task %s, role %s", task_id, critic_role)
 
     def get_critic_weights(self) -> dict[str, float]:
-        """
-        Executes the reinforcement learning weight update formula over historical runs.
-        Returns a dictionary mapping critic roles to tuned weights bounded in [0.1, 2.0].
-        """
-        weights = {
+        """Returns a static default weight map for council critics."""
+        return {
             "scalability": 1.0,
             "security": 1.0,
             "performance": 1.0,
             "maintainability": 1.0,
         }
-        eta = 0.05
-
-        query = """
-            SELECT critic_role, vote, success 
-            FROM critic_performance_metrics 
-            ORDER BY id ASC
-        """
-        rows = self.sqlite_manager.execute_read(query)
-        for row in rows:
-            role = row["critic_role"].lower()
-            if role not in weights:
-                weights[role] = 1.0
-
-            vote = float(row["vote"])  # 1.0 or 0.0
-            success = float(row["success"])  # 1.0 or 0.0
-
-            # Formula: W_t+1 = W_t + eta * (success * (vote - 0.5) - (1.0 - success) * (vote - 0.5))
-            delta = eta * (success * (vote - 0.5) - (1.0 - success) * (vote - 0.5))
-            weights[role] = max(0.1, min(2.0, weights[role] + delta))
-
-        return weights
 
     def record_debate_outcome(
         self,

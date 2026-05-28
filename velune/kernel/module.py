@@ -2,7 +2,7 @@ from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 
 def _create_cognitive_bus(env: RuntimeEnvironment):
-    from velune.kernel.bus import CognitiveBus
+    from velune.events import CognitiveBus
     return CognitiveBus()
 
 KERNEL_MODULES = [

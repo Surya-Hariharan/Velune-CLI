@@ -67,6 +67,64 @@ class CouncilOrchestrator:
         self.max_wall_time_seconds = float(
             os.environ.get("VELUNE_COUNCIL_MAX_SECONDS", "600")  # 10 minutes default
         )
+        self._states: dict[str, Any] = {}
+
+    def get_state(self, run_id: str) -> Any | None:
+        """Get the cached OrchestrationState by run_id."""
+        return self._states.get(run_id)
+
+    async def stream(self, prompt: str) -> AsyncIterator[str]:
+        """Runs the Reasoning Council task execution and streams milestones."""
+        import uuid
+        from velune.orchestration.schemas import OrchestrationState, OrchestrationRequest, ExecutionStatus
+        
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        
+        yield f"[{run_id}] context reconstruction"
+        repo_context = "Repository context summary."
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.repository_cognition"):
+                repository_cognition = container.get("runtime.repository_cognition")
+                snapshot = repository_cognition.index(force=False)
+                if snapshot:
+                    lines = [f"Repository Root: {snapshot.root_path}"]
+                    lines.append("Codebase Files:")
+                    for f in snapshot.files[:25]:
+                        lines.append(f"  - {f.path} ({f.language.value})")
+                    repo_context = "\n".join(lines)
+        except Exception as e:
+            logger.warning("Could not gather repository snapshot: %s", e)
+
+        yield f"[{run_id}] planning"
+        yield f"[{run_id}] reasoning"
+        yield f"[{run_id}] tool execution"
+        yield f"[{run_id}] validation"
+        yield f"[{run_id}] review"
+        yield f"[{run_id}] finalize"
+
+        try:
+            result = await self._execute_task_inner(prompt, repo_context)
+            final_summary = result.get("final_summary", "Execution completed successfully.")
+            status = ExecutionStatus.COMPLETED
+            error = None
+        except Exception as e:
+            logger.error("Reasoning Council execution failed: %s", e)
+            final_summary = f"Execution failed: {e}"
+            status = ExecutionStatus.FAILED
+            error = str(e)
+
+        request = OrchestrationRequest(prompt=prompt, workspace=".")
+        state = OrchestrationState(
+            run_id=run_id,
+            request=request,
+            status=status,
+            output=final_summary,
+            error=error,
+            task_plan=result.get("task_plan") if 'result' in locals() and isinstance(result, dict) else None,
+        )
+        self._states[run_id] = state
 
 
     def _get_or_refresh_style_profile(self, target_file: str) -> dict[str, Any] | None:

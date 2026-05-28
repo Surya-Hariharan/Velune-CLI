@@ -1,6 +1,5 @@
 """Production orchestration subsystem for Velune."""
 
-from velune.orchestration.engine import LangGraphOrchestrationEngine
 from velune.orchestration.schemas import (
     ExecutionStatus,
     OrchestrationRequest,
@@ -10,7 +9,6 @@ from velune.orchestration.schemas import (
 
 __all__ = [
     "ExecutionStatus",
-    "LangGraphOrchestrationEngine",
     "OrchestrationRequest",
     "OrchestrationResult",
     "OrchestrationState",
