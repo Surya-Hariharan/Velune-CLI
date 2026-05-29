@@ -29,6 +29,7 @@ class ASTParser:
 
     def __init__(self) -> None:
         self.languages: dict[str, Any] = {}
+        self._parsers: dict[str, Any] = {}
         if HAS_TREE_SITTER:
             self._init_tree_sitter()
 
@@ -89,7 +90,9 @@ class ASTParser:
 
     def _parse_tree_sitter(self, file_path: Path, code: str, lang: RepositoryLanguage) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Uses tree-sitter to parse the code and extract symbols and imports."""
-        parser = Parser(self.languages[lang.value])
+        if lang.value not in self._parsers:
+            self._parsers[lang.value] = Parser(self.languages[lang.value])
+        parser = self._parsers[lang.value]
         tree = parser.parse(bytes(code, "utf8"))
 
         symbols: list[RepositorySymbol] = []

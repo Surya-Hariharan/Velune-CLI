@@ -100,3 +100,18 @@ class OrchestrationResult(BaseModel):
     attempts: int = 0
     validation_issues: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StreamProgress(BaseModel):
+    """Structured progress data yielded during orchestration streaming."""
+
+    run_id: str
+    phase: str
+    message: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+
+    def __str__(self) -> str:
+        if self.phase:
+            return f"[{self.run_id}] {self.phase}: {self.message}"
+        return f"[{self.run_id}] {self.message}"
+

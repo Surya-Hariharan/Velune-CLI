@@ -102,54 +102,54 @@ class BaseCouncilAgent(ABC):
                     is_interactive = sys.stdout.isatty()
 
                     acquired = False
-                    if is_interactive:
-                        if not _live_lock.locked():
-                            await _live_lock.acquire()
-                            acquired = True
+                    try:
+                        if is_interactive:
+                            if not _live_lock.locked():
+                                await asyncio.shield(_live_lock.acquire())
+                                acquired = True
 
-                    async def run_streaming():
-                        full_content = []
-                        role_name = self.role.value.capitalize()
+                        async def run_streaming():
+                            full_content = []
+                            role_name = self.role.value.capitalize()
 
-                        AGENT_COLORS = {
-                            CouncilRole.PLANNER: "magenta",
-                            CouncilRole.CODER: "green",
-                            CouncilRole.REVIEWER: "yellow",
-                            CouncilRole.CHALLENGER: "red",
-                            CouncilRole.SYNTHESIZER: "cyan",
-                        }
-                        color = AGENT_COLORS.get(self.role, "cyan")
-                        panel_title = f"[bold {color}]🧠 {role_name} Agent Deliberating...[/bold {color}] ([dim]{self.model.model_id}[/dim])"
+                            AGENT_COLORS = {
+                                CouncilRole.PLANNER: "magenta",
+                                CouncilRole.CODER: "green",
+                                CouncilRole.REVIEWER: "yellow",
+                                CouncilRole.CHALLENGER: "red",
+                                CouncilRole.SYNTHESIZER: "cyan",
+                            }
+                            color = AGENT_COLORS.get(self.role, "cyan")
+                            panel_title = f"[bold {color}]🧠 {role_name} Agent Deliberating...[/bold {color}] ([dim]{self.model.model_id}[/dim])"
 
-                        if acquired:
-                            panel = Panel(
-                                "",
-                                title=panel_title,
-                                border_style=color,
-                                padding=(1, 2),
-                                subtitle="[dim]Streaming response...[/dim]",
-                                subtitle_align="right"
-                            )
-                            with Live(panel, console=console, refresh_per_second=10, transient=False) as live:
+                            if acquired:
+                                panel = Panel(
+                                    "",
+                                    title=panel_title,
+                                    border_style=color,
+                                    padding=(1, 2),
+                                    subtitle="[dim]Streaming response...[/dim]",
+                                    subtitle_align="right"
+                                )
+                                with Live(panel, console=console, refresh_per_second=10, transient=False) as live:
+                                    async for chunk in self.provider.stream(request):
+                                        full_content.append(chunk.content)
+                                        current_text = "".join(full_content)
+                                        panel = Panel(
+                                            Markdown(current_text),
+                                            title=panel_title,
+                                            border_style=color,
+                                            padding=(1, 2),
+                                            subtitle=f"[dim]Streaming: {len(current_text)} chars[/dim]",
+                                            subtitle_align="right"
+                                        )
+                                        live.update(panel)
+                            else:
                                 async for chunk in self.provider.stream(request):
                                     full_content.append(chunk.content)
-                                    current_text = "".join(full_content)
-                                    panel = Panel(
-                                        Markdown(current_text),
-                                        title=panel_title,
-                                        border_style=color,
-                                        padding=(1, 2),
-                                        subtitle=f"[dim]Streaming: {len(current_text)} chars[/dim]",
-                                        subtitle_align="right"
-                                    )
-                                    live.update(panel)
-                        else:
-                            async for chunk in self.provider.stream(request):
-                                full_content.append(chunk.content)
 
-                        return "".join(full_content)
+                            return "".join(full_content)
 
-                    try:
                         content = await asyncio.wait_for(
                             run_streaming(),
                             timeout=timeout,

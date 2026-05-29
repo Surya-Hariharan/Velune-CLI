@@ -32,12 +32,15 @@ class GraphRetriever:
             # Fetch files and symbols from the snapshot index
             snapshot = repo_service.index()
             file_map = {f.path: f for f in snapshot.files}
-            symbol_map = {s.name: s for s in snapshot.symbols}
+            symbol_by_id = {s.symbol_id: s for s in snapshot.symbols if s.symbol_id}
+            symbol_by_qualified = {s.qualified_name: s for s in snapshot.symbols if s.qualified_name}
+            symbol_by_name = {s.name: s for s in snapshot.symbols}
 
             rank = 1
             for n in neighbors[:top_k]:
                 content = ""
                 metadata = {}
+                s = None
 
                 # Check if neighbor is a file path
                 if n in file_map:
@@ -49,14 +52,22 @@ class GraphRetriever:
                         "sha256": f.sha256
                     }
                     content = f"File: {f.path}\nLanguage: {f.language.value}\nSymbols: " + ", ".join(s.name for s in f.symbols)
-                # Check if neighbor is a symbol name
-                elif n in symbol_map:
-                    s = symbol_map[n]
+                # Check if neighbor is a symbol (by symbol_id, qualified_name, or name)
+                elif n in symbol_by_id:
+                    s = symbol_by_id[n]
+                elif n in symbol_by_qualified:
+                    s = symbol_by_qualified[n]
+                elif n in symbol_by_name:
+                    s = symbol_by_name[n]
+
+                if s:
                     metadata = {
                         "name": s.name,
                         "kind": s.kind.value,
                         "file_path": s.file_path,
-                        "parent": s.parent or ""
+                        "parent": s.parent or "",
+                        "symbol_id": s.symbol_id or "",
+                        "qualified_name": s.qualified_name or ""
                     }
                     content = f"Symbol: {s.name}\nKind: {s.kind.value}\nDefined in: {s.file_path}\nLine range: {s.line_start}-{s.line_end}"
                     if s.docstring:

@@ -30,10 +30,13 @@ class RepositoryGrapher:
     def add_symbol(self, symbol: RepositorySymbol) -> None:
         """Adds a symbol node and binds it to its containing file."""
         file_rel = self._to_rel_path(symbol.file_path)
+        sym_id = symbol.symbol_id or symbol.name
 
         # Add symbol node
         self.graph.add_node(
-            symbol.name,
+            sym_id,
+            name=symbol.name,
+            qualified_name=symbol.qualified_name or symbol.name,
             kind=symbol.kind.value,
             file_path=file_rel,
             line_start=symbol.line_start,
@@ -42,7 +45,7 @@ class RepositoryGrapher:
         )
 
         # Draw containing relationship
-        self.graph.add_edge(file_rel, symbol.name, edge_type="contains", weight=1.0)
+        self.graph.add_edge(file_rel, sym_id, edge_type="contains", weight=1.0)
 
     def add_edge(self, edge: RepositoryEdge) -> None:
         """Adds a relationship edge between files or symbols."""
@@ -103,14 +106,25 @@ class RepositoryGrapher:
     def traverse(self, node_id: str, depth: int = 2) -> list[str]:
         """BFS traversal to discover connected file and symbol nodes up to specified depth."""
         node_rel = self._to_rel_path(node_id)
-        if node_rel not in self.graph:
-            # Check symbol exact name
-            if node_id not in self.graph:
-                return []
-            node_rel = node_id
+        
+        # Determine starting nodes
+        start_nodes = []
+        if node_rel in self.graph:
+            start_nodes.append(node_rel)
+        elif node_id in self.graph:
+            start_nodes.append(node_id)
+        else:
+            # Search by name or qualified_name in node attributes
+            for n, data in self.graph.nodes(data=True):
+                if data.get("type") == "symbol":
+                    if data.get("name") == node_id or data.get("qualified_name") == node_id:
+                        start_nodes.append(n)
+        
+        if not start_nodes:
+            return []
 
-        visited: set[str] = {node_rel}
-        queue = [node_rel]
+        visited: set[str] = set(start_nodes)
+        queue = list(start_nodes)
 
         for _ in range(depth):
             next_queue = []

@@ -7,7 +7,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, AsyncIterator
 
 from velune.memory.tiers.lineage import LineageMemoryTier
 
@@ -29,7 +29,9 @@ from velune.cognition.council.debate import calculate_max_debate_turns
 from velune.cognition.council.planner import PlannerAgent
 from velune.cognition.council.reviewer import ReviewerAgent
 from velune.cognition.council.synthesizer import SynthesizerAgent
-from velune.cognition.council.tiers import CouncilTier, classify_task_tier
+from velune.cognition.council.tiers import CouncilTier, classify_task_tier, TierClassifier
+from velune.cognition.council.factory import CouncilAgentFactory
+from velune.cognition.style_resolver import StyleResolver
 from velune.core.trace import TracedLogger
 from velune.models.specializations import CouncilRole, ModelSpecializationMapper
 from velune.providers.registry import ProviderRegistry
@@ -69,18 +71,65 @@ class CouncilOrchestrator:
         )
         self._states: dict[str, Any] = {}
 
+        # Extracted Subsystems
+        self.agent_factory = CouncilAgentFactory(
+            provider_registry=self.provider_registry,
+            mapper=self.mapper
+        )
+        self.style_resolver = StyleResolver(lineage_memory=self.lineage_memory)
+        
+        # Reduce Service Locator usage: resolve task_registry once in constructor if not passed
+        task_registry = None
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.task_registry"):
+                task_registry = container.get("runtime.task_registry")
+        except Exception:
+            pass
+
+        max_tier = "full"
+        default_override = "auto"
+        if config and hasattr(config, "cognition"):
+            max_tier = config.cognition.max_council_tier
+            default_override = config.cognition.default_tier_override
+
+        low_resource_mode = (
+            (config and config.execution.low_resource_mode) or
+            os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
+        )
+
+        self.tier_classifier = TierClassifier(
+            task_registry=task_registry,
+            max_council_tier=max_tier,
+            default_tier_override=default_override,
+            low_resource_mode=low_resource_mode,
+        )
+
     def get_state(self, run_id: str) -> Any | None:
         """Get the cached OrchestrationState by run_id."""
         return self._states.get(run_id)
 
-    async def stream(self, prompt: str) -> AsyncIterator[str]:
+    async def stream(self, prompt: str) -> AsyncIterator[StreamProgress]:
         """Runs the Reasoning Council task execution and streams milestones."""
         import uuid
-        from velune.orchestration.schemas import OrchestrationState, OrchestrationRequest, ExecutionStatus
+        from velune.orchestration.schemas import OrchestrationState, OrchestrationRequest, ExecutionStatus, StreamProgress
         
         run_id = f"run-{uuid.uuid4().hex[:12]}"
-        
-        yield f"[{run_id}] context reconstruction"
+        queue = asyncio.Queue()
+
+        def progress_callback(msg: str):
+            phase = ""
+            message = msg
+            if msg.startswith("[") and "]" in msg:
+                parts = msg.split("]", 1)
+                phase = parts[0][1:].lower()
+                message = parts[1].strip()
+            queue.put_nowait(StreamProgress(run_id=run_id, phase=phase, message=message))
+
+        # First, emit context reconstruction milestone before indexing
+        progress_callback("[Context Reconstruction] Gathering repository context snapshot...")
+
         repo_context = "Repository context summary."
         try:
             from velune.kernel.registry import get_container
@@ -97,74 +146,56 @@ class CouncilOrchestrator:
         except Exception as e:
             logger.warning("Could not gather repository snapshot: %s", e)
 
-        yield f"[{run_id}] planning"
-        yield f"[{run_id}] reasoning"
-        yield f"[{run_id}] tool execution"
-        yield f"[{run_id}] validation"
-        yield f"[{run_id}] review"
-        yield f"[{run_id}] finalize"
+        async def run_execution():
+            try:
+                result = await self.execute_task(
+                    prompt=prompt,
+                    repo_context=repo_context,
+                    progress_callback=progress_callback
+                )
+                final_summary = result.get("final_summary", "Execution completed successfully.")
+                status = ExecutionStatus.COMPLETED
+                error = None
+                task_plan = result.get("task_plan")
+            except Exception as e:
+                logger.error("Reasoning Council execution failed: %s", e)
+                final_summary = f"Execution failed: {e}"
+                status = ExecutionStatus.FAILED
+                error = str(e)
+                task_plan = None
+            
+            request = OrchestrationRequest(prompt=prompt, workspace=".")
+            state = OrchestrationState(
+                run_id=run_id,
+                request=request,
+                status=status,
+                output=final_summary,
+                error=error,
+                task_plan=task_plan,
+            )
+            self._states[run_id] = state
+            queue.put_nowait(None)  # Sentinel
+
+        execution_task = asyncio.create_task(run_execution())
 
         try:
-            result = await self._execute_task_inner(prompt, repo_context)
-            final_summary = result.get("final_summary", "Execution completed successfully.")
-            status = ExecutionStatus.COMPLETED
-            error = None
-        except Exception as e:
-            logger.error("Reasoning Council execution failed: %s", e)
-            final_summary = f"Execution failed: {e}"
-            status = ExecutionStatus.FAILED
-            error = str(e)
-
-        request = OrchestrationRequest(prompt=prompt, workspace=".")
-        state = OrchestrationState(
-            run_id=run_id,
-            request=request,
-            status=status,
-            output=final_summary,
-            error=error,
-            task_plan=result.get("task_plan") if 'result' in locals() and isinstance(result, dict) else None,
-        )
-        self._states[run_id] = state
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            if not execution_task.done():
+                execution_task.cancel()
+                try:
+                    await execution_task
+                except asyncio.CancelledError:
+                    pass
 
 
-    def _get_or_refresh_style_profile(self, target_file: str) -> dict[str, Any] | None:
+    async def _get_or_refresh_style_profile(self, target_file: str) -> dict[str, Any] | None:
         """Queries the style profile from database, or scans and caches it if missing/stale."""
-        target_dir = os.path.dirname(target_file)
-        if not target_dir:
-            target_dir = "velune/core"
-
-        # Check in the SQLite DB
-        profile = self.lineage_memory.get_personality_style(target_dir)
-
-        # If missing or older than 24 hours (86400 seconds), refresh it
-        is_stale = False
-        if profile:
-            updated_at = profile.get("updated_at", 0.0)
-            if time.time() - updated_at > 86400.0:
-                is_stale = True
-
-        if not profile or is_stale:
-            try:
-                # AST Scan
-                from velune.cognition.personality import RepositoryPersonalityAgent
-                agent = RepositoryPersonalityAgent()
-
-                # Check if directory exists
-                if os.path.exists(target_dir):
-                    profile = agent.analyze_directory_style(target_dir)
-                    # Cache in database
-                    self.lineage_memory.save_personality_style(
-                        subsystem=target_dir,
-                        naming_conventions=profile["naming_conventions"],
-                        type_hinting_strictness=profile["type_hinting_strictness"],
-                        preferred_constructs=profile["preferred_constructs"],
-                        class_vs_functional=profile["class_vs_functional"],
-                        docstring_style=profile["docstring_style"],
-                    )
-            except Exception as e:
-                logger.error("Failed to run RepositoryPersonalityAgent: %s", e)
-
-        return profile
+        return await self.style_resolver.get_or_refresh_style_profile(target_file)
 
     def _is_structural_change(self, prompt: str, repo_context: str) -> bool:
         """
@@ -174,7 +205,30 @@ class CouncilOrchestrator:
         """
         prompt_lower = prompt.lower()
 
-        # 1. Structural indicators
+        # 1. Integrate target-file structural awareness and fan-in signal
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.repository_cognition"):
+                repo_service = container.get("runtime.repository_cognition")
+                grapher = repo_service.grapher
+                
+                # Scan prompt for mentioned files
+                mentioned_files = re.findall(r"[\w\/\.\-]+\.(?:py|js|ts|go|rs)", prompt)
+                for mf in mentioned_files:
+                    # 1a. Core path structural awareness
+                    norm_path = mf.replace("\\", "/").lower()
+                    if "core/" in norm_path or "kernel/" in norm_path or "schemas/" in norm_path:
+                        return True
+                        
+                    # 1b. Direct fan-in signal
+                    dependents = grapher.get_dependents(mf)
+                    if len(dependents) >= 3:
+                        return True
+        except Exception:
+            pass
+
+        # 2. Structural indicators
         structural_keywords = [
             "redesign", "architect", "concurrency", "thread", "async", "lock", "database",
             "class", "interface", "refactor", "performance", "scalability", "security",
@@ -185,17 +239,90 @@ class CouncilOrchestrator:
             if kw in prompt_lower:
                 return True
 
-        # 2. Simple indicators
+        # 3. Simple indicators
         simple_keywords = ["typo", "comment", "format", "rename variable", "ui text", "alignment", "simple tweak"]
         for kw in simple_keywords:
             if kw in prompt_lower:
                 return False
 
-        # 3. Length heuristic
+        # 4. Length heuristic
         if len(prompt.split()) > 15:
             return True
 
         return False
+
+    def estimate_blast_radius(self, target_file: str) -> float:
+        """
+        Estimates structural impact using direct dependents (depth 1) 
+        and transitive dependents (depth 2) with depth attenuation.
+        Caps search and normalizes dynamically into standard range [0.1, 0.9].
+        """
+        import math
+        
+        # Defaults
+        default_score = 0.3
+        if any(kw in target_file.lower() for kw in ["core", "kernel", "engine", "base", "schemas"]):
+            default_score = 0.7
+
+        try:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if not container.has("runtime.repository_cognition"):
+                return default_score
+            
+            repo_service = container.get("runtime.repository_cognition")
+            grapher = repo_service.grapher
+            rel_file = grapher._to_rel_path(target_file)
+            
+            if rel_file not in grapher.graph:
+                return default_score
+
+            # Depth 1 dependents
+            deps_d1 = set(grapher.get_dependents(rel_file))
+            
+            # Depth 2 dependents
+            deps_d2 = set()
+            for d1 in deps_d1:
+                for d2 in grapher.get_dependents(d1):
+                    if d2 != rel_file and d2 not in deps_d1:
+                        deps_d2.add(d2)
+
+            # Cap traversals at a safe boundary to preserve latency
+            d1_list = list(deps_d1)[:30]
+            d2_list = list(deps_d2)[:20]
+
+            raw_score = 1.0 * len(d1_list) + 0.5 * len(d2_list)
+            
+            # Normalize dynamically to [0.1, 0.9] range
+            normalized_score = 0.1 + 0.8 * (1.0 - math.exp(-raw_score / 5.0))
+            return round(normalized_score, 3)
+        except Exception:
+            return default_score
+
+    def _resolve_tier(
+        self,
+        prompt: str,
+        repo_context: str,
+        council_tier: str | None = None,
+    ) -> CouncilTier:
+        """Resolve council tier once, considering configuration and resources."""
+        roles = self.mapper.map_roles()
+        coder_model = roles.get(CouncilRole.CODER)
+        estimated_tps = 8.0  # conservative default
+        if coder_model:
+            profile = self.mapper.profiler.get_profile(coder_model.provider_id, coder_model.model_id)
+            if profile and profile.tps > 0.0:
+                estimated_tps = profile.tps
+
+        # Temporarily apply override if specified
+        original_override = self.tier_classifier.default_tier_override
+        if council_tier:
+            self.tier_classifier.default_tier_override = council_tier
+
+        try:
+            return self.tier_classifier.classify(prompt, repo_context, estimated_tps)
+        finally:
+            self.tier_classifier.default_tier_override = original_override
 
     async def execute_task(
         self,
@@ -205,57 +332,7 @@ class CouncilOrchestrator:
         progress_callback: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt with wall-time limit."""
-        # Calculate/classify tier first so that we know the tier in case of timeout
-        roles = self.mapper.map_roles()
-        coder_model = roles.get(CouncilRole.CODER)
-        estimated_tps = 8.0  # conservative default
-        if coder_model:
-            profile = self.mapper.profiler.get_profile(coder_model.provider_id, coder_model.model_id)
-            if profile and profile.tps > 0.0:
-                estimated_tps = profile.tps
-
-        # Resolve config preferences
-        max_tier = "full"
-        default_override = "auto"
-        if self.config and hasattr(self.config, "cognition"):
-            max_tier = self.config.cognition.max_council_tier
-            default_override = self.config.cognition.default_tier_override
-
-        # Resolve queue depth
-        queue_depth = 0
-        try:
-            from velune.kernel.registry import get_container
-            container = get_container()
-            if container.has("runtime.task_registry"):
-                queue_depth = container.get("runtime.task_registry").pending_count()
-        except Exception:
-            pass
-
-        if council_tier:
-            try:
-                tier = CouncilTier(council_tier.lower())
-            except ValueError:
-                tier = classify_task_tier(
-                    prompt, repo_context, available_tps=estimated_tps,
-                    max_council_tier=max_tier, default_tier_override=default_override,
-                    queue_depth=queue_depth
-                )
-        else:
-            tier = classify_task_tier(
-                prompt, repo_context, available_tps=estimated_tps,
-                max_council_tier=max_tier, default_tier_override=default_override,
-                queue_depth=queue_depth
-            )
-
-        # Dynamic low-resource optimization mode
-        low_resource = (
-            (self.config and self.config.execution.low_resource_mode) or
-            os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
-        )
-        
-        if low_resource and tier == CouncilTier.FULL:
-            tier = CouncilTier.STANDARD
-
+        tier = self._resolve_tier(prompt, repo_context, council_tier)
         tier_str = tier.value
 
         try:
@@ -263,7 +340,7 @@ class CouncilOrchestrator:
                 self._execute_task_inner(
                     prompt=prompt,
                     repo_context=repo_context,
-                    council_tier=council_tier,
+                    resolved_tier=tier,
                     progress_callback=progress_callback,
                 ),
                 timeout=self.max_wall_time_seconds
@@ -302,7 +379,7 @@ class CouncilOrchestrator:
         self,
         prompt: str,
         repo_context: str,
-        council_tier: str | None = None,
+        resolved_tier: CouncilTier,
         progress_callback: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """Internal execution body of the orchestrator task."""
@@ -312,6 +389,8 @@ class CouncilOrchestrator:
 
         run_id = f"council-{uuid.uuid4().hex[:8]}"
         with TraceContext(run_id=run_id):
+            tier = resolved_tier
+
             # Estimate model speed from profiler
             roles = self.mapper.map_roles()
             coder_model = roles.get(CouncilRole.CODER)
@@ -320,47 +399,6 @@ class CouncilOrchestrator:
                 profile = self.mapper.profiler.get_profile(coder_model.provider_id, coder_model.model_id)
                 if profile and profile.tps > 0.0:
                     estimated_tps = profile.tps
-
-            max_tier = "full"
-            default_override = "auto"
-            if self.config and hasattr(self.config, "cognition"):
-                max_tier = self.config.cognition.max_council_tier
-                default_override = self.config.cognition.default_tier_override
-
-            queue_depth = 0
-            try:
-                from velune.kernel.registry import get_container
-                container = get_container()
-                if container.has("runtime.task_registry"):
-                    queue_depth = container.get("runtime.task_registry").pending_count()
-            except Exception:
-                pass
-
-            if council_tier:
-                try:
-                    tier = CouncilTier(council_tier.lower())
-                except ValueError:
-                    tier = classify_task_tier(
-                        prompt, repo_context, available_tps=estimated_tps,
-                        max_council_tier=max_tier, default_tier_override=default_override,
-                        queue_depth=queue_depth
-                    )
-            else:
-                tier = classify_task_tier(
-                    prompt, repo_context, available_tps=estimated_tps,
-                    max_council_tier=max_tier, default_tier_override=default_override,
-                    queue_depth=queue_depth
-                )
-                
-            # Dynamic low-resource optimization mode
-            low_resource = (
-                (self.config and self.config.execution.low_resource_mode) or
-                os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
-            )
-            
-            if low_resource and tier == CouncilTier.FULL:
-                logger.info("[LOW-RESOURCE] Downgrading Council tier from FULL to STANDARD to optimize CPU usage.")
-                tier = CouncilTier.STANDARD
 
             # Estimate cost (agent_count × estimated_seconds) before execution
             agent_counts = {
@@ -385,19 +423,25 @@ class CouncilOrchestrator:
             start_time = time.time()
             try:
                 if tier == CouncilTier.INSTANT:
-                    result = await self._execute_instant(prompt, repo_context, progress_callback)
+                    result = await self._execute_instant(prompt, repo_context, progress_callback, run_id)
                 elif tier == CouncilTier.MINIMAL:
-                    result = await self._execute_minimal(prompt, repo_context, progress_callback)
+                    result = await self._execute_minimal(prompt, repo_context, progress_callback, run_id)
                 elif tier == CouncilTier.STANDARD:
-                    result = await self._execute_standard(prompt, repo_context, progress_callback)
+                    result = await self._execute_standard(prompt, repo_context, progress_callback, run_id)
                 else:
-                    result = await self._execute_full(prompt, repo_context, progress_callback)
+                    result = await self._execute_full(prompt, repo_context, progress_callback, run_id)
                 return result
             finally:
                 elapsed_time = time.time() - start_time
                 logger.info("Executed %s tier in %.2fs", tier.value, elapsed_time)
 
-    async def _execute_instant(self, prompt: str, repo_context: str, progress_callback: Callable[[str], None] | None = None) -> dict[str, Any]:
+    async def _execute_instant(
+        self,
+        prompt: str,
+        repo_context: str,
+        progress_callback: Callable[[str], None] | None = None,
+        run_id: str = "default",
+    ) -> dict[str, Any]:
         """FAST PATH INSTANT: Coder only, no debate, no review, but still runs CognitiveFirewall scan on repo context."""
         logger.info("[COUNCIL - INSTANT] Executing Instant single-agent Coder path...")
 
@@ -415,14 +459,9 @@ class CouncilOrchestrator:
         if py_files:
             target_file = py_files[0]
 
-        style_profile = self._get_or_refresh_style_profile(target_file)
+        style_profile = await self._get_or_refresh_style_profile(target_file)
 
-        roles = self.mapper.map_roles()
-        coder_model = roles[CouncilRole.CODER]
-        coder = CoderAgent(
-            model=coder_model,
-            provider=self.provider_registry.get_or_raise(coder_model.provider_id),
-        )
+        coder = self.agent_factory.create_coder(run_id)
 
         logger.info("Council Phase: Coder")
         if progress_callback:
@@ -450,6 +489,7 @@ class CouncilOrchestrator:
         prompt: str,
         repo_context: str,
         progress_callback: Callable[[str], None] | None = None,
+        run_id: str = "default",
     ) -> dict[str, Any]:
         """MINIMAL PATH: Planner + Coder (No Reviewer, no specialized critics, no debate)"""
         logger.info("[COUNCIL - MINIMAL] Executing Minimal Planner + Coder path...")
@@ -459,20 +499,10 @@ class CouncilOrchestrator:
         if py_files:
             target_file = py_files[0]
 
-        style_profile = self._get_or_refresh_style_profile(target_file)
+        style_profile = await self._get_or_refresh_style_profile(target_file)
 
-        roles = self.mapper.map_roles()
-        planner_model = roles[CouncilRole.PLANNER]
-        coder_model = roles[CouncilRole.CODER]
-
-        planner = PlannerAgent(
-            model=planner_model,
-            provider=self.provider_registry.get_or_raise(planner_model.provider_id),
-        )
-        coder = CoderAgent(
-            model=coder_model,
-            provider=self.provider_registry.get_or_raise(coder_model.provider_id),
-        )
+        planner = self.agent_factory.create_planner(run_id)
+        coder = self.agent_factory.create_coder(run_id)
 
         # 1. Generate plan
         logger.info("Council Phase: Planner")
@@ -522,6 +552,7 @@ class CouncilOrchestrator:
         prompt: str,
         repo_context: str,
         progress_callback: Callable[[str], None] | None = None,
+        run_id: str = "default",
     ) -> dict[str, Any]:
         """STANDARD PATH: Planner + Coder + Reviewer + Synthesizer (No Challenger, no specialized critics, Max 1 debate turn)"""
         logger.info("[COUNCIL - STANDARD] Executing Standard Coder + Reviewer path...")
@@ -531,30 +562,12 @@ class CouncilOrchestrator:
         if py_files:
             target_file = py_files[0]
 
-        style_profile = self._get_or_refresh_style_profile(target_file)
+        style_profile = await self._get_or_refresh_style_profile(target_file)
 
-        roles = self.mapper.map_roles()
-        planner_model = roles[CouncilRole.PLANNER]
-        coder_model = roles[CouncilRole.CODER]
-        reviewer_model = roles[CouncilRole.REVIEWER]
-        synthesizer_model = roles[CouncilRole.SYNTHESIZER]
-
-        planner = PlannerAgent(
-            model=planner_model,
-            provider=self.provider_registry.get_or_raise(planner_model.provider_id),
-        )
-        coder = CoderAgent(
-            model=coder_model,
-            provider=self.provider_registry.get_or_raise(coder_model.provider_id),
-        )
-        reviewer = ReviewerAgent(
-            model=reviewer_model,
-            provider=self.provider_registry.get_or_raise(reviewer_model.provider_id),
-        )
-        synthesizer = SynthesizerAgent(
-            model=synthesizer_model,
-            provider=self.provider_registry.get_or_raise(synthesizer_model.provider_id),
-        )
+        planner = self.agent_factory.create_planner(run_id)
+        coder = self.agent_factory.create_coder(run_id)
+        reviewer = self.agent_factory.create_reviewer(run_id)
+        synthesizer = self.agent_factory.create_synthesizer(run_id)
 
         # 1. Generate plan
         logger.info("Council Phase: Planner")
@@ -667,11 +680,12 @@ class CouncilOrchestrator:
 
         # Log successful decision to DLS
         decision_id = f"DEC-{int(time.time())}"
+        impact = self.estimate_blast_radius(target_file)
         self.lineage_memory.log_decision(
             decision_id=decision_id,
             target_subsystem="standard_path",
             rationale=final_summary[:300],
-            architectural_impact=0.3,
+            architectural_impact=impact,
             consequences="Standard execution completed with single-reviewer arbitration.",
         )
 
@@ -690,6 +704,7 @@ class CouncilOrchestrator:
         prompt: str,
         repo_context: str,
         progress_callback: Callable[[str], None] | None = None,
+        run_id: str = "default",
     ) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt (FULL tier)."""
         logger.info("Reasoning Council starting execution in FULL tier for goal: %s", prompt)
@@ -700,27 +715,12 @@ class CouncilOrchestrator:
         if py_files:
             target_file = py_files[0]
 
-        style_profile = self._get_or_refresh_style_profile(target_file)
+        style_profile = await self._get_or_refresh_style_profile(target_file)
 
-        # 1. Map specialized models to council roles
-        roles = self.mapper.map_roles()
-
-        # 2. Instantiate active council agent instances
+        # 1. Instantiate active council agent instances using AgentFactory
         logger.info("Instantiating specialized council agents...")
-        planner_model = roles[CouncilRole.PLANNER]
-        coder_model = roles[CouncilRole.CODER]
-        reviewer_model = roles[CouncilRole.REVIEWER]
-        challenger_model = roles[CouncilRole.CHALLENGER]
-        synthesizer_model = roles[CouncilRole.SYNTHESIZER]
-
-        coder = CoderAgent(
-            model=coder_model,
-            provider=self.provider_registry.get_or_raise(coder_model.provider_id),
-        )
-        synthesizer = SynthesizerAgent(
-            model=synthesizer_model,
-            provider=self.provider_registry.get_or_raise(synthesizer_model.provider_id),
-        )
+        coder = self.agent_factory.create_coder(run_id)
+        synthesizer = self.agent_factory.create_synthesizer(run_id)
 
         # --- STRUCTURAL CHANGE PATH ---
         logger.info("[COUNCIL - COMPLEXITY] Launching Architecture Cognition Agent & Multi-Critique Council...")
@@ -728,8 +728,10 @@ class CouncilOrchestrator:
         # ACA Analysis
         logger.info("[COUNCIL - ACA] Executing Architecture Cognition Agent audit on: %s", target_file)
         architectural_context = ""
-        if "class " in repo_context or "def " in repo_context:
-            self.architecture_agent.audit_architecture(target_file, repo_context)
+        shi = None
+        if self._is_structural_change(prompt, repo_context) and ("class " in repo_context or "def " in repo_context):
+            audit_res = self.architecture_agent.audit_architecture(target_file, repo_context)
+            shi = audit_res.get("shi")
 
             # Retrieve persistent ledger items to enrich reasoning
             debt_items = self.architecture_agent.ledger.get_items()
@@ -781,36 +783,15 @@ class CouncilOrchestrator:
 
         enriched_repo_context = repo_context + architectural_context + continuity_context
 
-        # Instantiate Planner, Reviewer, Challenger, and specialized critics
-        planner = PlannerAgent(
-            model=planner_model,
-            provider=self.provider_registry.get_or_raise(planner_model.provider_id),
-        )
-        reviewer = ReviewerAgent(
-            model=reviewer_model,
-            provider=self.provider_registry.get_or_raise(reviewer_model.provider_id),
-        )
-        challenger = ChallengerAgent(
-            model=challenger_model,
-            provider=self.provider_registry.get_or_raise(challenger_model.provider_id),
-        )
+        # Instantiate Planner, Reviewer, Challenger, and specialized critics using AgentFactory
+        planner = self.agent_factory.create_planner(run_id)
+        reviewer = self.agent_factory.create_reviewer(run_id)
+        challenger = self.agent_factory.create_challenger(run_id)
 
-        scalability_critic = ScalabilityCritic(
-            model=challenger_model,
-            provider=self.provider_registry.get_or_raise(challenger_model.provider_id),
-        )
-        security_critic = SecurityCritic(
-            model=reviewer_model,
-            provider=self.provider_registry.get_or_raise(reviewer_model.provider_id),
-        )
-        performance_critic = PerformanceCritic(
-            model=reviewer_model,
-            provider=self.provider_registry.get_or_raise(reviewer_model.provider_id),
-        )
-        maintainability_critic = MaintainabilityCritic(
-            model=reviewer_model,
-            provider=self.provider_registry.get_or_raise(reviewer_model.provider_id),
-        )
+        scalability_critic = self.agent_factory.create_scalability_critic(run_id)
+        security_critic = self.agent_factory.create_security_critic(run_id)
+        performance_critic = self.agent_factory.create_performance_critic(run_id)
+        maintainability_critic = self.agent_factory.create_maintainability_critic(run_id)
 
         # 4. Deliberation Phase A: Planner compiles DAG Execution Plan
         logger.info("Council Phase: Planner")
@@ -1144,6 +1125,7 @@ class CouncilOrchestrator:
             security_report=security_report,
             performance_report=performance_report,
             maintainability_report=maintainability_report,
+            shi=shi,
         )
 
         fusion_score = arbitration.overall_confidence
@@ -1217,11 +1199,12 @@ class CouncilOrchestrator:
         else:
             # Log the successful decision in the DLS
             decision_id = f"DEC-{int(time.time())}"
+            impact = self.estimate_blast_radius(subsystem_target)
             self.lineage_memory.log_decision(
                 decision_id=decision_id,
                 target_subsystem=subsystem_target,
                 rationale=final_summary[:300],
-                architectural_impact=0.7,
+                architectural_impact=impact,
                 consequences="Approved and validated by Reasoning Council.",
                 alternatives=[
                     {

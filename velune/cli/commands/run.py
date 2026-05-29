@@ -81,7 +81,10 @@ async def _run_command_async(
         # Parse run_id from milestones (format: "[run_id] milestone_name")
         run_id = None
         for m in milestones:
-            if m.startswith("[") and "]" in m:
+            if hasattr(m, "run_id"):
+                run_id = m.run_id
+                break
+            elif isinstance(m, str) and m.startswith("[") and "]" in m:
                 run_id = m.split("]")[0][1:]
                 break
         return orchestration_engine.get_state(run_id) if run_id else None

@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Any
 
 
 class CouncilTier(str, Enum):
@@ -87,3 +88,93 @@ def _apply_ceiling(tier: CouncilTier, max_tier_str: str | None) -> CouncilTier:
     if order[tier] > order[max_tier]:
         return max_tier
     return tier
+
+
+class TierClassifier:
+    """Centralizes council tier decision-making and resource-aware classification policies."""
+
+    def __init__(
+        self,
+        task_registry: Any | None = None,
+        max_council_tier: str = "full",
+        default_tier_override: str = "auto",
+        low_resource_mode: bool = False,
+    ) -> None:
+        self.task_registry = task_registry
+        self.max_council_tier = max_council_tier
+        self.default_tier_override = default_tier_override
+        self.low_resource_mode = low_resource_mode
+
+    def get_queue_depth(self) -> int:
+        """Resolve queue depth from the task registry safely without direct locator calls in main methods."""
+        if self.task_registry and hasattr(self.task_registry, "pending_count"):
+            try:
+                return self.task_registry.pending_count()
+            except Exception:
+                pass
+        return 0
+
+    def classify(
+        self,
+        prompt: str,
+        repo_context: str,
+        available_tps: float = 8.0,
+    ) -> CouncilTier:
+        """Determine task complexity and resource consumption tier policy."""
+        queue_depth = self.get_queue_depth()
+        
+        tier = classify_task_tier(
+            prompt=prompt,
+            repo_context=repo_context,
+            available_tps=available_tps,
+            max_council_tier=self.max_council_tier,
+            default_tier_override=self.default_tier_override,
+            queue_depth=queue_depth,
+        )
+
+        # Apply structural fan-in tier escalation floor
+        floor = CouncilTier.INSTANT
+        max_fan_in = 0
+        try:
+            import re
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.repository_cognition"):
+                repo_service = container.get("runtime.repository_cognition")
+                grapher = repo_service.grapher
+                
+                # Scan prompt for mentioned source files
+                mentioned_files = re.findall(r"[\w\/\.\-]+\.(?:py|js|ts|go|rs)", prompt)
+                for mf in mentioned_files:
+                    dependents = grapher.get_dependents(mf)
+                    fan_in = len(dependents)
+                    if fan_in > max_fan_in:
+                        max_fan_in = fan_in
+        except Exception:
+            pass
+
+        if max_fan_in >= 5:
+            floor = CouncilTier.FULL
+        elif max_fan_in >= 3:
+            floor = CouncilTier.STANDARD
+        elif max_fan_in >= 1:
+            floor = CouncilTier.MINIMAL
+
+        # Structural escalation only upgrades, never downgrades keyword decisions
+        order = {
+            CouncilTier.INSTANT: 0,
+            CouncilTier.MINIMAL: 1,
+            CouncilTier.STANDARD: 2,
+            CouncilTier.FULL: 3,
+        }
+
+        if order[floor] > order[tier]:
+            tier = floor
+            # Apply ceiling after upgrading
+            tier = _apply_ceiling(tier, self.max_council_tier)
+
+        if self.low_resource_mode and tier == CouncilTier.FULL:
+            tier = CouncilTier.STANDARD
+
+        return tier
+

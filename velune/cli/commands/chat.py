@@ -113,7 +113,10 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
                 
                 run_id = None
                 for m in milestones:
-                    if m.startswith("[") and "]" in m:
+                    if hasattr(m, "run_id"):
+                        run_id = m.run_id
+                        break
+                    elif isinstance(m, str) and m.startswith("[") and "]" in m:
                         run_id = m.split("]")[0][1:]
                         break
                 state = orchestration_engine.get_state(run_id) if run_id else None
