@@ -107,6 +107,66 @@ class RepositoryCognitionService:
 
         return snapshot
 
+    def get_snapshot(self) -> "RepositorySnapshot | None":
+        """Return the most-recently-computed snapshot from the indexer's on-disk cache.
+
+        This is a *read-only* accessor that does NOT trigger a new index run.
+        It restores symbol and file metadata from the JSON cache written by
+        :meth:`RepositoryIndexer.index`.  If no cache exists yet (cold start),
+        returns ``None`` so callers can fall back gracefully.
+
+        Use this instead of :meth:`index` when you only need to *read* the
+        existing snapshot — e.g. from :class:`~velune.retrieval.graph.GraphRetriever`.
+        """
+        import json
+
+        cache_path = self.indexer.cache_path
+        if not cache_path.exists():
+            return None
+
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                cache: dict = json.load(f)
+        except Exception:
+            return None
+
+        from velune.repository.schemas import (
+            RepositoryFile,
+            RepositoryLanguage,
+            RepositorySymbol,
+        )
+
+        files: list[RepositoryFile] = []
+        all_symbols: list[RepositorySymbol] = []
+
+        for rel_path, entry in cache.items():
+            try:
+                language = RepositoryLanguage(entry.get("language", "unknown"))
+                symbols = [RepositorySymbol(**s) for s in entry.get("symbols", [])]
+                file_rec = RepositoryFile(
+                    path=rel_path,
+                    language=language,
+                    size_bytes=entry.get("size_bytes", 0),
+                    sha256=entry.get("sha256", ""),
+                    symbols=symbols,
+                    metadata=entry.get("metadata", {}),
+                )
+                files.append(file_rec)
+                all_symbols.extend(symbols)
+            except Exception:
+                continue
+
+        return RepositorySnapshot(
+            root_path=str(self.root_path),
+            files=files,
+            symbols=all_symbols,
+            edges=[],
+            summary={
+                "total_files": len(files),
+                "total_symbols": len(all_symbols),
+            },
+        )
+
     def traverse(self, node_id: str, depth: int = 2) -> list[str]:
         """Queries the RepositoryGrapher to discover neighboring code relationships from a starting node."""
         return self.grapher.traverse(node_id, depth)

@@ -6,6 +6,7 @@ import json
 import os
 import time
 from collections.abc import AsyncIterator
+from pydantic import SecretStr
 
 import httpx
 
@@ -23,8 +24,10 @@ from velune.providers.base import ModelProvider
 class OpenAIProvider(ModelProvider):
     """OpenAI provider for GPT chat and embedding models."""
 
-    def __init__(self, api_key: str | None = None, base_url: str = "https://api.openai.com/v1") -> None:
+    def __init__(self, api_key: str | SecretStr | None = None, base_url: str = "https://api.openai.com/v1") -> None:
         self._api_key = api_key or os.getenv("OPENAI_API_KEY")
+        if hasattr(self._api_key, 'get_secret_value'):
+            self._api_key = self._api_key.get_secret_value()
         self._base_url = base_url
         self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(

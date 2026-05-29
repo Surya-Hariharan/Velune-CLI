@@ -168,8 +168,13 @@ class SubprocessSandbox:
         run_env = os.environ.copy()
         run_env.update(spec.env_additions)
         # Remove dangerous env vars
-        for dangerous in ("LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PYTHONPATH"):
+        for dangerous in (
+            "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PYTHONPATH",
+            "PYTHONSTARTUP", "PYTHONUSERBASE", "PYTHONINSPECT",
+            "BASH_ENV", "ENV", "PROMPT_COMMAND"
+        ):
             run_env.pop(dangerous, None)
+        run_env["PYTHONNOUSERSITE"] = "1"
 
         start_time = time.perf_counter()
 

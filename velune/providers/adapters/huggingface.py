@@ -6,6 +6,7 @@ import os
 import time
 import json
 from collections.abc import AsyncIterator
+from pydantic import SecretStr
 
 import httpx
 
@@ -22,8 +23,10 @@ from velune.providers.base import ModelProvider
 class HuggingFaceProvider(ModelProvider):
     """Hugging Face provider for serverless Inference API."""
 
-    def __init__(self, api_key: str | None = None, base_url: str = "https://api-inference.huggingface.co") -> None:
+    def __init__(self, api_key: str | SecretStr | None = None, base_url: str = "https://api-inference.huggingface.co") -> None:
         self._api_key = api_key or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
+        if hasattr(self._api_key, 'get_secret_value'):
+            self._api_key = self._api_key.get_secret_value()
         self._base_url = base_url
         self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(

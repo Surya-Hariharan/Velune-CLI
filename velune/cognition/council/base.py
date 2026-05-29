@@ -18,7 +18,6 @@ from velune.providers.base import ModelProvider
 logger = TracedLogger("velune.cognition.council.base")
 
 import asyncio
-_live_lock = asyncio.Lock()
 
 
 class BaseCouncilAgent(ABC):
@@ -30,11 +29,13 @@ class BaseCouncilAgent(ABC):
         model: ModelDescriptor,
         provider: ModelProvider,
         system_prompt: str,
+        live_lock: asyncio.Lock | None = None,
     ) -> None:
         self.role = role
         self.model = model
         self.provider = provider
         self.system_prompt = system_prompt
+        self.live_lock = live_lock
 
     async def deliberate(
         self,
@@ -103,9 +104,9 @@ class BaseCouncilAgent(ABC):
 
                     acquired = False
                     try:
-                        if is_interactive:
-                            if not _live_lock.locked():
-                                await asyncio.shield(_live_lock.acquire())
+                        if is_interactive and self.live_lock:
+                            if not self.live_lock.locked():
+                                await asyncio.shield(self.live_lock.acquire())
                                 acquired = True
 
                         async def run_streaming():
@@ -155,8 +156,8 @@ class BaseCouncilAgent(ABC):
                             timeout=timeout,
                         )
                     finally:
-                        if acquired:
-                            _live_lock.release()
+                        if acquired and self.live_lock:
+                            self.live_lock.release()
                 else:
                     response = await asyncio.wait_for(
                         self.provider.infer(request),

@@ -6,7 +6,6 @@ from velune.cognition.orchestrator import CouncilOrchestrator
 from velune.orchestration.schemas import StreamProgress, ExecutionStatus
 from velune.cognition.council.tiers import CouncilTier
 from velune.models.specializations import CouncilRole
-from velune.cognition.council.base import _live_lock
 
 class MockModelDescriptor:
     def __init__(self, provider_id: str, model_id: str):
@@ -122,10 +121,8 @@ async def test_streaming_correctness_and_timing():
 @pytest.mark.asyncio
 async def test_lock_release_safety():
     """Verify live lock is guaranteed to be released on failure or cancellation."""
-    # Ensure lock is initially unlocked
-    if _live_lock.locked():
-        _live_lock.release()
-    assert not _live_lock.locked()
+    test_lock = asyncio.Lock()
+    assert not test_lock.locked()
 
     # Simulate deliberation lock acquisition
     from velune.cognition.council.coder import CoderAgent
@@ -138,8 +135,9 @@ async def test_lock_release_safety():
     
     coder = CoderAgent(
         model=coder_model,
-        provider=failing_provider
+        provider=failing_provider,
     )
+    coder.live_lock = test_lock
     
     # We deliberately enable interactive mode mock to force lock acquisition
     import sys
@@ -154,5 +152,4 @@ async def test_lock_release_safety():
     finally:
         sys.stdout.isatty = original_isatty
 
-    # Lock must be released!
-    assert not _live_lock.locked(), "Live lock was leaked on deliberation failure!"
+    assert not test_lock.locked(), "Live lock was leaked on deliberation failure!"

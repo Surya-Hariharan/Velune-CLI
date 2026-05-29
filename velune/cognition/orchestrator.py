@@ -70,11 +70,13 @@ class CouncilOrchestrator:
             os.environ.get("VELUNE_COUNCIL_MAX_SECONDS", "600")  # 10 minutes default
         )
         self._states: dict[str, Any] = {}
+        self._live_lock = asyncio.Lock()
 
         # Extracted Subsystems
         self.agent_factory = CouncilAgentFactory(
             provider_registry=self.provider_registry,
-            mapper=self.mapper
+            mapper=self.mapper,
+            live_lock=self._live_lock
         )
         self.style_resolver = StyleResolver(lineage_memory=self.lineage_memory)
         
@@ -143,6 +145,12 @@ class CouncilOrchestrator:
                     for f in snapshot.files[:25]:
                         lines.append(f"  - {f.path} ({f.language.value})")
                     repo_context = "\n".join(lines)
+                    
+                    # Scan and sanitize context injection to prevent persistent prompt injection
+                    scan_res = self.firewall.scan_file_for_injection("repo_context", repo_context)
+                    if scan_res.get("quarantined"):
+                        repo_context = scan_res.get("neutralized_content", "")
+                        logger.warning("Repository context neutralized by firewall before prompt injection.")
         except Exception as e:
             logger.warning("Could not gather repository snapshot: %s", e)
 
@@ -157,6 +165,25 @@ class CouncilOrchestrator:
                 status = ExecutionStatus.COMPLETED
                 error = None
                 task_plan = result.get("task_plan")
+            except asyncio.CancelledError:
+                logger.info("Reasoning Council execution was cancelled.")
+                status = ExecutionStatus.FAILED
+                error = "Cancelled"
+                final_summary = "Execution cancelled by user."
+                task_plan = None
+                
+                request = OrchestrationRequest(prompt=prompt, workspace=".")
+                state = OrchestrationState(
+                    run_id=run_id,
+                    request=request,
+                    status=status,
+                    output=final_summary,
+                    error=error,
+                    task_plan=task_plan,
+                )
+                self._states[run_id] = state
+                queue.put_nowait(None)
+                raise
             except Exception as e:
                 logger.error("Reasoning Council execution failed: %s", e)
                 final_summary = f"Execution failed: {e}"

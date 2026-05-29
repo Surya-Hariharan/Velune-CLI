@@ -3,10 +3,14 @@
 from pathlib import Path
 
 from velune.tools.base.tool import BaseTool
+from velune.execution.path_guard import validate_workspace_path
 
 
 class WriteFile(BaseTool):
     """Tool for writing file contents."""
+
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = workspace or Path.cwd()
 
     def get_name(self) -> str:
         return "write_file"
@@ -17,6 +21,7 @@ class WriteFile(BaseTool):
     async def execute(self, file_path: str, content: str) -> str:
         """Write content to file."""
         path = Path(file_path)
+        validate_workspace_path(path, self.workspace, label="WriteFile")
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "w", encoding="utf-8") as f:
@@ -44,6 +49,9 @@ class WriteFile(BaseTool):
 class CreateFile(BaseTool):
     """Tool for creating an empty file."""
 
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = workspace or Path.cwd()
+
     def get_name(self) -> str:
         return "create_file"
 
@@ -53,6 +61,7 @@ class CreateFile(BaseTool):
     async def execute(self, file_path: str) -> str:
         """Create an empty file."""
         path = Path(file_path)
+        validate_workspace_path(path, self.workspace, label="CreateFile")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
 
@@ -74,6 +83,9 @@ class CreateFile(BaseTool):
 class DeleteFile(BaseTool):
     """Tool for deleting a file."""
 
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = workspace or Path.cwd()
+
     def get_name(self) -> str:
         return "delete_file"
 
@@ -83,6 +95,7 @@ class DeleteFile(BaseTool):
     async def execute(self, file_path: str) -> str:
         """Delete a file."""
         path = Path(file_path)
+        validate_workspace_path(path, self.workspace, label="DeleteFile")
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 

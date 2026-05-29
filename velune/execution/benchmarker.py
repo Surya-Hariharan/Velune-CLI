@@ -257,14 +257,24 @@ class SubsystemBenchmarker:
             tmp_path = tmp.name
 
         try:
-            proc = subprocess.run(
-                [sys.executable, tmp_path],
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                cwd=str(self.workspace),
-                env={**os.environ},
-            )
+            run_env = {**os.environ}
+            for dangerous in (
+                "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PYTHONPATH",
+                "PYTHONSTARTUP", "PYTHONUSERBASE", "PYTHONINSPECT",
+                "BASH_ENV", "ENV", "PROMPT_COMMAND"
+            ):
+                run_env.pop(dangerous, None)
+            run_env["PYTHONNOUSERSITE"] = "1"
+
+            with tempfile.TemporaryDirectory() as temp_cwd:
+                proc = subprocess.run(
+                    [sys.executable, tmp_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout,
+                    cwd=temp_cwd,
+                    env=run_env,
+                )
 
             if proc.returncode != 0:
                 err_text = (proc.stderr or proc.stdout or "unknown error").strip()

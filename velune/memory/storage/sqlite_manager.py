@@ -57,14 +57,35 @@ class SQLiteManager:
             conn.close()
 
     def _get_read_connection(self):
-        """Get or create a thread-local read connection."""
+        """Get or create a thread-local read connection.
+
+        If the stored connection was closed externally (e.g. by :meth:`close`
+        on a previous call in the same thread), a ``sqlite3.ProgrammingError``
+        is raised on the next use.  We catch that case here and transparently
+        recreate the connection so callers never see the error.
+        """
         if not hasattr(self._local, 'conn') or self._local.conn is None:
-            conn = sqlite3.connect(str(self.db_path), timeout=30.0)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=5000")
-            self._local.conn = conn
+            self._local.conn = self._new_read_connection()
+        else:
+            # Probe for a closed/stale handle without querying the DB
+            try:
+                self._local.conn.execute("SELECT 1")
+            except Exception:
+                # Connection was closed or is otherwise broken — recreate it
+                try:
+                    self._local.conn.close()
+                except Exception:
+                    pass
+                self._local.conn = self._new_read_connection()
         return self._local.conn
+
+    def _new_read_connection(self) -> sqlite3.Connection:
+        """Create and configure a new read-mode SQLite connection."""
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        return conn
 
     def _restart_write_thread(self) -> None:
         """Create a new write thread if the current one is dead."""
@@ -206,6 +227,25 @@ class SQLiteManager:
             raise TimeoutError(f"SQLite script timeout after {timeout}s.")
         if error_holder:
             raise error_holder[0]
+
+    def close(self) -> None:
+        """Synchronously close the calling thread's read connection.
+
+        Call this from the **same thread** that used :meth:`execute_read` to
+        ensure the handle is released promptly.  On Windows this is critical:
+        a lingering open handle prevents ``os.remove()`` from succeeding and
+        causes ``PermissionError`` in tests.
+
+        Safe to call multiple times — subsequent calls are no-ops.
+        """
+        conn = getattr(self._local, 'conn', None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            finally:
+                self._local.conn = None
 
     def is_healthy(self) -> bool:
         """Returns True if the write thread is alive and queue depth is under 100."""

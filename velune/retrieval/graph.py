@@ -7,17 +7,33 @@ from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalS
 
 
 class GraphRetriever:
-    """Traverses knowledge graphs and repository AST structures to fetch contiguous context."""
+    """Traverses knowledge graphs and repository AST structures to fetch contiguous context.
+
+    This retriever uses the **cached** repository snapshot (read from the
+    on-disk JSON index) instead of triggering a full ``repo_service.index()``
+    on every call.  That eliminates the O(N·files) AST re-parse that
+    previously happened on every retrieval request.
+
+    Cold-start behaviour (no cache on disk yet):
+      - ``get_snapshot()`` returns ``None``.
+      - ``retrieve()`` returns an empty list and logs a debug warning.
+      - The first ``velune run`` / ``velune chat`` call that triggers a full
+        index will populate the cache, after which graph retrieval works normally.
+    """
 
     def __init__(self) -> None:
         self.registry = ComponentRegistry()
 
     def retrieve(self, node_id: str, depth: int = 1, top_k: int = 10) -> list[RetrievalHit]:
-        """Traverses adjacent AST and symbol imports from the repository cognition service."""
+        """Traverses adjacent AST and symbol imports from the repository cognition service.
+
+        Uses the cached snapshot via ``get_snapshot()`` to avoid triggering a
+        full repository re-index on every call.
+        """
         hits: list[RetrievalHit] = []
 
         try:
-            # Try to grab the active RepositoryCognitionService from the kernel registry
+            # Grab the active RepositoryCognitionService from the kernel registry
             repo_service = self.registry.get(RepositoryCognitionService)
             if not repo_service:
                 return []
@@ -29,8 +45,15 @@ class GraphRetriever:
             norm_node = node_id.replace("\\", "/")
             neighbors = [n for n in neighbors if n != norm_node]
 
-            # Fetch files and symbols from the snapshot index
-            snapshot = repo_service.index()
+            # --- KEY FIX: use get_snapshot() instead of index() ---
+            # get_snapshot() reads the on-disk JSON cache written by the last
+            # full index run.  It does NOT re-parse ASTs or run Git commands.
+            # Falls back gracefully to empty lists when no cache exists yet.
+            snapshot = repo_service.get_snapshot()
+            if snapshot is None:
+                # Cold start — no index on disk yet; skip graph retrieval silently
+                return []
+
             file_map = {f.path: f for f in snapshot.files}
             symbol_by_id = {s.symbol_id: s for s in snapshot.symbols if s.symbol_id}
             symbol_by_qualified = {s.qualified_name: s for s in snapshot.symbols if s.qualified_name}
@@ -51,7 +74,7 @@ class GraphRetriever:
                         "size_bytes": f.size_bytes,
                         "sha256": f.sha256
                     }
-                    content = f"File: {f.path}\nLanguage: {f.language.value}\nSymbols: " + ", ".join(s.name for s in f.symbols)
+                    content = f"File: {f.path}\nLanguage: {f.language.value}\nSymbols: " + ", ".join(sym.name for sym in f.symbols)
                 # Check if neighbor is a symbol (by symbol_id, qualified_name, or name)
                 elif n in symbol_by_id:
                     s = symbol_by_id[n]

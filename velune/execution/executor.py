@@ -100,9 +100,10 @@ class ExecutionExecutor:
                 logger.info("Saving checkpoint state for step %s...", step.id)
                 checkpoint_state = self.rollback_manager.save_state(checkpoint_id, files_to_track)
 
-                # Execute command inside sandbox
+                # Execute command inside sandbox (offloaded to prevent event loop blocking)
                 try:
-                    sandbox_res = self.sandbox.execute(spec)
+                    import asyncio
+                    sandbox_res = await asyncio.to_thread(self.sandbox.execute, spec)
                     logger.info(
                         "Command completed with exit code %d in %.2fms",
                         sandbox_res.exit_code,
