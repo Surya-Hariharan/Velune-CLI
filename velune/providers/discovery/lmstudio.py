@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
+
+logger = logging.getLogger("velune.providers.discovery.lmstudio")
 
 
 class LMStudioDiscovery:
@@ -11,6 +15,16 @@ class LMStudioDiscovery:
     def __init__(self):
         self.provider_id = "lmstudio"
         self.base_url = "http://localhost:1234"
+
+    @classmethod
+    async def is_running(cls) -> bool:
+        """Return True if the LM Studio server is reachable."""
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.head("http://localhost:1234")
+                return r.status_code < 500
+        except Exception:
+            return False
 
     async def discover(self) -> list[ModelDescriptor]:
         """Discover models from LM Studio."""
@@ -26,23 +40,20 @@ class LMStudioDiscovery:
                     descriptor = self._parse_model(model)
                     if descriptor:
                         models.append(descriptor)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("LM Studio discovery failed: %s", e)
 
         return models
 
     def _parse_model(self, model_data: dict) -> ModelDescriptor:
-        """Parse model data into descriptor."""
         model_id = model_data["id"]
-
-        # LM Studio doesn't provide detailed info, use heuristics
         capabilities = self._classify_capabilities(model_id)
 
         return ModelDescriptor(
             model_id=model_id,
             provider_id=self.provider_id,
             display_name=model_id,
-            context_length=4096,  # Default
+            context_length=4096,
             capabilities=capabilities,
             quantization=None,
             vram_required_gb=None,
@@ -54,12 +65,9 @@ class LMStudioDiscovery:
         )
 
     def _classify_capabilities(self, model_id: str) -> ModelCapabilityProfile:
-        """Classify model capabilities based on name."""
         model_lower = model_id.lower()
-
         profile = ModelCapabilityProfile()
 
-        # Basic capability classification
         if any(name in model_lower for name in ["coder", "code"]):
             profile.coding = CapabilityLevel.INTERMEDIATE
         else:

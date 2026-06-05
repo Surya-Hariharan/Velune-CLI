@@ -9,60 +9,39 @@ logger = logging.getLogger("velune.providers.discovery.gguf")
 
 
 class GGUFDiscovery:
-    """Discovers GGUF models from filesystem."""
+    """Discovers GGUF models from filesystem using LocalModelResolver."""
 
     def __init__(self):
         self.provider_id = "gguf"
-        self.search_paths = [
-            Path.home() / ".cache" / "huggingface" / "hub",
-            Path.home() / "models",
-            Path.cwd() / "models",
-        ]
 
     async def discover(self) -> list[ModelDescriptor]:
-        """Discover GGUF models from filesystem."""
-        models = []
+        """Discover GGUF models across all well-known paths."""
+        from velune.providers.local_resolver import LocalModelResolver
+        resolver = LocalModelResolver()
+        files = resolver.scan_gguf_files()
 
-        for search_path in self.search_paths:
-            if not search_path.exists():
-                continue
-
-            for gguf_file in search_path.rglob("*.gguf"):
-                descriptor = self._parse_gguf_file(gguf_file)
-                if descriptor:
-                    models.append(descriptor)
-
+        models: list[ModelDescriptor] = []
+        for gguf_path in files:
+            descriptor = self._build_descriptor(gguf_path, resolver)
+            if descriptor is not None:
+                models.append(descriptor)
         return models
 
-    def _parse_gguf_file(self, gguf_path: Path) -> ModelDescriptor:
-        """Parse GGUF file into descriptor."""
+    def _build_descriptor(self, gguf_path: Path, resolver) -> ModelDescriptor | None:
         try:
-            from gguf import GGUFReader
+            meta = resolver.get_model_metadata(gguf_path)
 
-            reader = GGUFReader(str(gguf_path))
-            metadata = reader.metadata
+            try:
+                model_id = str(gguf_path.relative_to(Path.home()))
+            except ValueError:
+                model_id = str(gguf_path)
 
-            model_id = str(gguf_path.relative_to(Path.home()))
             display_name = gguf_path.stem
-
-            # Extract metadata
-            context_length = metadata.get("context_length", 4096)
-            param_count = metadata.get("parameter_count", 0)
-
-            # Convert parameter count to billions if huge (e.g. 7,000,000,000 instead of 7)
-            if param_count > 1000:
-                param_count_b = param_count / 1e9
-            else:
-                param_count_b = param_count
-
-            # Classify capabilities
+            param_count_b = meta.get("param_count_b")
+            quantization = meta.get("quantization")
+            context_length = meta.get("context_length") or 4096
             capabilities = self._classify_capabilities(display_name)
-
-            # Extract quantization
-            quantization = self._extract_quantization(display_name)
-
-            # Estimate VRAM required
-            vram_required = self._estimate_vram(param_count_b, quantization)
+            vram_gb = self._estimate_vram(param_count_b, quantization)
 
             return ModelDescriptor(
                 model_id=model_id,
@@ -71,75 +50,38 @@ class GGUFDiscovery:
                 context_length=context_length,
                 capabilities=capabilities,
                 quantization=quantization,
-                vram_required_gb=vram_required,
+                vram_required_gb=vram_gb,
                 parameter_count_b=param_count_b,
                 speed_tier="medium",
                 cost_per_1k_tokens=None,
                 tags=["local", "gguf"],
-                metadata={"gguf_metadata": metadata},
+                metadata={"gguf_path": str(gguf_path), "family": meta.get("family")},
             )
-        except ImportError:
-            logger.warning(
-                "gguf package not installed. Install with: pip install velune[gguf] "
-                "to enable GGUF model discovery."
-            )
-            return None
         except Exception:
+            logger.debug("Failed to build descriptor for %s", gguf_path, exc_info=True)
             return None
 
-    def _estimate_vram(self, param_count_b: float, quantization: str) -> float | None:
-        """Estimate required VRAM in GB."""
+    def _estimate_vram(self, param_count_b: float | None, quantization: str | None) -> float | None:
         if not param_count_b:
             return None
-
         quant_lower = (quantization or "").lower()
-        if "q4_k_m" in quant_lower or "q4" in quant_lower:
-            bytes_per_param = 0.55
-        elif "q8_0" in quant_lower or "q8" in quant_lower:
-            bytes_per_param = 1.0
+        if "q4" in quant_lower:
+            bpp = 0.55
+        elif "q8" in quant_lower:
+            bpp = 1.0
         elif "fp16" in quant_lower or "f16" in quant_lower:
-            bytes_per_param = 2.0
+            bpp = 2.0
         else:
-            bytes_per_param = 0.55  # default fallback
-
-        vram_gb = (param_count_b * bytes_per_param) + 0.5
-        return vram_gb
+            bpp = 0.55
+        return param_count_b * bpp + 0.5
 
     def _classify_capabilities(self, filename: str) -> ModelCapabilityProfile:
-        """Classify capabilities from filename."""
-        filename_lower = filename.lower()
-
+        lower = filename.lower()
         profile = ModelCapabilityProfile()
-
-        if any(name in filename_lower for name in ["coder", "code"]):
+        if any(kw in lower for kw in ("coder", "code")):
             profile.coding = CapabilityLevel.INTERMEDIATE
         else:
             profile.coding = CapabilityLevel.BASIC
-
         profile.reasoning = CapabilityLevel.BASIC
         profile.instruction_following = CapabilityLevel.BASIC
-
         return profile
-
-    def _extract_quantization(self, filename: str) -> str:
-        """Extract quantization from filename."""
-        filename_lower = filename.lower()
-
-        if "q4_k_m" in filename_lower:
-            return "Q4_K_M"
-        elif "q4_0" in filename_lower:
-            return "Q4_0"
-        elif "q4" in filename_lower:
-            return "Q4"
-        elif "q5_k_m" in filename_lower:
-            return "Q5_K_M"
-        elif "q5" in filename_lower:
-            return "Q5"
-        elif "q8_0" in filename_lower:
-            return "Q8_0"
-        elif "q8" in filename_lower:
-            return "Q8"
-        elif "f16" in filename_lower or "fp16" in filename_lower:
-            return "FP16"
-
-        return None

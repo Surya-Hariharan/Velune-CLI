@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 from velune.providers.discovery.gpu import GPUDetector
+
+logger = logging.getLogger("velune.providers.discovery.ollama")
 
 
 class OllamaDiscovery:
@@ -16,6 +19,16 @@ class OllamaDiscovery:
         self.base_url = "http://localhost:11434"
         self.gpu_detector = GPUDetector()
 
+    @classmethod
+    async def is_running(cls) -> bool:
+        """Return True if the Ollama daemon is reachable."""
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.head("http://localhost:11434")
+                return r.status_code < 500
+        except Exception:
+            return False
+
     async def _get_model_details(self, model_name: str) -> dict:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -25,7 +38,6 @@ class OllamaDiscovery:
                 )
                 data = r.json()
                 modelfile = data.get("modelfile", "")
-                # Parse PARAMETER num_ctx from modelfile
                 for line in modelfile.splitlines():
                     if line.strip().upper().startswith("PARAMETER NUM_CTX"):
                         try:
@@ -48,7 +60,6 @@ class OllamaDiscovery:
 
                 gpu_info = self.gpu_detector.detect()
 
-                # Fetch details concurrently for all models to prevent slow sequential network requests!
                 tasks = [self._get_model_details(model["name"]) for model in data.get("models", [])]
                 details_list = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -61,23 +72,16 @@ class OllamaDiscovery:
                     descriptor = self._parse_model(model, gpu_info)
                     if descriptor:
                         models.append(descriptor)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Ollama discovery failed: %s", e)
 
         return models
 
     def _parse_model(self, model_data: dict, gpu_info: dict) -> ModelDescriptor:
-        """Parse model data into descriptor."""
         model_id = model_data["name"]
         details = model_data.get("details", {})
-
-        # Extract quantization from model name
         quantization = self._extract_quantization(model_id)
-
-        # Estimate VRAM based on quantization and parameter count
         vram_gb = self._estimate_vram(details, quantization)
-
-        # Classify capabilities based on model name
         capabilities = self._classify_capabilities(model_id)
 
         return ModelDescriptor(
@@ -96,8 +100,7 @@ class OllamaDiscovery:
             metadata={"details": details},
         )
 
-    def _extract_quantization(self, model_id: str) -> str:
-        """Extract quantization from model ID."""
+    def _extract_quantization(self, model_id: str) -> str | None:
         quant_map = {
             "q4_k_m": "Q4_K_M",
             "q4_0": "Q4_0",
@@ -107,22 +110,18 @@ class OllamaDiscovery:
             "fp16": "FP16",
             "f16": "F16",
         }
-
         model_lower = model_id.lower()
         for key, value in quant_map.items():
             if key in model_lower:
                 return value
         return None
 
-    def _estimate_vram(self, details: dict, quantization: str) -> float:
-        """Estimate VRAM requirements."""
+    def _estimate_vram(self, details: dict, quantization: str | None) -> float | None:
         param_count = details.get("parameter_count", 0)
-        if param_count == 0:
+        if not param_count:
             return None
-
-        # Rough VRAM estimation based on quantization
         vram_per_param_gb = {
-            None: 2.0,      # FP16
+            None: 2.0,
             "FP16": 2.0,
             "F16": 2.0,
             "Q8_0": 1.0,
@@ -131,45 +130,35 @@ class OllamaDiscovery:
             "Q4_K_M": 0.5,
             "Q4_0": 0.5,
         }
-
         vram_per_param = vram_per_param_gb.get(quantization, 0.5)
-        return (param_count * vram_per_param) / 1e9  # Convert to GB
+        return (param_count * vram_per_param) / 1e9
 
     def _classify_capabilities(self, model_id: str) -> ModelCapabilityProfile:
-        """Classify model capabilities based on name."""
         model_lower = model_id.lower()
-
         profile = ModelCapabilityProfile()
 
-        # Coding capability
         if any(name in model_lower for name in ["coder", "code", "deepseek-coder", "qwen-coder"]):
             profile.coding = CapabilityLevel.ADVANCED
         elif any(name in model_lower for name in ["llama", "mistral", "qwen"]):
             profile.coding = CapabilityLevel.INTERMEDIATE
 
-        # Reasoning capability
         if any(name in model_lower for name in ["r1", "reason", "deepseek-r1"]):
             profile.reasoning = CapabilityLevel.ADVANCED
         elif any(name in model_lower for name in ["qwq", "qwen"]):
             profile.reasoning = CapabilityLevel.INTERMEDIATE
 
-        # Planning capability
         if profile.reasoning >= CapabilityLevel.INTERMEDIATE:
             profile.planning = CapabilityLevel.INTERMEDIATE
 
-        # Summarization
         if any(name in model_lower for name in ["llama", "mistral"]):
             profile.summarization = CapabilityLevel.INTERMEDIATE
 
-        # Instruction following
         if "instruct" in model_lower or "chat" in model_lower:
             profile.instruction_following = CapabilityLevel.INTERMEDIATE
 
-        # Long context
         if any(name in model_lower for name in ["long", "32k", "128k"]):
             profile.long_context = CapabilityLevel.INTERMEDIATE
 
-        # Tool use
         if profile.instruction_following >= CapabilityLevel.INTERMEDIATE:
             profile.tool_use = CapabilityLevel.INTERMEDIATE
 

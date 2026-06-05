@@ -43,37 +43,26 @@ class LlamaCppProvider(ModelProvider):
 
     def _resolve_model_path(self, model_id: str) -> Path:
         """Resolve the GGUF model path from model ID."""
-        path = Path(model_id)
-        if path.is_absolute() and path.exists():
-            return path
+        from velune.providers.local_paths import get_model_path, save_model_path
+        from velune.providers.local_resolver import LocalModelResolver
 
-        # Check relative to home
-        home_path = Path.home() / model_id
-        if home_path.exists():
-            return home_path
+        # 1. Check persistent cache first
+        cached = get_model_path(model_id)
+        if cached:
+            return cached
 
-        # Check relative to models_dir
-        models_dir_path = self._models_dir / model_id
-        if models_dir_path.exists():
-            return models_dir_path
+        # 2. Ask LocalModelResolver (absolute, relative, stem scan)
+        resolver = LocalModelResolver()
+        found = resolver.resolve_model_path(model_id)
+        if found:
+            save_model_path(model_id, found)
+            return found
 
-        # Scan fallback paths
-        search_paths = [
-            Path.home() / "models",
-            Path.cwd() / "models",
-            Path.home() / ".cache" / "huggingface" / "hub",
-        ]
-        for sp in search_paths:
-            if not sp.exists():
-                continue
-            # Try exact match or relative match
-            test_path = sp / model_id
-            if test_path.exists():
-                return test_path
-            # Search by filename stem
-            for f in sp.rglob("*.gguf"):
-                if f.name == model_id or f.stem == model_id:
-                    return f
+        # 3. Interactive prompt — only in a real terminal
+        prompted = resolver.prompt_for_path(model_id)
+        if prompted:
+            save_model_path(model_id, prompted)
+            return prompted
 
         raise FileNotFoundError(f"GGUF model file not found for ID: {model_id}")
 
@@ -97,14 +86,10 @@ class LlamaCppProvider(ModelProvider):
         return llm
 
     async def list_models(self) -> list[ModelDescriptor]:
-        """List local GGUF models."""
+        """List local GGUF models via filesystem discovery."""
         await self.initialize()
-
         from velune.providers.discovery.gguf import GGUFDiscovery
-        discovery = GGUFDiscovery()
-        discovery.search_paths = [self._models_dir] + discovery.search_paths
-
-        return await discovery.discover()
+        return await GGUFDiscovery().discover()
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         """Non-blocking in-process inference using asyncio thread offloading."""
