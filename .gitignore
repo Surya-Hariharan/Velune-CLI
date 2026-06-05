@@ -1,81 +1,98 @@
-# .gitignore - Standard Python project ignores
-
-# Byte-compiled / optimized / DLL files
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyc
 *.pyo
 *.pyd
+*.so
 
-# Virtual environments
+# ── Virtual environments ───────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 ENV/
+.python-version
 
-# Testing / type checking / linter caches
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.tox/
-.nox/
-
-# Packaging and build output
+# ── Packaging & build ─────────────────────────────────────────────────────────
 build/
 dist/
 *.egg-info/
 *.egg
 pip-wheel-metadata/
+RECORD
+WHEEL
 
-# Coverage and reports
+# ── Test / lint / type-check caches ───────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.benchmarks/
+
+# ── Coverage & reports ────────────────────────────────────────────────────────
 .coverage
 .coverage.*
 coverage.xml
 htmlcov/
+*.lcov
 
-# Environment and secrets
+# ── Environment & secrets ─────────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
-.python-version
+*.pem
+*.key
+*.p12
+*.pfx
 pip-selfcheck.json
 
-# Editor and OS files
+# ── Editor & OS artefacts ─────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.sublime-workspace
 .DS_Store
 Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
 
-# Logs and local databases
+# ── Logs & local databases ────────────────────────────────────────────────────
 *.log
 *.sqlite
 *.sqlite3
 *.db
-
-# Jupyter notebooks
-.ipynb_checkpoints/
-
-# PEP 582; local packages
-__pypackages__/
-
-# Cache / miscellaneous
-.cache/
-.eggs/
-.ropeproject/
-*.swp
-*.swo
-
-# Project-specific local artifacts
-.velune/
-qdrant_db/
-
-# SQLite lock files and journals
 *.db-wal
 *.db-shm
 *.sqlite-wal
 *.sqlite-shm
 
-# Local config overrides
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── PEP 582 local packages ────────────────────────────────────────────────────
+__pypackages__/
+
+# ── Misc caches ───────────────────────────────────────────────────────────────
+.cache/
+.eggs/
+.ropeproject/
+*.swp
+*.swo
+*.bak
+*.orig
+
+# ── Project-specific local artefacts ─────────────────────────────────────────
+.velune/
+.claude/
+qdrant_db/
+
+# ── Local config overrides (never commit personal overrides) ──────────────────
 velune.local.toml
 local_settings.toml
+
+# ── Temporary / scratch files ─────────────────────────────────────────────────
+*.tmp
+*.temp
+scratch/
+tmp/
