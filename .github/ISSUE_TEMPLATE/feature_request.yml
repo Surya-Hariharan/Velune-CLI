@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest a new feature or enhancement
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement to Velune!
+        For large features, consider opening a discussion first to align on design before writing code.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this feature solve? What is the current pain point?
+      placeholder: When I try to do X, I have to manually do Y which is tedious because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature you'd like. Be as specific as you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider? Why is the proposed solution better?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Velune does this affect?
+      options:
+        - CLI / commands
+        - Provider system (cloud or local)
+        - Repository cognition / AST / search
+        - Council orchestrator / agents
+        - Memory / Qdrant / BM25
+        - Security / sandbox
+        - Documentation
+        - CI / tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, related issues, prior art, or anything else that helps.

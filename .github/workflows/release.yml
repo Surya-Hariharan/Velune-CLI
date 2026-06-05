@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write
-  id-token: write
+  id-token: write   # required for PyPI trusted publishing (OIDC)
 
 jobs:
   lint:
@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +49,7 @@ jobs:
           cache: pip
 
       - name: Install package and dev dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" pytest-timeout
 
       - name: Run tests
         run: pytest tests/ -v --tb=short --timeout=30
@@ -78,7 +78,7 @@ jobs:
       - name: Verify dist artifacts
         run: |
           ls dist/
-          test -n "$(ls dist/*.whl 2>/dev/null)" || (echo "Missing .whl" && exit 1)
+          test -n "$(ls dist/*.whl 2>/dev/null)"    || (echo "Missing .whl"    && exit 1)
           test -n "$(ls dist/*.tar.gz 2>/dev/null)" || (echo "Missing .tar.gz" && exit 1)
           echo "dist/ OK: $(ls dist/)"
 
@@ -106,10 +106,14 @@ jobs:
           name: dist-${{ github.ref_name }}
           path: dist/
 
-      - name: Publish to PyPI
+      - name: Publish to PyPI (trusted publishing / OIDC)
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_TOKEN }}
+        # No password needed when using OIDC trusted publishing.
+        # Configure the "pypi" environment on GitHub and add this repo
+        # as a trusted publisher on pypi.org.
+        # Fallback: set PYPI_TOKEN secret and uncomment the next line:
+        # with:
+        #   password: ${{ secrets.PYPI_TOKEN }}
 
   github-release:
     name: Create GitHub Release
@@ -127,13 +131,11 @@ jobs:
       - name: Extract CHANGELOG excerpt
         id: changelog
         run: |
-          # Pull the section for the current tag version (e.g. ## [0.2.0] or ## 0.2.0)
           VERSION="${GITHUB_REF_NAME#v}"
-          NOTES=$(awk "/^## [\[\(]?${VERSION}[\]\)]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
+          NOTES=$(awk "/^## \[?${VERSION}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
           if [ -z "$NOTES" ]; then
             NOTES="See [CHANGELOG.md](CHANGELOG.md) for details."
           fi
-          # Write to a file to preserve newlines safely
           echo "$NOTES" > release_notes.md
 
       - name: Create GitHub Release

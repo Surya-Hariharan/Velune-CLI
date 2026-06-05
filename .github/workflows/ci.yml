@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-flight runs for the same branch/PR on new pushes
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint
@@ -35,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -46,10 +51,18 @@ jobs:
           cache: pip
 
       - name: Install package and dev dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" pytest-timeout
 
       - name: Run tests
         run: pytest tests/ -v --tb=short --timeout=30
+
+      - name: Upload coverage report
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: .coverage
+          retention-days: 7
 
   build:
     name: Build
@@ -73,7 +86,7 @@ jobs:
       - name: Verify dist artifacts
         run: |
           ls dist/
-          test -n "$(ls dist/*.whl 2>/dev/null)" || (echo "Missing .whl" && exit 1)
+          test -n "$(ls dist/*.whl 2>/dev/null)"    || (echo "Missing .whl"    && exit 1)
           test -n "$(ls dist/*.tar.gz 2>/dev/null)" || (echo "Missing .tar.gz" && exit 1)
           echo "dist/ OK: $(ls dist/)"
 
