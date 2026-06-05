@@ -24,6 +24,27 @@ async def run_preflight_check(container: ServiceContainer, console: Console | No
     if not isinstance(workspace, Path):
         workspace = Path(workspace)
 
+    # Guard: workspace must exist and be a git repository. On a brand-new
+    # install neither will be true — show a single targeted message and bail
+    # early rather than cascading through checks that will all fail.
+    if not workspace.exists() or not (workspace / ".git").exists():
+        if console:
+            console.print()
+            console.print(
+                Panel(
+                    Text.from_markup(
+                        "This doesn't look like a code project yet. Navigate to your project\n"
+                        "folder and run [bold green]velune workspace init[/bold green] first."
+                    ),
+                    title="[bold yellow]⚠️  Not a Project Directory[/bold yellow]",
+                    border_style="yellow",
+                    box=ROUNDED,
+                    padding=(1, 2),
+                )
+            )
+            console.print()
+        return False
+
     # We check for the presence of the Tree-sitter AST index folder or `.velune` directory structure
     if not (workspace / ".velune" / "index").exists():
         issues.append(

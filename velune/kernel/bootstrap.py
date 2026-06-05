@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -6,6 +7,8 @@ from typing import Any
 from velune.kernel.config import VeluneConfig
 from velune.kernel.lifecycle import LifecycleCoordinator
 from velune.kernel.registry import ServiceContainer
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,9 +42,26 @@ class RuntimeBootstrapper:
         registry = BackgroundTaskRegistry()
         env.container.register_instance("runtime.task_registry", registry)
 
+        # Modules with lifecycle_key set are lifecycle-critical (startup/shutdown
+        # managed by LifecycleCoordinator). A factory failure aborts bootstrap.
+        # Modules with lifecycle_key=None are optional; a factory failure is
+        # logged and that module is skipped, letting the rest of the system start.
         resolved = self._topological_sort()
         for module in resolved:
-            instance = module.factory(env)
+            try:
+                instance = module.factory(env)
+            except Exception as exc:
+                if module.lifecycle_key:
+                    _logger.critical(
+                        "Critical module '%s' (%s) failed to initialize: %s",
+                        module.name, module.container_key, exc,
+                    )
+                    raise
+                _logger.warning(
+                    "Optional module '%s' (%s) failed to initialize, skipping: %s",
+                    module.name, module.container_key, exc,
+                )
+                continue
             env.container.register_instance(module.container_key, instance)
             if module.lifecycle_key:
                 env.lifecycle.register(module.lifecycle_key, instance)

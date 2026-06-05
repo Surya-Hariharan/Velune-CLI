@@ -110,7 +110,18 @@ def create_app() -> typer.Typer:
                 Console().print(f"Velune v{__version__}")
             raise typer.Exit()
 
-        runtime = build_runtime(workspace=workspace, config_path=config_path, verbose=verbose)
+        try:
+            runtime = build_runtime(workspace=workspace, config_path=config_path, verbose=verbose)
+        except Exception as e:
+            if json_mode:
+                import json
+                print(json.dumps({"error": f"Velune failed to start: {e}"}))
+            else:
+                Console().print(
+                    f"[bold red]Velune failed to start:[/bold red] {e}\n"
+                    "Run [bold cyan]`velune doctor check`[/bold cyan] to diagnose the issue."
+                )
+            raise typer.Exit(1)
 
         ctx.obj = CLIContext(
             workspace=workspace,

@@ -64,8 +64,18 @@ def build_runtime(
     container.register_instance("runtime.lifecycle", lifecycle)
 
     # Detect and persist GPU info
-    from velune.providers.discovery.gpu import GPUDetector
-    gpu_info = GPUDetector().detect()
+    try:
+        from velune.providers.discovery.gpu import GPUDetector
+        gpu_info = GPUDetector().detect()
+    except Exception as e:
+        logger.warning("GPU detection failed, using safe defaults: %s", e)
+        gpu_info = {
+            "has_gpu": False,
+            "gpu_type": None,
+            "vram_total_gb": None,
+            "vram_free_gb": None,
+            "cuda_available": False,
+        }
     container.register_instance("runtime.gpu_info", gpu_info)
 
     # 3. Initialize and bootstrap declarative subsystems in dependency order

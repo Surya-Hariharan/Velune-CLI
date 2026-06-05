@@ -27,8 +27,8 @@ def run_command(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
-    import asyncio
-    asyncio.run(_run_command_async(cli_context, task, dry_run, force))
+    from velune.core.event_loop import submit
+    submit(_run_command_async(cli_context, task, dry_run, force))
 
 
 async def _run_command_async(

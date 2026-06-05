@@ -76,6 +76,7 @@ def daemon_status():
     """Display daemon running status and PID."""
     if DaemonClient.is_running():
         try:
+            # Intentional: sync CLI callback, not inside running loop
             result = asyncio.run(DaemonClient.send_command("ping"))
             console.print(f"[green]Daemon running (PID: {result['pid']})[/green]")
         except Exception as e:

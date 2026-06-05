@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
+
+from velune.core.event_loop import submit
 
 import typer
 from rich.console import Console
@@ -44,7 +45,7 @@ def mcp_connect(
         finally:
             await client.disconnect()
 
-    asyncio.run(_connect_and_list())
+    submit(_connect_and_list())
 
 
 @mcp_cmd.command("serve")
@@ -61,7 +62,7 @@ def mcp_serve_subcmd(ctx: typer.Context) -> None:
     import logging
     logging.getLogger("velune").setLevel(logging.WARNING)
 
-    asyncio.run(server.run_stdio())
+    submit(server.run_stdio())
 
 
 def mcp_serve(ctx: typer.Context) -> None:
@@ -77,4 +78,4 @@ def mcp_serve(ctx: typer.Context) -> None:
     import logging
     logging.getLogger("velune").setLevel(logging.WARNING)
 
-    asyncio.run(server.run_stdio())
+    submit(server.run_stdio())

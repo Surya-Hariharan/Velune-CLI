@@ -41,8 +41,8 @@ def workspace_init(
     if not cli_context.json_mode:
         console.print("[green]✓[/green] Created .velune configuration directory structure.")
 
-    import asyncio
-    asyncio.run(_workspace_init_async(cli_context, path, velune_dir, force))
+    from velune.core.event_loop import submit
+    submit(_workspace_init_async(cli_context, path, velune_dir, force))
 
 
 async def _workspace_init_async(
@@ -134,8 +134,8 @@ def workspace_status(
             console.print("[dim]Use 'velune workspace init' to initialize.[/dim]")
         return
 
-    import asyncio
-    asyncio.run(_workspace_status_async(cli_context, path, velune_dir))
+    from velune.core.event_loop import submit
+    submit(_workspace_status_async(cli_context, path, velune_dir))
 
 
 async def _workspace_status_async(
