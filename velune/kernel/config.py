@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import toml
@@ -123,6 +123,50 @@ class VeluneConfig(BaseModel):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
+
+    def save_to_project(self, workspace: Path) -> Path:
+        """Write only non-default values to .velune/config.toml.
+
+        Returns the path the file was written to.
+        """
+        project_config_dir = workspace / ".velune"
+        project_config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = project_config_dir / "config.toml"
+
+        current_data = self.model_dump()
+        default_data = VeluneConfig().model_dump()
+        non_default = _strip_defaults(current_data, default_data)
+
+        with open(config_path, "w", encoding="utf-8") as f:
+            toml.dump(non_default, f)
+
+        return config_path
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, returning a new dict."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _strip_defaults(current: dict, defaults: dict) -> dict:
+    """Return only entries in *current* that differ from *defaults*."""
+    result: dict = {}
+    for key, value in current.items():
+        if key not in defaults:
+            result[key] = value
+        elif isinstance(value, dict) and isinstance(defaults[key], dict):
+            stripped = _strip_defaults(value, defaults[key])
+            if stripped:
+                result[key] = stripped
+        elif value != defaults[key]:
+            result[key] = value
+    return result
 
 
 def get_default_config() -> VeluneConfig:

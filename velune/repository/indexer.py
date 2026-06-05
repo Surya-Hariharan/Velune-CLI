@@ -1,6 +1,5 @@
 """Incremental symbol and repository metadata indexer."""
 
-import fnmatch
 import hashlib
 import json
 import logging
@@ -18,19 +17,63 @@ from velune.repository.schemas import (
 
 logger = logging.getLogger("velune.repository.indexer")
 
-# Hard-coded secret-file guard — these are skipped regardless of .veluneignore.
-_SECRET_EXACT: frozenset[str] = frozenset({
-    ".env", ".env.local", ".env.production", ".env.staging",
-    "id_rsa", "id_ed25519",
-})
-_SECRET_GLOBS: tuple[str, ...] = ("*.pem",)
 
+class SecretFileDetector:
+    """Detects files that are likely to contain credentials or private keys.
 
-def _is_secret_file(file_path: Path) -> bool:
-    name = file_path.name
-    if name in _SECRET_EXACT:
-        return True
-    return any(fnmatch.fnmatch(name, pat) for pat in _SECRET_GLOBS)
+    Checks are layered: filename patterns first (fast, no I/O), then file
+    extension, then an optional shallow content scan of the first 500 chars.
+    The content scan is only used by callers that have already read the file
+    for another purpose — the indexer never reads a file solely to check it.
+    """
+
+    SECRET_PATTERNS = [
+        ".env", ".env.local", ".env.production", ".env.staging",
+        ".env.development", "id_rsa", "id_dsa", "id_ed25519",
+        "id_ecdsa", ".netrc", ".aws/credentials", "credentials.json",
+        "service-account.json", "gcp-credentials.json",
+    ]
+    SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".crt", ".cer"]
+    SECRET_CONTENT_PATTERNS = [
+        "PRIVATE KEY", "BEGIN RSA PRIVATE", "BEGIN EC PRIVATE",
+        "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    ]
+
+    def is_likely_secret(self, file_path: str, content: str | None = None) -> bool:
+        """Return True if the file looks like a secrets/credentials file.
+
+        Args:
+            file_path: Relative or absolute path string (forward-slashes preferred).
+            content: Optional file content — only first 500 chars are scanned.
+        """
+        normalised = file_path.replace("\\", "/")
+        name = normalised.split("/")[-1]
+        suffix = ("." + name.rsplit(".", 1)[-1]).lower() if "." in name else ""
+
+        # 1. Filename / path suffix match
+        for pattern in self.SECRET_PATTERNS:
+            if "/" in pattern:
+                # Path-component pattern (e.g. ".aws/credentials")
+                if normalised.endswith(pattern):
+                    return True
+            elif name == pattern:
+                return True
+
+        # 2. Extension match
+        if suffix in self.SECRET_EXTENSIONS:
+            return True
+
+        # 3. Shallow content scan
+        if content is not None:
+            excerpt = content[:500]
+            for marker in self.SECRET_CONTENT_PATTERNS:
+                if marker in excerpt:
+                    return True
+
+        return False
+
+    def get_warning(self, file_path: str) -> str:
+        return f"⚠️  SECURITY: '{file_path}' looks like a secrets file and was not indexed."
 
 
 class RepositoryIndexer:
@@ -47,6 +90,7 @@ class RepositoryIndexer:
         self.parser = ASTParser()
         self.scanner = FilesystemScanner(self.root_path)
         self.firewall = firewall or CognitiveFirewall()
+        self.secret_detector = SecretFileDetector()
 
     def index(self, force: bool = False) -> RepositorySnapshot:
         """Indexes the workspace, loading cached results incrementally for unmodified files."""
@@ -65,6 +109,7 @@ class RepositoryIndexer:
         files: list[RepositoryFile] = []
         all_symbols: list[RepositorySymbol] = []
         new_cache: dict[str, dict] = {}
+        skipped_secrets: list[str] = []
 
         # Scan code files
         code_files = self.scanner.scan_code_files()
@@ -74,8 +119,9 @@ class RepositoryIndexer:
 
             # SECURITY: hard gate — never index secret/credential files, even if
             # they somehow passed the scanner's .veluneignore filter.
-            if _is_secret_file(file_path):
-                logger.warning("SECURITY: Skipping potential secret file: %s", rel_path)
+            if self.secret_detector.is_likely_secret(rel_path):
+                logger.warning(self.secret_detector.get_warning(rel_path))
+                skipped_secrets.append(rel_path)
                 continue
 
             try:
@@ -155,7 +201,8 @@ class RepositoryIndexer:
         summary = {
             "total_files": len(files),
             "total_symbols": len(all_symbols),
-            "languages": self._compile_language_summary(files)
+            "languages": self._compile_language_summary(files),
+            "skipped_secrets": skipped_secrets,
         }
 
         return RepositorySnapshot(

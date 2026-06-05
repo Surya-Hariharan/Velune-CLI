@@ -77,6 +77,7 @@ async def _workspace_init_async(
     num_files = len(snapshot.files)
     num_symbols = len(snapshot.symbols)
     num_edges = len(snapshot.edges)
+    skipped_secrets = snapshot.summary.get("skipped_secrets", [])
 
     languages = {}
     for f in snapshot.files:
@@ -96,7 +97,8 @@ async def _workspace_init_async(
             "languages": languages,
             "parsed_ast_symbols": num_symbols,
             "dependency_edges": num_edges,
-            "active_branch": git_branch
+            "active_branch": git_branch,
+            "skipped_secrets": skipped_secrets,
         }))
     else:
         console.print()
@@ -117,6 +119,24 @@ async def _workspace_init_async(
                 title="[bold green]Cognitive Priming Success[/bold green]"
             )
         )
+
+        if skipped_secrets:
+            secret_lines = "\n".join(f"  [bold yellow]•[/bold yellow] {p}" for p in skipped_secrets)
+            console.print(
+                Panel(
+                    Text.from_markup(
+                        "[bold yellow]Velune detected and protected the following files from being indexed:[/bold yellow]\n\n"
+                        + secret_lines
+                        + "\n\n[dim]These files matched known secrets/credentials patterns. "
+                        "Add them to [bold].veluneignore[/bold] to silence this notice, "
+                        "or ensure they are listed in [bold].gitignore[/bold].[/dim]"
+                    ),
+                    title="[bold yellow]🔒 Secrets Protected[/bold yellow]",
+                    border_style="yellow",
+                    box=ROUNDED,
+                    padding=(1, 2),
+                )
+            )
 
     await lifecycle.shutdown()
 
