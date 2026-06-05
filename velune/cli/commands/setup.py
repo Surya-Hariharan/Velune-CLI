@@ -1,0 +1,168 @@
+"""Interactive provider setup wizard — stores keys in the OS keychain."""
+
+from __future__ import annotations
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
+
+from velune.providers.keystore import get_key, has_key, save_key
+
+console = Console()
+
+PROVIDER_METADATA: dict[str, dict] = {
+    "ollama": {
+        "label": "Ollama (local — free, no key needed)",
+        "requires_key": False,
+        "free": True,
+        "url": "https://ollama.com",
+    },
+    "groq": {
+        "label": "Groq (cloud — free tier, very fast)",
+        "requires_key": True,
+        "free": True,
+        "key_label": "Groq API key",
+        "get_key_url": "https://console.groq.com/keys",
+    },
+    "openai": {
+        "label": "OpenAI (cloud — GPT-4o, paid)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "OpenAI API key",
+        "get_key_url": "https://platform.openai.com/api-keys",
+    },
+    "anthropic": {
+        "label": "Anthropic (cloud — Claude, paid)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "Anthropic API key",
+        "get_key_url": "https://console.anthropic.com",
+    },
+    "xai": {
+        "label": "xAI (cloud — Grok, paid)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "xAI API key",
+        "get_key_url": "https://console.x.ai",
+    },
+    "google": {
+        "label": "Google Gemini (cloud — free quota available)",
+        "requires_key": True,
+        "free": True,
+        "key_label": "Google API key",
+        "get_key_url": "https://aistudio.google.com/app/apikey",
+    },
+    "openrouter": {
+        "label": "OpenRouter (cloud — one key, 100+ models)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "OpenRouter API key",
+        "get_key_url": "https://openrouter.ai/keys",
+    },
+}
+
+
+def run_setup_wizard() -> None:
+    """Run the interactive API key setup wizard."""
+    console.print(Panel(
+        "[bold cyan]Velune Provider Setup[/bold cyan]\n"
+        "[dim]Configure which AI providers you want to use.[/dim]\n"
+        "[dim]Keys are stored securely in your OS keychain.[/dim]",
+        border_style="cyan", padding=(0, 1),
+    ))
+    console.print()
+
+    chosen = _select_providers()
+    if not chosen:
+        console.print("[yellow]No providers selected. Run `velune setup` any time.[/yellow]")
+        return
+
+    configured: list[str] = []
+    for pid in chosen:
+        meta = PROVIDER_METADATA[pid]
+        if not meta.get("requires_key"):
+            console.print(f"[green]✓[/green] {meta['label']} — no key required")
+            configured.append(pid)
+            continue
+
+        console.print(f"\n[cyan]{meta['label']}[/cyan]")
+        console.print(f"  [dim]Get your key: {meta.get('get_key_url', '')}[/dim]")
+
+        if has_key(pid):
+            existing = get_key(pid)
+            masked = _mask_key(existing)
+            overwrite = Confirm.ask(
+                f"  Key already configured ({masked}). Replace it?",
+                default=False,
+            )
+            if not overwrite:
+                configured.append(pid)
+                continue
+
+        key = Prompt.ask(
+            f"  Enter {meta['key_label']}",
+            password=True,
+        )
+
+        if not key.strip():
+            console.print("  [yellow]Skipped — no key entered.[/yellow]")
+            continue
+
+        save_key(pid, key.strip())
+        console.print("  [green]✓ Saved to OS keychain[/green]")
+        configured.append(pid)
+
+    console.print()
+    if configured:
+        console.print(
+            f"[bold green]✓ Configured providers:[/bold green] {', '.join(configured)}"
+        )
+        console.print("[dim]Run `velune doctor` to verify connectivity.[/dim]")
+
+
+def _select_providers() -> list[str]:
+    table = Table(border_style="dim", padding=(0, 1))
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Provider", style="cyan")
+    table.add_column("Type", style="dim")
+    table.add_column("Cost", style="dim")
+    table.add_column("Status")
+
+    provider_ids = list(PROVIDER_METADATA.keys())
+    for i, pid in enumerate(provider_ids, 1):
+        meta = PROVIDER_METADATA[pid]
+        cost = "[green]free[/green]" if meta.get("free") else "[dim]paid[/dim]"
+        status = "[green]✓ configured[/green]" if has_key(pid) else "[dim]not set[/dim]"
+        ptype = "local" if not meta.get("requires_key") else "cloud"
+        table.add_row(str(i), meta["label"], ptype, cost, status)
+
+    console.print(table)
+    console.print()
+
+    raw = Prompt.ask(
+        "Select providers to configure [dim](comma-separated numbers, e.g. 1,2,3)[/dim]",
+        default="1",
+    )
+
+    selected: list[str] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            idx = int(part) - 1
+            if 0 <= idx < len(provider_ids):
+                selected.append(provider_ids[idx])
+    return selected
+
+
+def _mask_key(key: str | None) -> str:
+    if not key:
+        return "***"
+    if len(key) <= 12:
+        return "*" * len(key)
+    return key[:8] + "..." + key[-4:]
+
+
+def setup_command() -> None:
+    """Configure AI provider API keys."""
+    run_setup_wizard()

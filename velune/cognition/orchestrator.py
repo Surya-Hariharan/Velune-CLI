@@ -538,6 +538,14 @@ class CouncilOrchestrator:
                     )
                     arbitration_dict = arbitration.to_dict()
 
+                _est_prompt = len(prompt.encode()) // 4
+                _est_completion = len(coder_proposal.encode()) // 4
+                _est_total = _est_prompt + _est_completion
+                if progress_callback:
+                    progress_callback(
+                        f"[Usage] ~{_est_total:,} tokens across 1 agent (estimated)"
+                    )
+
                 logger.info("Executed %s tier in %.2fs", tier.value, time.time() - start_time)
                 return {
                     "tier": tier.value,
@@ -835,6 +843,24 @@ class CouncilOrchestrator:
                             "rejected_reason": ""
                         }]
                     )
+
+            # Token usage summary — estimate from text lengths since agent
+            # responses are strings, not InferenceResponse objects.
+            _agent_texts = [
+                t for t in [
+                    coder_proposal,
+                    final_summary,
+                    getattr(reviewer_report, "model_dump", lambda: {})().get("critical_issues", ""),
+                ] if t
+            ]
+            _total_prompt = len(prompt.encode()) // 4
+            _total_completion = sum(len(str(t).encode()) // 4 for t in _agent_texts)
+            _agent_count = 1 + (1 if tier_level >= 3 else 0) + (4 if tier_level == 4 else 0)
+            if progress_callback:
+                progress_callback(
+                    f"[Usage] ~{_total_prompt + _total_completion:,} tokens "
+                    f"across {_agent_count} agents (estimated)"
+                )
 
             logger.info("Executed %s tier in %.2fs", tier.value, time.time() - start_time)
             return {

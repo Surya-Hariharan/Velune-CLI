@@ -67,6 +67,15 @@ def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
     return frames
 
 
+def _check_ollama_live() -> bool:
+    try:
+        import httpx
+        r = httpx.get("http://localhost:11434/api/tags", timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
 def _show_startup_animation(console: Console, workspace: Path, config_path: Path | None) -> None:
     """Show startup animation only in interactive TTY sessions."""
     import sys
@@ -99,6 +108,7 @@ def create_app() -> typer.Typer:
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
         version: bool = typer.Option(False, "--version", help="Show version and exit"),
         json_mode: bool = typer.Option(False, "--json", help="Enable machine-readable JSON output mode"),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Auto-accept all file changes without prompting"),
     ) -> None:
         """Initialize process-wide runtime state for every CLI invocation."""
 
@@ -109,6 +119,10 @@ def create_app() -> typer.Typer:
             else:
                 Console().print(f"Velune v{__version__}")
             raise typer.Exit()
+
+        if yes:
+            from velune.execution.diff_preview import configure as _configure_diff
+            _configure_diff(auto_accept=True)
 
         try:
             runtime = build_runtime(workspace=workspace, config_path=config_path, verbose=verbose)
@@ -123,12 +137,15 @@ def create_app() -> typer.Typer:
                 )
             raise typer.Exit(1)
 
+        runtime.container.register_instance("runtime.auto_accept", yes)
+
         ctx.obj = CLIContext(
             workspace=workspace,
             config_path=config_path,
             verbose=verbose,
             runtime=runtime,
             json_mode=json_mode,
+            yes=yes,
         )
 
         if ctx.invoked_subcommand is None:
@@ -141,6 +158,26 @@ def create_app() -> typer.Typer:
                     "version": __version__
                 }))
             else:
+                from velune.providers.keystore import list_configured_providers
+                configured = list_configured_providers()
+                ollama_live = _check_ollama_live()
+
+                if not configured and not ollama_live:
+                    runtime.console.print(Panel(
+                        "[yellow]No AI providers configured.[/yellow]\n"
+                        "[dim]Velune needs at least one provider to work.[/dim]",
+                        border_style="yellow",
+                    ))
+                    run_setup = typer.confirm("Run setup now?", default=True)
+                    if run_setup:
+                        from velune.cli.commands.setup import run_setup_wizard
+                        run_setup_wizard()
+                    else:
+                        runtime.console.print(
+                            "[dim]Run `velune setup` any time to configure providers.[/dim]"
+                        )
+                    raise typer.Exit(0)
+
                 _show_startup_animation(runtime.console, workspace, config_path)
                 runtime.console.print(
                     Panel(

@@ -30,4 +30,6 @@ class InferenceResponse(BaseModel):
     finish_reason: str
     tokens_used: int
     latency_ms: float
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)

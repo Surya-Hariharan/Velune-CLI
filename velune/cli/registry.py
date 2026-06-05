@@ -21,6 +21,7 @@ from velune.cli.commands import (
     memory_cmd,
     models_cmd,
     run_command,
+    setup_command,
     workspace_cmd,
 )
 from velune.kernel.registry import ServiceContainer
@@ -61,6 +62,7 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     app.command(name="chat")(chat_command)
     app.command(name="init")(init_command)
     app.command(name="run")(run_command)
+    app.command(name="setup")(setup_command)
     app.command(name="mcp-serve")(mcp_serve)
     app.add_typer(models_cmd, name="models")
     app.add_typer(workspace_cmd, name="workspace")

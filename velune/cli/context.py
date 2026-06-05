@@ -21,6 +21,7 @@ class CLIContext:
     verbose: bool
     runtime: RuntimeContext
     json_mode: bool = False
+    yes: bool = False
 
     @property
     def console(self) -> Console:

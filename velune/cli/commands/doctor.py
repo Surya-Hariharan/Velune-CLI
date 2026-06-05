@@ -66,6 +66,7 @@ def check(
         _check_lm_studio,
         _check_openai_api_key,
         _check_anthropic_api_key,
+        _check_groq,
         _check_velune_dir,
         _check_sqlite,
         _check_qdrant,
@@ -268,6 +269,42 @@ def _check_vram() -> dict:
         return {"name": "Available VRAM", "status": "warn", "message": "Unified or CPU-only memory in use."}
     except Exception as e:
         return {"name": "Available VRAM", "status": "warn", "message": f"Failed to query VRAM: {e}"}
+
+def _check_groq() -> dict:
+    from velune.providers.keystore import get_key, has_key
+    if not has_key("groq"):
+        return {
+            "name": "Groq",
+            "status": "warn",
+            "message": "Not configured — free tier available at console.groq.com/keys",
+        }
+    try:
+        import httpx
+        key = get_key("groq")
+        r = httpx.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            models = r.json().get("data", [])
+            return {
+                "name": "Groq",
+                "status": "ok",
+                "message": f"Connected — {len(models)} models available",
+            }
+        return {
+            "name": "Groq",
+            "status": "fail",
+            "message": f"Auth failed (HTTP {r.status_code}) — check your key",
+        }
+    except Exception as e:
+        return {
+            "name": "Groq",
+            "status": "fail",
+            "message": f"Cannot reach api.groq.com — {e}",
+        }
+
 
 def _check_model_benchmarks() -> dict:
     profile_path = Path.cwd() / ".velune" / "model_profiles.json"

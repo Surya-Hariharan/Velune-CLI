@@ -124,11 +124,14 @@ class OpenAIProvider(ModelProvider):
             data = response.json()
             latency = (time.perf_counter() - start) * 1000.0
 
+            usage = data.get("usage", {})
             return InferenceResponse(
                 content=data["choices"][0]["message"]["content"],
                 model_id=request.model_id,
                 finish_reason=data["choices"][0]["finish_reason"] or "stop",
-                tokens_used=data["usage"]["total_tokens"],
+                tokens_used=usage.get("total_tokens", 0),
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
                 latency_ms=latency,
             )
         except httpx.HTTPError as e:

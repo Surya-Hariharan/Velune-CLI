@@ -59,3 +59,8 @@ def delete_key(provider_id: str) -> None:
 def has_key(provider_id: str) -> bool:
     """Return True if a key is available for *provider_id*."""
     return get_key(provider_id) is not None
+
+
+def list_configured_providers() -> list[str]:
+    """Return provider IDs that have a key in the keyring or environment."""
+    return [pid for pid in _ENV_VARS if has_key(pid)]
