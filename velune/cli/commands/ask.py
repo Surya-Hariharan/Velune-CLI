@@ -42,8 +42,8 @@ def ask_command(
             console.print("[yellow]Empty query. Exiting.[/yellow]")
             return
 
-    from velune.core.event_loop import submit
-    submit(_ask_command_async(cli_context, prompt, council_tier))
+    import asyncio
+    asyncio.run(_ask_command_async(cli_context, prompt, council_tier))
 
 
 async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier: str | None = None) -> None:

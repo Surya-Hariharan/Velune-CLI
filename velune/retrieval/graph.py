@@ -1,8 +1,5 @@
 """Knowledge and repository AST dependency graph traversal retriever."""
 
-
-from velune.kernel.registry import ComponentRegistry
-from velune.repository.cognition import RepositoryCognitionService
 from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalSource
 
 
@@ -21,9 +18,6 @@ class GraphRetriever:
         index will populate the cache, after which graph retrieval works normally.
     """
 
-    def __init__(self) -> None:
-        self.registry = ComponentRegistry()
-
     def retrieve(self, node_id: str, depth: int = 1, top_k: int = 10) -> list[RetrievalHit]:
         """Traverses adjacent AST and symbol imports from the repository cognition service.
 
@@ -33,8 +27,13 @@ class GraphRetriever:
         hits: list[RetrievalHit] = []
 
         try:
-            # Grab the active RepositoryCognitionService from the kernel registry
-            repo_service = self.registry.get(RepositoryCognitionService)
+            # Resolve the active RepositoryCognitionService from the kernel container
+            try:
+                from velune.kernel.registry import get_container
+                repo_service = get_container().get("runtime.repository_cognition")
+            except (KeyError, Exception):
+                return []
+
             if not repo_service:
                 return []
 

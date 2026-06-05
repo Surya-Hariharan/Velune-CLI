@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from rich.console import Console
 
@@ -34,18 +33,4 @@ class CLIContext:
     @property
     def container(self) -> ServiceContainer:
         return self.runtime.container
-
-
-@dataclass
-class DaemonCLIContext:
-    """Thin context that routes commands via daemon client."""
-    client: Any
-    workspace: Path
-    config_path: Path | None = None
-    verbose: bool = False
-    json_mode: bool = False
-
-    @property
-    def console(self) -> Console:
-        from rich.console import Console
-        return Console()
+

@@ -47,12 +47,12 @@ class ModelCapabilityProfile(BaseModel):
 
 class ModelDescriptor(BaseModel):
     """Descriptor for a model."""
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
+    model_config = ConfigDict(extra="allow")
 
-    model_id: str = Field(alias="id")
-    provider_id: str = Field(alias="provider")
-    display_name: str = Field(alias="name")
-    context_length: int = Field(alias="context_window")
+    model_id: str
+    provider_id: str
+    display_name: str
+    context_length: int
     capabilities: Any
     is_local: bool = False
     quantization: str | None = None  # e.g. "Q4_K_M", "Q8_0"

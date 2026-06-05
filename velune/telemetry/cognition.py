@@ -158,48 +158,6 @@ class CognitivePerformanceAnalytics:
             "avg_execution_time": round(float(row["avg_execution_time"] or 0), 1),
         }
 
-    def route_reasoning_task(
-        self,
-        task_type: str,
-        available_models: list[str],
-        language: str | None = None,
-        directory: str | None = None,
-        default_model: str | None = None,
-    ) -> str:
-        """
-        Dynamically routes task to the best registered model based on historical metrics
-        (lowest rollback ratio, lowest hallucination rate, and highest success rate).
-        """
-        if not available_models:
-            if default_model:
-                return default_model
-            raise ValueError("No available models to route to.")
-
-        if len(available_models) == 1:
-            return available_models[0]
-
-        best_model = None
-        best_score = -1.0
-
-        for model in available_models:
-            perf = self.get_model_performance(model)
-            if perf["total_runs"] == 0:
-                # Give unmeasured models a neutral baseline score
-                score = 0.5
-            else:
-                # Higher success rate, lower hallucination/rollback rate is better
-                score = (
-                    perf["success_rate"] * 0.5
-                    + (1.0 - perf["hallucination_rate"]) * 0.25
-                    + (1.0 - perf["rollback_ratio"]) * 0.25
-                )
-
-            if score > best_score:
-                best_score = score
-                best_model = model
-
-        return best_model or available_models[0]
-
     def record_critic_vote(
         self,
         task_id: str,

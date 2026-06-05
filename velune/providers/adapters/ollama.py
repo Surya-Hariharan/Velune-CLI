@@ -53,10 +53,10 @@ class OllamaProvider(ModelProvider):
             for item in data.get("models", []):
                 descriptors.append(
                     ModelDescriptor(
-                        id=item["name"],
-                        name=item["name"],
-                        provider="ollama",
-                        context_window=8192,
+                        model_id=item["name"],
+                        display_name=item["name"],
+                        provider_id="ollama",
+                        context_length=8192,
                         capabilities={
                             "coding": CapabilityLevel.INTERMEDIATE,
                             "reasoning": CapabilityLevel.INTERMEDIATE,

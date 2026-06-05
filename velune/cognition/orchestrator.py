@@ -364,10 +364,10 @@ class CouncilOrchestrator:
 
         try:
             return await asyncio.wait_for(
-                self._execute_task_inner(
+                self._execute_tiered(
                     prompt=prompt,
                     repo_context=repo_context,
-                    resolved_tier=tier,
+                    tier=tier,
                     progress_callback=progress_callback,
                 ),
                 timeout=self.max_wall_time_seconds
@@ -402,861 +402,451 @@ class CouncilOrchestrator:
             "final_summary": f"Council execution timed out. Partial analysis: (None)",
         }
 
-    async def _execute_task_inner(
+    @staticmethod
+    def _extract_target_file(prompt: str) -> str:
+        target_file = "velune/core/main.py"
+        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
+        if py_files:
+            target_file = py_files[0]
+        return target_file
+
+    async def _execute_tiered(
         self,
         prompt: str,
         repo_context: str,
-        resolved_tier: CouncilTier,
+        tier: CouncilTier,
         progress_callback: Callable[[str], None] | None = None,
+        run_id: str = "default",
     ) -> dict[str, Any]:
-        """Internal execution body of the orchestrator task."""
+        """Consolidated orchestrator execution path for all tiers."""
         import uuid
-
+        import time
         from velune.core.trace import TraceContext
-
-        run_id = f"council-{uuid.uuid4().hex[:8]}"
-        with TraceContext(run_id=run_id):
-            tier = resolved_tier
-
-            # Estimate model speed from profiler
-            roles = self.mapper.map_roles()
-            coder_model = roles.get(CouncilRole.CODER)
-            estimated_tps = 8.0  # conservative default
-            if coder_model:
-                profile = self.mapper.profiler.get_profile(coder_model.provider_id, coder_model.model_id)
-                if profile and profile.tps > 0.0:
-                    estimated_tps = profile.tps
-
-            # Estimate cost (agent_count × estimated_seconds) before execution
-            agent_counts = {
-                CouncilTier.INSTANT: 1,
-                CouncilTier.MINIMAL: 2,
-                CouncilTier.STANDARD: 4,
-                CouncilTier.FULL: 10,
-            }
-            agent_count = agent_counts.get(tier, 4)
-            estimated_seconds_per_call = 300.0 / estimated_tps
-            estimated_cost_seconds = agent_count * estimated_seconds_per_call
-
-            logger.info(
-                "Council tier selected: %s for prompt: %s... (Estimated cost: %.1fs based on %d agents at %.1f TPS)",
-                tier.value,
-                prompt[:50],
-                estimated_cost_seconds,
-                agent_count,
-                estimated_tps,
-            )
-
-            start_time = time.time()
-            try:
-                if tier == CouncilTier.INSTANT:
-                    result = await self._execute_instant(prompt, repo_context, progress_callback, run_id)
-                elif tier == CouncilTier.MINIMAL:
-                    result = await self._execute_minimal(prompt, repo_context, progress_callback, run_id)
-                elif tier == CouncilTier.STANDARD:
-                    result = await self._execute_standard(prompt, repo_context, progress_callback, run_id)
-                else:
-                    result = await self._execute_full(prompt, repo_context, progress_callback, run_id)
-                return result
-            finally:
-                elapsed_time = time.time() - start_time
-                logger.info("Executed %s tier in %.2fs", tier.value, elapsed_time)
-
-    async def _execute_instant(
-        self,
-        prompt: str,
-        repo_context: str,
-        progress_callback: Callable[[str], None] | None = None,
-        run_id: str = "default",
-    ) -> dict[str, Any]:
-        """FAST PATH INSTANT: Coder only, no debate, no review, but still runs CognitiveFirewall scan on repo context."""
-        logger.info("[COUNCIL - INSTANT] Executing Instant single-agent Coder path...")
-
-        # INSTANT tier must still run CognitiveFirewall scan on repo context
         from velune.cognition.firewall import CognitiveFirewall
-        firewall = CognitiveFirewall()
-
-        # Scan repo context for security issues
-        if not firewall.scan_file_for_injection("workspace_context", repo_context)["is_safe"]:
-            logger.error("Security: prompt injection detected in workspace context during Instant execution")
-            raise ValueError("Security: Potential prompt injection detected in workspace context")
-
-        target_file = "velune/core/main.py"
-        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
-        if py_files:
-            target_file = py_files[0]
-
-        style_profile = await self._get_or_refresh_style_profile(target_file)
-
-        coder = self.agent_factory.create_coder(run_id)
-
-        logger.info("Council Phase: Coder")
-        if progress_callback:
-            progress_callback("[Coder] Designing code implementation...")
-
-        coder_proposal = await coder.write_code(
-            prompt=prompt,
-            current_code=repo_context,
-            plan_context="Direct implementation (Instant path chosen).",
-            style_profile=style_profile,
-        )
-
-        return {
-            "tier": "instant",
-            "task_plan": None,
-            "coder_proposal": coder_proposal,
-            "reviewer_report": None,
-            "challenger_report": None,
-            "arbitration": {"overall_confidence": 0.85, "requires_human_review": False},
-            "final_summary": coder_proposal,
-        }
-
-    async def _execute_minimal(
-        self,
-        prompt: str,
-        repo_context: str,
-        progress_callback: Callable[[str], None] | None = None,
-        run_id: str = "default",
-    ) -> dict[str, Any]:
-        """MINIMAL PATH: Planner + Coder (No Reviewer, no specialized critics, no debate)"""
-        logger.info("[COUNCIL - MINIMAL] Executing Minimal Planner + Coder path...")
-
-        target_file = "velune/core/main.py"
-        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
-        if py_files:
-            target_file = py_files[0]
-
-        style_profile = await self._get_or_refresh_style_profile(target_file)
-
-        planner = self.agent_factory.create_planner(run_id)
-        coder = self.agent_factory.create_coder(run_id)
-
-        # 1. Generate plan
-        logger.info("Council Phase: Planner")
-        if progress_callback:
-            progress_callback("[Planner] Decomposing task...")
-        task_plan = await planner.generate_plan(prompt, repo_context)
-        plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
-
-        # 2. Generate code
-        logger.info("Council Phase: Coder")
-        if progress_callback:
-            progress_callback("[Coder] Designing code implementation...")
-        coder_proposal = await coder.write_code(
-            prompt=prompt,
-            current_code=repo_context,
-            plan_context=plan_desc,
-            style_profile=style_profile,
-        )
-
-        # 3. Arbitration
-        logger.info("Council Phase: Arbitration")
-        if progress_callback:
-            progress_callback("[Arbitration] Arbitrating proposal...")
-        arbitration = self.arbitrator.arbitrate(
-            plan_steps=[s.description for s in task_plan.steps],
-            coder_proposal=coder_proposal,
-            reviewer_report=None,
-            challenger_report=None,
-            scalability_report=None,
-            security_report=None,
-            performance_report=None,
-            maintainability_report=None,
-        )
-
-        return {
-            "tier": "minimal",
-            "task_plan": task_plan,
-            "coder_proposal": coder_proposal,
-            "reviewer_report": None,
-            "challenger_report": None,
-            "arbitration": arbitration.to_dict(),
-            "final_summary": coder_proposal,
-        }
-
-    async def _execute_standard(
-        self,
-        prompt: str,
-        repo_context: str,
-        progress_callback: Callable[[str], None] | None = None,
-        run_id: str = "default",
-    ) -> dict[str, Any]:
-        """STANDARD PATH: Planner + Coder + Reviewer + Synthesizer (No Challenger, no specialized critics, Max 1 debate turn)"""
-        logger.info("[COUNCIL - STANDARD] Executing Standard Coder + Reviewer path...")
-
-        target_file = "velune/core/main.py"
-        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
-        if py_files:
-            target_file = py_files[0]
-
-        style_profile = await self._get_or_refresh_style_profile(target_file)
-
-        planner = self.agent_factory.create_planner(run_id)
-        coder = self.agent_factory.create_coder(run_id)
-        reviewer = self.agent_factory.create_reviewer(run_id)
-        synthesizer = self.agent_factory.create_synthesizer(run_id)
-
-        # 1. Generate plan
-        logger.info("Council Phase: Planner")
-        if progress_callback:
-            progress_callback("[Planner] Decomposing task...")
-        task_plan = await planner.generate_plan(prompt, repo_context)
-        plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
-
-        # 2. Generate code
-        logger.info("Council Phase: Coder")
-        if progress_callback:
-            progress_callback("[Coder] Designing code implementation...")
-        coder_proposal = await coder.write_code(
-            prompt=prompt,
-            current_code=repo_context,
-            plan_context=plan_desc,
-            style_profile=style_profile,
-        )
-
-        # 3. Review code
-        logger.info("Council Phase: Reviewer")
-        if progress_callback:
-            progress_callback("[Reviewer] Reviewing code proposal...")
-        try:
-            reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
-        except Exception as e:
-            logger.error("Reviewer failed in standard path: %s", e)
-            from velune.cognition.council.messages import ReviewerMessage
-            reviewer_report = ReviewerMessage(
-                passed=True,
-                confidence_rating=0.5,
-                critical_issues=["Reviewer unavailable"],
-            )
-
-        # Max 1 debate turn
-        objections = []
-        if not reviewer_report.passed:
-            objections.append(f"Reviewer: {reviewer_report.critical_issues}")
-
-        low_resource = (
-            (self.config and self.config.execution.low_resource_mode) or
-            os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
-        )
-
-        if objections and not low_resource:
-            logger.info("[COUNCIL - STANDARD] Objection detected. Running 1 refinement turn...")
-            objections_text = "\n".join([f"- {obj}" for obj in objections])
-            refine_prompt = (
-                f"The Reviewer has raised the following objections to your previous proposal:\n"
-                f"{objections_text}\n\n"
-                f"Please rewrite and refine the proposed code to resolve these objections."
-            )
-            coder_proposal = await coder.write_code(
-                prompt=prompt,
-                current_code=repo_context,
-                plan_context=f"Standard Refinement Turn:\n{refine_prompt}",
-                style_profile=style_profile,
-            )
-            # Re-run reviewer once
-            try:
-                reviewer_report = await reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
-            except Exception as e:
-                logger.error("Reviewer failed during refinement in standard path: %s", e)
-                from velune.cognition.council.messages import ReviewerMessage
-                reviewer_report = ReviewerMessage(
-                    passed=True,
-                    confidence_rating=0.5,
-                    critical_issues=["Reviewer unavailable during refinement"],
-                )
-
-        # 4. Arbitration
-        logger.info("Council Phase: Arbitration")
-        if progress_callback:
-            progress_callback("[Arbitration] Arbitrating proposal...")
-        arbitration = self.arbitrator.arbitrate(
-            plan_steps=[s.description for s in task_plan.steps],
-            coder_proposal=coder_proposal,
-            reviewer_report=reviewer_report,
-            challenger_report=None,  # No Challenger
-            scalability_report=None,
-            security_report=None,
-            performance_report=None,
-            maintainability_report=None,
-        )
-
-        # 5. Synthesize Walkthrough
-        logger.info("Council Phase: Synthesis")
-        if progress_callback:
-            progress_callback("[Synthesis] Synthesizing final summary...")
-        try:
-            final_summary = await synthesizer.synthesize(
-                task=prompt,
-                winning_claims=arbitration.winning_claims,
-                plan=coder_proposal,
-                audit_reports=[reviewer_report.model_dump()],
-                context=repo_context,
-            )
-            if final_summary.startswith("Deliberation failure inside agent"):
-                raise ValueError(final_summary)
-        except Exception as e:
-            logger.error("Synthesizer failed in standard path: %s. Using default fallback summary.", e)
-            final_summary = (
-                f"# Council Deliberation Report (Degraded Mode)\n\n"
-                f"The Lead Synthesizer was unavailable due to an unexpected offline model or network issue ({e}).\n"
-                f"Below is the raw compiled code proposal and findings directly from the deliberation council:\n\n"
-                f"## Task\n{prompt}\n\n"
-                f"## Code Proposal\n```\n{coder_proposal}\n```\n\n"
-                f"## Arbitration Status\n- **Confidence**: {arbitration.overall_confidence}\n- **Requires Human Review**: {arbitration.requires_human_review}\n- **Instructions**: {arbitration.synthesis_instructions}\n"
-            )
-
-        # Log successful decision to DLS
-        decision_id = f"DEC-{int(time.time())}"
-        impact = self.estimate_blast_radius(target_file)
-        self.lineage_memory.log_decision(
-            decision_id=decision_id,
-            target_subsystem="standard_path",
-            rationale=final_summary[:300],
-            architectural_impact=impact,
-            consequences="Standard execution completed with single-reviewer arbitration.",
-        )
-
-        return {
-            "tier": "standard",
-            "task_plan": task_plan,
-            "coder_proposal": coder_proposal,
-            "reviewer_report": reviewer_report,
-            "challenger_report": None,
-            "arbitration": arbitration.to_dict(),
-            "final_summary": final_summary,
-        }
-
-    async def _execute_full(
-        self,
-        prompt: str,
-        repo_context: str,
-        progress_callback: Callable[[str], None] | None = None,
-        run_id: str = "default",
-    ) -> dict[str, Any]:
-        """Orchestrate a complete council deliberation pass for a task prompt (FULL tier)."""
-        logger.info("Reasoning Council starting execution in FULL tier for goal: %s", prompt)
-
-        # Resolve target file and directory for style extraction
-        target_file = "velune/core/main.py"  # Default fallback
-        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
-        if py_files:
-            target_file = py_files[0]
-
-        style_profile = await self._get_or_refresh_style_profile(target_file)
-
-        # 1. Instantiate active council agent instances using AgentFactory
-        logger.info("Instantiating specialized council agents...")
-        coder = self.agent_factory.create_coder(run_id)
-        synthesizer = self.agent_factory.create_synthesizer(run_id)
-
-        # --- STRUCTURAL CHANGE PATH ---
-        logger.info("[COUNCIL - COMPLEXITY] Launching Architecture Cognition Agent & Multi-Critique Council...")
-
-        # ACA Analysis
-        logger.info("[COUNCIL - ACA] Executing Architecture Cognition Agent audit on: %s", target_file)
-        architectural_context = ""
-        shi = None
-        if self._is_structural_change(prompt, repo_context) and ("class " in repo_context or "def " in repo_context):
-            audit_res = self.architecture_agent.audit_architecture(target_file, repo_context)
-            shi = audit_res.get("shi")
-
-            # Retrieve persistent ledger items to enrich reasoning
-            debt_items = self.architecture_agent.ledger.get_items()
-            if debt_items:
-                architectural_context += "\n--- KNOWN ARCHITECTURAL DEBT & VIOLATIONS ---\n"
-                for item in debt_items:
-                    architectural_context += f"- [{item['category'].upper()}] in '{item['file_path']}': {item['description']} (Severity: {item['severity']})\n"
-                architectural_context += "Please ensure the proposed code fixes or avoids increasing this technical debt.\n"
-
-                # Check for active layering violations to append blocking alarm warning
-                layering_violations = [item for item in debt_items if item["category"] == "layering"]
-                if layering_violations:
-                    architectural_context += "\n==================================================\n"
-                    architectural_context += "!!! ARCHITECTURE DRIFT ALARM (ADA) ACTIVE BLOCK !!!\n"
-                    architectural_context += "The following layering boundary violations MUST BE RESOLVED IMMEDIATELY:\n"
-                    for item in layering_violations:
-                        architectural_context += f"- BLOCKING DRIFT: {item['description']} (File: {item['file_path']})\n"
-                    architectural_context += "You MUST plan to fix these import boundary violations in this execution pass.\n"
-                    architectural_context += "==================================================\n\n"
-
-        # Query past architectural decisions and failed experiment warnings
-        decisions, failures = self.lineage_memory.query_continuity_warnings(prompt, repo_context)
-
-        continuity_context = ""
-        if decisions or failures:
-            continuity_context += "\n--- COGNITIVE CONTINUITY WARNINGS ---\n"
-            if decisions:
-                continuity_context += "\n[DLS] Approved Architectural Decisions:\n"
-                for dec in decisions:
-                    continuity_context += f"- Decision {dec['id']}: {dec['rationale']} (Subsystem: {dec['target_subsystem']}, Impact: {dec['architectural_impact']})\n"
-                    if dec.get("alternatives"):
-                        continuity_context += "  Design Alternatives:\n"
-                        for alt in dec["alternatives"]:
-                            continuity_context += f"    * {alt['option_name']}: Tradeoffs {alt['tradeoffs']} (Rejected because: {alt['rejected_reason']})\n"
-            if failures:
-                continuity_context += "\n[FEL] BLOCK: Prior Failed Experiments (Avoid repeating these approaches):\n"
-                for fail in failures:
-                    continuity_context += f"- Failed Experiment {fail['id']} in Subsystem: {fail['target_subsystem']}\n"
-                    continuity_context += f"  Approach / Patch:\n{fail['patch']}\n"
-                    continuity_context += f"  Failure Error ({fail['error_type']}): {fail['error_message']}\n"
-
-        # SECURE WORKSPACE DATA VIA XML WRAPPING
-        architectural_context = self.firewall.wrap_workspace_content(
-            "architectural_debt_ledger", architectural_context
-        )
-        continuity_context = self.firewall.wrap_workspace_content(
-            "continuity_warnings", continuity_context
-        )
-
-        enriched_repo_context = repo_context + architectural_context + continuity_context
-
-        # Instantiate Planner, Reviewer, Challenger, and specialized critics using AgentFactory
-        planner = self.agent_factory.create_planner(run_id)
-        reviewer = self.agent_factory.create_reviewer(run_id)
-        challenger = self.agent_factory.create_challenger(run_id)
-
-        scalability_critic = self.agent_factory.create_scalability_critic(run_id)
-        security_critic = self.agent_factory.create_security_critic(run_id)
-        performance_critic = self.agent_factory.create_performance_critic(run_id)
-        maintainability_critic = self.agent_factory.create_maintainability_critic(run_id)
-
-        # 4. Deliberation Phase A: Planner compiles DAG Execution Plan
-        logger.info("Council Phase: Planner")
-        if progress_callback:
-            progress_callback("[Planner] Decomposing task...")
-        logger.info("[COUNCIL - PLANNER] Decomposing task into steps...")
-        task_plan = await planner.generate_plan(prompt, enriched_repo_context)
-
-        # 5. Deliberation Phase B: Coder generates solution proposal
-        logger.info("Council Phase: Coder")
-        if progress_callback:
-            progress_callback("[Coder] Designing code implementation...")
-        plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
-        logger.info("[COUNCIL - CODER] Designing code implementation...")
-        coder_proposal = await coder.write_code(
-            prompt=prompt,
-            current_code=enriched_repo_context,
-            plan_context=plan_desc,
-            style_profile=style_profile,
-        )
-
-        # 6. Deliberation Phase C & D: Concurrent Review and Parallel Critics Council
-        logger.info("Council Phase: Reviewer+Challenger")
-        if progress_callback:
-            progress_callback("[Reviewer+Challenger] Running parallel review and critique...")
-        logger.info("[COUNCIL - PARALLEL] Launching parallel adversarial review & 4 specialized critics...")
-
-        reviewer_task = reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)
-        challenger_task = challenger.challenge(task=prompt, proposal=coder_proposal, context=repo_context)
-        scalability_task = scalability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
-        security_task = security_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
-        performance_task = performance_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
-        maintainability_task = maintainability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
-
-        results = await asyncio.gather(
-            reviewer_task,
-            challenger_task,
-            scalability_task,
-            security_task,
-            performance_task,
-            maintainability_task,
-            return_exceptions=True,
-        )
-
         from velune.cognition.council.messages import ReviewerMessage, ChallengerMessage, CriticMessage
 
-        reviewer_report = (
-            results[0]
-            if not isinstance(results[0], Exception)
-            else ReviewerMessage(
-                passed=True,
-                confidence_rating=0.5,
-                critical_issues=["Reviewer unavailable"],
+        if run_id == "default":
+            run_id = f"council-{uuid.uuid4().hex[:8]}"
+            
+        tier_level = {"instant": 1, "minimal": 2, "standard": 3, "full": 4}[tier.value]
+
+        with TraceContext(run_id=run_id):
+            logger.info("Reasoning Council starting execution in %s tier for goal: %s", tier.value.upper(), prompt[:50])
+
+            start_time = time.time()
+            
+            # Security scan for Instant tier (or all tiers, kept for parity with old _execute_instant)
+            if tier_level == 1:
+                firewall = CognitiveFirewall()
+                if not firewall.scan_file_for_injection("workspace_context", repo_context)["is_safe"]:
+                    logger.error("Security: prompt injection detected in workspace context during Instant execution")
+                    raise ValueError("Security: Potential prompt injection detected in workspace context")
+
+            target_file = self._extract_target_file(prompt)
+            style_profile = await self._get_or_refresh_style_profile(target_file)
+
+            # Agent instantiation based on tier
+            coder = self.agent_factory.create_coder(run_id)
+            planner = self.agent_factory.create_planner(run_id) if tier_level >= 2 else None
+            reviewer = self.agent_factory.create_reviewer(run_id) if tier_level >= 3 else None
+            synthesizer = self.agent_factory.create_synthesizer(run_id) if tier_level >= 3 else None
+            
+            challenger = self.agent_factory.create_challenger(run_id) if tier_level == 4 else None
+            scalability_critic = self.agent_factory.create_scalability_critic(run_id) if tier_level == 4 else None
+            security_critic = self.agent_factory.create_security_critic(run_id) if tier_level == 4 else None
+            performance_critic = self.agent_factory.create_performance_critic(run_id) if tier_level == 4 else None
+            maintainability_critic = self.agent_factory.create_maintainability_critic(run_id) if tier_level == 4 else None
+
+            # Enriched Context for Full Tier
+            enriched_repo_context = repo_context
+            shi = None
+            if tier_level == 4:
+                architectural_context = ""
+                if self._is_structural_change(prompt, repo_context) and ("class " in repo_context or "def " in repo_context):
+                    audit_res = self.architecture_agent.audit_architecture(target_file, repo_context)
+                    shi = audit_res.get("shi")
+                    debt_items = self.architecture_agent.ledger.get_items()
+                    if debt_items:
+                        architectural_context += "\n--- KNOWN ARCHITECTURAL DEBT & VIOLATIONS ---\n"
+                        for item in debt_items:
+                            architectural_context += f"- [{item['category'].upper()}] in '{item['file_path']}': {item['description']} (Severity: {item['severity']})\n"
+                        architectural_context += "Please ensure the proposed code fixes or avoids increasing this technical debt.\n"
+                        layering_violations = [item for item in debt_items if item["category"] == "layering"]
+                        if layering_violations:
+                            architectural_context += "\n==================================================\n"
+                            architectural_context += "!!! ARCHITECTURE DRIFT ALARM (ADA) ACTIVE BLOCK !!!\n"
+                            architectural_context += "The following layering boundary violations MUST BE RESOLVED IMMEDIATELY:\n"
+                            for item in layering_violations:
+                                architectural_context += f"- BLOCKING DRIFT: {item['description']} (File: {item['file_path']})\n"
+                            architectural_context += "You MUST plan to fix these import boundary violations in this execution pass.\n"
+                            architectural_context += "==================================================\n\n"
+
+                decisions, failures = self.lineage_memory.query_continuity_warnings(prompt, repo_context)
+                continuity_context = ""
+                if decisions or failures:
+                    continuity_context += "\n--- COGNITIVE CONTINUITY WARNINGS ---\n"
+                    if decisions:
+                        continuity_context += "\n[DLS] Approved Architectural Decisions:\n"
+                        for dec in decisions:
+                            continuity_context += f"- Decision {dec['id']}: {dec['rationale']} (Subsystem: {dec['target_subsystem']}, Impact: {dec['architectural_impact']})\n"
+                            if dec.get("alternatives"):
+                                continuity_context += "  Design Alternatives:\n"
+                                for alt in dec["alternatives"]:
+                                    continuity_context += f"    * {alt['option_name']}: Tradeoffs {alt['tradeoffs']} (Rejected because: {alt['rejected_reason']})\n"
+                    if failures:
+                        continuity_context += "\n[FEL] BLOCK: Prior Failed Experiments (Avoid repeating these approaches):\n"
+                        for fail in failures:
+                            continuity_context += f"- Failed Experiment {fail['id']} in Subsystem: {fail['target_subsystem']}\n"
+                            continuity_context += f"  Approach / Patch:\n{fail['patch']}\n"
+                            continuity_context += f"  Failure Error ({fail['error_type']}): {fail['error_message']}\n"
+
+                firewall = CognitiveFirewall()
+                architectural_context = firewall.wrap_workspace_content("architectural_debt_ledger", architectural_context)
+                continuity_context = firewall.wrap_workspace_content("continuity_warnings", continuity_context)
+                enriched_repo_context = repo_context + architectural_context + continuity_context
+
+            # 1. Planner Phase
+            task_plan = None
+            plan_desc = "Direct implementation (Instant path chosen)."
+            if planner:
+                logger.info("Council Phase: Planner")
+                if progress_callback: progress_callback("[Planner] Decomposing task...")
+                task_plan = await planner.generate_plan(prompt, enriched_repo_context)
+                plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
+
+            # 2. Coder Phase
+            logger.info("Council Phase: Coder")
+            if progress_callback: progress_callback("[Coder] Designing code implementation...")
+            coder_proposal = await coder.write_code(
+                prompt=prompt,
+                current_code=enriched_repo_context,
+                plan_context=plan_desc,
+                style_profile=style_profile,
             )
-        )
-        challenger_report = (
-            results[1]
-            if not isinstance(results[1], Exception)
-            else ChallengerMessage(
-                assumptions_challenged=[],
-                failure_vectors=["Challenger unavailable"],
-                severity_rating=0.0,
-            )
-        )
-        scalability_report = (
-            results[2]
-            if not isinstance(results[2], Exception)
-            else CriticMessage(
-                passed=True,
-                issues=["Scalability Critic unavailable"],
-                score=0.9,
-                rationale="Scalability Critic unavailable",
-            )
-        )
-        security_report = (
-            results[3]
-            if not isinstance(results[3], Exception)
-            else CriticMessage(
-                passed=True,
-                issues=["Security Critic unavailable"],
-                score=0.9,
-                rationale="Security Critic unavailable",
-            )
-        )
-        performance_report = (
-            results[4]
-            if not isinstance(results[4], Exception)
-            else CriticMessage(
-                passed=True,
-                issues=["Performance Critic unavailable"],
-                score=0.9,
-                rationale="Performance Critic unavailable",
-            )
-        )
-        maintainability_report = (
-            results[5]
-            if not isinstance(results[5], Exception)
-            else CriticMessage(
-                passed=True,
-                issues=["Maintainability Critic unavailable"],
-                score=0.9,
-                rationale="Maintainability Critic unavailable",
-            )
-        )
-        logger.info("[COUNCIL - PARALLEL] Parallel reviews successfully gathered.")
 
-        # 7. Contradiction-Driven Arbitration Multi-Agent Debate Loop
-        objections = []
-        if not reviewer_report.passed:
-            objections.append(f"Reviewer: {reviewer_report.critical_issues}")
-        if not scalability_report.passed:
-            objections.append(f"Scalability Critic: {scalability_report.issues}")
-        if not security_report.passed:
-            objections.append(f"Security Critic: {security_report.issues}")
-        if not performance_report.passed:
-            objections.append(f"Performance Critic: {performance_report.issues}")
-        if not maintainability_report.passed:
-            objections.append(f"Maintainability Critic: {maintainability_report.issues}")
-        if challenger_report.severity_rating > 0.6:
-            objections.append(f"Challenger (Severity: {challenger_report.severity_rating}): {challenger_report.failure_vectors}")
-
-        initial_objection_count = len(objections)
-        converged = (initial_objection_count == 0)
-        turns_required = 0
-        debate_start_time = time.time()
-
-        all_critic_reports = {
-            "security": security_report,
-            "scalability": scalability_report,
-            "challenger": challenger_report,
-        }
-
-        # Calculate debate turns based on complexity and scores, but capped at 3
-        max_debate_turns = calculate_max_debate_turns(
-            initial_objections=objections,
-            critic_reports=all_critic_reports,
-            task_complexity="structural",
-        )
-        max_debate_turns = min(3, max_debate_turns)
-        logger.info("Debate configured for %d max turns (objections: %d)",
-                    max_debate_turns, len(objections))
-
-        refined_proposal = coder_proposal
-
-        if objections and max_debate_turns > 0:
-            logger.info("[COUNCIL - DEBATE] Objections detected. Initiating Contradiction-Driven Arbitration Debate Loop...")
-
-            async def _run_debate_loop() -> None:
-                nonlocal coder_proposal, refined_proposal, reviewer_report, scalability_report, security_report, performance_report, maintainability_report, objections, converged, turns_required
-
-                debate_turn = 1
-                refined_proposal = coder_proposal
-
-                while debate_turn <= max_debate_turns:
-                    logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
-                    logger.info("Council Phase: Debate turn %d", debate_turn)
-                    if progress_callback:
-                        progress_callback(f"[Debate] Running debate turn {debate_turn}...")
-                    turns_required = debate_turn
-
-                    objections_text = "\n".join([f"- {obj}" for obj in objections])
-                    refine_prompt = (
-                        f"The Reasoning Council has raised the following objections to your previous proposal:\n"
-                        f"{objections_text}\n\n"
-                        f"Please rewrite and refine the proposed code to resolve ALL of these objections completely while satisfying the original task."
+            # Early Return for Instant/Minimal
+            if tier_level < 3:
+                arbitration_dict = {"overall_confidence": 0.85, "requires_human_review": False}
+                if tier_level == 2 and task_plan:
+                    if progress_callback: progress_callback("[Arbitration] Arbitrating proposal...")
+                    arbitration = self.arbitrator.arbitrate(
+                        plan_steps=[s.description for s in task_plan.steps],
+                        coder_proposal=coder_proposal,
+                        reviewer_report=None, challenger_report=None,
+                        scalability_report=None, security_report=None,
+                        performance_report=None, maintainability_report=None
                     )
+                    arbitration_dict = arbitration.to_dict()
 
-                    logger.info("[COUNCIL - DEBATE] Coder refining proposal...")
-                    refined_proposal = await coder.write_code(
-                        prompt=prompt,
-                        current_code=repo_context,
-                        plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
-                        style_profile=style_profile,
-                    )
+                logger.info("Executed %s tier in %.2fs", tier.value, time.time() - start_time)
+                return {
+                    "tier": tier.value,
+                    "task_plan": task_plan,
+                    "coder_proposal": coder_proposal,
+                    "reviewer_report": None,
+                    "challenger_report": None,
+                    "arbitration": arbitration_dict,
+                    "final_summary": coder_proposal,
+                }
 
-                    logger.info("[COUNCIL - DEBATE] Re-running objecting critics on refined proposal...")
-                    re_tasks: list[Any] = []
-                    re_critics: list[str] = []
+            # 3. Review / Critique Phase
+            logger.info("Council Phase: Reviewer/Critics")
+            if progress_callback: progress_callback("[Reviewer] Running review and critique...")
 
-                    if not reviewer_report.passed:
-                        re_tasks.append(reviewer.review(task=prompt, proposal=refined_proposal, context=repo_context))
-                        re_critics.append("reviewer")
-                    if not scalability_report.passed:
-                        re_tasks.append(scalability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                        re_critics.append("scalability")
-                    if not security_report.passed:
-                        re_tasks.append(security_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                        re_critics.append("security")
-                    if not performance_report.passed:
-                        re_tasks.append(performance_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                        re_critics.append("performance")
-                    if not maintainability_report.passed:
-                        re_tasks.append(maintainability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
-                        re_critics.append("maintainability")
+            reviewer_report = ReviewerMessage(passed=True, confidence_rating=0.5, critical_issues=[])
+            challenger_report = ChallengerMessage(assumptions_challenged=[], failure_vectors=[], severity_rating=0.0)
+            scalability_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
+            security_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
+            performance_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
+            maintainability_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
 
-                    if re_tasks:
-                        from velune.cognition.council.messages import ReviewerMessage, ChallengerMessage, CriticMessage
-                        raw_re_results = await asyncio.gather(*re_tasks, return_exceptions=True)
+            tasks = [reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)]
+            if tier_level == 4:
+                tasks.extend([
+                    challenger.challenge(task=prompt, proposal=coder_proposal, context=repo_context),
+                    scalability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context),
+                    security_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context),
+                    performance_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context),
+                    maintainability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
+                ])
 
-                        re_results = []
-                        for name, res in zip(re_critics, raw_re_results):
-                            if isinstance(res, Exception):
-                                if name == "reviewer":
-                                    res = ReviewerMessage(
-                                        passed=True,
-                                        confidence_rating=0.5,
-                                        critical_issues=["Reviewer unavailable during refinement"],
-                                    )
-                                elif name == "scalability":
-                                    res = CriticMessage(
-                                        passed=True,
-                                        issues=["Scalability Critic unavailable during refinement"],
-                                        score=0.9,
-                                        rationale="Scalability Critic unavailable during refinement",
-                                    )
-                                elif name == "security":
-                                    res = CriticMessage(
-                                        passed=True,
-                                        issues=["Security Critic unavailable during refinement"],
-                                        score=0.9,
-                                        rationale="Security Critic unavailable during refinement",
-                                    )
-                                elif name == "performance":
-                                    res = CriticMessage(
-                                        passed=True,
-                                        issues=["Performance Critic unavailable during refinement"],
-                                        score=0.9,
-                                        rationale="Performance Critic unavailable during refinement",
-                                    )
-                                elif name == "maintainability":
-                                    res = CriticMessage(
-                                        passed=True,
-                                        issues=["Maintainability Critic unavailable during refinement"],
-                                        score=0.9,
-                                        rationale="Maintainability Critic unavailable during refinement",
-                                    )
-                            re_results.append(res)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            if not isinstance(results[0], Exception):
+                reviewer_report = results[0]
+            else:
+                logger.error("Reviewer failed: %s", results[0])
+                reviewer_report.critical_issues = ["Reviewer unavailable"]
 
-                        # Update all reports first to preserve converged state if we break early
-                        for name, res in zip(re_critics, re_results):
-                            if name == "reviewer":
-                                reviewer_report = res
-                            elif name == "scalability":
-                                scalability_report = res
-                            elif name == "security":
-                                security_report = res
-                            elif name == "performance":
-                                performance_report = res
-                            elif name == "maintainability":
-                                maintainability_report = res
+            if tier_level == 4:
+                if not isinstance(results[1], Exception): challenger_report = results[1]
+                if not isinstance(results[2], Exception): scalability_report = results[2]
+                if not isinstance(results[3], Exception): security_report = results[3]
+                if not isinstance(results[4], Exception): performance_report = results[4]
+                if not isinstance(results[5], Exception): maintainability_report = results[5]
 
-                        # convergence detection with score > 0.8
-                        all_passed_with_high_score = True
-                        for name, res in zip(re_critics, re_results):
-                            score = res.confidence_rating if name == "reviewer" else getattr(res, "score", 1.0)
-                            if not res.passed or score <= 0.8:
-                                all_passed_with_high_score = False
+            # 4. Debate Phase
+            objections = []
+            if not reviewer_report.passed: objections.append(f"Reviewer: {reviewer_report.critical_issues}")
+            if not scalability_report.passed: objections.append(f"Scalability Critic: {scalability_report.issues}")
+            if not security_report.passed: objections.append(f"Security Critic: {security_report.issues}")
+            if not performance_report.passed: objections.append(f"Performance Critic: {performance_report.issues}")
+            if not maintainability_report.passed: objections.append(f"Maintainability Critic: {maintainability_report.issues}")
+            if challenger_report.severity_rating > 0.6: objections.append(f"Challenger (Severity: {challenger_report.severity_rating}): {challenger_report.failure_vectors}")
+
+            low_resource = (
+                (self.config and self.config.execution.low_resource_mode) or
+                os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
+            )
+
+            max_debate_turns = 0
+            if tier_level == 3 and objections and not low_resource:
+                max_debate_turns = 1
+            elif tier_level == 4:
+                all_critic_reports = {
+                    "security": security_report,
+                    "scalability": scalability_report,
+                    "challenger": challenger_report,
+                }
+                max_debate_turns = calculate_max_debate_turns(
+                    initial_objections=objections,
+                    critic_reports=all_critic_reports,
+                    task_complexity="structural",
+                )
+                max_debate_turns = min(3, max_debate_turns)
+
+            refined_proposal = coder_proposal
+            initial_objection_count = len(objections)
+            converged = (initial_objection_count == 0)
+            turns_required = 0
+            debate_start_time = time.time()
+
+            if objections and max_debate_turns > 0:
+                logger.info("[COUNCIL - DEBATE] Objections detected. Initiating Debate Loop...")
+
+                async def _run_debate_loop() -> None:
+                    nonlocal coder_proposal, refined_proposal, reviewer_report, scalability_report, security_report, performance_report, maintainability_report, objections, converged, turns_required
+
+                    debate_turn = 1
+                    refined_proposal = coder_proposal
+
+                    while debate_turn <= max_debate_turns:
+                        logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
+                        if progress_callback: progress_callback(f"[Debate] Running debate turn {debate_turn}...")
+                        turns_required = debate_turn
+
+                        objections_text = "\n".join([f"- {obj}" for obj in objections])
+                        refine_prompt = (
+                            f"The Reasoning Council has raised the following objections to your previous proposal:\n"
+                            f"{objections_text}\n\n"
+                            f"Please rewrite and refine the proposed code to resolve ALL of these objections completely while satisfying the original task."
+                        )
+
+                        refined_proposal = await coder.write_code(
+                            prompt=prompt,
+                            current_code=enriched_repo_context,
+                            plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
+                            style_profile=style_profile,
+                        )
+
+                        re_tasks = []
+                        re_critics = []
+
+                        if not reviewer_report.passed:
+                            re_tasks.append(reviewer.review(task=prompt, proposal=refined_proposal, context=repo_context))
+                            re_critics.append("reviewer")
+                        if tier_level == 4:
+                            if not scalability_report.passed:
+                                re_tasks.append(scalability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_critics.append("scalability")
+                            if not security_report.passed:
+                                re_tasks.append(security_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_critics.append("security")
+                            if not performance_report.passed:
+                                re_tasks.append(performance_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_critics.append("performance")
+                            if not maintainability_report.passed:
+                                re_tasks.append(maintainability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_critics.append("maintainability")
+
+                        if re_tasks:
+                            raw_re_results = await asyncio.gather(*re_tasks, return_exceptions=True)
+                            re_results = []
+                            for name, res in zip(re_critics, raw_re_results):
+                                if isinstance(res, Exception):
+                                    if name == "reviewer":
+                                        res = ReviewerMessage(passed=True, confidence_rating=0.5, critical_issues=["Reviewer unavailable during refinement"])
+                                    else:
+                                        res = CriticMessage(passed=True, issues=[f"{name} unavailable during refinement"], score=0.9, rationale="")
+                                re_results.append(res)
+
+                            for name, res in zip(re_critics, re_results):
+                                if name == "reviewer": reviewer_report = res
+                                elif name == "scalability": scalability_report = res
+                                elif name == "security": security_report = res
+                                elif name == "performance": performance_report = res
+                                elif name == "maintainability": maintainability_report = res
+
+                            all_passed_with_high_score = True
+                            for name, res in zip(re_critics, re_results):
+                                score = res.confidence_rating if name == "reviewer" else getattr(res, "score", 1.0)
+                                if not res.passed or score <= 0.8:
+                                    all_passed_with_high_score = False
+                                    break
+
+                            if all_passed_with_high_score:
+                                coder_proposal = refined_proposal
+                                objections = []
+                                converged = True
                                 break
 
-                        if all_passed_with_high_score:
-                            logger.info("Full convergence achieved on turn %d", debate_turn)
-                            coder_proposal = refined_proposal
+                            new_objections = []
+                            for name, res in zip(re_critics, re_results):
+                                if not res.passed:
+                                    if name == "reviewer": new_objections.append(f"Reviewer: {res.critical_issues}")
+                                    elif name == "scalability": new_objections.append(f"Scalability Critic: {res.issues}")
+                                    elif name == "security": new_objections.append(f"Security Critic: {res.issues}")
+                                    elif name == "performance": new_objections.append(f"Performance Critic: {res.issues}")
+                                    elif name == "maintainability": new_objections.append(f"Maintainability Critic: {res.issues}")
+                            objections = new_objections
+                        else:
                             objections = []
+
+                        if not objections:
+                            coder_proposal = refined_proposal
                             converged = True
                             break
 
-                        new_objections = []
-                        for name, res in zip(re_critics, re_results):
-                            if name == "reviewer":
-                                if not res.passed:
-                                    new_objections.append(f"Reviewer: {res.critical_issues}")
-                            elif name == "scalability":
-                                if not res.passed:
-                                    new_objections.append(f"Scalability Critic: {res.issues}")
-                            elif name == "security":
-                                if not res.passed:
-                                    new_objections.append(f"Security Critic: {res.issues}")
-                            elif name == "performance":
-                                if not res.passed:
-                                    new_objections.append(f"Performance Critic: {res.issues}")
-                            elif name == "maintainability":
-                                if not res.passed:
-                                    new_objections.append(f"Maintainability Critic: {res.issues}")
-                        objections = new_objections
+                        debate_turn += 1
 
-                    else:
-                        objections = []
-
-                    if not objections:
-                        logger.info("Debate converged after %d turns", debate_turn)
-                        logger.info("[COUNCIL - DEBATE] Debate loop converged! All objections resolved.")
+                    if objections:
                         coder_proposal = refined_proposal
-                        converged = True
-                        break
+                        converged = False
 
-                    debate_turn += 1
-
-                if objections:
-                    logger.warning("[COUNCIL - DEBATE] Debate loop finished but objections remain: %s", objections)
-                    coder_proposal = refined_proposal
+                try:
+                    await asyncio.wait_for(_run_debate_loop(), timeout=300.0)
+                except TimeoutError:
+                    logger.warning("Debate loop hit wall time limit, proceeding with best proposal")
                     converged = False
 
-            MAX_DEBATE_WALL_TIME = 300.0  # 5 minutes hard cap for entire debate
-            try:
-                await asyncio.wait_for(_run_debate_loop(), timeout=MAX_DEBATE_WALL_TIME)
-            except TimeoutError:
-                logger.warning("Debate loop hit wall time limit, proceeding with best proposal")
-                converged = False
+            if tier_level == 4 and initial_objection_count > 0:
+                time_to_converge_ms = int((time.time() - debate_start_time) * 1000)
+                self.analytics.record_debate_outcome(
+                    turns_required=turns_required,
+                    initial_objection_count=initial_objection_count,
+                    final_objection_count=len(objections),
+                    converged=converged,
+                    time_to_converge_ms=time_to_converge_ms,
+                )
 
-        if initial_objection_count > 0:
-            time_to_converge_ms = int((time.time() - debate_start_time) * 1000)
-            self.analytics.record_debate_outcome(
-                turns_required=turns_required,
-                initial_objection_count=initial_objection_count,
-                final_objection_count=len(objections),
-                converged=converged,
-                time_to_converge_ms=time_to_converge_ms,
+            # 5. Arbitration Phase
+            logger.info("Council Phase: Arbitration")
+            if progress_callback: progress_callback("[Arbitration] Arbitrating proposal...")
+            arbitration = self.arbitrator.arbitrate(
+                plan_steps=[s.description for s in task_plan.steps],
+                coder_proposal=coder_proposal,
+                reviewer_report=reviewer_report,
+                challenger_report=challenger_report if tier_level == 4 else None,
+                scalability_report=scalability_report if tier_level == 4 else None,
+                security_report=security_report if tier_level == 4 else None,
+                performance_report=performance_report if tier_level == 4 else None,
+                maintainability_report=maintainability_report if tier_level == 4 else None,
+                shi=shi,
             )
 
-        # 8. Council Arbitration and Confidence Fusion
-        logger.info("Council Phase: Arbitration")
-        if progress_callback:
-            progress_callback("[Arbitration] Arbitrating proposal...")
-        logger.info("[COUNCIL - ARBITRATION] Evaluating agent votes and contradictions...")
-        arbitration = self.arbitrator.arbitrate(
-            plan_steps=[s.description for s in task_plan.steps],
-            coder_proposal=coder_proposal,
-            reviewer_report=reviewer_report,
-            challenger_report=challenger_report,
-            scalability_report=scalability_report,
-            security_report=security_report,
-            performance_report=performance_report,
-            maintainability_report=maintainability_report,
-            shi=shi,
-        )
-
-        fusion_score = arbitration.overall_confidence
-        logger.info(
-            "[COUNCIL - FUSION] Reasoning Confidence Fusion Score: %.3f (Objections: %d)",
-            fusion_score,
-            len(objections),
-        )
-
-        # 9. Final Response Synthesis
-        logger.info("Council Phase: Synthesis")
-        if progress_callback:
-            progress_callback("[Synthesis] Synthesizing final summary...")
-        logger.info("[COUNCIL - SYNTHESIS] Rendering walk-through response...")
-        try:
-            final_summary = await synthesizer.synthesize(
-                task=prompt,
-                winning_claims=arbitration.winning_claims,
-                plan=coder_proposal,
-                audit_reports=[
-                    reviewer_report.model_dump(),
+            # 6. Synthesis Phase
+            logger.info("Council Phase: Synthesis")
+            if progress_callback: progress_callback("[Synthesis] Synthesizing final summary...")
+                
+            audit_reports = [reviewer_report.model_dump()]
+            if tier_level == 4:
+                audit_reports.extend([
                     challenger_report.model_dump(),
                     scalability_report.model_dump(),
                     security_report.model_dump(),
                     performance_report.model_dump(),
-                    maintainability_report.model_dump(),
-                ],
-                context=repo_context,
-            )
-            if final_summary.startswith("Deliberation failure inside agent"):
-                raise ValueError(final_summary)
-        except Exception as e:
-            logger.error("Synthesizer failed in full path: %s. Using default fallback summary.", e)
-            final_summary = (
-                f"# Council Deliberation Report (Degraded Mode)\n\n"
-                f"The Lead Synthesizer was unavailable due to an unexpected offline model or network issue ({e}).\n"
-                f"Below is the raw compiled code proposal and findings directly from the deliberation council:\n\n"
-                f"## Task\n{prompt}\n\n"
-                f"## Code Proposal\n```\n{coder_proposal}\n```\n\n"
-                f"## Arbitration Status\n- **Confidence**: {arbitration.overall_confidence}\n- **Requires Human Review**: {arbitration.requires_human_review}\n- **Instructions**: {arbitration.synthesis_instructions}\n"
-            )
+                    maintainability_report.model_dump()
+                ])
 
-        # Determine subsystem keyword target
-        subsystem_target = "general"
-        py_files = re.findall(r"[\w\/\.\-]+\.py", prompt)
-        if py_files:
-            subsystem_target = py_files[0]
-        else:
-            # Match prompt keyword
-            for key in ["database", "concurrency", "lock", "thread", "async", "cache", "sandbox", "security", "telemetry", "model", "routing", "memory"]:
-                if key in prompt.lower():
-                    subsystem_target = key
-                    break
+            try:
+                final_summary = await synthesizer.synthesize(
+                    task=prompt,
+                    winning_claims=arbitration.winning_claims,
+                    plan=coder_proposal,
+                    audit_reports=audit_reports,
+                    context=repo_context,
+                )
+                if final_summary.startswith("Deliberation failure inside agent"):
+                    raise ValueError(final_summary)
+            except Exception as e:
+                logger.error("Synthesizer failed: %s. Using default fallback summary.", e)
+                final_summary = (
+                    f"# Council Deliberation Report (Degraded Mode)\n\n"
+                    f"The Lead Synthesizer was unavailable due to an unexpected offline model or network issue ({e}).\n"
+                    f"Below is the raw compiled code proposal and findings directly from the deliberation council:\n\n"
+                    f"## Task\n{prompt}\n\n"
+                    f"## Code Proposal\n```\n{coder_proposal}\n```\n\n"
+                    f"## Arbitration Status\n- **Confidence**: {arbitration.overall_confidence}\n- **Requires Human Review**: {arbitration.requires_human_review}\n- **Instructions**: {arbitration.synthesis_instructions}\n"
+                )
 
-        if objections:
-            # Log the unresolved objections as a failed experiment in the FEL
-            self.lineage_memory.log_failed_experiment(
-                target_subsystem=subsystem_target,
-                patch=coder_proposal[:1000],
-                error_type="critic_veto",
-                error_message=f"Debate loop finished but objections remained: {objections}",
-            )
-        elif arbitration.requires_human_review:
-            # Log the vetoed/failed experiment in the FEL
-            self.lineage_memory.log_failed_experiment(
-                target_subsystem=subsystem_target,
-                patch=coder_proposal[:1000],
-                error_type="arbitration_veto",
-                error_message="Reasoning council arbitration vetoed proposal due to low confidence.",
-            )
-        else:
-            # Log the successful decision in the DLS
+            # 7. Lineage Logging
             decision_id = f"DEC-{int(time.time())}"
-            impact = self.estimate_blast_radius(subsystem_target)
-            self.lineage_memory.log_decision(
-                decision_id=decision_id,
-                target_subsystem=subsystem_target,
-                rationale=final_summary[:300],
-                architectural_impact=impact,
-                consequences="Approved and validated by Reasoning Council.",
-                alternatives=[
-                    {
-                        "option_name": "Proposed Solution",
-                        "tradeoffs": {"confidence": arbitration.overall_confidence},
-                        "rejected_reason": ""
-                    }
-                ]
-            )
+            impact = self.estimate_blast_radius(target_file)
+            
+            if tier_level == 3:
+                self.lineage_memory.log_decision(
+                    decision_id=decision_id,
+                    target_subsystem="standard_path",
+                    rationale=final_summary[:300],
+                    architectural_impact=impact,
+                    consequences="Standard execution completed with single-reviewer arbitration.",
+                )
+            elif tier_level == 4:
+                subsystem_target = target_file
+                for key in ["database", "concurrency", "lock", "thread", "async", "cache", "sandbox", "security", "telemetry", "model", "routing", "memory"]:
+                    if key in prompt.lower():
+                        subsystem_target = key
+                        break
+                
+                if objections:
+                    self.lineage_memory.log_failed_experiment(
+                        target_subsystem=subsystem_target,
+                        patch=coder_proposal[:1000],
+                        error_type="critic_veto",
+                        error_message=f"Debate loop finished but objections remained: {objections}",
+                    )
+                elif arbitration.requires_human_review:
+                    self.lineage_memory.log_failed_experiment(
+                        target_subsystem=subsystem_target,
+                        patch=coder_proposal[:1000],
+                        error_type="arbitration_veto",
+                        error_message="Reasoning council arbitration vetoed proposal due to low confidence.",
+                    )
+                else:
+                    self.lineage_memory.log_decision(
+                        decision_id=decision_id,
+                        target_subsystem=subsystem_target,
+                        rationale=final_summary[:300],
+                        architectural_impact=impact,
+                        consequences="Approved and validated by Reasoning Council.",
+                        alternatives=[{
+                            "option_name": "Proposed Solution",
+                            "tradeoffs": {"confidence": arbitration.overall_confidence},
+                            "rejected_reason": ""
+                        }]
+                    )
 
-            pass
-
-        logger.info("Reasoning Council deliberation fully completed")
-        return {
-            "tier": "full",
-            "task_plan": task_plan,
-            "coder_proposal": coder_proposal,
-            "reviewer_report": reviewer_report,
-            "challenger_report": challenger_report,
-            "scalability_report": scalability_report,
-            "security_report": security_report,
-            "performance_report": performance_report,
-            "maintainability_report": maintainability_report,
-            "arbitration": arbitration.to_dict(),
-            "final_summary": final_summary,
-        }
-
-
+            logger.info("Executed %s tier in %.2fs", tier.value, time.time() - start_time)
+            return {
+                "tier": tier.value,
+                "task_plan": task_plan,
+                "coder_proposal": coder_proposal,
+                "reviewer_report": reviewer_report,
+                "challenger_report": challenger_report if tier_level == 4 else None,
+                "scalability_report": scalability_report if tier_level == 4 else None,
+                "security_report": security_report if tier_level == 4 else None,
+                "performance_report": performance_report if tier_level == 4 else None,
+                "maintainability_report": maintainability_report if tier_level == 4 else None,
+                "arbitration": arbitration.to_dict(),
+                "final_summary": final_summary,
+            }

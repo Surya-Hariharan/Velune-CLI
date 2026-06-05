@@ -9,6 +9,7 @@ import pytest
 from velune.core.errors.execution import SandboxError
 from velune.execution.benchmarker import SubsystemBenchmarker
 from velune.execution.command_spec import CommandSpec
+from velune.tools.filesystem.read import ReadFile, ReadDirectory
 from velune.tools.filesystem.write import WriteFile, CreateFile, DeleteFile
 from velune.cognition.orchestrator import CouncilOrchestrator
 from velune.execution.executor import ExecutionExecutor
@@ -34,6 +35,19 @@ def test_write_tools_enforce_workspace(temp_workspace):
     delete_tool = DeleteFile(workspace=temp_workspace)
     with pytest.raises(ValueError, match="is outside workspace"):
         asyncio.run(delete_tool.execute(str(outside_path)))
+
+
+def test_read_tools_enforce_workspace(temp_workspace):
+    """ReadFile and ReadDirectory must reject paths outside the workspace boundary."""
+    outside_path = temp_workspace.parent / "etc" / "passwd"
+
+    read_tool = ReadFile(workspace=temp_workspace)
+    with pytest.raises(ValueError, match="is outside workspace"):
+        asyncio.run(read_tool.execute(str(outside_path)))
+
+    read_dir_tool = ReadDirectory(workspace=temp_workspace)
+    with pytest.raises(ValueError, match="is outside workspace"):
+        asyncio.run(read_dir_tool.execute(str(temp_workspace.parent)))
 
 
 def test_benchmarker_isolation_env(temp_workspace):

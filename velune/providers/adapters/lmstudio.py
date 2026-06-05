@@ -51,10 +51,10 @@ class LMStudioProvider(ModelProvider):
                 m_id = item["id"]
                 descriptors.append(
                     ModelDescriptor(
-                        id=m_id,
-                        name=m_id,
-                        provider="lmstudio",
-                        context_window=32768,
+                        model_id=m_id,
+                        display_name=m_id,
+                        provider_id="lmstudio",
+                        context_length=32768,
                         capabilities={
                             "coding": CapabilityLevel.INTERMEDIATE,
                             "reasoning": CapabilityLevel.INTERMEDIATE,

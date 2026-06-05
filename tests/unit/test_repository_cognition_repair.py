@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 import pytest
 
-from velune.kernel.registry import ComponentRegistry
+from velune.kernel.registry import get_container
 from velune.repository.cognition import RepositoryCognitionService
 from velune.repository.grapher import RepositoryGrapher
 from velune.repository.parser import ASTParser
@@ -164,44 +164,44 @@ def test_graph_traversal_consistency() -> None:
 
 def test_retrieval_compatibility() -> None:
     """Verify GraphRetriever handles lookup resolution of symbols correctly using all formats."""
-    # Build a simulated service structure
-    registry = ComponentRegistry()
-    
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
-        
+
         # Instantiate a repo service in this temp directory
         repo_service = RepositoryCognitionService(temp_path)
-        
+
         # Write dummy files to trigger scanning
         file1 = temp_path / "velune" / "cognition" / "orchestrator.py"
         file1.parent.mkdir(parents=True, exist_ok=True)
         file1.write_text("class CouncilOrchestrator:\n    pass\n", encoding="utf-8")
-        
+
         file2 = temp_path / "velune" / "execution" / "executor.py"
         file2.parent.mkdir(parents=True, exist_ok=True)
         file2.write_text("class CouncilOrchestrator:\n    pass\n", encoding="utf-8")
 
         # Perform index
         snapshot = repo_service.index(force=True)
-        
+
         # Verify both symbols exist and have unique IDs
         assert len(snapshot.symbols) >= 2
         syms = [s for s in snapshot.symbols if s.name == "CouncilOrchestrator"]
         assert len(syms) == 2
         assert syms[0].symbol_id != syms[1].symbol_id
 
-        # Register repo service
-        registry.register(RepositoryCognitionService, repo_service)
+        # Register repo service in the global container, then retrieve
+        container = get_container()
+        container.register_instance("runtime.repository_cognition", repo_service)
+        try:
+            # Create retriever — it will call get_container().get("runtime.repository_cognition")
+            retriever = GraphRetriever()
 
-        # Create retriever
-        retriever = GraphRetriever()
-        retriever.registry = registry
+            # Traverse by raw name (should traverse starting at both nodes since they both match raw name)
+            hits = retriever.retrieve("CouncilOrchestrator", depth=1)
 
-        # Traverse by raw name (should traverse starting at both nodes since they both match raw name)
-        hits = retriever.retrieve("CouncilOrchestrator", depth=1)
-        
-        # Traversal successfully finds neighbor files and correct symbols
-        assert len(hits) >= 2
-        assert any("velune/cognition/orchestrator.py" in h.document.content for h in hits)
-        assert any("velune/execution/executor.py" in h.document.content for h in hits)
+            # Traversal successfully finds neighbor files and correct symbols
+            assert len(hits) >= 2
+            assert any("velune/cognition/orchestrator.py" in h.document.content for h in hits)
+            assert any("velune/execution/executor.py" in h.document.content for h in hits)
+        finally:
+            # Clean up global container state so other tests are not affected
+            container._singletons.pop("runtime.repository_cognition", None)

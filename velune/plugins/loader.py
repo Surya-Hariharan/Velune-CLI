@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from velune.plugins.registry import PluginRegistry
-from velune.plugins.sandbox import PluginSandbox
 from velune.plugins.schemas import PluginManifest
 
 logger = logging.getLogger("velune.plugins.loader")
@@ -72,7 +71,7 @@ class PluginLoader:
         plugin_class = getattr(module, plugin_class_name)
         plugin_instance = plugin_class()
 
-        # Wrap all hooks using sandbox safety wrapper
+        # Wrap all hooks using inline sandbox wrappers
         wrapped_instance = self._wrap_instance_hooks(plugin_instance, manifest)
 
         # Register instance to catalog
@@ -80,12 +79,17 @@ class PluginLoader:
         logger.info("Successfully loaded and registered plugin: %s", manifest.name)
 
     def _wrap_instance_hooks(self, instance: Any, manifest: PluginManifest) -> Any:
-        """Proxies active callbacks on instance to run inside sandbox wrappers."""
+        """Proxies active callbacks on instance to run inside a try-except safety boundary."""
         for hook in manifest.hooks:
             method_name = f"on_{hook}" if not hook.startswith("on_") else hook
             if hasattr(instance, method_name):
                 original = getattr(instance, method_name)
-                # Wrap using PluginSandbox helper
-                wrapped = PluginSandbox.wrap_callback(original)
-                setattr(instance, method_name, wrapped)
+                # Inline async wrapper — catches all plugin failures without crashing the process
+                async def _safe_callback(*args: Any, _orig: Any = original, _name: str = method_name, **kwargs: Any) -> Any:
+                    try:
+                        return await _orig(*args, **kwargs)
+                    except Exception as e:
+                        logger.error("Plugin callback %s failed: %s", _name, e)
+                        return None
+                setattr(instance, method_name, _safe_callback)
         return instance

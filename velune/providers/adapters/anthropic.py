@@ -58,38 +58,50 @@ class AnthropicProvider(ModelProvider):
         # Anthropic has static lists, or we can query their endpoints. Here we provide the standard suite.
         return [
             ModelDescriptor(
-                id="claude-3-5-sonnet-20241022",
-                name="Claude 3.5 Sonnet",
-                provider="anthropic",
-                context_window=200000,
+                model_id="claude-opus-4-5",
+                display_name="Claude Opus 4.5",
+                provider_id="anthropic",
+                context_length=200000,
                 capabilities={
                     "coding": CapabilityLevel.EXPERT,
                     "reasoning": CapabilityLevel.EXPERT,
                     "planning": CapabilityLevel.EXPERT,
                     "summarization": CapabilityLevel.EXPERT,
-                    "embedding": CapabilityLevel.NONE,
                     "instruction_following": CapabilityLevel.EXPERT,
-                    "multimodal": CapabilityLevel.EXPERT,
                     "tool_use": CapabilityLevel.EXPERT,
                     "long_context": CapabilityLevel.EXPERT,
                 },
                 is_local=False,
             ),
             ModelDescriptor(
-                id="claude-3-5-haiku-20241022",
-                name="Claude 3.5 Haiku",
-                provider="anthropic",
-                context_window=200000,
+                model_id="claude-sonnet-4-5",
+                display_name="Claude Sonnet 4.5",
+                provider_id="anthropic",
+                context_length=200000,
                 capabilities={
                     "coding": CapabilityLevel.ADVANCED,
                     "reasoning": CapabilityLevel.ADVANCED,
                     "planning": CapabilityLevel.ADVANCED,
                     "summarization": CapabilityLevel.ADVANCED,
-                    "embedding": CapabilityLevel.NONE,
-                    "instruction_following": CapabilityLevel.EXPERT,
-                    "multimodal": CapabilityLevel.NONE,
+                    "instruction_following": CapabilityLevel.ADVANCED,
                     "tool_use": CapabilityLevel.EXPERT,
-                    "long_context": CapabilityLevel.EXPERT,
+                    "long_context": CapabilityLevel.ADVANCED,
+                },
+                is_local=False,
+            ),
+            ModelDescriptor(
+                model_id="claude-haiku-4-5",
+                display_name="Claude Haiku 4.5",
+                provider_id="anthropic",
+                context_length=200000,
+                capabilities={
+                    "coding": CapabilityLevel.INTERMEDIATE,
+                    "reasoning": CapabilityLevel.INTERMEDIATE,
+                    "planning": CapabilityLevel.INTERMEDIATE,
+                    "summarization": CapabilityLevel.INTERMEDIATE,
+                    "instruction_following": CapabilityLevel.ADVANCED,
+                    "tool_use": CapabilityLevel.ADVANCED,
+                    "long_context": CapabilityLevel.INTERMEDIATE,
                 },
                 is_local=False,
             ),
@@ -199,7 +211,7 @@ class AnthropicProvider(ModelProvider):
             assert self.client is not None
             # Fetch a simple request with 1 token output
             payload = {
-                "model": "claude-3-5-haiku-20241022",
+                "model": "claude-haiku-4-5",
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 1,
             }

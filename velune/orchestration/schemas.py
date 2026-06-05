@@ -8,10 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from velune.core.types.context import ContextWindow
 from velune.core.types.task import TaskPlan
-from velune.repository.schemas import RepositorySnapshot
-from velune.retrieval.schemas import RetrievalResult
 
 
 class ExecutionStatus(str, Enum):
@@ -63,24 +60,9 @@ class OrchestrationState(BaseModel):
     run_id: str
     request: OrchestrationRequest
     status: ExecutionStatus = ExecutionStatus.PENDING
-
-    task_state: dict[str, Any] = Field(default_factory=dict)
-    execution_state: dict[str, Any] = Field(default_factory=dict)
-    retrieval_state: dict[str, Any] = Field(default_factory=dict)
-    memory_state: dict[str, Any] = Field(default_factory=dict)
-    repository_state: dict[str, Any] = Field(default_factory=dict)
-    context_state: dict[str, Any] = Field(default_factory=dict)
-
     task_plan: TaskPlan | None = None
-    retrieval_result: RetrievalResult | None = None
-    repository_snapshot: RepositorySnapshot | None = None
-    context_window: ContextWindow | None = None
-
-    agent_messages: list[AgentMessage] = Field(default_factory=list)
     attempts: list[ExecutionAttempt] = Field(default_factory=list)
-    validation_issues: list[str] = Field(default_factory=list)
     checkpoints: list[str] = Field(default_factory=list)
-
     output: str | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))

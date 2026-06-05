@@ -13,7 +13,7 @@ from velune.core.types.model import (
 from velune.core.types.provider import ProviderCapabilities, ProviderConfig
 from velune.core.types.repository import DependencyEdge, FileNode, SymbolNode
 from velune.core.types.task import Task, TaskPlan, TaskResult, TaskStatus, TaskStep
-from velune.core.types.workspace import CognitionModel, WorkspaceEvent, WorkspaceState
+from velune.core.types.workspace import WorkspaceEvent, WorkspaceState
 
 __all__ = [
     "AgentRole",
@@ -45,5 +45,4 @@ __all__ = [
     "TaskResult",
     "WorkspaceState",
     "WorkspaceEvent",
-    "CognitionModel",
 ]

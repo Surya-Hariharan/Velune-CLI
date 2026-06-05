@@ -4,7 +4,7 @@ from typing import Any
 
 logger = logging.getLogger("velune.retrieval.hybrid")
 
-from velune.kernel.registry import ComponentRegistry
+
 from velune.retrieval.graph import GraphRetriever
 from velune.retrieval.keyword import BM25Retriever
 from velune.retrieval.reranker import ContextReranker
@@ -19,7 +19,6 @@ class HybridRetriever:
     """
 
     def __init__(self, location: str = ":memory:", client: Any | None = None) -> None:
-        self.registry = ComponentRegistry()
         self.vector_retriever = VectorRetriever(location=location, client=client)
         self.lexical_retriever = BM25Retriever()
         self.graph_retriever = GraphRetriever()

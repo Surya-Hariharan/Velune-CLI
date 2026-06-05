@@ -16,7 +16,7 @@ from velune.kernel.config import (
 )
 from velune.kernel.health import SubsystemHealthMonitor
 from velune.kernel.lifecycle import LifecycleCoordinator, Subsystem
-from velune.kernel.registry import ComponentRegistry, ServiceContainer, get_container, inject
+from velune.kernel.registry import ServiceContainer, get_container, inject
 from velune.kernel.schemas import ComponentStatus, Event, HealthReport
 
 __all__ = [
@@ -32,7 +32,6 @@ __all__ = [
     "EventHandler",
 
     # Registry
-    "ComponentRegistry",
     "ServiceContainer",
     "inject",
     "get_container",

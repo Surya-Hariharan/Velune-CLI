@@ -151,14 +151,16 @@ class CognitiveFirewall:
                     pass
                 return False
 
-        # Individual message scanning
+        # Individual message scanning — skip only non-conversational roles (e.g. system, tool).
+        # Assistant messages are included so reflected injections in provider responses are caught.
         for msg in messages:
-            if msg.get("role") == "system":
+            if msg.get("role") not in ("user", "assistant"):
                 continue
             if not self.scan_text(msg.get("content", "")):
                 return False
 
         return True
+
 
     def sanitize_content(self, text: str, is_code: bool = False) -> str:
         """Neutralize malicious injection blocks in text by escaping structure tags and keywords."""

@@ -31,8 +31,8 @@ def models_scan(
             console.print("[red]Model discovery service is unavailable.[/red]")
         raise typer.Exit(code=1)
 
-    from velune.core.event_loop import submit
-    records = submit(_models_scan_async(cli_context, provider, probe))
+    import asyncio
+    records = asyncio.run(_models_scan_async(cli_context, provider, probe))
 
     from velune.core.types.model import CapabilityLevel
 
@@ -376,8 +376,8 @@ def models_benchmark(
             console.print("[yellow]No models registered for benchmarking.[/yellow]")
         return
 
-    from velune.core.event_loop import submit
-    submit(_models_benchmark_async(cli_context, registry, provider_registry, models_to_probe))
+    import asyncio
+    asyncio.run(_models_benchmark_async(cli_context, registry, provider_registry, models_to_probe))
 
 
 async def _models_benchmark_async(

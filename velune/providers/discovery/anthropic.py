@@ -20,9 +20,9 @@ class AnthropicDiscovery:
 
         # Anthropic has a fixed set of models
         models = [
-            self._create_model_descriptor("claude-3-opus-20240229", 200000, 0.015),
-            self._create_model_descriptor("claude-3-sonnet-20240229", 200000, 0.003),
-            self._create_model_descriptor("claude-3-haiku-20240307", 200000, 0.00025),
+            self._create_model_descriptor("claude-opus-4-5", 200000, 0.015),
+            self._create_model_descriptor("claude-sonnet-4-5", 200000, 0.003),
+            self._create_model_descriptor("claude-haiku-4-5", 200000, 0.00025),
         ]
 
         return models
@@ -51,28 +51,28 @@ class AnthropicDiscovery:
         profile = ModelCapabilityProfile()
 
         if "opus" in model_id:
-            profile.coding = CapabilityLevel.ADVANCED
+            profile.coding = CapabilityLevel.EXPERT
             profile.reasoning = CapabilityLevel.EXPERT
             profile.planning = CapabilityLevel.EXPERT
             profile.summarization = CapabilityLevel.EXPERT
             profile.instruction_following = CapabilityLevel.EXPERT
             profile.tool_use = CapabilityLevel.EXPERT
-            profile.long_context = CapabilityLevel.ADVANCED
+            profile.long_context = CapabilityLevel.EXPERT
         elif "sonnet" in model_id:
             profile.coding = CapabilityLevel.ADVANCED
             profile.reasoning = CapabilityLevel.ADVANCED
             profile.planning = CapabilityLevel.ADVANCED
             profile.summarization = CapabilityLevel.ADVANCED
             profile.instruction_following = CapabilityLevel.ADVANCED
-            profile.tool_use = CapabilityLevel.ADVANCED
+            profile.tool_use = CapabilityLevel.EXPERT
             profile.long_context = CapabilityLevel.ADVANCED
         elif "haiku" in model_id:
             profile.coding = CapabilityLevel.INTERMEDIATE
             profile.reasoning = CapabilityLevel.INTERMEDIATE
             profile.planning = CapabilityLevel.INTERMEDIATE
             profile.summarization = CapabilityLevel.INTERMEDIATE
-            profile.instruction_following = CapabilityLevel.INTERMEDIATE
-            profile.tool_use = CapabilityLevel.INTERMEDIATE
+            profile.instruction_following = CapabilityLevel.ADVANCED
+            profile.tool_use = CapabilityLevel.ADVANCED
             profile.long_context = CapabilityLevel.INTERMEDIATE
 
         return profile

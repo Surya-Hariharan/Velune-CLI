@@ -48,7 +48,6 @@ __all__ = [
     "TaskResult",
     "WorkspaceState",
     "WorkspaceEvent",
-    "CognitionModel",
     # Config
     "VeluneConfig",
     "ProjectConfig",

@@ -72,8 +72,8 @@ def memory_inspect(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
-    from velune.core.event_loop import submit
-    submit(_memory_inspect_async(cli_context, tier, limit, session_id))
+    import asyncio
+    asyncio.run(_memory_inspect_async(cli_context, tier, limit, session_id))
 
 
 async def _memory_inspect_async(
@@ -169,8 +169,8 @@ def memory_clear(
             abort=True,
         )
 
-    from velune.core.event_loop import submit
-    submit(_memory_clear_async(cli_context, tier, session_id))
+    import asyncio
+    asyncio.run(_memory_clear_async(cli_context, tier, session_id))
 
 
 async def _memory_clear_async(cli_context: CLIContext, tier: str, session_id: str) -> None:
@@ -225,8 +225,8 @@ def memory_compact(ctx: typer.Context) -> None:
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
-    from velune.core.event_loop import submit
-    submit(_memory_compact_async(cli_context))
+    import asyncio
+    asyncio.run(_memory_compact_async(cli_context))
 
 
 async def _memory_compact_async(cli_context: CLIContext) -> None:

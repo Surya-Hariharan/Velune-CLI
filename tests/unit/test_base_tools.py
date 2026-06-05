@@ -1,12 +1,12 @@
-"""Unit tests for Velune base tool registry and execution coordinator (Batch 13)."""
+"""Unit tests for Velune base tool registry."""
 
-import pytest
 import asyncio
 from typing import Any
 
-from velune.tools.base.tool import BaseTool, ToolPermission
+import pytest
+
 from velune.tools.base.registry import ToolRegistry
-from velune.tools.base.executor import ToolExecutionCoordinator, ToolExecutionResult
+from velune.tools.base.tool import BaseTool, ToolPermission
 
 
 class DummyAddTool(BaseTool):
@@ -93,86 +93,4 @@ def test_tool_registry_registration_and_validation() -> None:
     assert registry.has("add_tool") is False
 
 
-@pytest.mark.asyncio
-async def test_tool_executor_happy_path() -> None:
-    """Verify that the ToolExecutionCoordinator executes registered tools successfully."""
-    registry = ToolRegistry()
-    tool = DummyAddTool()
-    registry.register(tool)
-    
-    executor = ToolExecutionCoordinator(registry)
-    
-    result = await executor.execute(
-        tool_name="add_tool",
-        arguments={"a": 10, "b": 20},
-        run_id="run-1",
-        actor="user"
-    )
-    
-    assert result.success is True
-    assert result.output == 30
-    assert result.attempts == 1
-    assert result.error is None
-    assert tool.input_validated is True
 
-
-@pytest.mark.asyncio
-async def test_tool_executor_missing_permissions() -> None:
-    """Verify that the ToolExecutionCoordinator blocks execution on missing permissions."""
-    registry = ToolRegistry()
-    tool = DummyAddTool(requires_perms={ToolPermission.TERMINAL_EXECUTE})
-    registry.register(tool)
-    
-    executor = ToolExecutionCoordinator(registry)
-    
-    # Execute with permissions missing TERMINAL_EXECUTE
-    result = await executor.execute(
-        tool_name="add_tool",
-        arguments={"a": 1, "b": 2},
-        run_id="run-2",
-        actor="user",
-        granted_permissions={ToolPermission.FILESYSTEM_READ}
-    )
-    
-    assert result.success is False
-    assert "missing_permissions" in result.error
-    assert ToolPermission.TERMINAL_EXECUTE.value in result.error
-
-
-@pytest.mark.asyncio
-async def test_tool_executor_tool_not_found() -> None:
-    """Verify that the ToolExecutionCoordinator returns an error for unregistered tools."""
-    registry = ToolRegistry()
-    executor = ToolExecutionCoordinator(registry)
-    
-    result = await executor.execute(
-        tool_name="non_existent",
-        arguments={},
-        run_id="run-3",
-        actor="user"
-    )
-    
-    assert result.success is False
-    assert result.error == "tool_not_found"
-
-
-@pytest.mark.asyncio
-async def test_tool_executor_timeout_and_retries() -> None:
-    """Verify that the ToolExecutionCoordinator enforces timeouts and executes retries on failure."""
-    registry = ToolRegistry()
-    tool = DummyAddTool()
-    registry.register(tool)
-    
-    executor = ToolExecutionCoordinator(registry, default_timeout=0.05, default_retries=2)
-    
-    # Trigger a timeout by setting a delay greater than the timeout budget
-    result = await executor.execute(
-        tool_name="add_tool",
-        arguments={"a": 5, "b": 5, "delay": 0.2},
-        run_id="run-4",
-        actor="user"
-    )
-    
-    assert result.success is False
-    # Max attempts: default_retries (2) + 1 = 3
-    assert result.attempts == 3

@@ -3,13 +3,11 @@
 from velune.plugins.hooks import PluginHookDispatcher
 from velune.plugins.loader import PluginLoader
 from velune.plugins.registry import PluginRegistry
-from velune.plugins.sandbox import PluginSandbox
 from velune.plugins.schemas import PluginManifest
 
 __all__ = [
     "PluginManifest",
     "PluginHookDispatcher",
     "PluginRegistry",
-    "PluginSandbox",
     "PluginLoader",
 ]

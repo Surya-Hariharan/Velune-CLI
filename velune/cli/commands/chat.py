@@ -20,8 +20,8 @@ def chat_command(ctx: typer.Context) -> None:
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
-    from velune.core.event_loop import submit
-    submit(_chat_command_async(cli_context))
+    import asyncio
+    asyncio.run(_chat_command_async(cli_context))
 
 
 async def _chat_command_async(cli_context: CLIContext) -> None:

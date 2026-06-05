@@ -38,14 +38,19 @@ class TestGraphRetrieverUsesSnapshot:
         svc.index.side_effect = AssertionError("GraphRetriever must not call index()!")
         return svc
 
+    def _make_mock_container(self, svc):
+        """Build a mock ServiceContainer whose .get() returns svc for the repo key."""
+        container = MagicMock()
+        container.get.return_value = svc
+        return container
+
     def test_no_index_call_on_retrieve(self):
         """retrieve() must never invoke repo_service.index()."""
         from velune.retrieval.graph import GraphRetriever
 
         mock_svc = self._make_mock_service(snapshot=None)
 
-        with patch("velune.retrieval.graph.ComponentRegistry") as MockRegistry:
-            MockRegistry.return_value.get.return_value = mock_svc
+        with patch("velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)):
             gr = GraphRetriever()
             hits = gr.retrieve("some/file.py")
 
@@ -59,8 +64,7 @@ class TestGraphRetrieverUsesSnapshot:
 
         mock_svc = self._make_mock_service(snapshot=None)
 
-        with patch("velune.retrieval.graph.ComponentRegistry") as MockRegistry:
-            MockRegistry.return_value.get.return_value = mock_svc
+        with patch("velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)):
             gr = GraphRetriever()
             hits = gr.retrieve("velune/core/something.py")
 
@@ -94,8 +98,7 @@ class TestGraphRetrieverUsesSnapshot:
         mock_svc = self._make_mock_service(snapshot=snap)
         mock_svc.traverse.return_value = ["velune/core/engine.py"]
 
-        with patch("velune.retrieval.graph.ComponentRegistry") as MockRegistry:
-            MockRegistry.return_value.get.return_value = mock_svc
+        with patch("velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)):
             gr = GraphRetriever()
             hits = gr.retrieve("velune/core/caller.py", depth=1)
 

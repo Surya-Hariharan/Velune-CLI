@@ -13,7 +13,6 @@ import httpx
 from velune.core.errors.provider import (
     InferenceError,
     ProviderAuthenticationError,
-    ProviderConnectionError,
 )
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
@@ -50,42 +49,59 @@ class OpenAIProvider(ModelProvider):
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
 
     async def list_models(self) -> list[ModelDescriptor]:
-        """Fetch list of models and filter chat options."""
+        """Return the current OpenAI model lineup."""
         await self.initialize()
-        assert self.client is not None
-        try:
-            response = await self.client.get("/models")
-            response.raise_for_status()
-            data = response.json()
-
-            descriptors: list[ModelDescriptor] = []
-            for item in data.get("data", []):
-                m_id = item["id"]
-                if "gpt" in m_id.lower() or "o1" in m_id.lower():
-                    context_len = 128000 if "gpt-4" in m_id or "o1" in m_id else 16385
-                    descriptors.append(
-                        ModelDescriptor(
-                            id=m_id,
-                            name=m_id,
-                            provider="openai",
-                            context_window=context_len,
-                            capabilities={
-                                "coding": CapabilityLevel.ADVANCED,
-                                "reasoning": CapabilityLevel.EXPERT,
-                                "planning": CapabilityLevel.EXPERT,
-                                "summarization": CapabilityLevel.ADVANCED,
-                                "embedding": CapabilityLevel.INTERMEDIATE,
-                                "instruction_following": CapabilityLevel.EXPERT,
-                                "multimodal": CapabilityLevel.ADVANCED,
-                                "tool_use": CapabilityLevel.EXPERT,
-                                "long_context": CapabilityLevel.ADVANCED,
-                            },
-                            is_local=False,
-                        )
-                    )
-            return descriptors
-        except httpx.HTTPError as e:
-            raise ProviderConnectionError(f"OpenAI connection error: {e}")
+        return [
+            ModelDescriptor(
+                model_id="gpt-4o",
+                display_name="GPT-4o",
+                provider_id="openai",
+                context_length=128000,
+                capabilities={
+                    "coding": CapabilityLevel.EXPERT,
+                    "reasoning": CapabilityLevel.EXPERT,
+                    "planning": CapabilityLevel.EXPERT,
+                    "summarization": CapabilityLevel.EXPERT,
+                    "instruction_following": CapabilityLevel.EXPERT,
+                    "tool_use": CapabilityLevel.EXPERT,
+                    "long_context": CapabilityLevel.EXPERT,
+                },
+                is_local=False,
+            ),
+            ModelDescriptor(
+                model_id="gpt-4o-mini",
+                display_name="GPT-4o Mini",
+                provider_id="openai",
+                context_length=128000,
+                capabilities={
+                    "coding": CapabilityLevel.ADVANCED,
+                    "reasoning": CapabilityLevel.ADVANCED,
+                    "planning": CapabilityLevel.ADVANCED,
+                    "summarization": CapabilityLevel.ADVANCED,
+                    "instruction_following": CapabilityLevel.EXPERT,
+                    "tool_use": CapabilityLevel.EXPERT,
+                    "long_context": CapabilityLevel.ADVANCED,
+                },
+                is_local=False,
+            ),
+            ModelDescriptor(
+                model_id="gpt-3.5-turbo",
+                display_name="GPT-3.5 Turbo",
+                provider_id="openai",
+                context_length=16385,
+                capabilities={
+                    "coding": CapabilityLevel.INTERMEDIATE,
+                    "reasoning": CapabilityLevel.INTERMEDIATE,
+                    "planning": CapabilityLevel.INTERMEDIATE,
+                    "summarization": CapabilityLevel.ADVANCED,
+                    "instruction_following": CapabilityLevel.ADVANCED,
+                    "tool_use": CapabilityLevel.INTERMEDIATE,
+                    "long_context": CapabilityLevel.BASIC,
+                },
+                is_local=False,
+                tags=["fallback"],
+            ),
+        ]
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         """Standard chat inference."""

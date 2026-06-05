@@ -39,7 +39,9 @@ def _create_tool_registry(env: RuntimeEnvironment):
         workspace_path=str(env.workspace)
     )
     default_tools = [
-        ReadFile(), ReadDirectory(), WriteFile(), CreateFile(), DeleteFile(),
+        ReadFile(workspace=env.workspace), ReadDirectory(workspace=env.workspace),
+        WriteFile(workspace=env.workspace), CreateFile(workspace=env.workspace),
+        DeleteFile(workspace=env.workspace),
         GrepFiles(), FindFiles(), GitLog(), GitDiff(), GitBlame(), GitStatus(), GitBranch(),
         GitCommit(), GitCheckout(), execute_cmd_tool, TerminalHistory(),
         SemanticCodeSearch(), SymbolSearch(), GoToDefinition(), FindReferences(), WebFetch()
