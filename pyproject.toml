@@ -8,9 +8,9 @@ dynamic = ["version"]
 description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [
-    { name = "Velune Contributors" }
+    { name = "Surya HA" }
 ]
 keywords = ["ai", "cli", "llm", "ollama", "local-ai", "coding-assistant", "multi-agent", "agent", "autonomous"]
 classifiers = [
