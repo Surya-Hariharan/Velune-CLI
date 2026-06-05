@@ -15,6 +15,7 @@ from velune.cli.commands import (
     config_cmd,
     daemon_cmd,
     doctor_cmd,
+    init_command,
     mcp_cmd,
     mcp_serve,
     memory_cmd,
@@ -58,6 +59,7 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
 
     app.command(name="ask")(ask_command)
     app.command(name="chat")(chat_command)
+    app.command(name="init")(init_command)
     app.command(name="run")(run_command)
     app.command(name="mcp-serve")(mcp_serve)
     app.add_typer(models_cmd, name="models")

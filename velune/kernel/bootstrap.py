@@ -42,6 +42,10 @@ class RuntimeBootstrapper:
         registry = BackgroundTaskRegistry()
         env.container.register_instance("runtime.task_registry", registry)
 
+        from velune.hardware.detector import HardwareDetector
+        hardware_profile = HardwareDetector().detect()
+        env.container.register_instance("runtime.hardware", hardware_profile)
+
         # Modules with lifecycle_key set are lifecycle-critical (startup/shutdown
         # managed by LifecycleCoordinator). A factory failure aborts bootstrap.
         # Modules with lifecycle_key=None are optional; a factory failure is
