@@ -3,13 +3,56 @@
 import fnmatch
 from pathlib import Path
 
+DEFAULT_VELUNEIGNORE = """\
+# Velune index exclusions
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Large generated files
+*.min.js
+*.min.css
+dist/
+build/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+
+# Data and media
+*.sqlite
+*.db
+*.csv
+*.parquet
+data/
+datasets/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.mp4
+*.zip
+*.tar.gz
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+"""
+
 
 class FilesystemScanner:
     """Discovers source files inside a workspace, strictly adhering to .gitignore rules."""
 
     def __init__(self, root_path: Path) -> None:
         self.root_path = root_path.resolve()
-        self.gitignore_patterns = self._load_gitignore()
+        self.gitignore_patterns = self._load_gitignore() + self._load_veluneignore()
 
     def _load_gitignore(self) -> list[str]:
         """Loads and parses .gitignore rules along with core default exclusions."""
@@ -49,6 +92,24 @@ class FilesystemScanner:
             except Exception:
                 pass
 
+        return patterns
+
+    def _load_veluneignore(self) -> list[str]:
+        """Loads and parses .veluneignore rules from the workspace root."""
+        patterns: list[str] = []
+        veluneignore_path = self.root_path / ".veluneignore"
+        if not veluneignore_path.exists():
+            return patterns
+        try:
+            with open(veluneignore_path, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        if line.endswith("/"):
+                            line = line[:-1]
+                        patterns.append(line)
+        except Exception:
+            pass
         return patterns
 
     def is_ignored(self, path: Path) -> bool:

@@ -41,6 +41,14 @@ def workspace_init(
     if not cli_context.json_mode:
         console.print("[green]✓[/green] Created .velune configuration directory structure.")
 
+    # 2. Write default .veluneignore if one doesn't already exist
+    veluneignore_path = path / ".veluneignore"
+    if not veluneignore_path.exists():
+        from velune.repository.scanner import DEFAULT_VELUNEIGNORE
+        veluneignore_path.write_text(DEFAULT_VELUNEIGNORE, encoding="utf-8")
+        if not cli_context.json_mode:
+            console.print("[green]✓[/green] Created default .veluneignore (edit to customise index exclusions).")
+
     from velune.core.event_loop import submit
     submit(_workspace_init_async(cli_context, path, velune_dir, force))
 

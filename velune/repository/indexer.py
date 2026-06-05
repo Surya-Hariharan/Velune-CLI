@@ -1,5 +1,6 @@
 """Incremental symbol and repository metadata indexer."""
 
+import fnmatch
 import hashlib
 import json
 import logging
@@ -16,6 +17,20 @@ from velune.repository.schemas import (
 )
 
 logger = logging.getLogger("velune.repository.indexer")
+
+# Hard-coded secret-file guard — these are skipped regardless of .veluneignore.
+_SECRET_EXACT: frozenset[str] = frozenset({
+    ".env", ".env.local", ".env.production", ".env.staging",
+    "id_rsa", "id_ed25519",
+})
+_SECRET_GLOBS: tuple[str, ...] = ("*.pem",)
+
+
+def _is_secret_file(file_path: Path) -> bool:
+    name = file_path.name
+    if name in _SECRET_EXACT:
+        return True
+    return any(fnmatch.fnmatch(name, pat) for pat in _SECRET_GLOBS)
 
 
 class RepositoryIndexer:
@@ -56,6 +71,12 @@ class RepositoryIndexer:
 
         for file_path in code_files:
             rel_path = str(file_path.relative_to(self.root_path)).replace("\\", "/")
+
+            # SECURITY: hard gate — never index secret/credential files, even if
+            # they somehow passed the scanner's .veluneignore filter.
+            if _is_secret_file(file_path):
+                logger.warning("SECURITY: Skipping potential secret file: %s", rel_path)
+                continue
 
             try:
                 # Get hash and size
