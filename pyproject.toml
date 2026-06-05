@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "velune"
-version = "0.1.0"
-description = "Cognitive AI CLI for autonomous software engineering"
+dynamic = ["version"]
+description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "Velune Contributors" }
 ]
-keywords = ["ai", "cli", "agent", "autonomous", "coding"]
+keywords = ["ai", "cli", "llm", "ollama", "local-ai", "coding-assistant", "multi-agent", "agent", "autonomous"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -20,6 +20,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
 ]
 
 dependencies = [
@@ -30,22 +33,21 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=13.7.0",
     "platformdirs>=4.2.0",
-    
+    "keyring>=24.0.0",
+    "prompt-toolkit>=3.0.0",
+    "pathspec>=0.12.0",
+
     # Providers
     "openai>=1.10.0",
     "anthropic>=0.18.0",
     "httpx>=0.26.0",
-    
 
-    
     # Memory
     "qdrant-client>=1.7.0",
-    
 
-    
     # Retrieval
     "rank-bm25>=0.2.2",
-    
+
     # Repository
     "tree-sitter>=0.21.0",
     "tree-sitter-python>=0.21.0",
@@ -54,15 +56,15 @@ dependencies = [
     "tree-sitter-go>=0.21.0",
     "gitpython>=3.1.40",
     "networkx>=3.2.0",
-    
+
     # Execution
     "psutil>=5.9.0",
-    
+
     # Telemetry
     "opentelemetry-api>=1.22.0",
     "opentelemetry-sdk>=1.22.0",
     "opentelemetry-exporter-otlp>=1.22.0",
-    
+
     # Utilities
     "orjson>=3.9.0",
     "tiktoken>=0.5.0",
@@ -70,18 +72,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ollama = []
+gguf = ["gguf>=0.6.0", "llama-cpp-python>=0.2.0"]
+all-providers = ["velune[gguf]"]
 dev = [
-    "black>=23.12.0",
-    "ruff>=0.1.0",
-    "mypy>=1.8.0",
-    "pre-commit>=3.6.0",
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
     "pytest-mock>=3.12.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "coverage>=7.0.0",
+    "black>=23.12.0",
+    "pre-commit>=3.6.0",
     "pytest-cov>=4.1.0",
 ]
-gguf = ["gguf>=0.6.0"]
-langgraph = ["langgraph>=0.2.0"]
 
 [project.scripts]
 velune = "velune.main:app"
@@ -92,8 +96,19 @@ Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
 Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
 Documentation = "https://github.com/Surya-Hariharan/Velune-CLI#readme"
 
+[tool.hatch.version]
+path = "velune/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["velune"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "velune/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+]
 
 [tool.black]
 line-length = 100
@@ -102,6 +117,8 @@ target-version = ["py311", "py312"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
 
