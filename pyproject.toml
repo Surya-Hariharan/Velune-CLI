@@ -91,6 +91,7 @@ dev = [
     "black>=23.12.0",
     "pre-commit>=3.6.0",
     "pytest-cov>=4.1.0",
+    "types-toml>=0.10.0",
 ]
 
 [project.scripts]
@@ -143,6 +144,17 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
 no_implicit_optional = true
+
+# Third-party dependencies that ship no type stubs / py.typed marker.
+[[tool.mypy.overrides]]
+module = [
+    "psutil",
+    "pynvml",
+    "rank_bm25",
+    "networkx",
+    "llama_cpp",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

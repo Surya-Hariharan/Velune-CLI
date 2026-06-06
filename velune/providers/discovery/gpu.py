@@ -1,12 +1,13 @@
 """GPU/VRAM detection."""
 
 import subprocess
+from typing import Any
 
 
 class GPUDetector:
     """Detects GPU capabilities and VRAM."""
 
-    def detect(self) -> dict[str, any]:
+    def detect(self) -> dict[str, Any]:
         """Detect GPU information."""
         info = {
             "has_gpu": False,
@@ -36,7 +37,7 @@ class GPUDetector:
 
         return info
 
-    def _detect_nvidia(self) -> dict[str, any] | None:
+    def _detect_nvidia(self) -> dict[str, Any] | None:
         """Detect NVIDIA GPU via nvidia-smi."""
         try:
             result = subprocess.run(
@@ -66,7 +67,7 @@ class GPUDetector:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
 
-    def _detect_amd(self) -> dict[str, any] | None:
+    def _detect_amd(self) -> dict[str, Any] | None:
         """Detect AMD GPU via rocm-smi."""
         try:
             subprocess.run(
@@ -85,7 +86,7 @@ class GPUDetector:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
 
-    def _detect_metal(self) -> dict[str, any] | None:
+    def _detect_metal(self) -> dict[str, Any] | None:
         """Detect Apple Silicon GPU via Metal."""
         try:
             import platform
