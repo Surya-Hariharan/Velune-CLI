@@ -30,7 +30,12 @@ class VeluneREPL:
         self._history_file = Path.home() / ".velune" / "repl_history"
         self._history_file.parent.mkdir(parents=True, exist_ok=True)
         self._conversation: list[dict] = []
+        from velune.orchestration.role_assignments import CouncilRoleMap
+        self._assignments_path = Path.home() / ".velune" / "council_roles.json"
+        self._role_map = CouncilRoleMap.load(self._assignments_path)
+        self._project_profile = self._load_project_profile()
         self._registry = self._build_registry()
+        self._apply_role_overrides_to_orchestrator()
 
     # ------------------------------------------------------------------
     # prompt_toolkit session
@@ -150,6 +155,13 @@ class VeluneREPL:
         workspace_name = Path(workspace).name if workspace else "unknown"
         model_id = self.active_model.model_id if self.active_model else None
 
+        pt_name = None
+        if self._project_profile:
+            if isinstance(self._project_profile, dict):
+                pt_name = self._project_profile.get("display_name")
+            else:
+                pt_name = getattr(self._project_profile, "display_name", None)
+
         render_startup_banner(
             console=self.console,
             hardware_profile=hardware,
@@ -158,6 +170,7 @@ class VeluneREPL:
             workspace_name=workspace_name,
             active_model_id=model_id,
             version=__version__,
+            project_type_name=pt_name,
         )
 
     # ------------------------------------------------------------------
@@ -281,6 +294,24 @@ class VeluneREPL:
             description="Show the current session mode and its settings",
             usage="/mode",
             handler=self._cmd_mode,
+        ))
+        registry.register(SlashCommand(
+            name="councilmodel", aliases=["cm", "roles"],
+            description="Assign specific models to council agent roles",
+            usage="/councilmodel [show|reset]",
+            handler=self._cmd_councilmodel,
+        ))
+        registry.register(SlashCommand(
+            name="pull", aliases=["download", "get"],
+            description="Download an Ollama model interactively",
+            usage="/pull [model-id]",
+            handler=self._cmd_pull,
+        ))
+        registry.register(SlashCommand(
+            name="delete", aliases=["remove", "rm"],
+            description="Delete a locally installed Ollama model",
+            usage="/delete <model-id>",
+            handler=self._cmd_delete,
         ))
         return registry
 
@@ -855,6 +886,146 @@ class VeluneREPL:
         self.console.print(table)
 
     # ------------------------------------------------------------------
+    # Council model assignment command handlers
+    # ------------------------------------------------------------------
+
+    def _apply_role_overrides_to_orchestrator(self) -> None:
+        """Push current role assignments into the orchestrator's mapper overrides."""
+        try:
+            orchestrator = self.container.get("runtime.council_orchestrator")
+            if not orchestrator or not hasattr(orchestrator, "mapper"):
+                return
+            from velune.models.specializations import CouncilRole
+            orchestrator.mapper.overrides.clear()
+            for role_str, assignment in self._role_map.assignments.items():
+                try:
+                    orchestrator.mapper.overrides[CouncilRole(role_str)] = assignment.model_id
+                except ValueError:
+                    pass  # skip roles not in CouncilRole enum (e.g. "embedding")
+            if hasattr(orchestrator, "agent_factory"):
+                orchestrator.agent_factory.clear_cache()
+        except Exception:
+            pass
+
+    async def _cmd_councilmodel(self, args: str) -> None:
+        sub = args.strip().lower()
+        if sub == "show":
+            await self._cmd_councilmodel_show()
+            return
+        if sub == "reset":
+            self._role_map.clear_all()
+            self._role_map.save(self._assignments_path)
+            self._apply_role_overrides_to_orchestrator()
+            self.console.print("[yellow]✓ All council role assignments cleared.[/yellow]")
+            return
+
+        model_registry = self.container.get("runtime.model_registry")
+        provider_registry = self.container.get("runtime.provider_registry")
+        available = [
+            m for m in model_registry.list_all()
+            if provider_registry.get(m.provider_id) is not None
+        ]
+        if not available:
+            self.console.print("[yellow]No models available. Run /doctor to diagnose.[/yellow]")
+            return
+
+        from velune.cli.councilmodel_ui import run_councilmodel_ui
+        updated = await run_councilmodel_ui(self._role_map, available, self.console)
+        if updated is not None:
+            self._role_map = updated
+            self._role_map.save(self._assignments_path)
+            self._apply_role_overrides_to_orchestrator()
+
+    async def _cmd_councilmodel_show(self) -> None:
+        from rich.table import Table
+        from velune.orchestration.role_assignments import COUNCIL_ROLES, ROLE_DESCRIPTIONS
+
+        table = Table(border_style="dim", padding=(0, 1))
+        table.add_column("Role", style="cyan", width=14)
+        table.add_column("Assigned Model", style="white")
+        table.add_column("Provider", style="dim")
+        table.add_column("Description", style="dim")
+        for role in COUNCIL_ROLES:
+            assignment = self._role_map.get(role)
+            model_str = assignment.model_id if assignment else "[dim]auto-routed[/dim]"
+            provider_str = assignment.provider_id if assignment else "—"
+            table.add_row(
+                role, model_str, provider_str,
+                ROLE_DESCRIPTIONS.get(role, "")[:45],
+            )
+        self.console.print(table)
+        if not self._role_map.assignments:
+            self.console.print(
+                "[dim]No custom assignments. Use /councilmodel to assign.[/dim]"
+            )
+
+    # ------------------------------------------------------------------
+    # Ollama pull / delete command handlers
+    # ------------------------------------------------------------------
+
+    async def _cmd_pull(self, args: str) -> None:
+        from velune.providers.ollama_manager import OllamaManager
+        manager = OllamaManager()
+
+        if not await manager.is_running():
+            self.console.print(
+                "[red]Ollama is not running.[/red]\n"
+                "[dim]Start it with: ollama serve[/dim]"
+            )
+            return
+
+        if args.strip():
+            success = await manager.pull_model(args.strip(), self.console)
+            if success:
+                await self._refresh_model_registry()
+        else:
+            from velune.cli.pull_ui import run_pull_ui
+            local_models = await manager.list_local_models()
+            hardware = self.container.get("runtime.hardware")
+            ram_gb = float(hardware.total_ram_gb) if hardware else 16.0
+            chosen = await run_pull_ui(local_models, ram_gb, self.console)
+            if chosen:
+                if chosen in local_models:
+                    self.console.print(f"[yellow]{chosen} is already installed.[/yellow]")
+                    return
+                success = await manager.pull_model(chosen, self.console)
+                if success:
+                    await self._refresh_model_registry()
+
+    async def _cmd_delete(self, args: str) -> None:
+        if not args.strip():
+            self.console.print("[yellow]Usage: /delete <model-id>[/yellow]")
+            return
+        from rich.prompt import Confirm
+        from velune.providers.ollama_manager import OllamaManager
+        model_id = args.strip()
+        confirm = Confirm.ask(
+            f"  Delete [cyan]{model_id}[/cyan] from Ollama? This cannot be undone.",
+            default=False,
+        )
+        if not confirm:
+            return
+        manager = OllamaManager()
+        if await manager.delete_model(model_id):
+            self.console.print(f"[green]✓ Deleted: {model_id}[/green]")
+            await self._refresh_model_registry()
+        else:
+            self.console.print(f"[red]Failed to delete {model_id}[/red]")
+
+    async def _refresh_model_registry(self) -> None:
+        model_registry = self.container.get("runtime.model_registry")
+        if not model_registry:
+            return
+        try:
+            await model_registry.refresh()
+            count = len(model_registry.list_all())
+            self.console.print(
+                f"[dim]Model registry refreshed: {count} models available.[/dim]"
+            )
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     # Prompt handler
     # ------------------------------------------------------------------
 
@@ -871,6 +1042,24 @@ class VeluneREPL:
                 "or /doctor to diagnose.[/red]"
             )
             return
+
+        # Inject project-aware system prompt on the very first turn
+        if not self._conversation and self._project_profile:
+            try:
+                from velune.repository.project_type import PROJECT_SYSTEM_PROMPTS, ProjectType
+                pt_value = (
+                    self._project_profile.get("project_type")
+                    if isinstance(self._project_profile, dict)
+                    else self._project_profile.project_type.value
+                )
+                addon = PROJECT_SYSTEM_PROMPTS.get(ProjectType(pt_value), "")
+                if addon:
+                    self._conversation.append({
+                        "role": "system",
+                        "content": f"You are a coding assistant. {addon}",
+                    })
+            except Exception:
+                pass
 
         self._conversation.append({"role": "user", "content": text})
 
@@ -962,6 +1151,24 @@ class VeluneREPL:
                 self.active_model = model
                 return model, provider
         return None, None
+
+    def _load_project_profile(self):
+        """Load the cached project profile for the current workspace, or auto-detect."""
+        workspace = self.container.get("runtime.workspace")
+        if not workspace:
+            return None
+        profile_path = Path(workspace) / ".velune" / "project_profile.json"
+        if profile_path.exists():
+            try:
+                import json
+                return json.loads(profile_path.read_text())
+            except Exception:
+                pass
+        try:
+            from velune.repository.project_type import ProjectTypeDetector
+            return ProjectTypeDetector().detect(Path(workspace))
+        except Exception:
+            return None
 
 
 def run_repl(runtime: RuntimeContext) -> None:

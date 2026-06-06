@@ -34,7 +34,8 @@ _MODELS = [
         },
         is_local=False,
         speed_tier="fast",
-        tags=["cloud", "google", "flash"],
+        cost_per_1k_tokens=0.000075,
+        tags=["cloud", "google", "flash", "free"],
     ),
     ModelDescriptor(
         model_id="gemini-1.5-pro",
@@ -42,7 +43,7 @@ _MODELS = [
         provider_id="google",
         context_length=2097152,
         capabilities={
-            "coding": CapabilityLevel.ADVANCED,
+            "coding": CapabilityLevel.EXPERT,
             "reasoning": CapabilityLevel.EXPERT,
             "planning": CapabilityLevel.EXPERT,
             "summarization": CapabilityLevel.EXPERT,
@@ -52,6 +53,7 @@ _MODELS = [
         },
         is_local=False,
         speed_tier="medium",
+        cost_per_1k_tokens=0.00125,
         tags=["cloud", "google", "pro"],
     ),
     ModelDescriptor(
@@ -60,19 +62,42 @@ _MODELS = [
         provider_id="google",
         context_length=1048576,
         capabilities={
-            "coding": CapabilityLevel.INTERMEDIATE,
-            "reasoning": CapabilityLevel.INTERMEDIATE,
+            "coding": CapabilityLevel.ADVANCED,
+            "reasoning": CapabilityLevel.ADVANCED,
             "planning": CapabilityLevel.INTERMEDIATE,
             "summarization": CapabilityLevel.ADVANCED,
-            "instruction_following": CapabilityLevel.ADVANCED,
-            "tool_use": CapabilityLevel.INTERMEDIATE,
+            "instruction_following": CapabilityLevel.EXPERT,
+            "tool_use": CapabilityLevel.ADVANCED,
             "long_context": CapabilityLevel.EXPERT,
         },
         is_local=False,
         speed_tier="fast",
-        tags=["cloud", "google", "flash"],
+        cost_per_1k_tokens=0.000075,
+        tags=["cloud", "google", "flash", "free"],
+    ),
+    ModelDescriptor(
+        model_id="gemini-2.0-flash-thinking-exp",
+        display_name="Gemini 2.0 Flash Thinking",
+        provider_id="google",
+        context_length=32767,
+        capabilities={
+            "coding": CapabilityLevel.EXPERT,
+            "reasoning": CapabilityLevel.EXPERT,
+            "planning": CapabilityLevel.EXPERT,
+            "summarization": CapabilityLevel.ADVANCED,
+            "instruction_following": CapabilityLevel.EXPERT,
+            "tool_use": CapabilityLevel.ADVANCED,
+            "long_context": CapabilityLevel.INTERMEDIATE,
+        },
+        is_local=False,
+        speed_tier="medium",
+        cost_per_1k_tokens=0.0,
+        tags=["cloud", "google", "thinking", "free"],
     ),
 ]
+
+# Public alias used by tests and tooling
+GEMINI_MODELS = _MODELS
 
 
 def _build_contents(messages: list[dict]) -> tuple[list[dict], str]:
@@ -103,6 +128,22 @@ class GoogleProvider(ModelProvider):
             max_context_window=2097152,
         )
 
+    def _convert_messages(self, request: InferenceRequest) -> dict:
+        """Build the full Gemini REST payload from an InferenceRequest."""
+        contents, system_text = _build_contents(request.messages)
+        payload: dict = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": request.temperature,
+                "topP": request.top_p,
+                **({"maxOutputTokens": request.max_tokens} if request.max_tokens else {}),
+                **({"stopSequences": request.stop_sequences} if request.stop_sequences else {}),
+            },
+        }
+        if system_text:
+            payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+        return payload
+
     @property
     def provider_id(self) -> str:
         return "google"
@@ -122,18 +163,7 @@ class GoogleProvider(ModelProvider):
         await self.initialize()
         assert self.client is not None
         start = time.perf_counter()
-        contents, system_text = _build_contents(request.messages)
-        payload: dict = {
-            "contents": contents,
-            "generationConfig": {
-                "temperature": request.temperature,
-                "topP": request.top_p,
-                **({"maxOutputTokens": request.max_tokens} if request.max_tokens else {}),
-                **({"stopSequences": request.stop_sequences} if request.stop_sequences else {}),
-            },
-        }
-        if system_text:
-            payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+        payload = self._convert_messages(request)
 
         try:
             url = f"/models/{request.model_id}:generateContent"
@@ -158,17 +188,7 @@ class GoogleProvider(ModelProvider):
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         await self.initialize()
         assert self.client is not None
-        contents, system_text = _build_contents(request.messages)
-        payload: dict = {
-            "contents": contents,
-            "generationConfig": {
-                "temperature": request.temperature,
-                "topP": request.top_p,
-                **({"maxOutputTokens": request.max_tokens} if request.max_tokens else {}),
-            },
-        }
-        if system_text:
-            payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+        payload = self._convert_messages(request)
 
         try:
             url = f"/models/{request.model_id}:streamGenerateContent"

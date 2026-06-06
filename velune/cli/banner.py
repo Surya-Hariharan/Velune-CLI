@@ -20,6 +20,7 @@ def render_startup_banner(
     workspace_name: str,
     active_model_id: str | None,
     version: str = "0.1.0",
+    project_type_name: str | None = None,
 ) -> None:
     # Header
     header = Text()
@@ -66,13 +67,25 @@ def render_startup_banner(
             "[dim]model[/dim]     [yellow]none — type /model to select[/yellow]"
         )
 
+    # Project type (optional)
+    project_text = None
+    if project_type_name and project_type_name != "Unknown":
+        project_text = Text.from_markup(
+            f"[dim]project[/dim]   [green]{project_type_name}[/green]"
+        )
+
     # Hint
     hint = Text("type a prompt or ", style="dim")
     hint.append("/help", style="cyan")
     hint.append(" for commands", style="dim")
 
+    body_items = [header, hw_line, providers_text, model_text]
+    if project_text:
+        body_items.append(project_text)
+    body_items.append(hint)
+
     console.print(Panel(
-        Group(header, hw_line, providers_text, model_text, hint),
+        Group(*body_items),
         border_style="cyan",
         padding=(0, 1),
     ))

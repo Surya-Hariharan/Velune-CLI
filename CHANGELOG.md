@@ -9,6 +9,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-06-07
+
+### Added
+
+- Google Gemini provider (2.0 Flash, 1.5 Pro, 1.5 Flash, 2.0 Flash Thinking)
+- Together AI provider (Llama 3.3 70B, Qwen 2.5 Coder 32B, DeepSeek R1)
+- Fireworks AI provider (DeepSeek R1, Qwen 2.5 Coder, Mixtral 8x22B)
+- /councilmodel command — assign specific models to specific council roles
+- /pull command — download Ollama models interactively from within the REPL
+- /delete command — remove locally installed Ollama models
+- Project type auto-detection (FastAPI, Django, Flask, React, Next.js,
+  Rust, Go, Java Spring, .NET, Flutter) with framework-specific context
+- ProjectTypeDetector writes .velune/project_profile.json on init
+- System prompt injection based on detected project type
+- Model pull progress bar with live streaming status
+- Council role assignments persist to .velune/council_roles.json
+- ModeAwareModelSelector for /optimus and /godly auto-model selection
+
 ### Added
 
 - `/optimus` and `/godly` session-wide REPL modes with `ModeManager`, `ModeConfig`,

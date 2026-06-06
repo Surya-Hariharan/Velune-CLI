@@ -10,7 +10,7 @@ import keyring.errors
 _SERVICE = "velune/{}"
 _USERNAME = "api_key"
 
-_ENV_VARS: dict[str, str] = {
+PROVIDER_ENV_VARS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "xai": "XAI_API_KEY",
@@ -18,7 +18,11 @@ _ENV_VARS: dict[str, str] = {
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
     "huggingface": "HF_TOKEN",
+    "together": "TOGETHER_API_KEY",
+    "fireworks": "FIREWORKS_API_KEY",
 }
+
+_ENV_VARS = PROVIDER_ENV_VARS
 
 
 def save_key(provider_id: str, api_key: str) -> None:

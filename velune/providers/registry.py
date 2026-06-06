@@ -114,6 +114,16 @@ class ProviderRegistry:
             self._keyed_factory("velune.providers.adapters.openrouter", "OpenRouterProvider", "openrouter"),
         )
 
+        self.register_factory(
+            "together",
+            self._keyed_factory("velune.providers.adapters.together", "TogetherProvider", "together"),
+        )
+
+        self.register_factory(
+            "fireworks",
+            self._keyed_factory("velune.providers.adapters.fireworks", "FireworksProvider", "fireworks"),
+        )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------

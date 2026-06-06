@@ -21,6 +21,15 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("help",        "Show all available commands"),
     ("clear",       "Clear screen and conversation context"),
     ("exit",        "Exit the Velune session"),
+    ("councilmodel","Assign specific models to council agent roles"),
+    ("cm",          "Assign specific models to council agent roles"),
+    ("roles",       "Show council role assignments table"),
+    ("pull",        "Download an Ollama model interactively"),
+    ("download",    "Download an Ollama model interactively"),
+    ("get",         "Download an Ollama model interactively"),
+    ("delete",      "Delete a locally installed Ollama model"),
+    ("remove",      "Delete a locally installed Ollama model"),
+    ("rm",          "Delete a locally installed Ollama model"),
 ]
 
 _MODEL_PREFIX = "/model "

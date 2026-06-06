@@ -68,6 +68,7 @@ def check(
         _check_openai_api_key,
         _check_anthropic_api_key,
         _check_groq,
+        _check_google,
         _check_velune_dir,
         _check_sqlite,
         _check_qdrant,
@@ -304,6 +305,41 @@ def _check_groq() -> dict:
             "name": "Groq",
             "status": "fail",
             "message": f"Cannot reach api.groq.com — {e}",
+        }
+
+
+def _check_google() -> dict:
+    from velune.providers.keystore import get_key, has_key
+    if not has_key("google"):
+        return {
+            "name": "Google Gemini",
+            "status": "warn",
+            "message": "Not configured — free quota at aistudio.google.com",
+        }
+    try:
+        import httpx
+        key = get_key("google")
+        r = httpx.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+            timeout=5,
+        )
+        if r.status_code == 200:
+            models = r.json().get("models", [])
+            return {
+                "name": "Google Gemini",
+                "status": "ok",
+                "message": f"Connected — {len(models)} models available",
+            }
+        return {
+            "name": "Google Gemini",
+            "status": "fail",
+            "message": f"Auth failed (HTTP {r.status_code})",
+        }
+    except Exception as e:
+        return {
+            "name": "Google Gemini",
+            "status": "fail",
+            "message": f"Cannot reach googleapis.com — {e}",
         }
 
 

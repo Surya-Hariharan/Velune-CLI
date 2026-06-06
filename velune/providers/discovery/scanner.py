@@ -14,7 +14,9 @@ from velune.providers.discovery.huggingface import HuggingFaceDiscovery
 from velune.providers.discovery.lmstudio import LMStudioDiscovery
 from velune.providers.discovery.ollama import OllamaDiscovery
 from velune.providers.discovery.openai import OpenAIDiscovery
+from velune.providers.discovery.fireworks import FireworksDiscovery
 from velune.providers.discovery.openrouter import OpenRouterDiscovery
+from velune.providers.discovery.together import TogetherDiscovery
 from velune.providers.discovery.xai import XAIDiscovery
 
 logger = logging.getLogger("velune.providers.discovery.scanner")
@@ -43,6 +45,8 @@ class ModelDiscoveryScanner:
             GoogleDiscovery(),
             GroqDiscovery(),
             OpenRouterDiscovery(),
+            TogetherDiscovery(),
+            FireworksDiscovery(),
         ]
 
     def _should_run(self, discoverer) -> bool:

@@ -47,7 +47,7 @@ PROVIDER_METADATA: dict[str, dict] = {
         "get_key_url": "https://console.x.ai",
     },
     "google": {
-        "label": "Google Gemini (cloud — free quota available)",
+        "label": "Google Gemini (cloud — 2.0 Flash free quota)",
         "requires_key": True,
         "free": True,
         "key_label": "Google API key",
@@ -59,6 +59,20 @@ PROVIDER_METADATA: dict[str, dict] = {
         "free": False,
         "key_label": "OpenRouter API key",
         "get_key_url": "https://openrouter.ai/keys",
+    },
+    "together": {
+        "label": "Together.AI (cloud — Llama, Qwen, DeepSeek, cheap)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "Together.AI API key",
+        "get_key_url": "https://api.together.ai/settings/api-keys",
+    },
+    "fireworks": {
+        "label": "Fireworks.AI (cloud — fastest open-model inference)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "Fireworks.AI API key",
+        "get_key_url": "https://fireworks.ai/account/api-keys",
     },
 }
 

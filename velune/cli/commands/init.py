@@ -51,6 +51,31 @@ def init_command(
     (velune_dir / "index").mkdir(exist_ok=True)
     console.print("[green]✓[/green] Created .velune/ directory")
 
+    # Project type detection
+    try:
+        import json as _json
+        from velune.repository.project_type import ProjectTypeDetector
+        _profile = ProjectTypeDetector().detect(workspace)
+        (velune_dir / "project_profile.json").write_text(_json.dumps({
+            "project_type": _profile.project_type.value,
+            "display_name": _profile.display_name,
+            "primary_language": _profile.primary_language,
+            "detected_frameworks": _profile.detected_frameworks,
+            "entry_points": _profile.entry_points,
+            "test_directories": _profile.test_directories,
+            "config_files": _profile.config_files,
+        }, indent=2))
+        console.print(
+            f"[green]✓[/green] Detected project type: "
+            f"[cyan]{_profile.display_name}[/cyan]"
+        )
+        if _profile.detected_frameworks:
+            console.print(
+                f"  [dim]Frameworks: {', '.join(_profile.detected_frameworks)}[/dim]"
+            )
+    except Exception:
+        pass
+
     # .veluneignore
     ignore_file = workspace / ".veluneignore"
     if not ignore_file.exists():
