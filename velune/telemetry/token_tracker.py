@@ -62,7 +62,7 @@ class TokenUsage:
         model_id: str,
         prompt_tokens: int,
         completion_tokens: int,
-    ) -> "TokenUsage":
+    ) -> TokenUsage:
         total = prompt_tokens + completion_tokens
         cost = cls._calculate_cost(provider_id, model_id, total)
         return cls(

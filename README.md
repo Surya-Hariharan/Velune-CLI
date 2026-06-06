@@ -1,260 +1,210 @@
 # Velune
 
-<div align="center">
+> Local-first multi-model AI developer CLI. Council-based agents,
+> persistent memory, repository cognition.
+> No cloud required. No quota. No lock-in.
 
-### Local-first Autonomous Code Companion
-
-Velune is a privacy-focused, developer-centric CLI that understands your codebase,
-reasons about changes, and applies them safely — without leaving your machine.
-
-Designed for maintainers who need reliable, auditable, and reversible code edits
-driven by local models (Ollama, LM Studio, GGUF) with optional cloud fallback.
-
----
-
-[![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Surya-Hariharan/Velune-CLI?style=for-the-badge&color=0ea5e9)](https://github.com/Surya-Hariharan/Velune-CLI/releases)
-[![PyPI](https://img.shields.io/pypi/v/velune?style=for-the-badge&color=3b82f6)](https://pypi.org/project/velune/)
-[![Python](https://img.shields.io/pypi/pyversions/velune?style=for-the-badge)](https://pypi.org/project/velune/)
-[![License](https://img.shields.io/github/license/Surya-Hariharan/Velune-CLI?style=for-the-badge&color=0f172a)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/Surya-Hariharan/Velune-CLI?style=for-the-badge&color=3b82f6)](https://github.com/Surya-Hariharan/Velune-CLI/stargazers)
-[![Local First](https://img.shields.io/badge/Privacy-Local--First%20AI-06b6d4?style=for-the-badge)](SECURITY.md)
-[![Offline](https://img.shields.io/badge/Offline-100%25%20Capable-8b5cf6?style=for-the-badge)](https://github.com/Surya-Hariharan/Velune-CLI#quick-start)
-
-</div>
+[![PyPI](https://img.shields.io/pypi/v/velune)](https://pypi.org/project/velune/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
 
 ---
 
-## System vision
+## What it does
 
-Velune treats a codebase as structured knowledge: parseable, searchable, and safely
-writable. It brings deterministic planning and local model reasoning together so you
-can automate non-trivial code edits with confidence.
+Velune is a terminal-first AI coding assistant that runs a council of
+specialized agents (Planner, Coder, Reviewer, Challenger, Synthesizer)
+on your local machine using Ollama, or on free cloud tiers via Groq,
+OpenRouter, and others.
 
-Core principles:
+Unlike Copilot or Cursor, Velune:
 
-- **Privacy-first** — all analysis and model interactions occur locally by default.
-- **Auditable changes** — proposed plans are presented for review; edits are applied
-  inside a sandboxed, git-backed transaction.
-- **Practical memory** — a hybrid of lexical and vector search (BM25 + Qdrant)
-  supplies compact, relevant context to models.
-- **Robust concurrency** — async execution coordinates parallel reasoning agents
-  without blocking development workflows.
-- **BYOK cloud fallback** — bring your own API keys for OpenAI, Anthropic, xAI,
-  Google, Groq, or OpenRouter; all stored securely in your OS keyring.
+- Runs 100% locally with Ollama — no API key needed
+- Remembers your codebase across sessions (persistent 5-tier memory)
+- Reviews its own code using multiple specialized agents
+- Works in any terminal on any project — no IDE required
 
 ---
 
-## Architecture
+## 60-second quickstart
 
-Velune decouples system operations into a structured cognitive engine.
-
-```mermaid
-flowchart TD
-    Operator[Operator CLI] -->|CLI commands| App[Typer App Factory]
-    App -->|Dependency injection| ServiceContainer[Service Container Kernel]
-
-    subgraph Cognitive Layer
-        ServiceContainer -->|Scan AST| RepoCognition[Repository Cognition Core]
-        ServiceContainer -->|Stateful steps| Orchestrator[LangGraph Council Orchestrator]
-        ServiceContainer -->|Isolate writes| Sandbox[Subprocess Sandbox Executor]
-    end
-
-    subgraph Memory & Context
-        RepoCognition -->|Token ingestion| BM25[BM25 Lexical Ranker]
-        RepoCognition -->|Store vectors| Qdrant[Local Qdrant DB]
-        RepoCognition -->|Parse relations| Graphiti[Graphiti Core Memory]
-    end
-
-    subgraph Providers
-        Orchestrator -->|Local REST| Ollama[Ollama]
-        Orchestrator -->|Local API| LMStudio[LM Studio]
-        Orchestrator -->|GGUF in-process| LlamaCpp[llama.cpp]
-        Orchestrator -->|Cloud fallback| CloudAPI[OpenAI / Anthropic / xAI / Groq]
-        Sandbox -->|Run command| Shell[Secured Subprocess Wrapper]
-    end
-```
-
-### Request lifecycle
-
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant CLI as CLI
-    participant Repo as RepoCognition
-    participant Council as Council
-    participant Sandbox as Sandbox
-    participant Git as Git
-
-    Dev->>CLI: velune run "<task>"
-    CLI->>Repo: retrieve context (AST + embeddings)
-    Repo-->>CLI: context bundle
-    CLI->>Council: generate plan
-    Council-->>CLI: plan blueprint
-    CLI->>Dev: show plan & request approval
-    Dev-->>CLI: approve
-    CLI->>Git: create transactional snapshot
-    CLI->>Sandbox: execute plan (isolated)
-    Sandbox-->>CLI: results + verification
-    alt success
-        CLI->>Git: commit changes
-        CLI->>Dev: success report
-    else failure
-        CLI->>Git: rollback snapshot
-        CLI->>Dev: failure report
-    end
-```
-
-Design guarantees:
-
-- **Human-in-the-loop** — the system never writes without explicit approval
-  (configurable for CI with `--force`).
-- **Sandboxed writes** — all modifications occur inside `SubprocessSandbox` with
-  explicit write-path allowlists and time / memory limits.
-- **Network hygiene** — external fetches are gated by DNS / IP validation to prevent
-  SSRF or local-network leaks.
-- **Auditability** — plans, diffs, and checkpoints are logged locally for replay and
-  forensic inspection.
-
----
-
-## Quick start
-
-**Prerequisites:** Python ≥ 3.11, Git, and a local model provider (recommended: Ollama).
+### Option A — Local (Ollama, free, no key)
 
 ```bash
-# Clone
-git clone https://github.com/Surya-Hariharan/Velune-CLI.git
-cd Velune-CLI
+# 1. Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
 
-# Create a virtualenv and install
-python -m venv .venv
-source .venv/bin/activate          # macOS / Linux
-.venv\Scripts\Activate.ps1         # Windows PowerShell
-pip install -e ".[dev]"
-
-# Optional: pull recommended local models via Ollama
-ollama pull llama3.2
+# 2. Pull a model
 ollama pull qwen2.5-coder:7b
 
-# Initialize and audit
-velune workspace init
-velune doctor check
+# 3. Install Velune
+pip install velune
+
+# 4. Initialize in your project
+cd your-project
+velune init
+
+# 5. Start
+velune
 ```
 
-Install from PyPI (stable releases):
+### Option B — Cloud free tier (Groq, fastest, no GPU needed)
 
 ```bash
 pip install velune
+velune init --provider groq
+velune setup        # enter your free Groq key
+velune
 ```
+
+Get a free Groq key at <https://console.groq.com/keys> — no credit card.
 
 ---
 
-## CLI reference
+## Hardware requirements
 
-### Primary subcommands
+| RAM    | GPU              | Can run local LLM? | Recommended setup            |
+|--------|------------------|--------------------|------------------------------|
+| < 8 GB | any              | ✗ No               | Use Groq free tier           |
+| 8 GB   | integrated       | ⚠ 3B models only   | Groq + phi3-mini local       |
+| 16 GB  | integrated       | ⚠ Slow (CPU only)  | Groq + 3B local              |
+| 16 GB  | 6–8 GB VRAM      | ✓ 7B comfortable   | qwen2.5-coder:7b             |
+| 32 GB  | 12+ GB VRAM      | ✓ 13B comfortable  | Full council local           |
+| 36 GB  | Apple Silicon    | ✓ 27B comfortable  | Full council, Metal accel    |
+| 64 GB  | 24 GB VRAM       | ✓ 70B capable      | Max power mode               |
 
-| Command | Description |
-| :--- | :--- |
-| `velune ask [prompt]` | Conceptual questions — reasons with the council, **no codebase writes**. |
-| `velune run [task]` | Analyzes context, builds a plan, asks for approval, executes in sandbox. |
-| `velune workspace init` | Configures `.velune/` metadata directory and initializes databases. |
-| `velune doctor check` | Scans Python version, provider connectivity, tree-sitter grammars, GPU. |
-| `velune models scan` | Probes Ollama / LM Studio APIs and GGUF filesystem for installed models. |
-| `velune models list` | Renders a table of registered models with capability profiles. |
-| `velune models assign` | Maps a specific model to an agent role (coder, planner, reviewer). |
-| `velune models benchmark` | Triggers latency and accuracy probes; stores results locally. |
-| `velune keys set [provider]` | Save a cloud provider API key to the OS keyring. |
-| `velune keys list` | List which cloud providers have a key configured. |
+Velune detects your hardware on startup and prints tier, GPU, and recommendations.
+On underpowered machines it routes tasks to cloud providers automatically.
 
-### Common options
+---
+
+## Providers
+
+| Provider    | Type  | Cost           | Setup                            |
+|-------------|-------|----------------|----------------------------------|
+| Ollama      | Local | Free           | Install Ollama, pull a model     |
+| Groq        | Cloud | Free tier      | `velune setup` → enter key       |
+| OpenRouter  | Cloud | Pay-per-token  | `velune setup` → enter key       |
+| OpenAI      | Cloud | Pay-per-token  | `velune setup` → enter key       |
+| Anthropic   | Cloud | Pay-per-token  | `velune setup` → enter key       |
+| xAI (Grok)  | Cloud | Pay-per-token  | `velune setup` → enter key       |
+| Google      | Cloud | Free quota     | `velune setup` → enter key       |
+
+Keys are stored in your OS keyring — never in files, never in git.
+
+---
+
+## Commands
+
+### CLI (before the REPL starts)
 
 ```bash
-# Expose maximum council reasoning for complex tasks
-velune ask "Explain the data flow between ServiceContainer and app.py" --council-tier full
-
-# Skip human approval gate in CI
-velune run "Refactor tests/ to import mock repositories" --force
-
-# Preview plan without writing any files
-velune run "Rename DatabaseConnector to DbConnector everywhere" --dry-run
+velune              # Start the persistent REPL session
+velune init         # Initialize Velune in a project
+velune setup        # Configure API keys securely (stored in OS keyring)
+velune doctor       # Check hardware, providers, dependencies
+velune models scan  # Discover all available local and cloud models
 ```
 
-### Interactive slash commands
+### Inside the REPL
 
-Inside the `velune chat` REPL:
+```text
+/run <task>              Execute a task through the council
+/model                   Switch active model (arrow-key picker)
+/models                  List all available models
+/optimus                 Speed mode — instant tier, smallest model
+/godly                   Max power — full council, largest model
+/normal                  Return to balanced mode
+/mode                    Show current mode settings
+/memory                  Inspect memory tiers
+/session save            Save current session
+/session list            List saved sessions
+/session resume <id>     Resume a session
+/usage                   Token count and cost for this session
+/context                 Context window usage indicator
+/diff                    Show pending file changes
+/doctor                  Run health checks
+/help                    Show all commands
+/clear                   Clear screen and context
+/exit                    Exit Velune
+```
 
-| Command | Effect |
-| :--- | :--- |
-| `/ask [query]` | Shift to lightweight conceptual evaluation mode. |
-| `/run [task]` | Execute an autonomous write cycle on the active codebase. |
-| `/doctor` | Run environment audits without leaving the REPL. |
-| `/models` | List registered model profiles and active seat assignments. |
-| `/clear` | Flush local context layers and restart debate threads. |
-| `/exit` | Terminate the runtime safely. |
-
----
-
-## Feature matrix
-
-| Category | Capability | Implementation |
-| :--- | :--- | :--- |
-| **Multi-agent council** | Planner → Coder → Reviewer → Synthesizer | LangGraph stateful orchestrator |
-| **Hybrid RAG** | BM25 + vector search | tree-sitter AST + local Qdrant |
-| **Sandboxed execution** | Write-path allowlists, time / memory limits | `SubprocessSandbox` |
-| **BYOK cloud** | OpenAI, Anthropic, xAI, Google, Groq, OpenRouter | OS keyring via `keyring` |
-| **Local model discovery** | GGUF filesystem scan, Ollama, LM Studio | `LocalModelResolver` |
-| **Workspace doctor** | GPU, VRAM, grammar, provider checks | `velune doctor` |
-| **Low-resource mode** | Single-model path, no multi-agent debate | `low_resource_mode = true` |
-| **Zero telemetry** | No analytics or crash reporting | Local-only by design |
+Tab-completion is active for all `/` commands and for model IDs (type `/model` then space to trigger).
 
 ---
 
-## Benchmark reference
+## Architecture overview
 
-Velune tracks latencies locally in `.velune/model_profiles.json`.
-
-| Model | Size | Inference | Coding | Ideal seat |
-| :--- | :--- | :--- | :--- | :--- |
-| Qwen 2.5 Coder | 7B (Ollama) | 18–24 ms/tok | Excellent | Coder |
-| Qwen 2.5 Coder | 1.5B (Ollama) | 9–12 ms/tok | Moderate | Synthesizer |
-| Llama 3.2 | 3B (Ollama) | 11–15 ms/tok | Good | Planner |
-| DeepSeek Coder | 6.7B (Ollama) | 19–25 ms/tok | Excellent | Reviewer |
-| GPT-4o / Claude | Cloud API | API RTT | Elite | Cloud fallback |
-
-A 7B Q4 model occupies ~4.8 GB VRAM and runs on mid-range hardware (M1 Mac, RTX 3060).
-
----
-
-## Security
-
-Velune treats security as a core architectural constraint.
-
-1. **Zero telemetry** — no analytics, crash reports, or payloads leave your machine.
-2. **SSRF suppression** — DNS resolution filters RFC 1918 ranges before any outbound
-   socket is created.
-3. **Subprocess isolation** — runtime modifications are contained in
-   `SubprocessSandbox` with explicit allowlists.
-4. **Secret protection** — indexers and commit hooks exclude credential files and
-   runtime artifacts by default.
-
-See [SECURITY.md](SECURITY.md) for the full vulnerability reporting process.
+```text
+velune/
+├── cli/              REPL, slash commands, banner, autocomplete, session manager
+├── providers/        Ollama, Groq, OpenAI, Anthropic, xAI, Google, OpenRouter
+├── cognition/        Council: Planner + Coder + Reviewer + Challenger + Synthesizer
+├── memory/           5-tier: working → episodic → semantic → graph → lineage
+├── repository/       AST indexing, dependency graph, .veluneignore
+├── execution/        Sandbox, diff preview, rollback, cancellation
+├── hardware/         Hardware detection, tier classification, GPU probe
+├── telemetry/        Token tracking, cost estimation, latency profiling
+├── models/           Model registry, capability scoring, specializations
+├── context/          Context window tracking, extractive compression
+├── kernel/           Bootstrap, lifecycle coordinator, service container
+└── plugins/          Plugin API, sandbox, hook registry
+```
 
 ---
 
-## Roadmap
+## Memory system
 
-- [ ] VS Code and Continue.dev plugins for inline council reviews
-- [ ] Universal MCP server support (live databases, remote search)
-- [ ] Local VitePress dashboard for tracing LangGraph checkpoints
-- [ ] Dry-run playback with timeline controls
+Velune maintains five memory tiers across sessions:
+
+1. **Working** — current conversation turns (in-process, TTL-evicted)
+2. **Episodic** — session history (SQLite, persisted to `~/.velune/`)
+3. **Semantic** — vector search over past interactions (local Qdrant)
+4. **Graph** — repository structure and symbol relationships
+5. **Lineage** — decision history, what was tried and why
+
+This means "fix the auth issue from yesterday" actually works —
+Velune retrieves recent sessions, git changes, and related context
+to reconstruct intent without you explaining it again.
+
+---
+
+## Session modes
+
+| Mode    | Command    | Council tier | Model    | Context cap  |
+|---------|------------|--------------|----------|--------------|
+| Normal  | `/normal`  | auto         | current  | 16 k tokens  |
+| Optimus | `/optimus` | instant      | smallest | 4 k tokens   |
+| Godly   | `/godly`   | full         | largest  | 128 k tokens |
+
+Switch modes at any time mid-session. The prompt badge updates immediately.
+
+---
+
+## MCP integration
+
+Velune exposes an MCP server so that Claude Desktop and VS Code can call
+Velune's local model council as a tool — giving cloud-based editors access
+to local hardware without sending your code to a third party.
+
+See [`docs/mcp.md`](docs/mcp.md) for configuration examples and the full tool reference.
+
+---
+
+## Windows
+
+Velune runs on Windows via WSL2. Native Windows support is planned.
+
+See [WINDOWS.md](WINDOWS.md) for the complete WSL2 setup guide.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
-Quick checklist before opening a PR:
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Before opening a PR:
 
 ```bash
 pip install -e ".[dev]"
@@ -262,12 +212,14 @@ ruff check velune/
 pytest tests/ -q
 ```
 
-Report security issues via [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new) — not public issues.
+Report security issues via
+[GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new) —
+not public issues.
 
 ---
 
 ## License
 
-Velune is open-source software released under the [Apache License 2.0](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).
 
 Copyright 2026 Surya HA

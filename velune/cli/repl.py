@@ -22,7 +22,8 @@ class VeluneREPL:
         self.container = runtime.container
         self.console = runtime.console
         self.active_model: ModelDescriptor | None = None
-        self.session_mode: str = "normal"  # "normal" | "optimus" | "godly"
+        from velune.cli.modes import ModeManager
+        self._mode_manager = ModeManager()
         self.session_tokens: int = 0
         self.session_cost: float = 0.0
         self._history_file = Path.home() / ".velune" / "repl_history"
@@ -35,9 +36,11 @@ class VeluneREPL:
     # ------------------------------------------------------------------
 
     def _build_prompt_session(self) -> PromptSession:
-        from prompt_toolkit.history import FileHistory
         from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+        from prompt_toolkit.history import FileHistory
         from prompt_toolkit.styles import Style
+
+        from velune.cli.autocomplete import SlashCompleter
 
         style = Style.from_dict({
             "prompt.prefix": "#00d7ff bold",
@@ -49,9 +52,20 @@ class VeluneREPL:
             "ctx.danger": "#ff3333 bold",
         })
 
+        try:
+            models = self.container.get("runtime.model_registry").list_all()
+            model_ids = [m.model_id for m in models]
+        except Exception:
+            model_ids = []
+
+        completer = SlashCompleter(model_ids=model_ids)
+
         return PromptSession(
             history=FileHistory(str(self._history_file)),
             auto_suggest=AutoSuggestFromHistory(),
+            completer=completer,
+            complete_while_typing=True,
+            complete_in_thread=True,
             style=style,
             mouse_support=False,
             wrap_lines=True,
@@ -59,12 +73,15 @@ class VeluneREPL:
 
     def _get_prompt_tokens(self) -> FormattedText:
         from prompt_toolkit.formatted_text import FormattedText
+
         from velune.context.window import estimate_tokens
 
         tokens: list[tuple[str, str]] = [("class:prompt.prefix", "velune")]
 
-        if self.session_mode != "normal":
-            tokens.append(("class:prompt.mode", f" [{self.session_mode.upper()}]"))
+        if not self._mode_manager.is_normal():
+            color = self._mode_manager.config.prompt_color
+            label = self._mode_manager.current.value.upper()
+            tokens.append((f"bold fg:{color}", f" [{label}]"))
 
         if self.active_model:
             tokens.append(("class:prompt.model", f" {self.active_model.model_id}"))
@@ -114,19 +131,34 @@ class VeluneREPL:
                 break
 
     def _print_startup_banner(self) -> None:
-        from rich.panel import Panel
-        from rich.text import Text
-        gpu_info = self.container.get("runtime.gpu_info")
-        gpu_str = gpu_info.get("gpu_name", "CPU only") if gpu_info.get("has_gpu") else "CPU only"
-        self.console.print(Panel(
-            Text.assemble(
-                ("[bold cyan]Velune[/bold cyan] [dim]v0.1.0[/dim]\n"),
-                (f"[dim]Hardware:[/dim] {gpu_str}\n"),
-                ("[dim]Type a prompt or /help for commands[/dim]"),
-            ),
-            border_style="cyan",
-            padding=(0, 1),
-        ))
+        import httpx
+
+        from velune import __version__
+        from velune.cli.banner import render_startup_banner
+        from velune.providers.keystore import list_configured_providers
+
+        hardware = self.container.get("runtime.hardware")
+        configured = list_configured_providers()
+
+        try:
+            r = httpx.get("http://localhost:11434/api/tags", timeout=1.5)
+            ollama_live = r.status_code == 200
+        except Exception:
+            ollama_live = False
+
+        workspace = self.container.get("runtime.workspace")
+        workspace_name = Path(workspace).name if workspace else "unknown"
+        model_id = self.active_model.model_id if self.active_model else None
+
+        render_startup_banner(
+            console=self.console,
+            hardware_profile=hardware,
+            configured_providers=configured,
+            ollama_live=ollama_live,
+            workspace_name=workspace_name,
+            active_model_id=model_id,
+            version=__version__,
+        )
 
     # ------------------------------------------------------------------
     # Slash command dispatch
@@ -226,6 +258,30 @@ class VeluneREPL:
             usage="/context",
             handler=self._cmd_context,
         ))
+        registry.register(SlashCommand(
+            name="optimus", aliases=["fast", "opt"],
+            description="Speed mode — instant tier, compressed context, smallest model",
+            usage="/optimus",
+            handler=self._cmd_optimus,
+        ))
+        registry.register(SlashCommand(
+            name="godly", aliases=["full", "god"],
+            description="Max power — full council, largest model, full context",
+            usage="/godly",
+            handler=self._cmd_godly,
+        ))
+        registry.register(SlashCommand(
+            name="normal", aliases=["reset", "n"],
+            description="Return to balanced normal mode",
+            usage="/normal",
+            handler=self._cmd_normal,
+        ))
+        registry.register(SlashCommand(
+            name="mode", aliases=["status"],
+            description="Show the current session mode and its settings",
+            usage="/mode",
+            handler=self._cmd_mode,
+        ))
         return registry
 
     # ------------------------------------------------------------------
@@ -255,12 +311,23 @@ class VeluneREPL:
 
     async def _cmd_doctor(self, args: str) -> None:
         from velune.cli.commands.doctor import (
-            _check_python_version, _check_core_dependencies,
-            _check_ollama_connectivity, _check_ollama_models,
-            _check_lm_studio, _check_openai_api_key, _check_anthropic_api_key,
-            _check_groq, _check_velune_dir, _check_sqlite, _check_qdrant,
-            _check_config, _check_treesitter, _check_git,
-            _check_gpu, _check_vram, _check_model_benchmarks,
+            _check_anthropic_api_key,
+            _check_config,
+            _check_core_dependencies,
+            _check_git,
+            _check_gpu,
+            _check_groq,
+            _check_lm_studio,
+            _check_model_benchmarks,
+            _check_ollama_connectivity,
+            _check_ollama_models,
+            _check_openai_api_key,
+            _check_python_version,
+            _check_qdrant,
+            _check_sqlite,
+            _check_treesitter,
+            _check_velune_dir,
+            _check_vram,
             _render_results,
         )
         checks = [
@@ -340,11 +407,11 @@ class VeluneREPL:
         self, models: list[ModelDescriptor]
     ) -> ModelDescriptor | None:
         from prompt_toolkit.application import Application
+        from prompt_toolkit.formatted_text import FormattedText
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.layout import Layout
         from prompt_toolkit.layout.containers import Window
         from prompt_toolkit.layout.controls import FormattedTextControl
-        from prompt_toolkit.formatted_text import FormattedText
 
         local = [m for m in models if m.is_local]
         cloud = [m for m in models if not m.is_local]
@@ -421,6 +488,7 @@ class VeluneREPL:
 
     async def _cmd_models(self, args: str) -> None:
         from rich.table import Table
+
         from velune.core.types.model import CapabilityLevel
 
         model_registry = self.container.get("runtime.model_registry")
@@ -464,7 +532,11 @@ class VeluneREPL:
         self.console.print(table)
 
     async def _cmd_run(self, args: str) -> None:
-        await self._execute_council_task(args, force_tier=None)
+        force_tier = (
+            None if self._mode_manager.is_normal()
+            else self._mode_manager.config.council_tier
+        )
+        await self._execute_council_task(args, force_tier=force_tier)
 
     async def _cmd_council(self, args: str) -> None:
         await self._execute_council_task(args, force_tier="full")
@@ -543,6 +615,7 @@ class VeluneREPL:
 
     async def _cmd_diff(self, args: str) -> None:
         import subprocess
+
         from rich.syntax import Syntax
 
         workspace = self.container.get("runtime.workspace")
@@ -624,8 +697,12 @@ class VeluneREPL:
 
     async def _cmd_session(self, args: str) -> None:
         from pathlib import Path as _Path
+
         from velune.cli.session_manager import (
-            save_session, list_sessions, load_session, export_session_markdown,
+            export_session_markdown,
+            list_sessions,
+            load_session,
+            save_session,
         )
 
         workspace = str(self.container.get("runtime.workspace"))
@@ -710,13 +787,82 @@ class VeluneREPL:
             )
 
     # ------------------------------------------------------------------
+    # Mode command handlers
+    # ------------------------------------------------------------------
+
+    async def _cmd_optimus(self, args: str) -> None:
+        from velune.cli.model_selector import ModeAwareModelSelector
+        from velune.cli.modes import SessionMode
+        config = self._mode_manager.set_mode(SessionMode.OPTIMUS)
+        selector = ModeAwareModelSelector(
+            self.container.get("runtime.model_registry"),
+            self.container.get("runtime.provider_registry"),
+        )
+        auto_model = selector.select_for_mode(config, self.active_model)
+        if auto_model:
+            self.active_model = auto_model
+        self.console.print(
+            f"[yellow]⚡ OPTIMUS MODE[/yellow] — {config.description}\n"
+            f"[dim]Model: {self.active_model.model_id if self.active_model else 'none'} · "
+            f"Context cap: {config.max_context_tokens:,} tokens · "
+            f"Council: {config.council_tier}[/dim]"
+        )
+
+    async def _cmd_godly(self, args: str) -> None:
+        from velune.cli.model_selector import ModeAwareModelSelector
+        from velune.cli.modes import SessionMode
+        config = self._mode_manager.set_mode(SessionMode.GODLY)
+        selector = ModeAwareModelSelector(
+            self.container.get("runtime.model_registry"),
+            self.container.get("runtime.provider_registry"),
+        )
+        auto_model = selector.select_for_mode(config, self.active_model)
+        if auto_model:
+            self.active_model = auto_model
+        self.console.print(
+            f"[magenta]🔮 GODLY MODE[/magenta] — {config.description}\n"
+            f"[dim]Model: {self.active_model.model_id if self.active_model else 'none'} · "
+            f"Context: unlimited · "
+            f"Council: {config.council_tier} · "
+            f"Retrieval depth: {config.retrieval_depth}[/dim]"
+        )
+
+    async def _cmd_normal(self, args: str) -> None:
+        from velune.cli.modes import SessionMode
+        config = self._mode_manager.set_mode(SessionMode.NORMAL)
+        self.console.print(
+            f"[cyan]● NORMAL MODE[/cyan] — {config.description}"
+        )
+
+    async def _cmd_mode(self, args: str) -> None:
+        from rich.table import Table
+
+        config = self._mode_manager.config
+        table = Table(border_style="dim", padding=(0, 1), show_header=False)
+        table.add_column("Setting", style="dim", width=22)
+        table.add_column("Value", style="white")
+        table.add_row("Active mode", f"[bold]{config.mode.value.upper()}[/bold]")
+        table.add_row("Description", config.description)
+        table.add_row("Council tier", config.council_tier)
+        table.add_row("Max context", f"{config.max_context_tokens:,} tokens")
+        table.add_row("Compression", "on" if config.context_compression else "off")
+        table.add_row("Retrieval depth", str(config.retrieval_depth))
+        table.add_row("Critics", "disabled" if config.disable_critics else "enabled")
+        table.add_row(
+            "Current model",
+            self.active_model.model_id if self.active_model else "none"
+        )
+        self.console.print(table)
+
+    # ------------------------------------------------------------------
     # Prompt handler
     # ------------------------------------------------------------------
 
     async def _handle_prompt(self, text: str) -> None:
-        from velune.core.types.inference import InferenceRequest
         from rich.live import Live
         from rich.markdown import Markdown
+
+        from velune.core.types.inference import InferenceRequest
 
         model, provider = await self._resolve_active_model_and_provider()
         if not model or not provider:
@@ -728,10 +874,19 @@ class VeluneREPL:
 
         self._conversation.append({"role": "user", "content": text})
 
+        mode_config = self._mode_manager.config
+
+        if mode_config.context_compression and self._conversation:
+            from velune.context.extractive import compress_conversation
+            self._conversation = compress_conversation(
+                self._conversation,
+                max_tokens=mode_config.max_context_tokens,
+            )
+
         request = InferenceRequest(
             model_id=model.model_id,
-            messages=self._conversation,
-            temperature=0.3,
+            messages=self._conversation[-50:],   # Hard cap at 50 turns
+            temperature=mode_config.temperature,
             max_tokens=4096,
         )
 

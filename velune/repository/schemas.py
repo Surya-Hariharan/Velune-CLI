@@ -10,17 +10,17 @@ from pydantic import BaseModel, Field, model_validator
 def build_qualified_name(file_path: str, name: str, parent: str | None = None) -> str:
     """Builds a dotted qualified name for a symbol from its file path and parent scope."""
     p = file_path.replace("\\", "/")
-    
+
     # Extract package path relative to 'velune/' if absolute
     if "/velune/" in p:
         p = p.split("/velune/", 1)[1]
         p = "velune/" + p
     elif p.startswith("c:") or p.startswith("C:") or ":" in p:
         p = p.split(":", 1)[1].lstrip("/")
-        
+
     p = p.rsplit(".", 1)[0]
     dotted = p.replace("/", ".").strip(".")
-    
+
     if parent:
         return f"{dotted}.{parent}.{name}"
     return f"{dotted}.{name}"
@@ -34,7 +34,7 @@ def compute_symbol_id(file_path: str, qualified_name: str, kind: str) -> str:
         p = "velune/" + p
     elif p.startswith("c:") or p.startswith("C:") or ":" in p:
         p = p.split(":", 1)[1].lstrip("/")
-        
+
     payload = f"{p}:{qualified_name}:{kind.lower()}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

@@ -6,31 +6,21 @@ import asyncio
 import os
 import re
 import time
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 from velune.memory.tiers.lineage import LineageMemoryTier
 
 if TYPE_CHECKING:
-    from velune.memory.storage.sqlite_manager import SQLiteManager
     from velune.kernel.config import VeluneConfig
+    from velune.memory.storage.sqlite_manager import SQLiteManager
 
 from velune.cognition.arbitrator import CouncilArbitrator
 from velune.cognition.architecture import ArchitectureCognitionAgent
-from velune.cognition.council.challenger import ChallengerAgent
-from velune.cognition.council.coder import CoderAgent
-from velune.cognition.council.critics import (
-    MaintainabilityCritic,
-    PerformanceCritic,
-    ScalabilityCritic,
-    SecurityCritic,
-)
 from velune.cognition.council.debate import calculate_max_debate_turns
-from velune.cognition.council.planner import PlannerAgent
-from velune.cognition.council.reviewer import ReviewerAgent
-from velune.cognition.council.synthesizer import SynthesizerAgent
-from velune.cognition.council.tiers import CouncilTier, classify_task_tier, TierClassifier
 from velune.cognition.council.factory import CouncilAgentFactory
+from velune.cognition.council.tiers import CouncilTier, TierClassifier
 from velune.cognition.style_resolver import StyleResolver
 from velune.core.trace import TracedLogger
 from velune.models.specializations import CouncilRole, ModelSpecializationMapper
@@ -79,7 +69,7 @@ class CouncilOrchestrator:
             live_lock=self._live_lock
         )
         self.style_resolver = StyleResolver(lineage_memory=self.lineage_memory)
-        
+
         # Reduce Service Locator usage: resolve task_registry once in constructor if not passed
         task_registry = None
         try:
@@ -115,8 +105,14 @@ class CouncilOrchestrator:
     async def stream(self, prompt: str) -> AsyncIterator[StreamProgress]:
         """Runs the Reasoning Council task execution and streams milestones."""
         import uuid
-        from velune.orchestration.schemas import OrchestrationState, OrchestrationRequest, ExecutionStatus, StreamProgress
-        
+
+        from velune.orchestration.schemas import (
+            ExecutionStatus,
+            OrchestrationRequest,
+            OrchestrationState,
+            StreamProgress,
+        )
+
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         queue = asyncio.Queue()
 
@@ -145,7 +141,7 @@ class CouncilOrchestrator:
                     for f in snapshot.files[:25]:
                         lines.append(f"  - {f.path} ({f.language.value})")
                     repo_context = "\n".join(lines)
-                    
+
                     # Scan and sanitize context injection to prevent persistent prompt injection
                     scan_res = self.firewall.scan_file_for_injection("repo_context", repo_context)
                     if scan_res.get("quarantined"):
@@ -171,7 +167,7 @@ class CouncilOrchestrator:
                 error = "Cancelled"
                 final_summary = "Execution cancelled by user."
                 task_plan = None
-                
+
                 request = OrchestrationRequest(prompt=prompt, workspace=".")
                 state = OrchestrationState(
                     run_id=run_id,
@@ -190,7 +186,7 @@ class CouncilOrchestrator:
                 status = ExecutionStatus.FAILED
                 error = str(e)
                 task_plan = None
-            
+
             request = OrchestrationRequest(prompt=prompt, workspace=".")
             state = OrchestrationState(
                 run_id=run_id,
@@ -239,7 +235,7 @@ class CouncilOrchestrator:
             if container.has("runtime.repository_cognition"):
                 repo_service = container.get("runtime.repository_cognition")
                 grapher = repo_service.grapher
-                
+
                 # Scan prompt for mentioned files
                 mentioned_files = re.findall(r"[\w\/\.\-]+\.(?:py|js|ts|go|rs)", prompt)
                 for mf in mentioned_files:
@@ -247,7 +243,7 @@ class CouncilOrchestrator:
                     norm_path = mf.replace("\\", "/").lower()
                     if "core/" in norm_path or "kernel/" in norm_path or "schemas/" in norm_path:
                         return True
-                        
+
                     # 1b. Direct fan-in signal
                     dependents = grapher.get_dependents(mf)
                     if len(dependents) >= 3:
@@ -285,7 +281,7 @@ class CouncilOrchestrator:
         Caps search and normalizes dynamically into standard range [0.1, 0.9].
         """
         import math
-        
+
         # Defaults
         default_score = 0.3
         if any(kw in target_file.lower() for kw in ["core", "kernel", "engine", "base", "schemas"]):
@@ -296,17 +292,17 @@ class CouncilOrchestrator:
             container = get_container()
             if not container.has("runtime.repository_cognition"):
                 return default_score
-            
+
             repo_service = container.get("runtime.repository_cognition")
             grapher = repo_service.grapher
             rel_file = grapher._to_rel_path(target_file)
-            
+
             if rel_file not in grapher.graph:
                 return default_score
 
             # Depth 1 dependents
             deps_d1 = set(grapher.get_dependents(rel_file))
-            
+
             # Depth 2 dependents
             deps_d2 = set()
             for d1 in deps_d1:
@@ -319,7 +315,7 @@ class CouncilOrchestrator:
             d2_list = list(deps_d2)[:20]
 
             raw_score = 1.0 * len(d1_list) + 0.5 * len(d2_list)
-            
+
             # Normalize dynamically to [0.1, 0.9] range
             normalized_score = 0.1 + 0.8 * (1.0 - math.exp(-raw_score / 5.0))
             return round(normalized_score, 3)
@@ -372,7 +368,7 @@ class CouncilOrchestrator:
                 ),
                 timeout=self.max_wall_time_seconds
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "Council wall-time limit reached (%.0fs). "
                 "Returning partial result.",
@@ -399,7 +395,7 @@ class CouncilOrchestrator:
                 "winning_claims": [],
                 "synthesis_instructions": "",
             },
-            "final_summary": f"Council execution timed out. Partial analysis: (None)",
+            "final_summary": "Council execution timed out. Partial analysis: (None)",
         }
 
     @staticmethod
@@ -420,21 +416,25 @@ class CouncilOrchestrator:
     ) -> dict[str, Any]:
         """Consolidated orchestrator execution path for all tiers."""
         import uuid
-        import time
-        from velune.core.trace import TraceContext
+
+        from velune.cognition.council.messages import (
+            ChallengerMessage,
+            CriticMessage,
+            ReviewerMessage,
+        )
         from velune.cognition.firewall import CognitiveFirewall
-        from velune.cognition.council.messages import ReviewerMessage, ChallengerMessage, CriticMessage
+        from velune.core.trace import TraceContext
 
         if run_id == "default":
             run_id = f"council-{uuid.uuid4().hex[:8]}"
-            
+
         tier_level = {"instant": 1, "minimal": 2, "standard": 3, "full": 4}[tier.value]
 
         with TraceContext(run_id=run_id):
             logger.info("Reasoning Council starting execution in %s tier for goal: %s", tier.value.upper(), prompt[:50])
 
             start_time = time.time()
-            
+
             # Security scan for Instant tier (or all tiers, kept for parity with old _execute_instant)
             if tier_level == 1:
                 firewall = CognitiveFirewall()
@@ -450,7 +450,7 @@ class CouncilOrchestrator:
             planner = self.agent_factory.create_planner(run_id) if tier_level >= 2 else None
             reviewer = self.agent_factory.create_reviewer(run_id) if tier_level >= 3 else None
             synthesizer = self.agent_factory.create_synthesizer(run_id) if tier_level >= 3 else None
-            
+
             challenger = self.agent_factory.create_challenger(run_id) if tier_level == 4 else None
             scalability_critic = self.agent_factory.create_scalability_critic(run_id) if tier_level == 4 else None
             security_critic = self.agent_factory.create_security_critic(run_id) if tier_level == 4 else None
@@ -579,7 +579,7 @@ class CouncilOrchestrator:
                 ])
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             if not isinstance(results[0], Exception):
                 reviewer_report = results[0]
             else:
@@ -765,7 +765,7 @@ class CouncilOrchestrator:
             # 6. Synthesis Phase
             logger.info("Council Phase: Synthesis")
             if progress_callback: progress_callback("[Synthesis] Synthesizing final summary...")
-                
+
             audit_reports = [reviewer_report.model_dump()]
             if tier_level == 4:
                 audit_reports.extend([
@@ -800,7 +800,7 @@ class CouncilOrchestrator:
             # 7. Lineage Logging
             decision_id = f"DEC-{int(time.time())}"
             impact = self.estimate_blast_radius(target_file)
-            
+
             if tier_level == 3:
                 self.lineage_memory.log_decision(
                     decision_id=decision_id,
@@ -815,7 +815,7 @@ class CouncilOrchestrator:
                     if key in prompt.lower():
                         subsystem_target = key
                         break
-                
+
                 if objections:
                     self.lineage_memory.log_failed_experiment(
                         target_subsystem=subsystem_target,

@@ -1,6 +1,7 @@
 """Vector retrieval layer using Qdrant client."""
 
 import logging
+
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 

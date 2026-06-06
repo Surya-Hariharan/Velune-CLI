@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 import tempfile
@@ -11,6 +10,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.table import Table
+
+from velune.providers.keystore import get_key
 
 console = Console()
 doctor_cmd = typer.Typer(help="Environment health diagnostics")
@@ -153,16 +154,16 @@ def _check_lm_studio() -> dict:
         return {"name": "LM Studio Connectivity", "status": "warn", "message": "Not running or not accessible at http://localhost:1234."}
 
 def _check_openai_api_key() -> dict:
-    key = os.getenv("OPENAI_API_KEY")
+    key = get_key("openai")
     if key:
-        return {"name": "OpenAI API Key", "status": "ok", "message": f"Found in environment ({key[:4]}...{key[-4:] if len(key) > 8 else ''})"}
-    return {"name": "OpenAI API Key", "status": "warn", "message": "Missing OPENAI_API_KEY env variable."}
+        return {"name": "OpenAI API Key", "status": "ok", "message": f"Configured ({key[:4]}...{key[-4:] if len(key) > 8 else ''})"}
+    return {"name": "OpenAI API Key", "status": "warn", "message": "Not configured. Run 'velune setup' to add your key."}
 
 def _check_anthropic_api_key() -> dict:
-    key = os.getenv("ANTHROPIC_API_KEY")
+    key = get_key("anthropic")
     if key:
-        return {"name": "Anthropic API Key", "status": "ok", "message": f"Found in environment ({key[:4]}...{key[-4:] if len(key) > 8 else ''})"}
-    return {"name": "Anthropic API Key", "status": "warn", "message": "Missing ANTHROPIC_API_KEY env variable."}
+        return {"name": "Anthropic API Key", "status": "ok", "message": f"Configured ({key[:4]}...{key[-4:] if len(key) > 8 else ''})"}
+    return {"name": "Anthropic API Key", "status": "warn", "message": "Not configured. Run 'velune setup' to add your key."}
 
 def _check_velune_dir() -> dict:
     velune_dir = Path.cwd() / ".velune"

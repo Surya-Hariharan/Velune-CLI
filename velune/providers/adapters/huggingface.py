@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
-import time
 import json
+import time
 from collections.abc import AsyncIterator
-from pydantic import SecretStr
 
 import httpx
+from pydantic import SecretStr
 
 from velune.core.errors.provider import (
     InferenceError,
@@ -18,13 +17,14 @@ from velune.core.types.inference import InferenceRequest, InferenceResponse, Str
 from velune.core.types.model import ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
 from velune.providers.base import ModelProvider
+from velune.providers.keystore import get_key
 
 
 class HuggingFaceProvider(ModelProvider):
     """Hugging Face provider for serverless Inference API."""
 
     def __init__(self, api_key: str | SecretStr | None = None, base_url: str = "https://api-inference.huggingface.co") -> None:
-        self._api_key = api_key or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
+        self._api_key = api_key or get_key("huggingface")
         if hasattr(self._api_key, 'get_secret_value'):
             self._api_key = self._api_key.get_secret_value()
         self._base_url = base_url

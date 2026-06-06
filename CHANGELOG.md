@@ -11,6 +11,37 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- `/optimus` and `/godly` session-wide REPL modes with `ModeManager`, `ModeConfig`,
+  and `ModeAwareModelSelector` (`velune/cli/modes.py`, `velune/cli/model_selector.py`)
+- Slash command Tab-autocomplete (`velune/cli/autocomplete.py`) with `/model <id>` completion
+- Rich startup banner showing hardware tier, GPU, providers, and active model
+  (`velune/cli/banner.py`)
+- Security audit script (`scripts/security_audit.py`) — 6 checks, exit 0 required in CI
+- `RateLimiter` token bucket and `DEFAULT_HOST`/`MAX_REQUEST_BYTES` constants added to
+  the MCP server (`velune/mcp/server.py`)
+- `DEFAULT_VELUNEIGNORE` expanded: `*.crt`, `id_rsa`, `id_dsa`, `id_ed25519`, `id_ecdsa`,
+  `.netrc`, `.npmrc`, `.pypirc`, `.aws/`, `credentials.json`, `service-account.json`
+- Full GitHub Actions CI/CD pipeline: lint + type check, 2×2 test matrix (Python 3.11/3.12
+  × Ubuntu/macOS), security audit job, build + `twine check`, Codecov upload
+- Automated release workflow: tag-to-PyPI via OIDC trusted publishing, CHANGELOG-based
+  GitHub Release notes, pre-release detection from tag suffix
+- `scripts/extract_changelog.py` — parses CHANGELOG.md for a version section
+- `docs/releasing.md` — step-by-step release checklist
+- `docs/mcp.md` — MCP integration guide with all 21 real tool names
+- `CONTRIBUTING.md` — developer how-to: adding providers, slash commands, council agents
+- `README.md` rewritten — quickstart, hardware table, provider table, architecture tree,
+  session modes, MCP section, Windows section
+- `WINDOWS.md` — complete 10-section WSL2 setup guide with GPU passthrough
+
+### Security
+
+- All provider adapters and discovery modules now use `keystore.get_key()` instead of
+  bare `os.getenv()` for API key retrieval
+  (`adapters/anthropic.py`, `adapters/openai.py`, `adapters/huggingface.py`,
+  `discovery/anthropic.py`, `discovery/openai.py`, `cli/commands/doctor.py`)
+- `tests/test_security.py` — 6 security property tests covering shell injection,
+  API key bypass, SSRF blocking, veluneignore coverage, and rate limiting
+
 - BYOK (Bring Your Own Key) provider system: xAI, Google Gemini, Groq, OpenRouter
 - OS keyring integration via `keyring` library (`velune/providers/keystore.py`)
 - `LocalModelResolver` for filesystem GGUF discovery across 9 well-known paths

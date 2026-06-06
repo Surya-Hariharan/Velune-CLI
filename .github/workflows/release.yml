@@ -7,120 +7,85 @@ on:
 
 permissions:
   contents: write
-  id-token: write   # required for PyPI trusted publishing (OIDC)
+  id-token: write  # required for PyPI trusted publishing (OIDC)
 
 jobs:
-  lint:
-    name: Lint
+  validate-tag:
+    name: Validate Release Tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
 
-      - name: Install lint tools
-        run: pip install ruff mypy
+      - name: Install package (for version import)
+        run: pip install -e .
 
-      - name: ruff check
-        run: ruff check velune/
-
-      - name: mypy
-        run: mypy velune/ --ignore-missing-imports --no-error-summary
-        continue-on-error: true
+      - name: Check version matches tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION=$(python -c "import velune; print(velune.__version__)")
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "ERROR: Tag $TAG_VERSION does not match package version $PACKAGE_VERSION"
+            exit 1
+          fi
+          echo "Version check passed: $TAG_VERSION"
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Full Test Suite
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
+
+  publish-pypi:
+    name: Publish to PyPI
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+    needs: test
+    # To add deployment protection rules, create a "pypi" environment in
+    # GitHub repo Settings → Environments and uncomment:
+    # environment: pypi
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install package and dev dependencies
-        run: pip install -e ".[dev]" pytest-timeout
-
-      - name: Run tests
-        run: pytest tests/ -v --tb=short --timeout=30
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      - name: Install build
+      - name: Install build tools
         run: pip install build
 
-      - name: Build wheel and sdist
+      - name: Build package
         run: python -m build
 
-      - name: Verify dist artifacts
-        run: |
-          ls dist/
-          test -n "$(ls dist/*.whl 2>/dev/null)"    || (echo "Missing .whl"    && exit 1)
-          test -n "$(ls dist/*.tar.gz 2>/dev/null)" || (echo "Missing .tar.gz" && exit 1)
-          echo "dist/ OK: $(ls dist/)"
-
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload dist artifacts
+      - name: Upload dist artifacts for GitHub Release job
         uses: actions/upload-artifact@v4
         with:
           name: dist-${{ github.ref_name }}
           path: dist/
 
-  publish:
-    name: Publish to PyPI
-    runs-on: ubuntu-latest
-    needs: [build]
-    environment:
-      name: pypi
-      url: https://pypi.org/project/velune/
-    steps:
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ github.ref_name }}
-          path: dist/
-
-      - name: Publish to PyPI (trusted publishing / OIDC)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # No password needed when using OIDC trusted publishing.
-        # Configure the "pypi" environment on GitHub and add this repo
-        # as a trusted publisher on pypi.org.
-        # Fallback: set PYPI_TOKEN secret and uncomment the next line:
+        with:
+          verbose: true
+        # Uses OIDC trusted publishing — no PYPI_TOKEN secret needed.
+        # Set up the "pypi" environment on GitHub and add this repo as a
+        # trusted publisher on pypi.org for the velune project.
+        # Fallback (token): add PYPI_TOKEN secret and uncomment below:
         # with:
         #   password: ${{ secrets.PYPI_TOKEN }}
 
-  github-release:
+  create-github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [publish]
+    needs: publish-pypi
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download dist artifacts
         uses: actions/download-artifact@v4
@@ -128,19 +93,21 @@ jobs:
           name: dist-${{ github.ref_name }}
           path: dist/
 
-      - name: Extract CHANGELOG excerpt
+      - name: Extract changelog for this version
         id: changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          NOTES=$(awk "/^## \[?${VERSION}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
-          if [ -z "$NOTES" ]; then
-            NOTES="See [CHANGELOG.md](CHANGELOG.md) for details."
-          fi
-          echo "$NOTES" > release_notes.md
+          NOTES=$(python scripts/extract_changelog.py "$VERSION")
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: release_notes.md
-          files: dist/*
-          fail_on_unmatched_files: true
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz

@@ -1,23 +1,24 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
-from velune.models.specializations import CouncilRole
-from velune.cognition.council.planner import PlannerAgent
-from velune.cognition.council.coder import CoderAgent
-from velune.cognition.council.reviewer import ReviewerAgent
 from velune.cognition.council.challenger import ChallengerAgent
-from velune.cognition.council.synthesizer import SynthesizerAgent
+from velune.cognition.council.coder import CoderAgent
 from velune.cognition.council.critics import (
     MaintainabilityCritic,
     PerformanceCritic,
     ScalabilityCritic,
     SecurityCritic,
 )
+from velune.cognition.council.planner import PlannerAgent
+from velune.cognition.council.reviewer import ReviewerAgent
+from velune.cognition.council.synthesizer import SynthesizerAgent
+from velune.models.specializations import CouncilRole
 
 if TYPE_CHECKING:
-    from velune.providers.registry import ProviderRegistry
-    from velune.models.specializations import ModelSpecializationMapper
     from velune.core.types.model import ModelDescriptor
+    from velune.models.specializations import ModelSpecializationMapper
+    from velune.providers.registry import ProviderRegistry
 
 
 class CouncilAgentFactory:

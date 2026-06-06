@@ -2,45 +2,51 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_call:  # allow release.yml to call this as a reusable workflow
 
-# Cancel in-flight runs for the same branch/PR on new pushes
+# Cancel in-flight runs for the same branch/PR on new pushes.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
+
+env:
+  PYTHON_DEFAULT: "3.11"
 
 jobs:
   lint:
-    name: Lint
+    name: Lint + Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_DEFAULT }}
           cache: pip
 
-      - name: Install lint tools
+      - name: Install lint dependencies
         run: pip install ruff mypy
 
-      - name: ruff check
-        run: ruff check velune/
+      - name: Run ruff
+        run: ruff check velune/ --output-format=github
 
-      - name: mypy
+      - name: Run mypy (soft — warnings only)
         run: mypy velune/ --ignore-missing-imports --no-error-summary
         continue-on-error: true
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12"]
+        os: [ubuntu-latest, macos-latest]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -50,49 +56,68 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install package and dev dependencies
-        run: pip install -e ".[dev]" pytest-timeout
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
 
-      - name: Run tests
-        run: pytest tests/ -v --tb=short --timeout=30
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v \
+            --tb=short \
+            --timeout=30 \
+            --cov=velune \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            -x
 
-      - name: Upload coverage report
-        if: matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v4
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         with:
-          name: coverage-${{ github.sha }}
-          path: .coverage
-          retention-days: 7
+          file: coverage.xml
+          fail_ci_if_error: false
 
-  build:
-    name: Build
+  security:
+    name: Security Audit
     runs-on: ubuntu-latest
-    needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_DEFAULT }}
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run security audit
+        run: python scripts/security_audit.py
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [lint, test, security]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_DEFAULT }}
           cache: pip
 
-      - name: Install build
-        run: pip install build
+      - name: Install build tools
+        run: pip install build twine
 
       - name: Build wheel and sdist
         run: python -m build
 
-      - name: Verify dist artifacts
-        run: |
-          ls dist/
-          test -n "$(ls dist/*.whl 2>/dev/null)"    || (echo "Missing .whl"    && exit 1)
-          test -n "$(ls dist/*.tar.gz 2>/dev/null)" || (echo "Missing .tar.gz" && exit 1)
-          echo "dist/ OK: $(ls dist/)"
+      - name: Verify package
+        run: twine check dist/*
 
-      - name: Upload dist artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ github.sha }}
+          name: dist
           path: dist/
           retention-days: 7

@@ -106,7 +106,7 @@ class RepositoryGrapher:
     def traverse(self, node_id: str, depth: int = 2) -> list[str]:
         """BFS traversal to discover connected file and symbol nodes up to specified depth."""
         node_rel = self._to_rel_path(node_id)
-        
+
         # Determine starting nodes
         start_nodes = []
         if node_rel in self.graph:
@@ -119,7 +119,7 @@ class RepositoryGrapher:
                 if data.get("type") == "symbol":
                     if data.get("name") == node_id or data.get("qualified_name") == node_id:
                         start_nodes.append(n)
-        
+
         if not start_nodes:
             return []
 

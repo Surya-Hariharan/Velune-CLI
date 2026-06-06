@@ -230,7 +230,7 @@ class CognitiveFirewall:
         """
         # Existing single-line scan
         is_safe = self.scan_text(content)
-        
+
         if is_safe:
             # Additional multi-line scan for embedded strings
             injectable_strings = self._extract_injectable_strings(content)
@@ -245,7 +245,7 @@ class CognitiveFirewall:
                         break
                 if not is_safe:
                     break
-        
+
         neutralized = content if is_safe else self.sanitize_content(content)
 
         return {

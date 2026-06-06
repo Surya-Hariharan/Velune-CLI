@@ -210,7 +210,7 @@ class GitTracker:
                 "--pretty=format:",
                 "--name-only",
             ])
-            
+
             counts: dict[str, int] = {}
             for line in result.splitlines():
                 line = line.strip()

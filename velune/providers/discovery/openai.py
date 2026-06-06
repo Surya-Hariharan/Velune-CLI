@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import os
-
 import httpx
 
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
+from velune.providers.keystore import get_key
 
 
 class OpenAIDiscovery:
@@ -12,7 +11,7 @@ class OpenAIDiscovery:
 
     def __init__(self):
         self.provider_id = "openai"
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = get_key("openai")
         self.base_url = "https://api.openai.com/v1"
 
     async def discover(self) -> list[ModelDescriptor]:

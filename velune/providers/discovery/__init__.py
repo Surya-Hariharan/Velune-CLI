@@ -5,8 +5,8 @@ from velune.providers.discovery.benchmarks import CapabilityBenchmark
 from velune.providers.discovery.classifier import CapabilityClassifier
 from velune.providers.discovery.gguf import GGUFDiscovery
 from velune.providers.discovery.google import GoogleDiscovery
-from velune.providers.discovery.groq import GroqDiscovery
 from velune.providers.discovery.gpu import GPUDetector
+from velune.providers.discovery.groq import GroqDiscovery
 from velune.providers.discovery.huggingface import HuggingFaceDiscovery
 from velune.providers.discovery.lmstudio import LMStudioDiscovery
 from velune.providers.discovery.ollama import OllamaDiscovery

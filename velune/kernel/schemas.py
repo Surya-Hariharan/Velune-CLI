@@ -1,6 +1,5 @@
 """Strictly-typed schemas for the Cognitive Kernel."""
 
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -19,7 +18,6 @@ class ComponentStatus(str, Enum):
     SHUTDOWN = "shutdown"
 
 
-from velune.events import Event
 
 
 class HealthReport(BaseModel):

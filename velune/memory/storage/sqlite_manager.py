@@ -26,14 +26,14 @@ class SQLiteManager:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._write_queue: queue.Queue = queue.Queue()
         self._is_running = True
-        
+
         # Write thread health tracking and lock
         self._thread_lock = threading.Lock()
         self._thread_healthy = threading.Event()
-        
+
         # Read connection pool
         self._local = threading.local()
-        
+
         # Start the writer thread
         self._write_thread = threading.Thread(target=self._process_writes, daemon=True)
         self._write_thread.start()
@@ -124,7 +124,7 @@ class SQLiteManager:
         done = threading.Event()
         error_holder: list[Exception] = []
         self._safe_put((query, params, done, error_holder))
-        
+
         # Log warning if taking longer than expected (5s)
         completed = done.wait(timeout=min(5.0, timeout))
         if not completed:
@@ -134,7 +134,7 @@ class SQLiteManager:
                     "Queue depth: %d", self._write_queue.qsize()
                 )
                 completed = done.wait(timeout=timeout - 5.0)
-                
+
         if not completed:
             alive = self._write_thread.is_alive() if self._write_thread else False
             logger.critical(
@@ -166,7 +166,7 @@ class SQLiteManager:
         done = threading.Event()
         error_holder: list[Exception] = []
         self._safe_put(("__BATCH__", queries, done, error_holder))
-        
+
         # Log warning if taking longer than expected (5s)
         completed = done.wait(timeout=min(5.0, timeout))
         if not completed:
@@ -176,7 +176,7 @@ class SQLiteManager:
                     "Queue depth: %d", self._write_queue.qsize()
                 )
                 completed = done.wait(timeout=timeout - 5.0)
-                
+
         if not completed:
             alive = self._write_thread.is_alive() if self._write_thread else False
             logger.critical(
@@ -213,7 +213,7 @@ class SQLiteManager:
         done = threading.Event()
         error_holder: list[Exception] = []
         self._safe_put((script, None, done, error_holder))
-        
+
         completed = done.wait(timeout=min(5.0, timeout))
         if not completed:
             if timeout > 5.0:
@@ -222,7 +222,7 @@ class SQLiteManager:
                     "Queue depth: %d", self._write_queue.qsize()
                 )
                 completed = done.wait(timeout=timeout - 5.0)
-                
+
         if not completed:
             raise TimeoutError(f"SQLite script timeout after {timeout}s.")
         if error_holder:
@@ -249,8 +249,8 @@ class SQLiteManager:
 
     def is_healthy(self) -> bool:
         """Returns True if the write thread is alive and queue depth is under 100."""
-        return (self._write_thread is not None and 
-                self._write_thread.is_alive() and 
+        return (self._write_thread is not None and
+                self._write_thread.is_alive() and
                 self._write_queue.qsize() < 100)
 
     def _process_writes(self) -> None:
@@ -262,14 +262,14 @@ class SQLiteManager:
                     if item is None:
                         self._write_queue.task_done()
                         break
-                    
+
                     # Support both 3-tuple (fire-and-forget) and 4-tuple (with error capture)
                     if len(item) == 4:
                         query, params, done_event, error_holder = item
                     else:
                         query, params, done_event = item
                         error_holder = None
-                    
+
                     try:
                         self._do_write(query, params)
                     except Exception as write_error:
@@ -285,9 +285,9 @@ class SQLiteManager:
                     finally:
                         if done_event:
                             done_event.set()
-                    
+
                     self._write_queue.task_done()
-                    
+
                 except queue.Empty:
                     continue
                 except Exception as e:
@@ -348,7 +348,7 @@ class SQLiteManager:
                     self._write_queue.join()
                 except Exception:
                     pass
-            
+
             if self._write_thread.is_alive():
                 t = threading.Thread(target=drain, daemon=True)
                 t.start()
@@ -358,7 +358,7 @@ class SQLiteManager:
         # Signal thread to exit
         self._write_queue.put(None)  # sentinel
         self._write_thread.join(timeout=5.0)
-        
+
         # Clean up thread local connections
         if hasattr(self._local, 'conn') and self._local.conn is not None:
             try:

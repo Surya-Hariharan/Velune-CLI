@@ -152,7 +152,7 @@ class HybridRetriever:
             if "cannot be called" in str(e):
                 raise
             # No running loop — safe to use asyncio.run()
-        
+
         return asyncio.run(self.retrieve(query))
 
     def search(self, query: RetrievalQuery) -> RetrievalResult:

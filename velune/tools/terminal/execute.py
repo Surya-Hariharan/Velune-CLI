@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from velune.execution.sandbox import SubprocessSandbox
@@ -11,7 +11,7 @@ from velune.tools.base.tool import BaseTool
 class ExecuteCommand(BaseTool):
     """Tool for executing terminal commands."""
 
-    def __init__(self, sandbox: Optional['SubprocessSandbox'] = None, workspace_path: str | None = None):
+    def __init__(self, sandbox: SubprocessSandbox | None = None, workspace_path: str | None = None):
         self._sandbox = sandbox
         self._workspace_path = workspace_path
 

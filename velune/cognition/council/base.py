@@ -94,10 +94,11 @@ class BaseCouncilAgent(ABC):
 
                 if supports_streaming:
                     import sys
-                    from rich.live import Live
-                    from rich.panel import Panel
-                    from rich.markdown import Markdown
+
                     from rich.console import Console
+                    from rich.live import Live
+                    from rich.markdown import Markdown
+                    from rich.panel import Panel
 
                     console = Console()
                     is_interactive = sys.stdout.isatty()

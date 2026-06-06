@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from velune.plugins.hooks import PluginHookDispatcher
 from velune.plugins.schemas import PluginManifest
@@ -14,7 +14,7 @@ logger = logging.getLogger("velune.plugins.registry")
 class PluginRegistry:
     """Stores all loaded manifests and associated hook boundaries."""
 
-    def __init__(self, hook_dispatcher: Optional[PluginHookDispatcher] = None) -> None:
+    def __init__(self, hook_dispatcher: PluginHookDispatcher | None = None) -> None:
         self.hook_dispatcher = hook_dispatcher or PluginHookDispatcher()
         self._manifests: dict[str, PluginManifest] = {}
         self._instances: dict[str, Any] = {}
@@ -45,7 +45,7 @@ class PluginRegistry:
                     method_name,
                 )
 
-    def get_plugin(self, name: str) -> Optional[Any]:
+    def get_plugin(self, name: str) -> Any | None:
         """Fetch active plugin instance."""
         return self._instances.get(name)
 

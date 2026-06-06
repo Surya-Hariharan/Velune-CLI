@@ -12,6 +12,20 @@ DEFAULT_VELUNEIGNORE = """\
 *.key
 *.p12
 *.pfx
+*.crt
+*.jks
+*.keystore
+id_rsa
+id_dsa
+id_ed25519
+id_ecdsa
+.netrc
+.npmrc
+.pypirc
+.aws/
+credentials.json
+service-account.json
+gcp-credentials.json
 secrets/
 credentials/
 

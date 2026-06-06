@@ -146,7 +146,8 @@ async def _models_scan_async(
 
         if probe:
             from pathlib import Path
-            from velune.models.probes import ModelProber, FastProbe
+
+            from velune.models.probes import FastProbe, ModelProber
             from velune.models.profile_cache import ModelProfileCache
 
             profile_cache = ModelProfileCache(Path(".velune") / "model_profiles.json")
@@ -386,8 +387,8 @@ async def _models_benchmark_async(
     provider_registry: Any,
     models_to_probe: list[Any],
 ) -> None:
-    from pathlib import Path
     import json
+    from pathlib import Path
 
     from velune.models.probes import ModelProber
     from velune.models.profile_cache import ModelProfileCache

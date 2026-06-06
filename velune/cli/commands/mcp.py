@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from velune.core.event_loop import submit
-
 import typer
 from rich.console import Console
 
 from velune.cli.context import CLIContext
+from velune.core.event_loop import submit
 from velune.core.runtime import build_runtime
 from velune.mcp.client import VeluneMCPClient
 from velune.mcp.server import VeluneMCPServer

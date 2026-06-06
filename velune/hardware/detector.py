@@ -35,6 +35,7 @@ class HardwareProfile:
 class HardwareDetector:
     def detect(self) -> HardwareProfile:
         import platform
+
         import psutil
 
         total_ram = psutil.virtual_memory().total / (1024 ** 3)

@@ -122,7 +122,7 @@ class TierClassifier:
     ) -> CouncilTier:
         """Determine task complexity and resource consumption tier policy."""
         queue_depth = self.get_queue_depth()
-        
+
         tier = classify_task_tier(
             prompt=prompt,
             repo_context=repo_context,
@@ -137,12 +137,13 @@ class TierClassifier:
         max_fan_in = 0
         try:
             import re
+
             from velune.kernel.registry import get_container
             container = get_container()
             if container.has("runtime.repository_cognition"):
                 repo_service = container.get("runtime.repository_cognition")
                 grapher = repo_service.grapher
-                
+
                 # Scan prompt for mentioned source files
                 mentioned_files = re.findall(r"[\w\/\.\-]+\.(?:py|js|ts|go|rs)", prompt)
                 for mf in mentioned_files:

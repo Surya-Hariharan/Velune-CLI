@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
-
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
+from velune.providers.keystore import get_key
 
 
 class AnthropicDiscovery:
@@ -10,7 +9,7 @@ class AnthropicDiscovery:
 
     def __init__(self):
         self.provider_id = "anthropic"
-        self.api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = get_key("anthropic")
         self.base_url = "https://api.anthropic.com"
 
     async def discover(self) -> list[ModelDescriptor]:

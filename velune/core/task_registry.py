@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
@@ -41,10 +40,10 @@ class BackgroundTaskRegistry:
             with self._lock:
                 self._dropped_count += 1
             return None
-        
+
         with self._lock:
             self._submitted_count += 1
-        
+
         async def _wrapped() -> Any:
             try:
                 result = await asyncio.wait_for(coro, timeout=timeout_seconds)
@@ -64,7 +63,7 @@ class BackgroundTaskRegistry:
             finally:
                 with self._lock:
                     self._tasks.pop(name, None)
-        
+
         task = running_loop.create_task(_wrapped(), name=name)
         with self._lock:
             self._tasks[name] = task
@@ -74,27 +73,27 @@ class BackgroundTaskRegistry:
         """Cancel all pending tasks and wait for completion."""
         with self._lock:
             tasks = [t for t in self._tasks.values() if not t.done()]
-        
+
         if not tasks:
             return
-        
+
         for task in tasks:
             task.cancel()
-        
+
         # Give tasks a chance to handle CancelledError
         done, pending = await asyncio.wait(tasks, timeout=timeout)
-        
+
         if pending:
             logger.warning(
                 "%d background tasks did not cancel within %.1fs",
                 len(pending), timeout
             )
-        
+
         # Shutdown stats reporting of dropped tasks
         stats = self.stats()
         if stats["dropped"] > 0:
             logger.info("Task registry shutdown: %d dropped tasks reported.", stats["dropped"])
-            
+
         with self._lock:
             self._tasks.clear()
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import typer
 from typing import TYPE_CHECKING
+
+import typer
 
 if TYPE_CHECKING:
     from velune.cognition.firewall import CognitiveFirewall

@@ -81,7 +81,7 @@ def _show_startup_animation(console: Console, workspace: Path, config_path: Path
     import sys
     if not sys.stdout.isatty():
         return  # Skip animation in CI, piped output, --quiet mode
-    
+
     frames = _startup_frames(workspace, config_path)
     with Live(frames[0], console=console, refresh_per_second=12, transient=True) as live:
         for frame in frames[1:]:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 
 @dataclass

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 _MAX_DEPTH = 5
 _MAX_FILES_PER_ROOT = 100_000

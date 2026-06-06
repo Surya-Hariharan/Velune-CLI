@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import typer
-from pathlib import Path
 from rich.console import Console
 
 from velune.cli.context import CLIContext
@@ -103,14 +102,14 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
                 console.print("[bold red]Error: please specify a task to execute (e.g. !run implement feature x)[/bold red]")
                 continue
             console.print(f"[bold cyan]Escalating task to full Reasoning Council: '{task}'...[/bold cyan]")
-            
+
             orchestration_engine = container.get("runtime.orchestration_engine")
             try:
                 milestones = []
                 async for milestone in orchestration_engine.stream(task):
                     console.print(f"  [bold cyan]•[/bold cyan] {milestone}")
                     milestones.append(milestone)
-                
+
                 run_id = None
                 for m in milestones:
                     if hasattr(m, "run_id"):
