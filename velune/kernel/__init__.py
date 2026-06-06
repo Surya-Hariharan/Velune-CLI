@@ -1,6 +1,6 @@
 """Cognitive Kernel (the OS layer for Velune)."""
 
-from velune.events import CognitiveBus, EventBus, EventHandler, Subscription
+from velune.events import CognitiveBus, Event, EventBus, EventHandler, Subscription
 from velune.kernel.config import (
     ConfigLoader,
     ConfigService,
@@ -17,7 +17,7 @@ from velune.kernel.config import (
 from velune.kernel.health import SubsystemHealthMonitor
 from velune.kernel.lifecycle import LifecycleCoordinator, Subsystem
 from velune.kernel.registry import ServiceContainer, get_container, inject
-from velune.kernel.schemas import ComponentStatus, Event, HealthReport
+from velune.kernel.schemas import ComponentStatus, HealthReport
 
 __all__ = [
     # Schemas
