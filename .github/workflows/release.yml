@@ -43,9 +43,9 @@ jobs:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: test
-    # To add deployment protection rules, create a "pypi" environment in
-    # GitHub repo Settings → Environments and uncomment:
-    # environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/project/velune/
     steps:
       - uses: actions/checkout@v4
 

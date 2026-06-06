@@ -75,7 +75,7 @@ class EpisodicMemoryTier:
             """
             self.sqlite_manager.execute_script(schema_sql)
             self._initialized = True
-            logger.info("Successfully initialized Episodic SQLite DB via SQLiteManager")
+            logger.debug("Successfully initialized Episodic SQLite DB via SQLiteManager")
         except (TimeoutError, RuntimeError) as e:
             logger.critical("Failed to initialize database schema: %s", e)
             raise

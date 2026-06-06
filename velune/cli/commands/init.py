@@ -54,6 +54,7 @@ def init_command(
     # Project type detection
     try:
         import json as _json
+
         from velune.repository.project_type import ProjectTypeDetector
         _profile = ProjectTypeDetector().detect(workspace)
         (velune_dir / "project_profile.json").write_text(_json.dumps({

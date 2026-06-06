@@ -101,7 +101,7 @@ class LineageMemoryTier:
                 CREATE INDEX IF NOT EXISTS idx_evolution_subsystem ON repository_evolution_timeline(subsystem);
             """
             self.sqlite_manager.execute_script(script)
-            logger.info("Lineage database successfully initialized at %s", self.db_path)
+            logger.debug("Lineage database successfully initialized at %s", self.db_path)
         except (TimeoutError, RuntimeError) as e:
             logger.critical("Failed to initialize database schema: %s", e)
             raise

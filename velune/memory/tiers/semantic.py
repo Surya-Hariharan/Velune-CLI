@@ -34,13 +34,13 @@ class SemanticMemoryTier:
         Otherwise, runs in-process volatile memory client (:memory:).
         """
         if url:
-            logger.info("Initializing Qdrant remote client at %s", url)
+            logger.debug("Initializing Qdrant remote client at %s", url)
             self.client = QdrantClient(url=url, api_key=api_key)
         elif path:
-            logger.info("Initializing Qdrant in-process local storage at %s", path)
+            logger.debug("Initializing Qdrant in-process local storage at %s", path)
             self.client = QdrantClient(path=path)
         else:
-            logger.info("Initializing Qdrant volatile in-memory client (:memory:)")
+            logger.debug("Initializing Qdrant volatile in-memory client (:memory:)")
             self.client = QdrantClient(location=location)
 
     def create_collection(
@@ -69,7 +69,7 @@ class SemanticMemoryTier:
                         distance=metric,
                     ),
                 )
-                logger.info("Created Qdrant collection: %s", collection_name)
+                logger.debug("Created Qdrant collection: %s", collection_name)
         except Exception as e:
             logger.error("Failed to create collection %s: %s", collection_name, e)
 

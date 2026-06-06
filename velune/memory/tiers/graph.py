@@ -85,7 +85,7 @@ class GraphMemoryTier:
                 CREATE INDEX IF NOT EXISTS idx_exec_nodes_task ON execution_nodes(task_id);
             """
             self.sqlite_manager.execute_script(schema_sql)
-            logger.info("Successfully initialized Graph Database via SQLiteManager")
+            logger.debug("Successfully initialized Graph Database via SQLiteManager")
         except (TimeoutError, RuntimeError) as e:
             logger.critical("Failed to initialize database schema: %s", e)
             raise

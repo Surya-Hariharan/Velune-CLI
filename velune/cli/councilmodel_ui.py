@@ -19,6 +19,7 @@ from velune.orchestration.role_assignments import (
 
 if TYPE_CHECKING:
     from rich.console import Console
+
     from velune.core.types.model import ModelDescriptor
 
 # Sentinel to distinguish "user pressed Escape" from "user selected clear"

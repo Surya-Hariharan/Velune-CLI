@@ -81,15 +81,15 @@ On underpowered machines it routes tasks to cloud providers automatically.
 
 ## Providers
 
-| Provider    | Type  | Cost           | Setup                            |
-|-------------|-------|----------------|----------------------------------|
-| Ollama      | Local | Free           | Install Ollama, pull a model     |
-| Groq        | Cloud | Free tier      | `velune setup` → enter key       |
-| OpenRouter  | Cloud | Pay-per-token  | `velune setup` → enter key       |
-| OpenAI      | Cloud | Pay-per-token  | `velune setup` → enter key       |
-| Anthropic   | Cloud | Pay-per-token  | `velune setup` → enter key       |
-| xAI (Grok)  | Cloud | Pay-per-token  | `velune setup` → enter key       |
-| Google      | Cloud | Free quota     | `velune setup` → enter key       |
+| Provider              | Type  | Cost           | Models                               | Setup                            |
+|-----------------------|-------|----------------|--------------------------------------|----------------------------------|
+| Ollama                | Local | Free           | Any pulled model                     | Install Ollama, pull a model     |
+| Groq                  | Cloud | Free tier      | Llama 3.3 70B, Mixtral, Gemma2       | `velune setup` → enter key       |
+| OpenRouter            | Cloud | Pay-per-token  | 100+ models                          | `velune setup` → enter key       |
+| OpenAI                | Cloud | Pay-per-token  | GPT-4o, GPT-4o Mini                  | `velune setup` → enter key       |
+| Anthropic             | Cloud | Pay-per-token  | Claude Opus, Sonnet, Haiku           | `velune setup` → enter key       |
+| xAI (Grok)            | Cloud | Pay-per-token  | Grok 2, Grok 2 Mini                  | `velune setup` → enter key       |
+| Google Gemini         | Cloud | Free quota     | Gemini 2.0 Flash, 1.5 Pro/Flash      | `velune setup` → enter key       |
 
 Keys are stored in your OS keyring — never in files, never in git.
 

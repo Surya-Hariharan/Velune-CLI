@@ -38,9 +38,10 @@ def build_runtime(
     logger_name = "velune"
     logger = logging.getLogger(logger_name)
 
-    # Configure root logger levels
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    # Configure root logger levels. Non-verbose hides internal INFO/DEBUG
+    # logs so users only ever see Rich-formatted output, not raw Python logs.
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.WARNING)
+    logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
 
     # 2. Configuration Service
     config_service = ConfigService(workspace=workspace, config_path=config_path)

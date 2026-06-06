@@ -66,5 +66,18 @@ def has_key(provider_id: str) -> bool:
 
 
 def list_configured_providers() -> list[str]:
-    """Return provider IDs that have a key in the keyring or environment."""
-    return [pid for pid in _ENV_VARS if has_key(pid)]
+    """Return provider IDs that have a key in the keyring or environment.
+
+    Ollama is local and keyless — it counts as configured when its server
+    is reachable, not when a key is present.
+    """
+    configured = [pid for pid in _ENV_VARS if has_key(pid)]
+    # Ollama is local — check if it's running, not if it has a key.
+    try:
+        import httpx
+        r = httpx.get("http://localhost:11434/api/tags", timeout=2.0)
+        if r.status_code == 200 and "ollama" not in configured:
+            configured.insert(0, "ollama")
+    except Exception:
+        pass
+    return configured

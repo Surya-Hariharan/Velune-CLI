@@ -43,6 +43,7 @@ class CouncilOrchestrator:
         analytics: CognitivePerformanceAnalytics | None = None,
         sqlite_manager: SQLiteManager | None = None,
         config: VeluneConfig | None = None,
+        lineage_memory: LineageMemoryTier | None = None,
     ) -> None:
         self.provider_registry = provider_registry
         self.mapper = mapper
@@ -50,8 +51,14 @@ class CouncilOrchestrator:
         self.architecture_agent = ArchitectureCognitionAgent(workspace_root=None, ledger=None)
         self.config = config
 
-        db_path = lineage_db_path or Path(".velune") / "velune_cognitive_core.db"
-        self.lineage_memory = LineageMemoryTier(db_path, sqlite_manager=sqlite_manager)
+        # Reuse the shared lineage tier (already created with the correct
+        # absolute workspace path) instead of instantiating a duplicate.
+        # Only fall back to creating one if none was provided.
+        if lineage_memory is not None:
+            self.lineage_memory = lineage_memory
+        else:
+            db_path = lineage_db_path or Path(".velune") / "velune_cognitive_core.db"
+            self.lineage_memory = LineageMemoryTier(db_path, sqlite_manager=sqlite_manager)
         self.analytics = analytics or CognitivePerformanceAnalytics(sqlite_manager=sqlite_manager)
 
         from velune.cognition.firewall import CognitiveFirewall

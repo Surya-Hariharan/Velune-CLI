@@ -7,6 +7,7 @@ import logging
 
 from velune.core.types.model import ModelDescriptor
 from velune.providers.discovery.anthropic import AnthropicDiscovery
+from velune.providers.discovery.fireworks import FireworksDiscovery
 from velune.providers.discovery.gguf import GGUFDiscovery
 from velune.providers.discovery.google import GoogleDiscovery
 from velune.providers.discovery.groq import GroqDiscovery
@@ -14,7 +15,6 @@ from velune.providers.discovery.huggingface import HuggingFaceDiscovery
 from velune.providers.discovery.lmstudio import LMStudioDiscovery
 from velune.providers.discovery.ollama import OllamaDiscovery
 from velune.providers.discovery.openai import OpenAIDiscovery
-from velune.providers.discovery.fireworks import FireworksDiscovery
 from velune.providers.discovery.openrouter import OpenRouterDiscovery
 from velune.providers.discovery.together import TogetherDiscovery
 from velune.providers.discovery.xai import XAIDiscovery

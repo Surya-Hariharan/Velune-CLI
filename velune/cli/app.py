@@ -12,6 +12,22 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+import logging
+
+# Suppress all internal Velune logs from showing in terminal.
+# Users see Rich output only — not raw Python logs. This MUST run before
+# any velune.* modules are imported so their module-level loggers inherit
+# these levels before producing any output.
+logging.getLogger("velune").setLevel(logging.WARNING)
+logging.getLogger("qdrant_client").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("uvicorn").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+# Suppress the root logger from printing INFO/DEBUG to stderr.
+logging.getLogger().setLevel(logging.WARNING)
+
 from pathlib import Path
 
 import typer
@@ -120,6 +136,12 @@ def create_app() -> typer.Typer:
                 Console().print(f"Velune v{__version__}")
             raise typer.Exit()
 
+        # Developers can opt into full internal logs with --verbose/-v.
+        if verbose:
+            logging.getLogger("velune").setLevel(logging.DEBUG)
+        else:
+            logging.getLogger("velune").setLevel(logging.WARNING)
+
         if yes:
             from velune.execution.diff_preview import configure as _configure_diff
             _configure_diff(auto_accept=True)
@@ -168,15 +190,16 @@ def create_app() -> typer.Typer:
                         "[dim]Velune needs at least one provider to work.[/dim]",
                         border_style="yellow",
                     ))
-                    run_setup = typer.confirm("Run setup now?", default=True)
-                    if run_setup:
+                    run_now = typer.confirm("Run setup now?", default=True)
+                    if run_now:
                         from velune.cli.commands.setup import run_setup_wizard
                         run_setup_wizard()
                     else:
                         runtime.console.print(
                             "[dim]Run `velune setup` any time to configure providers.[/dim]"
                         )
-                    raise typer.Exit(0)
+                    # NO EXIT HERE — fall through to REPL regardless. The only
+                    # ways out of Velune are /exit, /quit, or Ctrl+C twice.
 
                 _show_startup_animation(runtime.console, workspace, config_path)
                 from velune.cli.repl import run_repl

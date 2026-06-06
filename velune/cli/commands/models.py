@@ -188,7 +188,10 @@ async def _models_scan_async(
                     results = await asyncio.gather(*empirical_probe_tasks, return_exceptions=True)
 
                     for (record, prober), result in zip(probing_models, results):
-                        if isinstance(result, Exception):
+                        # gather(return_exceptions=True) can also surface BaseException
+                        # subclasses (e.g. asyncio.CancelledError); treat any of them
+                        # as a failed probe so they are never cached as valid results.
+                        if isinstance(result, BaseException):
                             if not cli_context.json_mode:
                                 console.print(f"[red]✗[/red] Probe failed for {record.model_id}: {result}")
                             continue

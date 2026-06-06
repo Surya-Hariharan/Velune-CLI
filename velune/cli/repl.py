@@ -938,6 +938,7 @@ class VeluneREPL:
 
     async def _cmd_councilmodel_show(self) -> None:
         from rich.table import Table
+
         from velune.orchestration.role_assignments import COUNCIL_ROLES, ROLE_DESCRIPTIONS
 
         table = Table(border_style="dim", padding=(0, 1))
@@ -997,6 +998,7 @@ class VeluneREPL:
             self.console.print("[yellow]Usage: /delete <model-id>[/yellow]")
             return
         from rich.prompt import Confirm
+
         from velune.providers.ollama_manager import OllamaManager
         model_id = args.strip()
         confirm = Confirm.ask(

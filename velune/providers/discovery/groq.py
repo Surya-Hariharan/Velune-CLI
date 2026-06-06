@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from velune.core.types.model import ModelDescriptor
-from velune.providers.keystore import has_key
+from velune.providers import keystore
 
 
 class GroqDiscovery:
@@ -12,7 +12,9 @@ class GroqDiscovery:
     provider_id = "groq"
 
     async def discover(self) -> list[ModelDescriptor]:
-        if not has_key("groq"):
+        # Call through the module (not a from-imported name) so the check
+        # always reflects the current keystore state and stays patchable.
+        if not keystore.has_key("groq"):
             return []
         from velune.providers.adapters.groq import GROQ_MODELS
         return GROQ_MODELS

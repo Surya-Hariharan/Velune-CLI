@@ -7,22 +7,26 @@ name = "velune"
 dynamic = ["version"]
 description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
 readme = "README.md"
-requires-python = ">=3.11"
 license = { file = "LICENSE" }
+requires-python = ">=3.11"
 authors = [
-    { name = "Surya HA", email = "suryahariharan2006@gmail.com" }
+  { name = "Surya_HA" }
 ]
-keywords = ["ai", "cli", "llm", "ollama", "local-ai", "coding-assistant", "multi-agent", "agent", "autonomous"]
+keywords = [
+  "ai", "cli", "llm", "ollama", "local-ai",
+  "coding-assistant", "multi-agent", "terminal",
+]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Environment :: Console",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development",
+  "Topic :: Terminals",
 ]
 
 dependencies = [
@@ -96,7 +100,6 @@ velune = "velune.main:app"
 Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
 Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
 Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
-Documentation = "https://github.com/Surya-Hariharan/Velune-CLI#readme"
 
 [tool.hatch.version]
 path = "velune/__init__.py"
@@ -106,10 +109,11 @@ packages = ["velune"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "velune/",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md",
+  "velune/",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  "pyproject.toml",
 ]
 
 [tool.black]
@@ -123,12 +127,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = [
-    "E501",   # line too long (handled by formatter)
-    "E402",   # module-level import not at top (intentional for circular-import guards)
-    "E701",   # multiple statements on one line (intentional compact style in hot paths)
-    "F403",   # star imports in __init__ re-export modules
-    "F405",   # may-be-undefined from star import (accompanies F403)
-    "N818",   # exception name should end in Error (ArchitectureDriftAlarm is intentional)
+    "E501",
+    "E402",
+    "E701",
+    "F403",
+    "F405",
+    "N818",
 ]
 
 [tool.mypy]
