@@ -179,19 +179,8 @@ def create_app() -> typer.Typer:
                     raise typer.Exit(0)
 
                 _show_startup_animation(runtime.console, workspace, config_path)
-                runtime.console.print(
-                    Panel(
-                        "\n".join(
-                            [
-                                "[bold]Velune is ready.[/bold]",
-                                f"Workspace: {workspace}",
-                                f"Config: {config_path or 'auto-discovered'}",
-                                "Use [bold]velune ask[/bold], [bold]velune models scan[/bold], or [bold]velune memory stats[/bold] to start.",
-                            ]
-                        ),
-                        title="Startup",
-                    )
-                )
+                from velune.cli.repl import run_repl
+                run_repl(runtime)
 
     register_commands(app, ServiceContainer())
     return app
