@@ -50,7 +50,7 @@ class GraphMemoryTier:
                     node_type TEXT NOT NULL,
                     properties TEXT NOT NULL
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS graph_edges (
                     source TEXT NOT NULL,
                     target TEXT NOT NULL,
@@ -60,7 +60,7 @@ class GraphMemoryTier:
                     FOREIGN KEY (source) REFERENCES graph_nodes(id) ON DELETE CASCADE,
                     FOREIGN KEY (target) REFERENCES graph_nodes(id) ON DELETE CASCADE
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS execution_nodes (
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL,

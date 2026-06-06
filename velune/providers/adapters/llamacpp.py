@@ -35,7 +35,7 @@ class LlamaCppProvider(ModelProvider):
     async def initialize(self) -> None:
         """Verify llama-cpp-python library is available."""
         try:
-            import llama_cpp
+            import llama_cpp  # noqa: F401
         except ImportError:
             raise ProviderConnectionError(
                 "llama-cpp-python dependency is missing. Install with: pip install llama-cpp-python"

@@ -17,8 +17,8 @@ class ToolRegistry:
         import logging
         logger = logging.getLogger("velune")
         try:
-            name = tool.get_name()
-            schema = tool.get_schema()
+            tool.get_name()
+            tool.get_schema()
             return True
         except Exception as e:
             class_name = tool.__class__.__name__

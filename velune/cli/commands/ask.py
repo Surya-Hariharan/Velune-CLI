@@ -86,7 +86,7 @@ async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier:
     # 4. Ingest and Scan AST Snapshot
     snapshot: RepositorySnapshot | None = None
     if not cli_context.json_mode:
-        with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]") as status:
+        with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]"):
             snapshot = repo_cognition.index()
     else:
         snapshot = repo_cognition.index()
@@ -96,7 +96,7 @@ async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier:
     # 5. deliberating debate loop
     council_res = None
     if not cli_context.json_mode:
-        with console.status("[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]") as status:
+        with console.status("[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]"):
             council_res = await orchestrator.execute_task(prompt, formatted_snap, council_tier=council_tier)
     else:
         council_res = await orchestrator.execute_task(prompt, formatted_snap, council_tier=council_tier)

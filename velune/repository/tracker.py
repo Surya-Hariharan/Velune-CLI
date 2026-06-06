@@ -196,7 +196,7 @@ class GitTracker:
 
     def get_all_file_volatility(self, days: int = 90) -> dict[str, int]:
         """Get commit counts for ALL files in a single git log call.
-        
+
         Returns:
             dict mapping relative file path → commit count in last {days} days.
             Empty dict if not a git repo.

@@ -21,7 +21,7 @@ class MemoryPrioritizer:
     ) -> None:
         """
         Initialize the prioritizer.
-        
+
         - default_halflife_hours: Hours for memory importance to decay by half.
         - retrieval_boost_factor: Percentage boost added to importance on access.
         """
@@ -36,7 +36,7 @@ class MemoryPrioritizer:
     def calculate_decayed_score(self, initial_score: float, creation_timestamp: float) -> float:
         """
         Applies exponential decay over elapsed time.
-        
+
         S(t) = S_0 * e^(-lambda * t)
         """
         elapsed_seconds = max(0.0, time.time() - creation_timestamp)
@@ -51,7 +51,7 @@ class MemoryPrioritizer:
     ) -> float:
         """
         Combines baseline importance with dynamic context factors.
-        
+
         Initial = 0.5 * base + 0.3 * semantic_depth + 0.2 * context_fit
         """
         score = (0.5 * base_importance) + (0.3 * semantic_depth) + (0.2 * context_fit)

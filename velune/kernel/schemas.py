@@ -1,13 +1,13 @@
 """Strictly-typed schemas for the Cognitive Kernel."""
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ComponentStatus(str, Enum):
+class ComponentStatus(StrEnum):
     """Execution status of registered kernel components."""
     UNINITIALIZED = "uninitialized"
     INITIALIZING = "initializing"

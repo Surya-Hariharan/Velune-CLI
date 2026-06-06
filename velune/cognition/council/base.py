@@ -67,7 +67,7 @@ class BaseCouncilAgent(ABC):
                 max_tokens=max_tokens,
             )
 
-            AGENT_TIMEOUTS = {
+            agent_timeouts = {
                 CouncilRole.PLANNER: 120.0,
                 CouncilRole.CODER: 180.0,
                 CouncilRole.REVIEWER: 120.0,
@@ -75,7 +75,7 @@ class BaseCouncilAgent(ABC):
                 CouncilRole.SYNTHESIZER: 120.0,
             }
 
-            timeout = AGENT_TIMEOUTS.get(self.role, 120.0)
+            timeout = agent_timeouts.get(self.role, 120.0)
 
             import time
             start = time.perf_counter()
@@ -114,14 +114,14 @@ class BaseCouncilAgent(ABC):
                             full_content = []
                             role_name = self.role.value.capitalize()
 
-                            AGENT_COLORS = {
+                            agent_colors = {
                                 CouncilRole.PLANNER: "magenta",
                                 CouncilRole.CODER: "green",
                                 CouncilRole.REVIEWER: "yellow",
                                 CouncilRole.CHALLENGER: "red",
                                 CouncilRole.SYNTHESIZER: "cyan",
                             }
-                            color = AGENT_COLORS.get(self.role, "cyan")
+                            color = agent_colors.get(self.role, "cyan")
                             panel_title = f"[bold {color}]🧠 {role_name} Agent Deliberating...[/bold {color}] ([dim]{self.model.model_id}[/dim])"
 
                             if acquired:

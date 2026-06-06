@@ -1,13 +1,13 @@
 """Core memory type definitions."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class MemoryType(str, Enum):
+class MemoryType(StrEnum):
     """Types of memory records."""
     WORKING = "working"
     EPISODIC = "episodic"

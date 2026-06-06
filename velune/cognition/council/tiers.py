@@ -1,8 +1,8 @@
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class CouncilTier(str, Enum):
+class CouncilTier(StrEnum):
     INSTANT = "instant"     # Coder only, no review. Read-only queries, explanations.
     MINIMAL = "minimal"     # Planner + Coder, no Reviewer. Simple bug fixes on fast hardware.
     STANDARD = "standard"   # Coder + Reviewer. Small edits, bug fixes.

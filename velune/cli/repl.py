@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import FormattedText
 
 from velune.cli.slash_commands import SlashCommand, SlashCommandRegistry
 from velune.core.runtime import RuntimeContext
@@ -72,7 +73,6 @@ class VeluneREPL:
         )
 
     def _get_prompt_tokens(self) -> FormattedText:
-        from prompt_toolkit.formatted_text import FormattedText
 
         from velune.context.window import estimate_tokens
 
@@ -568,7 +568,7 @@ class VeluneREPL:
 
         from rich.panel import Panel
 
-        _PHASE_COLORS: dict[str, str] = {
+        _phase_colors: dict[str, str] = {
             "planner": "magenta",
             "coder": "green",
             "reviewer": "yellow",
@@ -586,7 +586,7 @@ class VeluneREPL:
                 last_run_id = milestone.run_id
                 phase = milestone.phase
                 message = milestone.message
-                color = _PHASE_COLORS.get(phase.lower(), "dim") if phase else "dim"
+                color = _phase_colors.get(phase.lower(), "dim") if phase else "dim"
                 label = phase.capitalize() if phase else "Council"
                 self.console.print(
                     f"  [bold {color}]●[/bold {color}] "

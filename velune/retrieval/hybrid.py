@@ -127,10 +127,10 @@ class HybridRetriever:
 
     def search_sync(self, query: RetrievalQuery) -> RetrievalResult:
         """Synchronous retrieval. DEPRECATED: use await retrieve() in async contexts.
-        
-        This method creates a new event loop for synchronous callers. Do NOT call 
+
+        This method creates a new event loop for synchronous callers. Do NOT call
         from within a running event loop — use 'await self.retrieve(query)' instead.
-        
+
         Raises:
             RuntimeError: If called from within a running event loop.
         """
@@ -161,7 +161,7 @@ class HybridRetriever:
         import asyncio
         import warnings
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             warnings.warn(
                 "HybridRetriever.search() called from async context. "
                 "Use 'await retriever.retrieve()' instead.",

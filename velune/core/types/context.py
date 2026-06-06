@@ -1,12 +1,12 @@
 """Core context type definitions."""
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ContextPriority(str, Enum):
+class ContextPriority(StrEnum):
     """Context chunk priority levels."""
     CRITICAL = "critical"
     HIGH = "high"

@@ -1,7 +1,7 @@
 """Strictly-typed schemas for repository cognition."""
 
 import hashlib
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -39,7 +39,7 @@ def compute_symbol_id(file_path: str, qualified_name: str, kind: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-class RepositoryLanguage(str, Enum):
+class RepositoryLanguage(StrEnum):
     PYTHON = "python"
     JAVASCRIPT = "javascript"
     TYPESCRIPT = "typescript"
@@ -48,7 +48,7 @@ class RepositoryLanguage(str, Enum):
     UNKNOWN = "unknown"
 
 
-class RepositorySymbolKind(str, Enum):
+class RepositorySymbolKind(StrEnum):
     CLASS = "class"
     FUNCTION = "function"
     METHOD = "method"

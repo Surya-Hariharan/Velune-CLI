@@ -42,8 +42,6 @@ async def _run_command_async(
     lifecycle = container.get("runtime.lifecycle")
     model_registry = container.get("runtime.model_registry")
     orchestration_engine = container.get("runtime.orchestration_engine")
-    config = cli_context.config
-
     # 2. Boot up Cognitive OS Subsystems
     if not cli_context.json_mode:
         console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")

@@ -1,12 +1,12 @@
 """Core provider type definitions."""
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ProviderHealth(str, Enum):
+class ProviderHealth(StrEnum):
     """Provider health status."""
     HEALTHY = "healthy"
     DEGRADED = "degraded"

@@ -55,7 +55,7 @@ class LineageMemoryTier:
                     architectural_impact REAL DEFAULT 0.0,
                     consequences TEXT
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS design_alternatives (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     decision_id TEXT NOT NULL,
@@ -64,7 +64,7 @@ class LineageMemoryTier:
                     rejected_reason TEXT,
                     FOREIGN KEY(decision_id) REFERENCES decision_nodes(id) ON DELETE CASCADE
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS failed_experiments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp REAL NOT NULL,
@@ -268,7 +268,7 @@ class LineageMemoryTier:
         """Asynchronously save a subsystem's repository personality and style profile in SQLite."""
         query = """
             INSERT INTO repo_personality_styles (
-                subsystem, naming_conventions, type_hinting_strictness, 
+                subsystem, naming_conventions, type_hinting_strictness,
                 preferred_constructs, class_vs_functional, docstring_style, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(subsystem) DO UPDATE SET
@@ -294,7 +294,7 @@ class LineageMemoryTier:
         """Synchronously query the style profile for a subsystem."""
         try:
             query = """
-                SELECT subsystem, naming_conventions, type_hinting_strictness, 
+                SELECT subsystem, naming_conventions, type_hinting_strictness,
                        preferred_constructs, class_vs_functional, docstring_style, updated_at
                 FROM repo_personality_styles
                 WHERE subsystem = ?

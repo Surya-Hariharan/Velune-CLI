@@ -16,7 +16,7 @@ logger = logging.getLogger("velune.memory.storage.sqlite_manager")
 
 class SQLiteManager:
     """Thread-safe SQLite manager with WAL mode and connection pooling.
-    
+
     All memory tiers should use this manager instead of direct sqlite3.connect() calls.
     WAL (Write-Ahead Logging) mode allows concurrent readers with one writer.
     """
@@ -115,7 +115,7 @@ class SQLiteManager:
 
     def execute_write_sync(self, query: str, params: tuple = (), timeout: float = 15.0) -> None:
         """Queue a write operation and wait for completion.
-        
+
         Raises:
             TimeoutError: If write doesn't complete within timeout.
                 This indicates write thread death or severe queue backup.
@@ -158,7 +158,7 @@ class SQLiteManager:
 
     def execute_write_many(self, queries: list[tuple[str, tuple]], timeout: float = 15.0) -> None:
         """Batch multiple writes as a single atomic transaction.
-        
+
         Raises:
             TimeoutError: If batch write doesn't complete within timeout.
             RuntimeError: If the batch write fails.
@@ -205,7 +205,7 @@ class SQLiteManager:
 
     def execute_script(self, script: str, timeout: float = 10.0) -> None:
         """Execute a DDL script (CREATE TABLE, CREATE INDEX, etc.).
-        
+
         Raises:
             TimeoutError: If script doesn't complete within timeout.
             RuntimeError: If the script fails.
@@ -337,7 +337,7 @@ class SQLiteManager:
 
     async def shutdown(self) -> None:
         """Gracefully shut down the write processing thread.
-        
+
         This is non-blocking with a timeout to prevent deadlocks if the write thread is dead.
         """
         self._is_running = False

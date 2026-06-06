@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from enum import Enum
+from enum import StrEnum
 
 from velune.core.types.model import ModelDescriptor
 from velune.models.profiler import ModelProfiler
@@ -13,7 +13,7 @@ from velune.models.scorer import ModelScorer
 logger = logging.getLogger("velune.models.specializations")
 
 
-class CouncilRole(str, Enum):
+class CouncilRole(StrEnum):
     """Roles in the Velune Reasoning Council."""
 
     PLANNER = "planner"
@@ -54,7 +54,7 @@ class ModelSpecializationMapper:
     ) -> dict[CouncilRole, ModelDescriptor]:
         """
         Assigns the best available model for each CouncilRole based on their functional profiles and optimal context token sizes.
-        
+
         - Planner: High planning and instruction-following scores (optimizes for 16k context window).
         - Coder: High coding and tool-use scores (optimizes for 32k context window).
         - Reviewer: High reasoning and instruction-following scores (optimizes for 32k context window).

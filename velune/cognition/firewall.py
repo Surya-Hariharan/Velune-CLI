@@ -103,7 +103,7 @@ class CognitiveFirewall:
 
     def scan_text(self, text: str) -> bool:
         """Scan a given string for potential prompt injection signatures.
-        
+
         Returns True if the text is safe, False if a potential injection is detected.
         """
         # Normalize unicode to catch homoglyph attacks
@@ -186,8 +186,8 @@ class CognitiveFirewall:
 
     def wrap_workspace_content(self, content_name: str, content: str) -> str:
         """Encapsulate code/text contents inside strict XML blocks.
-        
-        This prevents raw contents from escaping their boundaries and being interpreted 
+
+        This prevents raw contents from escaping their boundaries and being interpreted
         as active LLM instructions.
         """
         is_code = False
@@ -225,7 +225,7 @@ class CognitiveFirewall:
 
     def scan_file_for_injection(self, file_path: str, content: str) -> dict[str, Any]:
         """Perform a complete security security scan on a workspace file before ingestion.
-        
+
         Returns a dict indicating safety status, potential matched patterns, and a quarantined/neutralized content string.
         """
         # Existing single-line scan

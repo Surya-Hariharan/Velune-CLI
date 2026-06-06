@@ -1,12 +1,12 @@
 """Core agent type definitions."""
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class AgentRole(str, Enum):
+class AgentRole(StrEnum):
     """Agent role definitions."""
     PLANNER = "planner"
     CODER = "coder"
@@ -18,7 +18,7 @@ class AgentRole(str, Enum):
     SUPERVISOR = "supervisor"
 
 
-class AgentMessageType(str, Enum):
+class AgentMessageType(StrEnum):
     """Typed message protocol for agent communication."""
     TASK_REQUEST = "task_request"
     TASK_RESPONSE = "task_response"

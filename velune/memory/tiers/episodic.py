@@ -60,7 +60,7 @@ class EpisodicMemoryTier:
                     timestamp REAL NOT NULL,
                     metadata TEXT NOT NULL
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS execution_steps (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
@@ -69,7 +69,7 @@ class EpisodicMemoryTier:
                     payload TEXT NOT NULL,
                     timestamp REAL NOT NULL
                 );
-                
+
                 CREATE INDEX IF NOT EXISTS idx_turns_session ON conversation_turns(session_id);
                 CREATE INDEX IF NOT EXISTS idx_steps_session ON execution_steps(session_id);
             """

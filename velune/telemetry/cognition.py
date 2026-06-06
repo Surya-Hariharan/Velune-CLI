@@ -126,7 +126,7 @@ class CognitivePerformanceAnalytics:
     def get_model_performance(self, model_id: str) -> dict[str, Any]:
         """Calculates performance aggregated KPIs for a specific model."""
         query = """
-            SELECT 
+            SELECT
                 COUNT(*) as total_runs,
                 SUM(hallucinated) as total_hallucinations,
                 SUM(rolled_back) as total_rollbacks,

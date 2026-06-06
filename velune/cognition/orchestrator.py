@@ -24,6 +24,7 @@ from velune.cognition.council.tiers import CouncilTier, TierClassifier
 from velune.cognition.style_resolver import StyleResolver
 from velune.core.trace import TracedLogger
 from velune.models.specializations import CouncilRole, ModelSpecializationMapper
+from velune.orchestration.schemas import StreamProgress
 from velune.providers.registry import ProviderRegistry
 from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
@@ -276,7 +277,7 @@ class CouncilOrchestrator:
 
     def estimate_blast_radius(self, target_file: str) -> float:
         """
-        Estimates structural impact using direct dependents (depth 1) 
+        Estimates structural impact using direct dependents (depth 1)
         and transitive dependents (depth 2) with depth attenuation.
         Caps search and normalizes dynamically into standard range [0.1, 0.9].
         """

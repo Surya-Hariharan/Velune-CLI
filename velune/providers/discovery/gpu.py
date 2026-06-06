@@ -69,7 +69,7 @@ class GPUDetector:
     def _detect_amd(self) -> dict[str, any] | None:
         """Detect AMD GPU via rocm-smi."""
         try:
-            result = subprocess.run(
+            subprocess.run(
                 ["rocm-smi", "--showmeminfo", "vram"],
                 capture_output=True,
                 text=True,

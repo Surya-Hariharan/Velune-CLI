@@ -46,7 +46,7 @@ class WriteFile(BaseTool):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             self.console.print(f"[green]✓ Written:[/green] {path}")
-            return f"Successfully wrote to {file_path}"
+            return f"Successfully wrote to {path}"
         self.console.print(f"[yellow]Skipped:[/yellow] {path}")
         return f"Skipped (rejected by user): {path}"
 

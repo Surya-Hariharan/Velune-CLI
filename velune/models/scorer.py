@@ -97,7 +97,7 @@ class ModelScorer:
     ) -> float:
         """
         Calculate aggregated suitability score (0.0 - 1.0) for a model based on task constraints.
-        
+
         agg_score = w_cap * cap_match + w_ctx * ctx_fit + w_speed * speed + w_rel * reliability - w_cost * cost
         """
         # 1. Base Capability Score (0.0 to 1.0)

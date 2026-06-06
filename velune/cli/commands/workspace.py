@@ -68,7 +68,7 @@ async def _workspace_init_async(
 
     if not cli_context.json_mode:
         console.print("[bold cyan]⠋[/bold cyan] Building Tree-sitter compiler AST indices and scanning imports...")
-        with console.status("[bold magenta]⚡ Parsing symbols, dependencies, and git Authorship...[/bold magenta]") as status:
+        with console.status("[bold magenta]⚡ Parsing symbols, dependencies, and git Authorship...[/bold magenta]"):
             snapshot = repo_cognition.index(force=force)
     else:
         snapshot = repo_cognition.index(force=force)
@@ -178,7 +178,7 @@ async def _workspace_status_async(
     await lifecycle.startup()
 
     if not cli_context.json_mode:
-        with console.status("[bold cyan]Querying cognitive index status...[/bold cyan]") as status:
+        with console.status("[bold cyan]Querying cognitive index status...[/bold cyan]"):
             snapshot = repo_cognition.index(force=False)
     else:
         snapshot = repo_cognition.index(force=False)

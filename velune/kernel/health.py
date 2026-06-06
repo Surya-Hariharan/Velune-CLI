@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 
 from velune.kernel.lifecycle import ComponentStatus, LifecycleCoordinator
 from velune.kernel.schemas import HealthReport

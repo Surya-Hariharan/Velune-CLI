@@ -1,12 +1,12 @@
 """Core model type definitions."""
 
-from enum import Enum, IntEnum
+from enum import IntEnum, StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ModelCapability(str, Enum):
+class ModelCapability(StrEnum):
     """Capability categories used by the model router and classifiers."""
 
     CODE_GENERATION = "code_generation"
