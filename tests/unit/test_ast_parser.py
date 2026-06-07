@@ -81,7 +81,11 @@ def test_detect_language_by_extension() -> None:
 def test_ast_parser_python_fallback() -> None:
     """Verify that Python AST fallback parsing functions correctly when tree-sitter is disabled."""
     parser = ASTParser()
-    parser.languages = {}  # Disable tree-sitter path
+    # Disable tree-sitter path. Languages now load lazily on first parse, so we
+    # mark the parser as already-loaded with an empty language map to force the
+    # AST/regex fallbacks.
+    parser._loaded = True
+    parser.languages = {}
     
     code = (
         "import os\n"
@@ -102,7 +106,9 @@ def test_ast_parser_python_fallback() -> None:
 def test_ast_parser_regex_fallbacks() -> None:
     """Verify that regex fallback parsing works for TypeScript, Go, and Rust when tree-sitter is disabled."""
     parser = ASTParser()
-    parser.languages = {}  # Disable tree-sitter path
+    # Disable tree-sitter path (lazy-load aware — see test_ast_parser_python_fallback).
+    parser._loaded = True
+    parser.languages = {}
     
     # 1. TypeScript
     ts_code = "export class Controller {}\nexport async function handler() {}\nimport { log } from 'logger';\n"

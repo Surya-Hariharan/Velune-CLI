@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import time
 
 if sys.platform == "win32":
     try:
@@ -32,7 +31,6 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
@@ -40,7 +38,10 @@ from velune import __version__
 from velune.cli.context import CLIContext
 from velune.cli.registry import register_commands
 from velune.core.runtime import build_runtime
+from velune.core.startup_profiler import mark as _startup_mark
 from velune.kernel.registry import ServiceContainer
+
+_startup_mark("cli.app imported (typer/rich/runtime ready)")
 
 
 def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
@@ -83,26 +84,19 @@ def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
     return frames
 
 
-def _check_ollama_live() -> bool:
-    try:
-        import httpx
-        r = httpx.get("http://localhost:11434/api/tags", timeout=2)
-        return r.status_code == 200
-    except Exception:
-        return False
+def _show_startup_banner(console: Console, workspace: Path, config_path: Path | None) -> None:
+    """Render the welcome banner once, instantly.
 
-
-def _show_startup_animation(console: Console, workspace: Path, config_path: Path | None) -> None:
-    """Show startup animation only in interactive TTY sessions."""
+    The previous implementation animated the banner frame-by-frame with a
+    ``time.sleep(0.08)`` per line — ~0.6-1.2s of pure blocking delay on every
+    interactive launch. Modern AI terminals show their surface immediately;
+    perceived speed comes from an instant prompt, not a reveal animation.
+    """
     import sys
     if not sys.stdout.isatty():
-        return  # Skip animation in CI, piped output, --quiet mode
+        return  # Skip banner in CI, piped output, --quiet mode
 
-    frames = _startup_frames(workspace, config_path)
-    with Live(frames[0], console=console, refresh_per_second=12, transient=True) as live:
-        for frame in frames[1:]:
-            live.update(frame)
-            time.sleep(0.08)  # Acceptable: sync context, interactive only
+    console.print(_startup_frames(workspace, config_path)[-1])
 
 
 def create_app() -> typer.Typer:
@@ -181,10 +175,11 @@ def create_app() -> typer.Typer:
                 }))
             else:
                 from velune.providers.keystore import list_configured_providers
+                # list_configured_providers already includes a (short, deduped)
+                # Ollama reachability probe, so a single call suffices.
                 configured = list_configured_providers()
-                ollama_live = _check_ollama_live()
 
-                if not configured and not ollama_live:
+                if not configured:
                     runtime.console.print(Panel(
                         "[yellow]No AI providers configured.[/yellow]\n"
                         "[dim]Velune needs at least one provider to work.[/dim]",
@@ -201,7 +196,8 @@ def create_app() -> typer.Typer:
                     # NO EXIT HERE — fall through to REPL regardless. The only
                     # ways out of Velune are /exit, /quit, or Ctrl+C twice.
 
-                _show_startup_animation(runtime.console, workspace, config_path)
+                _show_startup_banner(runtime.console, workspace, config_path)
+                _startup_mark("REPL handoff (prompt visible)")
                 from velune.cli.repl import run_repl
                 run_repl(runtime)
 

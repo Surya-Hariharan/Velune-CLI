@@ -10,6 +10,11 @@ on:
 # No top-level permissions block — every job declares exactly the
 # permissions it needs. This is the least-privilege standard.
 
+# Opt into Node.js 24 runtime now, ahead of the June 16 2026 forced migration.
+# Prevents the Node.js 20 deprecation warnings and ensures forward compatibility.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
   # JOB 1: validate-tag

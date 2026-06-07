@@ -32,8 +32,17 @@ class HardwareProfile:
     suggestions: list[str] = field(default_factory=list)
 
 
+_PROFILE_CACHE: HardwareProfile | None = None
+
+
 class HardwareDetector:
     def detect(self) -> HardwareProfile:
+        global _PROFILE_CACHE
+        # Memoized for the process lifetime — RAM/GPU topology is stable during
+        # a run and the GPU probe is comparatively expensive.
+        if _PROFILE_CACHE is not None:
+            return _PROFILE_CACHE
+
         import platform
 
         import psutil
@@ -51,7 +60,7 @@ class HardwareDetector:
         tier, rec_model, can_run = self._classify(total_ram, vram_gb, is_apple_silicon)
         warnings, suggestions = self._build_advice(total_ram, vram_gb, is_apple_silicon, tier)
 
-        return HardwareProfile(
+        _PROFILE_CACHE = HardwareProfile(
             total_ram_gb=round(total_ram, 1),
             available_ram_gb=round(available_ram, 1),
             gpu_name=gpu_name,
@@ -65,8 +74,27 @@ class HardwareDetector:
             warnings=warnings,
             suggestions=suggestions,
         )
+        return _PROFILE_CACHE
 
     def _detect_gpu(self) -> tuple[str | None, float | None]:
+        # Reuse the runtime's already-completed GPU probe if present. The CLI
+        # bootstrap runs GPUDetector before HardwareDetector; without this the
+        # GPU is probed twice (~0.4-0.6s of duplicated subprocess/driver work).
+        try:
+            from velune.providers.discovery import gpu as _gpu_mod
+            cache = _gpu_mod._GPU_CACHE
+            if cache is not None:
+                # Runtime already completed a GPU probe — trust it rather than
+                # re-running pynvml/subprocess for the same hardware.
+                if not cache.get("has_gpu"):
+                    return None, None
+                name = cache.get("gpu_name") or cache.get("gpu_type")
+                vram = cache.get("vram_total_gb")
+                if name and vram:
+                    return str(name), round(float(vram), 1)
+        except Exception:
+            pass
+
         # NVIDIA via pynvml
         try:
             import pynvml

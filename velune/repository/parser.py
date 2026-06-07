@@ -12,56 +12,74 @@ from velune.repository.schemas import (
     RepositorySymbolKind,
 )
 
-# Optional imports for tree-sitter
-try:
-    import tree_sitter_go
-    import tree_sitter_python
-    import tree_sitter_rust
-    import tree_sitter_typescript
-    from tree_sitter import Language, Parser
-    HAS_TREE_SITTER = True
-except ImportError:
-    HAS_TREE_SITTER = False
+# Tree-sitter ships compiled C extensions (.pyd/.so). Importing them at module
+# load time forces Windows to load several DLLs synchronously — each triggering
+# a Defender real-time scan — adding seconds to *every* startup, even when no
+# parsing is requested. We therefore defer all tree-sitter imports until the
+# first actual parse via ``_ensure_tree_sitter``.
+#
+# ``HAS_TREE_SITTER`` starts ``None`` (unknown) and becomes ``True``/``False``
+# after the first lazy load attempt. It remains importable for callers/tests
+# that reference it, but no import cost is paid until parsing happens.
+HAS_TREE_SITTER: bool | None = None
+_TS_LANGUAGES: dict[str, Any] = {}
+_TS_PARSER_CLS: Any = None
+
+
+def _ensure_tree_sitter() -> bool:
+    """Lazily import tree-sitter grammars on first use. Returns availability."""
+    global HAS_TREE_SITTER, _TS_PARSER_CLS
+    if HAS_TREE_SITTER is not None:
+        return HAS_TREE_SITTER
+    try:
+        import tree_sitter_go
+        import tree_sitter_python
+        import tree_sitter_rust
+        import tree_sitter_typescript
+        from tree_sitter import Language, Parser
+
+        _TS_PARSER_CLS = Parser
+        for name, factory in (
+            ("python", tree_sitter_python.language),
+            ("typescript", tree_sitter_typescript.language_typescript),
+            ("javascript", tree_sitter_typescript.language_typescript),
+            ("go", tree_sitter_go.language),
+            ("rust", tree_sitter_rust.language),
+        ):
+            try:
+                _TS_LANGUAGES[name] = Language(factory())
+            except Exception:
+                pass
+        HAS_TREE_SITTER = True
+    except ImportError:
+        HAS_TREE_SITTER = False
+    return HAS_TREE_SITTER
 
 
 class ASTParser:
     """Multi-language AST and symbol parser with comprehensive fallbacks."""
 
     def __init__(self) -> None:
+        # Languages are populated lazily on first parse — see _ensure_loaded.
         self.languages: dict[str, Any] = {}
         self._parsers: dict[str, Any] = {}
-        if HAS_TREE_SITTER:
-            self._init_tree_sitter()
+        self._loaded = False
 
-    def _init_tree_sitter(self) -> None:
-        """Initialize tree-sitter language mappings dynamically."""
-        try:
-            self.languages["python"] = Language(tree_sitter_python.language())
-        except Exception:
-            pass
-        try:
-            self.languages["typescript"] = Language(tree_sitter_typescript.language_typescript())
-        except Exception:
-            pass
-        try:
-            self.languages["javascript"] = Language(tree_sitter_typescript.language_typescript())
-        except Exception:
-            pass
-        try:
-            self.languages["go"] = Language(tree_sitter_go.language())
-        except Exception:
-            pass
-        try:
-            self.languages["rust"] = Language(tree_sitter_rust.language())
-        except Exception:
-            pass
+    def _ensure_loaded(self) -> bool:
+        """Populate ``self.languages`` from the lazily-loaded grammar cache."""
+        if self._loaded:
+            return bool(self.languages)
+        self._loaded = True
+        if _ensure_tree_sitter():
+            self.languages = dict(_TS_LANGUAGES)
+        return bool(self.languages)
 
     def parse(self, file_path: Path, code: str) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Parses source code from file_path, leveraging tree-sitter or fallbacks."""
         lang = self._detect_language(file_path)
 
-        # Try tree-sitter if available and initialized
-        if HAS_TREE_SITTER and lang.value in self.languages:
+        # Try tree-sitter if available (loaded lazily on first parse)
+        if self._ensure_loaded() and lang.value in self.languages:
             try:
                 return self._parse_tree_sitter(file_path, code, lang)
             except Exception:
@@ -91,7 +109,7 @@ class ASTParser:
     def _parse_tree_sitter(self, file_path: Path, code: str, lang: RepositoryLanguage) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Uses tree-sitter to parse the code and extract symbols and imports."""
         if lang.value not in self._parsers:
-            self._parsers[lang.value] = Parser(self.languages[lang.value])
+            self._parsers[lang.value] = _TS_PARSER_CLS(self.languages[lang.value])
         parser = self._parsers[lang.value]
         tree = parser.parse(bytes(code, "utf8"))
 

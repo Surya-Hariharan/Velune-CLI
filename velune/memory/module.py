@@ -2,44 +2,42 @@ from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 
 def _create_sqlite_manager(env: RuntimeEnvironment):
+    from velune.core.paths import cognitive_db_path, migrate_legacy_storage
     from velune.memory.storage.sqlite_manager import SQLiteManager
-    velune_dir = env.workspace / ".velune"
-    velune_dir.mkdir(parents=True, exist_ok=True)
-    db_path = velune_dir / "velune_cognitive_core.db"
-    return SQLiteManager(db_path)
+    # First subsystem to touch heavy state — run the one-time relocation of
+    # any pre-existing in-workspace (possibly cloud-synced) data.
+    migrate_legacy_storage(env.workspace)
+    return SQLiteManager(cognitive_db_path(env.workspace))
 
 def _create_working_tier(env: RuntimeEnvironment):
     from velune.memory.tiers.working import WorkingMemoryTier
     return WorkingMemoryTier()
 
 def _create_episodic_tier(env: RuntimeEnvironment):
+    from velune.core.paths import cognitive_db_path
     from velune.memory.tiers.episodic import EpisodicMemoryTier
-    velune_dir = env.workspace / ".velune"
-    velune_dir.mkdir(parents=True, exist_ok=True)
-    db_path = velune_dir / "velune_cognitive_core.db"
+    db_path = cognitive_db_path(env.workspace)
     sqlite_manager = env.container.get("runtime.sqlite_manager")
     return EpisodicMemoryTier(db_path, sqlite_manager=sqlite_manager)
 
 def _create_semantic_tier(env: RuntimeEnvironment):
+    from velune.core.paths import qdrant_store_path
     from velune.memory.tiers.semantic import SemanticMemoryTier
-    velune_dir = env.workspace / ".velune"
-    velune_dir.mkdir(parents=True, exist_ok=True)
-    vector_path = str(velune_dir / "qdrant_local_store")
-    return SemanticMemoryTier(path=vector_path)
+    return SemanticMemoryTier(path=str(qdrant_store_path(env.workspace)))
 
 def _create_graph_tier(env: RuntimeEnvironment):
+    from velune.core.paths import cognitive_db_path
     from velune.memory.tiers.graph import GraphMemoryTier
-    velune_dir = env.workspace / ".velune"
-    velune_dir.mkdir(parents=True, exist_ok=True)
-    db_path = velune_dir / "velune_cognitive_core.db"
+    db_path = cognitive_db_path(env.workspace)
     sqlite_manager = env.container.get("runtime.sqlite_manager")
     return GraphMemoryTier(db_path, sqlite_manager=sqlite_manager)
 
 def _create_lineage_tier(env: RuntimeEnvironment):
+    from velune.core.paths import cognitive_db_path
     from velune.memory.tiers.lineage import LineageMemoryTier
     sqlite_manager = env.container.get("runtime.sqlite_manager")
     return LineageMemoryTier(
-        db_path=env.workspace / ".velune" / "velune_cognitive_core.db",
+        db_path=cognitive_db_path(env.workspace),
         sqlite_manager=sqlite_manager,
     )
 

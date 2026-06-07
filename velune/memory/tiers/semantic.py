@@ -7,18 +7,34 @@ summaries, and payload-filtered contextual searches.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from typing import Any
 
-from qdrant_client import QdrantClient
-from qdrant_client.http import models as qmodels
-from qdrant_client.http.exceptions import UnexpectedResponse
+# NOTE: qdrant_client (and its compiled local-mode backend) is imported lazily
+# inside _ensure_client(). Importing it at module load — and constructing the
+# client — was a multi-second cost on the startup path, especially with the
+# store on a cloud-synced drive. Vectors are needed only once a memory/retrieval
+# operation actually runs, so we defer both the import and the connection.
 
 logger = logging.getLogger("velune.memory.tiers.semantic")
 
 
+def _qmodels() -> Any:
+    """Lazily import qdrant http models."""
+    from qdrant_client.http import models as qmodels
+    return qmodels
+
+
 class SemanticMemoryTier:
-    """Tier 3: Semantic store using Qdrant (supports in-process local storage and server modes)."""
+    """Tier 3: Semantic store using Qdrant (lazy-initialized, degradable).
+
+    The Qdrant client is created on first access rather than at construction.
+    This keeps the vector backend off the critical startup path and lets the
+    rest of the system boot even when the vector store is unavailable. Set
+    ``VELUNE_SKIP_QDRANT=1`` to force a no-op degraded mode (useful for fast dev
+    iteration); all operations then become safe no-ops and searches return ``[]``.
+    """
 
     def __init__(
         self,
@@ -27,21 +43,43 @@ class SemanticMemoryTier:
         api_key: str | None = None,
         path: str | None = None,
     ) -> None:
-        """
-        Initialize Qdrant client connection.
-        If url/api_key is set, connects to remote server.
-        If path is set, runs in-process local storage with SQLite persistence.
-        Otherwise, runs in-process volatile memory client (:memory:).
-        """
-        if url:
-            logger.debug("Initializing Qdrant remote client at %s", url)
-            self.client = QdrantClient(url=url, api_key=api_key)
-        elif path:
-            logger.debug("Initializing Qdrant in-process local storage at %s", path)
-            self.client = QdrantClient(path=path)
-        else:
-            logger.debug("Initializing Qdrant volatile in-memory client (:memory:)")
-            self.client = QdrantClient(location=location)
+        self._location = location
+        self._url = url
+        self._api_key = api_key
+        self._path = path
+        self._client: Any = None
+        self._degraded = os.environ.get("VELUNE_SKIP_QDRANT", "").lower() in ("1", "true", "yes")
+        if self._degraded:
+            logger.warning("VELUNE_SKIP_QDRANT set — semantic memory running in degraded (no-op) mode.")
+
+    def _ensure_client(self) -> Any:
+        """Create (once) and return the Qdrant client, or None in degraded mode."""
+        if self._degraded:
+            return None
+        if self._client is not None:
+            return self._client
+        try:
+            from qdrant_client import QdrantClient
+            if self._url:
+                logger.debug("Initializing Qdrant remote client at %s", self._url)
+                self._client = QdrantClient(url=self._url, api_key=self._api_key)
+            elif self._path:
+                logger.debug("Initializing Qdrant in-process local storage at %s", self._path)
+                self._client = QdrantClient(path=self._path)
+            else:
+                logger.debug("Initializing Qdrant volatile in-memory client (:memory:)")
+                self._client = QdrantClient(location=self._location)
+        except Exception as exc:
+            # Degrade gracefully rather than crashing the whole runtime.
+            logger.error("Qdrant initialization failed; semantic memory degraded: %s", exc)
+            self._degraded = True
+            return None
+        return self._client
+
+    @property
+    def client(self) -> Any:
+        """Backward-compatible accessor; triggers lazy initialization."""
+        return self._ensure_client()
 
     def create_collection(
         self,
@@ -50,9 +88,13 @@ class SemanticMemoryTier:
         distance_metric: str = "Cosine",
     ) -> None:
         """Create a new collection if it does not already exist."""
+        client = self._ensure_client()
+        if client is None:
+            return  # Degraded mode
+        qmodels = _qmodels()
         try:
             # Check if exists
-            collections = self.client.get_collections().collections
+            collections = client.get_collections().collections
             exists = any(c.name == collection_name for c in collections)
 
             if not exists:
@@ -62,7 +104,7 @@ class SemanticMemoryTier:
                 elif distance_metric.lower() == "dot":
                     metric = qmodels.Distance.DOT
 
-                self.client.create_collection(
+                client.create_collection(
                     collection_name=collection_name,
                     vectors_config=qmodels.VectorParams(
                         size=vector_size,
@@ -95,6 +137,10 @@ class SemanticMemoryTier:
         payloads: list[dict[str, Any]],
     ) -> None:
         """Upsert structural code or memory embedding points into the collection."""
+        client = self._ensure_client()
+        if client is None:
+            return  # Degraded mode
+        qmodels = _qmodels()
         if vectors:
             dims = {len(v) for v in vectors}
             if len(dims) > 1:
@@ -113,7 +159,7 @@ class SemanticMemoryTier:
             )
 
         try:
-            self.client.upsert(
+            client.upsert(
                 collection_name=collection_name,
                 points=points,
             )
@@ -131,6 +177,10 @@ class SemanticMemoryTier:
         """
         Query vector similarities under optional key-value metadata payload filter matching.
         """
+        client = self._ensure_client()
+        if client is None:
+            return []  # Degraded mode
+        qmodels = _qmodels()
         q_filter = None
         if payload_filter:
             conditions = []
@@ -144,7 +194,7 @@ class SemanticMemoryTier:
             q_filter = qmodels.Filter(must=conditions)
 
         try:
-            results = self.client.query_points(
+            results = client.query_points(
                 collection_name=collection_name,
                 query=query_vector,
                 limit=limit,
@@ -159,18 +209,19 @@ class SemanticMemoryTier:
                     "payload": item.payload or {},
                 })
             return output
-        except UnexpectedResponse as e:
-            logger.error("Qdrant query returned unexpected response: %s", e)
-            return []
         except Exception as e:
             logger.error("Semantic search failure on %s: %s", collection_name, e)
             return []
 
     def delete_points(self, collection_name: str, ids: list[int | str]) -> None:
         """Delete specific vectors by their identifier."""
+        client = self._ensure_client()
+        if client is None:
+            return  # Degraded mode
+        qmodels = _qmodels()
         try:
             cleaned_ids = [self._clean_id(p_id) for p_id in ids]
-            self.client.delete(
+            client.delete(
                 collection_name=collection_name,
                 points_selector=qmodels.PointIdsList(points=cleaned_ids),
             )
@@ -179,6 +230,10 @@ class SemanticMemoryTier:
 
     def delete_by_payload(self, collection_name: str, payload_filter: dict[str, Any]) -> None:
         """Delete points matching a payload filter."""
+        client = self._ensure_client()
+        if client is None:
+            return  # Degraded mode
+        qmodels = _qmodels()
         try:
             conditions = []
             for key, val in payload_filter.items():
@@ -189,7 +244,7 @@ class SemanticMemoryTier:
                     )
                 )
             q_filter = qmodels.Filter(must=conditions)
-            self.client.delete(
+            client.delete(
                 collection_name=collection_name,
                 points_selector=qmodels.FilterSelector(filter=q_filter),
             )

@@ -38,6 +38,8 @@ class RuntimeBootstrapper:
 
     def bootstrap(self, env: RuntimeEnvironment) -> None:
         """Initialize all modules in dependency order."""
+        from velune.core.startup_profiler import mark
+
         from velune.core.task_registry import BackgroundTaskRegistry
         registry = BackgroundTaskRegistry()
         env.container.register_instance("runtime.task_registry", registry)
@@ -45,6 +47,7 @@ class RuntimeBootstrapper:
         from velune.hardware.detector import HardwareDetector
         hardware_profile = HardwareDetector().detect()
         env.container.register_instance("runtime.hardware", hardware_profile)
+        mark("hardware detected")
 
         # Modules with lifecycle_key set are lifecycle-critical (startup/shutdown
         # managed by LifecycleCoordinator). A factory failure aborts bootstrap.
@@ -54,6 +57,7 @@ class RuntimeBootstrapper:
         for module in resolved:
             try:
                 instance = module.factory(env)
+                mark(f"module: {module.name}")
             except Exception as exc:
                 if module.lifecycle_key:
                     _logger.critical(

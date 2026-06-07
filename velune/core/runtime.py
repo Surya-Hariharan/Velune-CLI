@@ -33,6 +33,8 @@ def build_runtime(
     verbose: bool = False,
 ) -> RuntimeContext:
     """Create and register the shared runtime services using the declarative bootstrapper."""
+    from velune.core.startup_profiler import mark
+    mark("build_runtime: enter")
     # 1. Setup Logging and Console
     console = Console(highlight=False)
     logger_name = "velune"
@@ -50,6 +52,7 @@ def build_runtime(
     except Exception as e:
         logger.warning("Failed to load configuration. Falling back to system defaults: %s", e)
         config = get_default_config()
+    mark("config loaded")
 
     container = ServiceContainer()
     lifecycle = LifecycleCoordinator()
@@ -78,6 +81,7 @@ def build_runtime(
             "cuda_available": False,
         }
     container.register_instance("runtime.gpu_info", gpu_info)
+    mark("gpu detected")
 
     # 3. Initialize and bootstrap declarative subsystems in dependency order
     from velune.kernel.bootstrap import RuntimeBootstrapper, RuntimeEnvironment
@@ -95,6 +99,7 @@ def build_runtime(
     for module in ALL_MODULES:
         bootstrapper.register_module(module)
     bootstrapper.bootstrap(env)
+    mark("subsystems bootstrapped")
 
     return RuntimeContext(
         workspace=workspace,

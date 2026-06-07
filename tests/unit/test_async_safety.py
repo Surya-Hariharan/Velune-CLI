@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from rich.console import Console
 
-from velune.cli.app import _show_startup_animation
+from velune.cli.app import _show_startup_banner
 from velune.events import CognitiveBus
 from velune.events import Event as KernelEvent
 from velune.retrieval.hybrid import HybridRetriever
@@ -90,15 +90,29 @@ def test_search_sync_works_from_sync_context():
     assert any("search_sync() is deprecated" in str(w.message) for w in record)
 
 
-def test_animation_skipped_in_non_tty():
-    """Verify _show_startup_animation skips processing if sys.stdout is not a TTY."""
+def test_banner_skipped_in_non_tty():
+    """Verify _show_startup_banner renders nothing when sys.stdout is not a TTY.
+
+    The banner is now rendered instantly (no animation/sleep). In non-TTY
+    contexts (CI, piped output) it must short-circuit before printing.
+    """
     console = MagicMock(spec=Console)
     workspace = Path("/mock/workspace")
 
-    with patch("sys.stdout.isatty", return_value=False), \
-         patch("velune.cli.app.Live") as mock_live:
+    with patch("sys.stdout.isatty", return_value=False):
+        _show_startup_banner(console, workspace, None)
 
-        _show_startup_animation(console, workspace, None)
+        # Nothing should be printed in a non-interactive context.
+        console.print.assert_not_called()
 
-        # rich.Live should not be instantiated at all
-        mock_live.assert_not_called()
+
+def test_banner_renders_once_in_tty():
+    """Verify _show_startup_banner prints exactly one frame (no animation loop)."""
+    console = MagicMock(spec=Console)
+    workspace = Path("/mock/workspace")
+
+    with patch("sys.stdout.isatty", return_value=True):
+        _show_startup_banner(console, workspace, None)
+
+        # Single instant render — not a frame-by-frame animation.
+        assert console.print.call_count == 1

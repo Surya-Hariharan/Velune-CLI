@@ -18,8 +18,15 @@ class HybridRetriever:
     Primary interface: await retrieve(). search() is sync-only.
     """
 
-    def __init__(self, location: str = ":memory:", client: Any | None = None) -> None:
-        self.vector_retriever = VectorRetriever(location=location, client=client)
+    def __init__(
+        self,
+        location: str = ":memory:",
+        client: Any | None = None,
+        client_provider: Any | None = None,
+    ) -> None:
+        self.vector_retriever = VectorRetriever(
+            location=location, client=client, client_provider=client_provider
+        )
         self.lexical_retriever = BM25Retriever()
         self.graph_retriever = GraphRetriever()
         self.reranker = ContextReranker()
