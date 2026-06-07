@@ -5,7 +5,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v*"
 
 # No top-level permissions block — every job declares exactly the
 # permissions it needs. This is the least-privilege standard.
