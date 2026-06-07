@@ -87,9 +87,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_DEFAULT }}
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-
+      # security_audit.py uses only Python stdlib (re, sys, pathlib).
+      # No package installation needed — installing the full dev tree here
+      # was wasting 3-5 minutes per run for zero benefit.
       - name: Run security audit
         run: python scripts/security_audit.py
 

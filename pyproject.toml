@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "velune"
+name = "velune-cli"
 dynamic = ["version"]
 description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [
-  { name = "Surya_HA" }
+  { name = "Surya HA", email = "suryahariharan2006@gmail.com" }
 ]
 keywords = [
   "ai", "cli", "llm", "ollama", "local-ai",
@@ -76,9 +76,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ollama = []
 gguf = ["gguf>=0.6.0", "llama-cpp-python>=0.2.0"]
-all-providers = ["velune[gguf]"]
+all = ["velune-cli[gguf]"]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
@@ -101,6 +100,7 @@ velune = "velune.main:app"
 Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
 Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
 Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
+Changelog = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "velune/__init__.py"
