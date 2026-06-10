@@ -111,10 +111,10 @@ class SubprocessSandbox:
                 except RuntimeError:
                     loop = None
 
-                if loop and loop.is_running():
+                if loop is not None:
                     loop.create_task(self.bus.emit(event))
-                else:
-                    asyncio.run(self.bus.emit(event))
+                # No running loop: emission is skipped; rejection is already
+                # recorded via logger.warning() above.
             except Exception as e:
                 logger.error("Failed to emit command_rejected event to CognitiveBus: %s", e)
 

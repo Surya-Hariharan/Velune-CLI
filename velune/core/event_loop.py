@@ -20,11 +20,16 @@ def submit(coro: Coroutine[Any, Any, T]) -> T:
 
     Raises RuntimeError if called from within a running event loop — callers
     inside an async context should await the coroutine directly.
+
+    Delegates to ``velune.kernel.entrypoint.run_async`` so that
+    ``asyncio.run()`` is called from exactly one place in the codebase.
     """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        from velune.kernel.entrypoint import run_async
+
+        return run_async(coro)
     raise RuntimeError(
         "submit() called from a running event loop — await the coroutine directly instead."
     )

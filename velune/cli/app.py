@@ -198,8 +198,8 @@ def create_app() -> typer.Typer:
 
                 _show_startup_banner(runtime.console, workspace, config_path)
                 _startup_mark("REPL handoff (prompt visible)")
-                from velune.cli.repl import run_repl
-                run_repl(runtime)
+                from velune.kernel.entrypoint import launch
+                launch(runtime)
 
     register_commands(app, ServiceContainer())
     return app

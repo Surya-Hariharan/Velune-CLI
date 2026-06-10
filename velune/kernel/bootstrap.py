@@ -39,7 +39,6 @@ class RuntimeBootstrapper:
     def bootstrap(self, env: RuntimeEnvironment) -> None:
         """Initialize all modules in dependency order."""
         from velune.core.startup_profiler import mark
-
         from velune.core.task_registry import BackgroundTaskRegistry
         registry = BackgroundTaskRegistry()
         env.container.register_instance("runtime.task_registry", registry)

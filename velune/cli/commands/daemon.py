@@ -1,4 +1,3 @@
-import asyncio
 import os
 import signal
 import subprocess
@@ -76,8 +75,9 @@ def daemon_status():
     """Display daemon running status and PID."""
     if DaemonClient.is_running():
         try:
-            # Intentional: sync CLI callback, not inside running loop
-            result = asyncio.run(DaemonClient.send_command("ping"))
+            from velune.kernel.entrypoint import run_async
+
+            result = run_async(DaemonClient.send_command("ping"))
             console.print(f"[green]Daemon running (PID: {result['pid']})[/green]")
         except Exception as e:
             console.print(f"[red]Daemon running but communication failed: {e}[/red]")

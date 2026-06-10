@@ -98,6 +98,7 @@ if __name__ == "__main__":
     import sys
 
     from velune.daemon.client import DaemonClient
+    from velune.kernel.entrypoint import run_async
 
     if len(sys.argv) < 2:
         print("Usage: python -m velune.daemon.server <workspace_path>")
@@ -110,6 +111,6 @@ if __name__ == "__main__":
     workspace_path = Path(sys.argv[1]).resolve()
     daemon = VeluneDaemon(workspace_path)
     try:
-        asyncio.run(daemon.start())
+        run_async(daemon.start())
     except KeyboardInterrupt:
         daemon.shutdown()

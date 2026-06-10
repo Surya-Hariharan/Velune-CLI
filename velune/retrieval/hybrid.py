@@ -135,14 +135,12 @@ class HybridRetriever:
     def search_sync(self, query: RetrievalQuery) -> RetrievalResult:
         """Synchronous retrieval. DEPRECATED: use await retrieve() in async contexts.
 
-        This method creates a new event loop for synchronous callers. Do NOT call
-        from within a running event loop — use 'await self.retrieve(query)' instead.
-
         Raises:
             RuntimeError: If called from within a running event loop.
         """
         import asyncio
         import warnings
+
         warnings.warn(
             "HybridRetriever.search_sync() is deprecated and will be removed in a future version. "
             "Use 'await retriever.retrieve(query)' instead.",
@@ -158,25 +156,34 @@ class HybridRetriever:
         except RuntimeError as e:
             if "cannot be called" in str(e):
                 raise
-            # No running loop — safe to use asyncio.run()
+            # No running loop — safe to delegate to run_async().
 
-        return asyncio.run(self.retrieve(query))
+        from velune.kernel.entrypoint import run_async
+
+        return run_async(self.retrieve(query))
 
     def search(self, query: RetrievalQuery) -> RetrievalResult:
         """Synchronous interface. Do NOT call from within a running event loop.
-        Use await retrieve() instead from async contexts."""
+
+        Raises:
+            RuntimeError: If called from within a running event loop.
+        """
         import asyncio
-        import warnings
+
         try:
             asyncio.get_running_loop()
-            warnings.warn(
-                "HybridRetriever.search() called from async context. "
-                "Use 'await retriever.retrieve()' instead.",
-                RuntimeWarning, stacklevel=2
+            raise RuntimeError(
+                "HybridRetriever.search() cannot be called from an async context. "
+                "Use 'await retriever.retrieve()' instead."
             )
-        except RuntimeError:
-            pass  # No running loop, safe to use asyncio.run()
-        return asyncio.run(self.retrieve(query))
+        except RuntimeError as e:
+            if "cannot be called" in str(e):
+                raise
+            # No running loop — safe to proceed.
+
+        from velune.kernel.entrypoint import run_async
+
+        return run_async(self.retrieve(query))
 
     async def check_embedding_available(self) -> bool:
         """Returns True if a real embedding provider is available."""

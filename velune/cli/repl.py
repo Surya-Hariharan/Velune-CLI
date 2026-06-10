@@ -117,7 +117,7 @@ class VeluneREPL:
 
     async def run(self) -> None:
         session = self._build_prompt_session()
-        self._print_startup_banner()
+        await asyncio.to_thread(self._print_startup_banner)
 
         while True:
             try:
@@ -650,7 +650,8 @@ class VeluneREPL:
         from rich.syntax import Syntax
 
         workspace = self.container.get("runtime.workspace")
-        stat = subprocess.run(
+        stat = await asyncio.to_thread(
+            subprocess.run,
             ["git", "diff", "--stat"],
             cwd=workspace,
             capture_output=True,
@@ -661,7 +662,8 @@ class VeluneREPL:
             return
 
         self.console.print(stat.stdout)
-        full = subprocess.run(
+        full = await asyncio.to_thread(
+            subprocess.run,
             ["git", "diff"],
             cwd=workspace,
             capture_output=True,
@@ -1173,6 +1175,11 @@ class VeluneREPL:
             return None
 
 
-def run_repl(runtime: RuntimeContext) -> None:
+async def run_repl(runtime: RuntimeContext) -> None:
+    """Coroutine entry point for the REPL session.
+
+    Callers should use ``velune.kernel.entrypoint.launch()`` to drive this from
+    a synchronous context; do not call ``asyncio.run()`` directly.
+    """
     repl = VeluneREPL(runtime)
-    asyncio.run(repl.run())
+    await repl.run()
