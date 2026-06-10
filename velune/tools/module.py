@@ -38,13 +38,19 @@ def _create_tool_registry(env: RuntimeEnvironment):
         sandbox=execution_executor.sandbox,
         workspace_path=str(env.workspace)
     )
+    ws = env.workspace
     default_tools = [
-        ReadFile(workspace=env.workspace), ReadDirectory(workspace=env.workspace),
-        WriteFile(workspace=env.workspace), CreateFile(workspace=env.workspace),
-        DeleteFile(workspace=env.workspace),
-        GrepFiles(), FindFiles(), GitLog(), GitDiff(), GitBlame(), GitStatus(), GitBranch(),
-        GitCommit(), GitCheckout(), execute_cmd_tool, TerminalHistory(),
-        SemanticCodeSearch(), SymbolSearch(), GoToDefinition(), FindReferences(), WebFetch()
+        ReadFile(workspace=ws), ReadDirectory(workspace=ws),
+        WriteFile(workspace=ws), CreateFile(workspace=ws),
+        DeleteFile(workspace=ws),
+        GrepFiles(workspace=ws), FindFiles(workspace=ws),
+        GitLog(workspace=ws), GitDiff(workspace=ws), GitBlame(workspace=ws),
+        GitStatus(workspace=ws), GitBranch(workspace=ws),
+        GitCommit(workspace=ws), GitCheckout(workspace=ws),
+        execute_cmd_tool, TerminalHistory(),
+        SemanticCodeSearch(workspace=ws), SymbolSearch(workspace=ws),
+        GoToDefinition(workspace=ws), FindReferences(workspace=ws),
+        WebFetch(),
     ]
     for tool in default_tools:
         tool_registry.register(tool)

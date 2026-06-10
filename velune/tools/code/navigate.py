@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from velune.execution.path_guard import PathGuard
 from velune.tools.base.tool import BaseTool
 
 
 class GoToDefinition(BaseTool):
     """Tool for navigating to symbol definitions."""
+
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
 
     def get_name(self) -> str:
         return "go_to_definition"
@@ -23,7 +27,9 @@ class GoToDefinition(BaseTool):
         """Go to symbol definition."""
         from velune.repository.parser import ASTParser
 
-        path = Path(file_path)
+        guard = PathGuard(self.workspace)
+        path = guard.validate(file_path)
+
         parser = ASTParser()
 
         try:
@@ -67,6 +73,9 @@ class GoToDefinition(BaseTool):
 class FindReferences(BaseTool):
     """Tool for finding symbol references."""
 
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+
     def get_name(self) -> str:
         return "find_references"
 
@@ -81,7 +90,7 @@ class FindReferences(BaseTool):
         """Find references to a symbol."""
         from velune.tools.filesystem.search import GrepFiles
 
-        grep = GrepFiles()
+        grep = GrepFiles(workspace=self.workspace)
         results = await grep.execute(
             pattern=symbol_name,
             directory=directory,

@@ -3,6 +3,8 @@
 import subprocess
 from pathlib import Path
 
+from velune.execution.path_guard import PathGuard
+
 
 class GitTracker:
     """Direct Git integration for capturing branch topology, blames, and commit volatility."""
@@ -10,6 +12,7 @@ class GitTracker:
     def __init__(self, root_path: Path) -> None:
         self.root_path = root_path.resolve()
         self.is_git = (self.root_path / ".git").exists()
+        self._guard = PathGuard(self.root_path)
 
     def get_active_branch(self) -> str:
         """Returns the name of the currently checked out Git branch."""
@@ -62,8 +65,9 @@ class GitTracker:
         if not self.is_git:
             return 0
         try:
-            # Count commit entries modifying this file
-            res = self._run_git(["log", f"--since={days} days ago", "--oneline", "--", file_path])
+            safe = self._guard.validate(self.root_path / file_path)
+            rel = str(safe.relative_to(self.root_path))
+            res = self._run_git(["log", f"--since={days} days ago", "--oneline", "--", rel])
             return len(res.splitlines())
         except Exception:
             return 0
@@ -73,8 +77,10 @@ class GitTracker:
         if not self.is_git:
             return []
         try:
-            # git blame --porcelain file
-            res = self._run_git(["blame", "--porcelain", file_path])
+            safe = self._guard.validate(self.root_path / file_path)
+            rel = str(safe.relative_to(self.root_path))
+            # "--" prevents the path from being misinterpreted as a git ref.
+            res = self._run_git(["blame", "--porcelain", "--", rel])
             blames = []
             commit_data: dict[str, dict[str, str]] = {}
             lines = res.splitlines()

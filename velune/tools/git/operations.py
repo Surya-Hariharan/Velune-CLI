@@ -1,12 +1,44 @@
-"""Git operation tools."""
+"""Git operation tools — GitCommit, GitCheckout.
 
+Uses gitpython's high-level API instead of raw subprocess.  This eliminates
+two classes of injection risk:
+  - Shell injection (no shell=True was ever used, but subprocess is gone).
+  - Argument injection: branch names are looked up by key in the Repo heads
+    dict rather than spliced into a command string, so ``--detach`` or similar
+    flag-like inputs cannot influence git's option parsing.
+"""
+
+from __future__ import annotations
+
+import asyncio
 from pathlib import Path
 
+from velune.execution.path_guard import PathGuard
 from velune.tools.base.tool import BaseTool
+
+
+def _open_repo(path: Path):  # type: ignore[return]
+    try:
+        import git
+
+        return git.Repo(str(path), search_parent_directories=True)
+    except Exception as exc:
+        raise ValueError(f"Not a git repository: {path}") from exc
+
+
+def _validate_ref_name(name: str, label: str = "name") -> None:
+    """Reject ref names that look like git option flags."""
+    if name.startswith("-"):
+        raise ValueError(
+            f"Invalid git {label} '{name}': names must not start with '-'."
+        )
 
 
 class GitCommit(BaseTool):
     """Tool for committing changes."""
+
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
 
     def get_name(self) -> str:
         return "git_commit"
@@ -20,52 +52,25 @@ class GitCommit(BaseTool):
         directory: str = ".",
         add_all: bool = True,
     ) -> str:
-        """Commit changes."""
-        import subprocess
+        guard = PathGuard(self.workspace)
+        safe_root = guard.validate(directory)
+        repo = _open_repo(safe_root)
 
-        root_path = Path(directory)
-        if not (root_path / ".git").exists():
-            raise ValueError("Not a git repository")
+        def _do_commit() -> str:
+            if add_all:
+                repo.git.add(A=True)
+            commit = repo.index.commit(message)
+            return f"Committed: {message} ({commit.hexsha[:8]})"
 
-        import asyncio
-        import functools
-        if add_all:
-            await asyncio.to_thread(
-                functools.partial(
-                    subprocess.run,
-                    ["git", "add", "."],
-                    cwd=root_path,
-                    check=True,
-                )
-            )
-
-        await asyncio.to_thread(
-            functools.partial(
-                subprocess.run,
-                ["git", "commit", "-m", message],
-                cwd=root_path,
-                check=True,
-            )
-        )
-
-        return f"Committed: {message}"
+        return await asyncio.to_thread(_do_commit)
 
     def get_schema(self) -> dict:
         return {
             "type": "object",
             "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "Commit message",
-                },
-                "directory": {
-                    "type": "string",
-                    "description": "Git repository directory",
-                },
-                "add_all": {
-                    "type": "boolean",
-                    "description": "Add all changes before committing",
-                },
+                "message": {"type": "string", "description": "Commit message"},
+                "directory": {"type": "string", "description": "Git repository directory"},
+                "add_all": {"type": "boolean", "description": "Add all changes before committing"},
             },
             "required": ["message"],
         }
@@ -73,6 +78,9 @@ class GitCommit(BaseTool):
 
 class GitCheckout(BaseTool):
     """Tool for checking out branches."""
+
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
 
     def get_name(self) -> str:
         return "git_checkout"
@@ -86,47 +94,31 @@ class GitCheckout(BaseTool):
         directory: str = ".",
         create: bool = False,
     ) -> str:
-        """Checkout a branch."""
-        import subprocess
+        _validate_ref_name(branch, label="branch")
+        guard = PathGuard(self.workspace)
+        safe_root = guard.validate(directory)
+        repo = _open_repo(safe_root)
 
-        root_path = Path(directory)
-        if not (root_path / ".git").exists():
-            raise ValueError("Not a git repository")
+        def _do_checkout() -> str:
+            if create:
+                new_head = repo.create_head(branch)
+                new_head.checkout()
+            else:
+                existing = {h.name: h for h in repo.heads}
+                if branch not in existing:
+                    raise ValueError(f"Branch not found: '{branch}'")
+                existing[branch].checkout()
+            return f"Checked out: {branch}"
 
-        cmd = ["git", "checkout"]
-        if create:
-            cmd.append("-b")
-        cmd.append(branch)
-
-        import asyncio
-        import functools
-        await asyncio.to_thread(
-            functools.partial(
-                subprocess.run,
-                cmd,
-                cwd=root_path,
-                check=True,
-            )
-        )
-
-        return f"Checked out: {branch}"
+        return await asyncio.to_thread(_do_checkout)
 
     def get_schema(self) -> dict:
         return {
             "type": "object",
             "properties": {
-                "branch": {
-                    "type": "string",
-                    "description": "Branch name",
-                },
-                "directory": {
-                    "type": "string",
-                    "description": "Git repository directory",
-                },
-                "create": {
-                    "type": "boolean",
-                    "description": "Create branch if it doesn't exist",
-                },
+                "branch": {"type": "string", "description": "Branch name"},
+                "directory": {"type": "string", "description": "Git repository directory"},
+                "create": {"type": "boolean", "description": "Create branch if it doesn't exist"},
             },
             "required": ["branch"],
         }

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from velune.execution.path_guard import PathGuard
 from velune.tools.base.tool import BaseTool
 
 
 class GrepFiles(BaseTool):
     """Tool for searching file contents."""
+
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
 
     def get_name(self) -> str:
         return "grep_files"
@@ -25,7 +29,9 @@ class GrepFiles(BaseTool):
 
         from velune.repository.scanner import FilesystemScanner
 
-        root_path = Path(directory)
+        guard = PathGuard(self.workspace)
+        root_path = guard.validate(directory)
+
         scanner = FilesystemScanner(root_path)
 
         extensions = None
@@ -82,6 +88,9 @@ class GrepFiles(BaseTool):
 class FindFiles(BaseTool):
     """Tool for finding files by name."""
 
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+
     def get_name(self) -> str:
         return "find_files"
 
@@ -95,11 +104,11 @@ class FindFiles(BaseTool):
     ) -> list[str]:
         """Find files by pattern."""
         import fnmatch
-        from pathlib import Path
 
-        root_path = Path(directory)
+        guard = PathGuard(self.workspace)
+        root_path = guard.validate(directory)
+
         matches = []
-
         for file_path in root_path.rglob("*"):
             if file_path.is_file() and fnmatch.fnmatch(file_path.name, pattern):
                 matches.append(str(file_path))

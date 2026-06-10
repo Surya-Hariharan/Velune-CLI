@@ -335,8 +335,9 @@ class VeluneREPL:
         raise SystemExit(0)
 
     async def _cmd_clear(self, args: str) -> None:
-        import os
-        os.system("cls" if os.name == "nt" else "clear")
+        # ESC c (RIS — Reset to Initial State) clears the terminal without
+        # spawning a shell process or using os.system().
+        print("\033c", end="", flush=True)
         self._conversation = []
         self.console.print("[dim]Screen and conversation context cleared.[/dim]")
 
