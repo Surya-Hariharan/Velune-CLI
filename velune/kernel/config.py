@@ -8,6 +8,16 @@ from pathlib import Path
 
 import toml
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+@dataclass
+class ConfigValidationError:
+    """A single configuration validation problem."""
+    field: str
+    value: str | None
+    reason: str
+    severity: str = "CRITICAL"  # "CRITICAL" or "WARNING"
 
 
 class ProjectConfig(BaseModel):
@@ -21,6 +31,7 @@ class WorkspaceConfig(BaseModel):
     index_on_init: bool = True
     watch_files: bool = True
     git_aware: bool = True
+    root: Path | None = None
 
 
 class ContextConfig(BaseModel):
@@ -36,6 +47,7 @@ class MemoryConfig(BaseModel):
     episodic_retention_days: int = 30
     semantic_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     graph_enabled: bool = True
+    storage_dir: Path | None = None
 
 
 class RetrievalConfig(BaseModel):
@@ -111,8 +123,25 @@ class CognitionConfig(BaseModel):
     default_tier_override: str = "auto"  # auto, instant, minimal, standard, full
 
 
-class VeluneConfig(BaseModel):
-    """Root configuration tree."""
+class VeluneConfig(BaseSettings):
+    """Root configuration tree.
+
+    Field values are resolved in this priority order (highest first):
+    1. Explicit constructor kwargs (e.g. from TOML file data)
+    2. Environment variables prefixed with ``VELUNE_`` (nested via ``__``)
+    3. A ``.env`` file in the working directory
+    4. Hard-coded field defaults
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="VELUNE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
+
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
@@ -124,6 +153,85 @@ class VeluneConfig(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
 
+    # ---------------------------------------------------------------------------
+    # Startup validation
+    # ---------------------------------------------------------------------------
+
+    def validate(self) -> list[ConfigValidationError]:
+        """Validate the configuration and return any problems found.
+
+        Returns a list of :class:`ConfigValidationError`.  An empty list means
+        the configuration is healthy.  Callers should treat ``severity="CRITICAL"``
+        errors as startup-blocking failures.
+        """
+        errors: list[ConfigValidationError] = []
+
+        provider_name = self.providers.default_provider
+        provider_entry: ProviderEntry | None = getattr(self.providers, provider_name, None)
+
+        if not isinstance(provider_entry, ProviderEntry):
+            errors.append(ConfigValidationError(
+                field="providers.default_provider",
+                value=provider_name,
+                reason=(
+                    f"Provider '{provider_name}' is not defined in the [providers] section. "
+                    f"Add a [{provider_name}] entry or change default_provider."
+                ),
+                severity="CRITICAL",
+            ))
+        else:
+            # Remote providers require an API key env var to be populated.
+            if provider_entry.api_key_env:
+                resolved = os.getenv(provider_entry.api_key_env)
+                if not resolved:
+                    errors.append(ConfigValidationError(
+                        field=f"providers.{provider_name}.api_key_env",
+                        value=provider_entry.api_key_env,
+                        reason=(
+                            f"Environment variable '{provider_entry.api_key_env}' is not set. "
+                            f"Provider '{provider_name}' requires an API key to function."
+                        ),
+                        severity="CRITICAL",
+                    ))
+
+        # Optional workspace root — validate if explicitly configured.
+        if self.workspace.root is not None:
+            wp = Path(self.workspace.root)
+            if not wp.exists():
+                errors.append(ConfigValidationError(
+                    field="workspace.root",
+                    value=str(wp),
+                    reason=f"Workspace path '{wp}' does not exist.",
+                    severity="CRITICAL",
+                ))
+            elif not os.access(wp, os.R_OK):
+                errors.append(ConfigValidationError(
+                    field="workspace.root",
+                    value=str(wp),
+                    reason=f"Workspace path '{wp}' exists but is not readable.",
+                    severity="CRITICAL",
+                ))
+
+        # Optional memory storage directory — validate writability if configured.
+        if self.memory.storage_dir is not None:
+            sd = Path(self.memory.storage_dir)
+            if not sd.exists():
+                errors.append(ConfigValidationError(
+                    field="memory.storage_dir",
+                    value=str(sd),
+                    reason=f"Storage directory '{sd}' does not exist.",
+                    severity="WARNING",
+                ))
+            elif not os.access(sd, os.W_OK):
+                errors.append(ConfigValidationError(
+                    field="memory.storage_dir",
+                    value=str(sd),
+                    reason=f"Storage directory '{sd}' exists but is not writable.",
+                    severity="CRITICAL",
+                ))
+
+        return errors
+
     def save_to_project(self, workspace: Path) -> Path:
         """Write only non-default values to .velune/config.toml.
 
@@ -134,13 +242,35 @@ class VeluneConfig(BaseModel):
         config_path = project_config_dir / "config.toml"
 
         current_data = self.model_dump()
-        default_data = VeluneConfig().model_dump()
+        # Compare against hard-coded defaults, not an env-var-influenced instance.
+        default_data = _hardcoded_defaults()
         non_default = _strip_defaults(current_data, default_data)
 
         with open(config_path, "w", encoding="utf-8") as f:
             toml.dump(non_default, f)
 
         return config_path
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _hardcoded_defaults() -> dict:
+    """Return a pure-default VeluneConfig dict, unaffected by environment variables."""
+    instance = VeluneConfig.model_construct(
+        project=ProjectConfig(),
+        workspace=WorkspaceConfig(),
+        context=ContextConfig(),
+        memory=MemoryConfig(),
+        retrieval=RetrievalConfig(),
+        execution=ExecutionConfig(),
+        providers=ProvidersConfig(),
+        telemetry=TelemetryConfig(),
+        mcp=MCPConfig(),
+        cognition=CognitionConfig(),
+    )
+    return instance.model_dump()
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -200,7 +330,12 @@ class ConfigLoader:
         return None
 
     def load(self) -> VeluneConfig:
-        """Parse the TOML config file if it exists, otherwise return defaults."""
+        """Parse the TOML config file if it exists, otherwise return defaults.
+
+        Constructor kwargs take highest priority in BaseSettings, so TOML values
+        override env vars when an explicit config file is present.  When no config
+        file is found, ``VeluneConfig()`` is returned and env vars apply normally.
+        """
         if not self.config_path or not self.config_path.exists():
             return get_default_config()
 
@@ -211,22 +346,13 @@ class ConfigLoader:
             return get_default_config()
 
     def load_with_env_overrides(self) -> VeluneConfig:
-        """Inject API key strings directly from the environment variables specified in the config."""
-        config = self.load()
+        """Load config from the TOML file (if present), with env var fallback.
 
-        # Override OpenAI key if env variable matches
-        if config.providers.openai and config.providers.openai.api_key_env:
-            key = os.getenv(config.providers.openai.api_key_env)
-            if key:
-                # Store resolved key directly (adapters can fallback to standard resolution too)
-                pass
-
-        if config.providers.anthropic and config.providers.anthropic.api_key_env:
-            key = os.getenv(config.providers.anthropic.api_key_env)
-            if key:
-                pass
-
-        return config
+        Since ``VeluneConfig`` is now a ``BaseSettings``, environment variables
+        prefixed with ``VELUNE_`` are always consulted for any field not supplied
+        by the TOML file.
+        """
+        return self.load()
 
 
 @dataclass(slots=True)

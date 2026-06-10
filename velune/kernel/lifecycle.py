@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from velune.kernel.schemas import ComponentStatus
+
+if TYPE_CHECKING:
+    from velune.kernel.config import VeluneConfig
 
 logger = logging.getLogger("velune.kernel.lifecycle")
 
@@ -32,6 +35,11 @@ class LifecycleCoordinator:
         self._states: dict[str, ComponentStatus] = {}
         self._started = False
         self.container: Any = None
+        self._config: VeluneConfig | None = None
+
+    def set_config(self, config: VeluneConfig) -> None:
+        """Attach a VeluneConfig so startup() can validate it before initialising subsystems."""
+        self._config = config
 
     def register(self, name: str, component: Subsystem) -> None:
         """Register a component for active lifecycle tracking."""
@@ -50,9 +58,37 @@ class LifecycleCoordinator:
             logger.debug("Component '%s' transitioned to state: %s", name, status.value)
 
     async def startup(self) -> None:
-        """Initialize all registered subsystems sequentially."""
+        """Initialize all registered subsystems sequentially.
+
+        If a :class:`~velune.kernel.config.VeluneConfig` was attached via
+        :meth:`set_config`, it is validated first.  Any ``CRITICAL`` validation
+        errors abort startup immediately with a descriptive exception.
+        """
         if self._started:
             return
+
+        if self._config is not None:
+            from velune.kernel.config import ConfigValidationError  # noqa: F401
+            errors = self._config.validate()
+            critical = [e for e in errors if e.severity == "CRITICAL"]
+            if critical:
+                for err in critical:
+                    logger.critical(
+                        "Config validation failed — %s = %r: %s",
+                        err.field, err.value, err.reason,
+                    )
+                summary = "; ".join(f"{e.field}: {e.reason}" for e in critical)
+                raise RuntimeError(
+                    f"VeluneConfig has {len(critical)} critical error(s). "
+                    f"Startup aborted. Details: {summary}"
+                )
+            for warn in errors:
+                if warn.severity != "CRITICAL":
+                    logger.warning(
+                        "Config warning — %s = %r: %s",
+                        warn.field, warn.value, warn.reason,
+                    )
+
         self._started = True
         logger.info("Initializing Velune systems...")
         for name, comp in self._components.items():

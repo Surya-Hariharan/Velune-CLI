@@ -4,6 +4,7 @@ from velune.events import CognitiveBus, Event, EventBus, EventHandler, Subscript
 from velune.kernel.config import (
     ConfigLoader,
     ConfigService,
+    ConfigValidationError,
     ContextConfig,
     ExecutionConfig,
     MemoryConfig,
@@ -42,6 +43,7 @@ __all__ = [
 
     # Config
     "VeluneConfig",
+    "ConfigValidationError",
     "ProjectConfig",
     "WorkspaceConfig",
     "ContextConfig",
