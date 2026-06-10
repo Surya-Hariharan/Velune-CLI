@@ -166,6 +166,7 @@ addopts = "--tb=short --strict-markers"
 markers = [
     "integration: marks tests requiring real filesystem or subprocess",
     "slow: marks tests taking > 1 second",
+    "critical: marks routing correctness tests that block CI if any fail",
 ]
 
 [tool.coverage.run]

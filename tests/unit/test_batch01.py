@@ -116,14 +116,14 @@ class TestCapabilityComparisons:
         assert CapabilityLevel.NONE < CapabilityLevel.INTERMEDIATE
 
     def test_values_are_stable(self):
-        """Integer values must be exactly 0–4 in order."""
+        """Integer values must be exactly 0/25/50/75/100 in order."""
         from velune.core.types.model import CapabilityLevel
 
         assert CapabilityLevel.NONE == 0
-        assert CapabilityLevel.BASIC == 1
-        assert CapabilityLevel.INTERMEDIATE == 2
-        assert CapabilityLevel.ADVANCED == 3
-        assert CapabilityLevel.EXPERT == 4
+        assert CapabilityLevel.BASIC == 25
+        assert CapabilityLevel.INTERMEDIATE == 50
+        assert CapabilityLevel.ADVANCED == 75
+        assert CapabilityLevel.EXPERT == 100
 
 
 # ---------------------------------------------------------------------------

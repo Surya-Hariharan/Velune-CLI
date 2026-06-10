@@ -26,10 +26,10 @@ class ModelCapability(StrEnum):
 class CapabilityLevel(IntEnum):
     """Capability proficiency levels."""
     NONE = 0
-    BASIC = 1
-    INTERMEDIATE = 2
-    ADVANCED = 3
-    EXPERT = 4
+    BASIC = 25
+    INTERMEDIATE = 50
+    ADVANCED = 75
+    EXPERT = 100
 
 
 class ModelCapabilityProfile(BaseModel):

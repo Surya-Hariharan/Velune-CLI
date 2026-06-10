@@ -50,9 +50,6 @@ class ProviderRouter:
                 qualified.append(model)
 
         if not qualified:
-            qualified = candidates
-
-        if not qualified:
             logger.warning("No models found in registry to route task: %s", task_category)
             return None
 
