@@ -15,6 +15,7 @@ from velune.memory.tiers.lineage import LineageMemoryTier
 if TYPE_CHECKING:
     from velune.kernel.config import VeluneConfig
     from velune.memory.storage.sqlite_manager import SQLiteManager
+    from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
 
 from velune.cognition.arbitrator import CouncilArbitrator
 from velune.cognition.architecture import ArchitectureCognitionAgent
@@ -44,6 +45,7 @@ class CouncilOrchestrator:
         sqlite_manager: SQLiteManager | None = None,
         config: VeluneConfig | None = None,
         lineage_memory: LineageMemoryTier | None = None,
+        pool: SQLiteConnectionPool | None = None,
     ) -> None:
         self.provider_registry = provider_registry
         self.mapper = mapper
@@ -51,14 +53,15 @@ class CouncilOrchestrator:
         self.architecture_agent = ArchitectureCognitionAgent(workspace_root=None, ledger=None)
         self.config = config
 
-        # Reuse the shared lineage tier (already created with the correct
-        # absolute workspace path) instead of instantiating a duplicate.
-        # Only fall back to creating one if none was provided.
+        # In production the pre-created lineage_memory is always injected;
+        # the fallback is only used when constructing standalone (tests / CLI).
         if lineage_memory is not None:
-            self.lineage_memory = lineage_memory
+            self.lineage_memory: LineageMemoryTier | None = lineage_memory
+        elif pool is not None:
+            from velune.memory.tiers.lineage import LineageMemoryTier as _LMT
+            self.lineage_memory = _LMT(pool)
         else:
-            db_path = lineage_db_path or Path(".velune") / "velune_cognitive_core.db"
-            self.lineage_memory = LineageMemoryTier(db_path, sqlite_manager=sqlite_manager)
+            self.lineage_memory = None
         self.analytics = analytics or CognitivePerformanceAnalytics(sqlite_manager=sqlite_manager)
 
         from velune.cognition.firewall import CognitiveFirewall
@@ -489,7 +492,11 @@ class CouncilOrchestrator:
                             architectural_context += "You MUST plan to fix these import boundary violations in this execution pass.\n"
                             architectural_context += "==================================================\n\n"
 
-                decisions, failures = self.lineage_memory.query_continuity_warnings(prompt, repo_context)
+                decisions, failures = (
+                    await self.lineage_memory.query_continuity_warnings(prompt, repo_context)
+                    if self.lineage_memory is not None
+                    else ([], [])
+                )
                 continuity_context = ""
                 if decisions or failures:
                     continuity_context += "\n--- COGNITIVE CONTINUITY WARNINGS ---\n"
@@ -809,15 +816,15 @@ class CouncilOrchestrator:
             decision_id = f"DEC-{int(time.time())}"
             impact = self.estimate_blast_radius(target_file)
 
-            if tier_level == 3:
-                self.lineage_memory.log_decision(
+            if self.lineage_memory is not None and tier_level == 3:
+                await self.lineage_memory.log_decision(
                     decision_id=decision_id,
                     target_subsystem="standard_path",
                     rationale=final_summary[:300],
                     architectural_impact=impact,
                     consequences="Standard execution completed with single-reviewer arbitration.",
                 )
-            elif tier_level == 4:
+            elif self.lineage_memory is not None and tier_level == 4:
                 subsystem_target = target_file
                 for key in ["database", "concurrency", "lock", "thread", "async", "cache", "sandbox", "security", "telemetry", "model", "routing", "memory"]:
                     if key in prompt.lower():
@@ -825,21 +832,21 @@ class CouncilOrchestrator:
                         break
 
                 if objections:
-                    self.lineage_memory.log_failed_experiment(
+                    await self.lineage_memory.log_failed_experiment(
                         target_subsystem=subsystem_target,
                         patch=coder_proposal[:1000],
                         error_type="critic_veto",
                         error_message=f"Debate loop finished but objections remained: {objections}",
                     )
                 elif arbitration.requires_human_review:
-                    self.lineage_memory.log_failed_experiment(
+                    await self.lineage_memory.log_failed_experiment(
                         target_subsystem=subsystem_target,
                         patch=coder_proposal[:1000],
                         error_type="arbitration_veto",
                         error_message="Reasoning council arbitration vetoed proposal due to low confidence.",
                     )
                 else:
-                    self.lineage_memory.log_decision(
+                    await self.lineage_memory.log_decision(
                         decision_id=decision_id,
                         target_subsystem=subsystem_target,
                         rationale=final_summary[:300],

@@ -14,17 +14,19 @@ if TYPE_CHECKING:
 class StyleResolver:
     """Manages asynchronous scanning and caching of style profiles to avoid event loop blockages."""
 
-    def __init__(self, lineage_memory: LineageMemoryTier) -> None:
+    def __init__(self, lineage_memory: LineageMemoryTier | None) -> None:
         self.lineage_memory = lineage_memory
 
     async def get_or_refresh_style_profile(self, target_file: str) -> dict[str, Any] | None:
         """Queries the style profile asynchronously, scanning and caching it if missing/stale."""
+        if self.lineage_memory is None:
+            return None
+
         target_dir = os.path.dirname(target_file)
         if not target_dir:
             target_dir = "velune/core"
 
-        # Check in the SQLite DB (this is synchronous but extremely fast, though we can safely wrap it if needed)
-        profile = self.lineage_memory.get_personality_style(target_dir)
+        profile = await self.lineage_memory.get_personality_style(target_dir)
 
         is_stale = False
         if profile:
@@ -37,8 +39,7 @@ class StyleResolver:
                 # Wrap the blocking AST Directory analysis in an asyncio thread pool
                 profile = await asyncio.to_thread(self._scan_directory, target_dir)
                 if profile:
-                    # Cache in database
-                    self.lineage_memory.save_personality_style(
+                    await self.lineage_memory.save_personality_style(
                         subsystem=target_dir,
                         naming_conventions=profile["naming_conventions"],
                         type_hinting_strictness=profile["type_hinting_strictness"],
