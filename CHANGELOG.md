@@ -19,6 +19,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Enhanced theme colors with semantic tokens (muted, accent)
   - Better visual hierarchy throughout terminal interface
 
+## [0.9.0] - 2026-06-12
+
+### Security
+- Plugin sandbox status: Plugin sandbox remains unimplemented or disabled for standard CLI operations.
+- Removal of `run_until_complete` anti-pattern: Cleaned up all async loop management and centralized loop execution in `entrypoint.py`.
+- Security audit suite extension: Centralized static and runtime vulnerability controls.
+
+### Fixed
+- Fixed memory lifecycle shutdown duplication to prevent multiple DB closure errors.
+- Fixed Ollama context-window detection to correctly read local model metadata.
+
+### Changed
+- Consolidated AST parser logic into a unified syntax parsing layer.
+- Consolidated council orchestrators to streamline Planner/Coder/Reviewer loops.
+- Modernized CLI theme, refined color palettes, updated startup banner, and context trackers.
+- Reconciled documentation and cleaned up dead MCP CLI commands.
+
+### Removed
+- Removed superseded `tests/` and `scripts/` directories entirely from the repository.
+
 ## [0.9.0-beta] — 2026-06-12
 
 ### Overview
