@@ -5,6 +5,9 @@ intermediate tool outputs, and complete conversation traces.
 
 All I/O is async and routed through :class:`~velune.memory.storage.sqlite_pool.SQLiteConnectionPool`
 so concurrent coroutines never cause WAL write contention.
+
+Phase 2a also introduces :class:`EpisodicMemory` — a higher-level session/turn
+store with schema migrations, content search, and CognitiveBus integration.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -207,3 +211,373 @@ class EpisodicMemoryTier:
         except Exception as exc:
             logger.error("Failed to query episodic execution steps: %s", exc)
         return steps
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2a: session-scoped episodic memory with migrations and bus integration
+# ─────────────────────────────────────────────────────────────────────────────
+
+_V1_SCHEMA = """
+CREATE TABLE IF NOT EXISTS episodic_schema_version (
+    version    INTEGER PRIMARY KEY,
+    applied_at REAL    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    id             TEXT    PRIMARY KEY,
+    workspace_root TEXT    NOT NULL,
+    started_at     REAL    NOT NULL,
+    ended_at       REAL,
+    model_used     TEXT,
+    mode           TEXT,
+    total_tokens   INTEGER DEFAULT 0,
+    summary        TEXT
+);
+CREATE TABLE IF NOT EXISTS turns (
+    id           TEXT    PRIMARY KEY,
+    session_id   TEXT    NOT NULL REFERENCES sessions(id),
+    turn_index   INTEGER NOT NULL,
+    role         TEXT    NOT NULL,
+    content      TEXT    NOT NULL,
+    model_used   TEXT,
+    tokens_used  INTEGER,
+    created_at   REAL    NOT NULL,
+    embedding_id TEXT
+);
+CREATE TABLE IF NOT EXISTS memory_tags (
+    turn_id TEXT NOT NULL REFERENCES turns(id),
+    tag     TEXT NOT NULL,
+    value   TEXT,
+    PRIMARY KEY (turn_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_root);
+CREATE INDEX IF NOT EXISTS idx_sessions_started   ON sessions(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_turns_session      ON turns(session_id);
+CREATE INDEX IF NOT EXISTS idx_turns_created      ON turns(created_at);
+CREATE INDEX IF NOT EXISTS idx_turns_role         ON turns(role);
+CREATE INDEX IF NOT EXISTS idx_tags_turn          ON memory_tags(turn_id);
+CREATE INDEX IF NOT EXISTS idx_tags_tag           ON memory_tags(tag);
+"""
+
+_MIGRATIONS: list[tuple[int, str]] = [
+    (1, _V1_SCHEMA),
+]
+
+
+class Session(BaseModel):
+    """A REPL session record from the episodic sessions table."""
+
+    id: str
+    workspace_root: str
+    started_at: float
+    ended_at: float | None = None
+    model_used: str | None = None
+    mode: str | None = None
+    total_tokens: int = 0
+    summary: str | None = None
+    first_prompt: str | None = None  # populated via JOIN, not stored in sessions
+
+
+class Turn(BaseModel):
+    """A single conversation turn within an episodic session."""
+
+    id: str
+    session_id: str
+    turn_index: int
+    role: str
+    content: str
+    model_used: str | None = None
+    tokens_used: int | None = None
+    created_at: float
+    embedding_id: str | None = None
+
+
+class EpisodicMemory:
+    """Phase-2a session-scoped episodic store with migrations and bus integration.
+
+    Sits on top of the same :class:`~velune.memory.storage.sqlite_pool.SQLiteConnectionPool`
+    as :class:`EpisodicMemoryTier` but manages its own *sessions / turns / memory_tags*
+    schema, versioned via a migration table.
+
+    Lifecycle
+    ---------
+    Call ``await memory.initialize()`` once (the module system does this via
+    the ``lifecycle_key``).  Then:
+
+    * ``start_session()`` at REPL startup
+    * ``record_turn()`` (or event-driven via ``subscribe_to_bus()``) per exchange
+    * ``end_session()`` on graceful shutdown
+    """
+
+    def __init__(self, pool: SQLiteConnectionPool) -> None:
+        self._pool = pool
+
+    # ── Lifecycle ────────────────────────────────────────────────────────────
+
+    async def initialize(self) -> None:
+        await self._apply_migrations()
+
+    async def _apply_migrations(self) -> None:
+        async with self._pool.write() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS episodic_schema_version "
+                "(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
+            )
+
+        async with self._pool.read() as conn:
+            cursor = await conn.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM episodic_schema_version"
+            )
+            row = await cursor.fetchone()
+        current: int = row[0] if row else 0
+
+        for version, sql in _MIGRATIONS:
+            if version > current:
+                async with self._pool.write() as conn:
+                    for stmt in [s.strip() for s in sql.split(";") if s.strip()]:
+                        await conn.execute(stmt)
+                    await conn.execute(
+                        "INSERT INTO episodic_schema_version (version, applied_at) VALUES (?, ?)",
+                        (version, time.time()),
+                    )
+                logger.info("EpisodicMemory: applied schema migration v%d", version)
+
+        logger.debug(
+            "EpisodicMemory schema at version %d",
+            max(v for v, _ in _MIGRATIONS),
+        )
+
+    # ── Session management ───────────────────────────────────────────────────
+
+    async def start_session(
+        self, workspace_root: str, model: str, mode: str
+    ) -> str:
+        """Create a new session row and return its ID."""
+        session_id = f"ses-{uuid.uuid4().hex[:12]}"
+        try:
+            async with self._pool.write() as conn:
+                await conn.execute(
+                    "INSERT INTO sessions (id, workspace_root, started_at, model_used, mode) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (session_id, workspace_root, time.time(), model, mode),
+                )
+        except Exception as exc:
+            logger.error("Failed to start episodic session: %s", exc)
+        logger.debug("EpisodicMemory: started session %s", session_id)
+        return session_id
+
+    async def end_session(self, session_id: str) -> None:
+        """Close the session, recording end time and summing token usage."""
+        try:
+            async with self._pool.write() as conn:
+                cursor = await conn.execute(
+                    "SELECT COALESCE(SUM(tokens_used), 0) FROM turns WHERE session_id = ?",
+                    (session_id,),
+                )
+                row = await cursor.fetchone()
+                total_tokens: int = row[0] if row else 0
+                await conn.execute(
+                    "UPDATE sessions SET ended_at = ?, total_tokens = ? WHERE id = ?",
+                    (time.time(), total_tokens, session_id),
+                )
+        except Exception as exc:
+            logger.error("Failed to end episodic session %s: %s", session_id, exc)
+        logger.debug("EpisodicMemory: ended session %s", session_id)
+
+    # ── Turn recording ───────────────────────────────────────────────────────
+
+    async def record_turn(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        model: str | None = None,
+        tokens: int | None = None,
+    ) -> str:
+        """Persist a conversation turn and return its ID."""
+        turn_id = f"trn-{uuid.uuid4().hex[:12]}"
+        try:
+            async with self._pool.read() as conn:
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) FROM turns WHERE session_id = ?",
+                    (session_id,),
+                )
+                row = await cursor.fetchone()
+            turn_index: int = row[0] if row else 0
+
+            async with self._pool.write() as conn:
+                await conn.execute(
+                    "INSERT INTO turns "
+                    "(id, session_id, turn_index, role, content, model_used, tokens_used, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (turn_id, session_id, turn_index, role, content, model, tokens, time.time()),
+                )
+        except Exception as exc:
+            logger.error("Failed to record episodic turn: %s", exc)
+        return turn_id
+
+    # ── Read operations ──────────────────────────────────────────────────────
+
+    async def get_recent_turns(self, session_id: str, limit: int = 20) -> list[Turn]:
+        """Return the *limit* most recent turns in chronological order."""
+        turns: list[Turn] = []
+        try:
+            async with self._pool.read() as conn:
+                cursor = await conn.execute(
+                    "SELECT id, session_id, turn_index, role, content, "
+                    "model_used, tokens_used, created_at, embedding_id "
+                    "FROM turns WHERE session_id = ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (session_id, limit),
+                )
+                rows = await cursor.fetchall()
+            for row in reversed(rows):
+                turns.append(_row_to_turn(row))
+        except Exception as exc:
+            logger.error("Failed to query recent turns: %s", exc)
+        return turns
+
+    async def get_session_history(self, session_id: str) -> list[Turn]:
+        """Return all turns for a session in chronological order."""
+        turns: list[Turn] = []
+        try:
+            async with self._pool.read() as conn:
+                cursor = await conn.execute(
+                    "SELECT id, session_id, turn_index, role, content, "
+                    "model_used, tokens_used, created_at, embedding_id "
+                    "FROM turns WHERE session_id = ? ORDER BY created_at ASC",
+                    (session_id,),
+                )
+                rows = await cursor.fetchall()
+            for row in rows:
+                turns.append(_row_to_turn(row))
+        except Exception as exc:
+            logger.error("Failed to query session history: %s", exc)
+        return turns
+
+    async def search_by_content(
+        self, query: str, workspace_root: str, limit: int = 10
+    ) -> list[Turn]:
+        """LIKE-based content search across all turns in *workspace_root*."""
+        turns: list[Turn] = []
+        try:
+            pattern = f"%{query}%"
+            async with self._pool.read() as conn:
+                cursor = await conn.execute(
+                    "SELECT t.id, t.session_id, t.turn_index, t.role, t.content, "
+                    "t.model_used, t.tokens_used, t.created_at, t.embedding_id "
+                    "FROM turns t JOIN sessions s ON t.session_id = s.id "
+                    "WHERE s.workspace_root = ? AND t.content LIKE ? "
+                    "ORDER BY t.created_at DESC LIMIT ?",
+                    (workspace_root, pattern, limit),
+                )
+                rows = await cursor.fetchall()
+            for row in rows:
+                turns.append(_row_to_turn(row))
+        except Exception as exc:
+            logger.error("Failed to search turns by content: %s", exc)
+        return turns
+
+    async def list_recent_sessions(
+        self, workspace_root: str, limit: int = 20
+    ) -> list[Session]:
+        """Return the *limit* most recent sessions for *workspace_root*."""
+        sessions: list[Session] = []
+        try:
+            async with self._pool.read() as conn:
+                cursor = await conn.execute(
+                    "SELECT s.id, s.workspace_root, s.started_at, s.ended_at, "
+                    "s.model_used, s.mode, s.total_tokens, s.summary, "
+                    "(SELECT content FROM turns "
+                    " WHERE session_id = s.id AND role = 'user' "
+                    " ORDER BY created_at ASC LIMIT 1) AS first_prompt "
+                    "FROM sessions s "
+                    "WHERE s.workspace_root = ? "
+                    "ORDER BY s.started_at DESC LIMIT ?",
+                    (workspace_root, limit),
+                )
+                rows = await cursor.fetchall()
+            for row in rows:
+                sessions.append(Session(
+                    id=row["id"],
+                    workspace_root=row["workspace_root"],
+                    started_at=row["started_at"],
+                    ended_at=row["ended_at"],
+                    model_used=row["model_used"],
+                    mode=row["mode"],
+                    total_tokens=row["total_tokens"] or 0,
+                    summary=row["summary"],
+                    first_prompt=row["first_prompt"],
+                ))
+        except Exception as exc:
+            logger.error("Failed to list recent sessions: %s", exc)
+        return sessions
+
+    async def get_session_summary(self, session_id: str) -> str | None:
+        """Return the stored LLM-generated summary for *session_id*, or None."""
+        try:
+            async with self._pool.read() as conn:
+                cursor = await conn.execute(
+                    "SELECT summary FROM sessions WHERE id = ?", (session_id,)
+                )
+                row = await cursor.fetchone()
+            return row["summary"] if row else None
+        except Exception as exc:
+            logger.error("Failed to get session summary: %s", exc)
+            return None
+
+    async def set_session_summary(self, session_id: str, summary: str) -> None:
+        """Persist an LLM-generated summary for *session_id*."""
+        try:
+            async with self._pool.write() as conn:
+                await conn.execute(
+                    "UPDATE sessions SET summary = ? WHERE id = ?",
+                    (summary, session_id),
+                )
+        except Exception as exc:
+            logger.error("Failed to set session summary: %s", exc)
+
+    # ── Event bus wiring ─────────────────────────────────────────────────────
+
+    async def subscribe_to_bus(self, bus: Any) -> None:
+        """Subscribe an async handler to *ConversationTurn* events on *bus*.
+
+        The handler calls :meth:`record_turn` for each event, so REPL turn
+        recording is non-blocking: the REPL emits and forgets; SQLite writes
+        happen asynchronously in the background.
+        """
+
+        async def _on_turn_event(event: Any) -> None:
+            data = event.data
+            session_id = data.get("session_id")
+            role = data.get("role")
+            content = data.get("content")
+            if session_id and role and content:
+                try:
+                    await self.record_turn(
+                        session_id=session_id,
+                        role=role,
+                        content=content,
+                        model=data.get("model_used"),
+                        tokens=data.get("tokens_used"),
+                    )
+                except Exception as exc:
+                    logger.warning("Bus turn-handler failed: %s", exc)
+
+        await bus.subscribe("ConversationTurn", _on_turn_event)
+        logger.debug("EpisodicMemory subscribed to ConversationTurn events")
+
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+
+def _row_to_turn(row: Any) -> Turn:
+    return Turn(
+        id=row["id"],
+        session_id=row["session_id"],
+        turn_index=row["turn_index"],
+        role=row["role"],
+        content=row["content"],
+        model_used=row["model_used"],
+        tokens_used=row["tokens_used"],
+        created_at=row["created_at"],
+        embedding_id=row["embedding_id"],
+    )

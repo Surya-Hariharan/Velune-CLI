@@ -102,6 +102,14 @@ def qdrant_store_path(workspace: Path) -> Path:
     return workspace_storage_dir(workspace) / QDRANT_STORE_NAME
 
 
+LANCEDB_STORE_NAME = "lancedb_semantic_store"
+
+
+def lancedb_store_path(workspace: Path) -> Path:
+    """Absolute path to the workspace's LanceDB semantic store (non-synced)."""
+    return workspace_storage_dir(workspace) / LANCEDB_STORE_NAME
+
+
 def legacy_workspace_dir(workspace: Path) -> Path:
     """The old in-workspace ``.velune`` directory (may be cloud-synced)."""
     return workspace / ".velune"

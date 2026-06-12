@@ -1,4 +1,4 @@
-"""Provider routing subsystem matching tasks to capabilities."""
+"""Provider routing subsystem matching tasks to capabilities using real probe scores."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ _offline_warned: bool = False
 
 
 class ProviderRouter:
-    """Intelligent router selecting optimal model profiles based on task constraints."""
+    """Intelligent router selecting optimal model profiles based on empirical probe scores."""
 
     def __init__(self, provider_registry: ProviderRegistry) -> None:
         self._provider_registry = provider_registry
@@ -34,11 +34,18 @@ class ProviderRouter:
         models_list: list[ModelDescriptor],
         min_level: CapabilityLevel = CapabilityLevel.BASIC,
         local_preferred: bool = False,
+        latency_sensitive: bool = False,
     ) -> ModelDescriptor | None:
-        """Selects the best available model descriptor that satisfies the profile constraints.
+        """Selects the best available model using empirical probe scores.
+
+        Strategy:
+        1. Filter to models meeting min_level capability requirement
+        2. Sort by relevant probe score (descending)
+        3. Apply local preference: if local model >= 0.85 × best_score, prefer local
+        4. Apply latency preference: for latency_sensitive tasks, weight speed score
 
         When internet is unavailable, cloud providers are bypassed and local models
-        are preferred.  A one-time warning is emitted to stderr the first time this
+        are preferred. A one-time warning is emitted to stderr the first time this
         offline fallback activates.
         """
         global _offline_warned
@@ -87,7 +94,7 @@ class ProviderRouter:
             local_options = [m for m in qualified if getattr(m, "is_local", False)
                              or m.provider_id in _LOCAL_PROVIDER_IDS]
             if local_options:
-                return self._select_best_by_speed_or_context(local_options)
+                return self._select_best_by_score(local_options, task_category, latency_sensitive)
 
             if not online:
                 # No local models available and we're offline — fail with a clear message
@@ -101,23 +108,85 @@ class ProviderRouter:
                     ),
                 )
 
-        # Priority 2: Match by provider rank in fallback chain (cloud-only when online)
-        for provider in self._fallback_chain:
-            provider_options = [m for m in qualified if m.provider_id == provider]
-            # Skip cloud providers when offline
-            if not online and provider not in _LOCAL_PROVIDER_IDS:
-                continue
-            if provider_options:
-                return self._select_best_by_speed_or_context(provider_options)
+        # Priority 2: Route by capability score + local preference
+        selected = self._route_by_capability_score(qualified, task_category, latency_sensitive)
+        if selected:
+            return selected
 
         # Fallback: return first qualified candidate
         return qualified[0]
 
-    def _select_best_by_speed_or_context(self, options: list[ModelDescriptor]) -> ModelDescriptor:
-        """Heuristic selector favoring larger context bounds or faster tiers."""
-        sorted_opts = sorted(
-            options,
-            key=lambda x: (x.context_length, 1 if getattr(x, "speed_tier", "medium") == "fast" else 0),
-            reverse=True,
-        )
+    def _route_by_capability_score(
+        self,
+        qualified: list[ModelDescriptor],
+        task_category: str,
+        latency_sensitive: bool,
+    ) -> ModelDescriptor | None:
+        """Route using empirical probe scores with local preference heuristic."""
+        local_models = [m for m in qualified if getattr(m, "is_local", False)
+                        or m.provider_id in _LOCAL_PROVIDER_IDS]
+        cloud_models = [m for m in qualified if m not in local_models]
+
+        # Get best score from all models
+        best_score = self._get_task_score(qualified[0], task_category)
+        best_model = None
+        for model in qualified:
+            score = self._get_task_score(model, task_category)
+            if score > best_score:
+                best_score = score
+                best_model = model
+
+        if best_model is None:
+            best_model = qualified[0]
+
+        # Check if local model is within 85% of best score (local preference threshold)
+        if local_models:
+            best_local = max(
+                local_models,
+                key=lambda m: self._get_task_score(m, task_category)
+            )
+            local_score = self._get_task_score(best_local, task_category)
+
+            if local_score >= (0.85 * best_score):
+                logger.debug(
+                    "Local model %s (score %.2f) is competitive with best (%.2f), preferring local",
+                    best_local.model_id, local_score, best_score
+                )
+                return best_local
+
+        return best_model
+
+    def _select_best_by_score(
+        self,
+        options: list[ModelDescriptor],
+        task_category: str,
+        latency_sensitive: bool,
+    ) -> ModelDescriptor:
+        """Sort models by task capability score, with latency consideration."""
+        def score_fn(model: ModelDescriptor) -> tuple:
+            task_score = self._get_task_score(model, task_category)
+
+            # If latency sensitive, also weight speed tier
+            if latency_sensitive:
+                speed_weight = 1.0 if getattr(model, "speed_tier", "medium") == "fast" else 0.5
+                return (task_score, speed_weight)
+            return (task_score, 0.0)
+
+        sorted_opts = sorted(options, key=score_fn, reverse=True)
         return sorted_opts[0]
+
+    def _get_task_score(self, model: ModelDescriptor, task_category: str) -> float:
+        """Extract numeric probe score (0.0-1.0) from model capability profile."""
+        profile = getattr(model, "capabilities", None)
+        if not profile:
+            return 0.5
+
+        # Handle CapabilityLevel enum (0, 25, 50, 75, 100)
+        if hasattr(profile, task_category):
+            level = getattr(profile, task_category)
+            if isinstance(level, int):
+                return level / 100.0
+            return 0.5
+
+        # Fallback
+        return 0.5

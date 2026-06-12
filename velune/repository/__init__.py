@@ -1,6 +1,8 @@
 """Repository Cognition Engine for AST parsing, Git tracking, and dependency graphs."""
 
+from velune.repository.ast_parser import ASTParser, Symbol, SymbolKind
 from velune.repository.cognition import RepositoryCognitionService
+from velune.repository.rename_journal import RenameJournal
 from velune.repository.schemas import (
     RepositoryEdge,
     RepositoryFile,
@@ -9,6 +11,7 @@ from velune.repository.schemas import (
     RepositorySymbol,
     RepositorySymbolKind,
 )
+from velune.repository.symbol_registry import SymbolRegistry
 
 __all__ = [
     "RepositoryCognitionService",
@@ -18,4 +21,10 @@ __all__ = [
     "RepositoryFile",
     "RepositoryEdge",
     "RepositorySnapshot",
+    # AST parsing and symbol tracking
+    "ASTParser",
+    "Symbol",
+    "SymbolKind",
+    "SymbolRegistry",
+    "RenameJournal",
 ]

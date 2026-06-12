@@ -390,47 +390,93 @@ async def _models_benchmark_async(
     provider_registry: Any,
     models_to_probe: list[Any],
 ) -> None:
+    import asyncio
     import json
     from pathlib import Path
 
+    from velune.core.types.model import CapabilityLevel
     from velune.models.probes import ModelProber
     from velune.models.profile_cache import ModelProfileCache
+    from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TaskProgressColumn
 
     profile_cache = ModelProfileCache(Path(".velune") / "model_profiles.json")
 
-    table = Table(title="Model Empirical Benchmark Results")
-    table.add_column("Model ID", style="cyan")
-    table.add_column("Provider", style="magenta")
-    table.add_column("Coding Score (Lat)", style="green")
-    table.add_column("Reasoning Score (Lat)", style="blue")
-    table.add_column("Instruction Score (Lat)", style="yellow")
-    table.add_column("Source", style="white")
+    # Store benchmark results for auto-assignment
+    benchmark_results = []
 
-    json_results = []
+    if not cli_context.json_mode:
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        ) as progress:
+            task_id = progress.add_task(
+                "[cyan]Benchmarking models...",
+                total=len(models_to_probe)
+            )
 
-    for model in models_to_probe:
-        provider = provider_registry.get(model.provider_id)
-        if not provider:
-            if not cli_context.json_mode:
-                console.print(f"[yellow]Skipping model '{model.model_id}': Provider '{model.provider_id}' is not active or available.[/yellow]")
-            continue
+            for model in models_to_probe:
+                provider = provider_registry.get(model.provider_id)
+                if not provider:
+                    console.print(f"[yellow]⊘[/yellow] {model.model_id}: Provider '{model.provider_id}' unavailable")
+                    progress.advance(task_id)
+                    continue
 
-        if not cli_context.json_mode:
-            console.print(f"Benchmarking model [bold cyan]{model.model_id}[/bold cyan] via [bold magenta]{model.provider_id}[/bold magenta]...")
+                progress.update(task_id, description=f"[cyan]Testing {model.model_id}...")
 
-        prober = ModelProber(provider, model.model_id)
-        results = await prober.run_all_probes()
+                prober = ModelProber(provider, model.model_id)
+                results = await prober.run_all_probes()
 
-        # Save to cache
-        profile_cache.set(model.model_id, model.provider_id, results)
-        # Apply to registry in-memory
-        registry._apply_probe_results(model, results)
+                # Save to cache and registry
+                profile_cache.set(model.model_id, model.provider_id, results)
+                registry._apply_probe_results(model, results)
 
-        coding = results["coding"]
-        reasoning = results["reasoning"]
-        instruction = results["instruction"]
+                coding = results["coding"]
+                reasoning = results["reasoning"]
+                instruction = results["instruction"]
 
-        if cli_context.json_mode:
+                # Calculate speed score as average of latencies (lower is better)
+                latencies = [l for l in [coding.latency_ms, reasoning.latency_ms, instruction.latency_ms] if l > 0]
+                avg_latency = sum(latencies) / len(latencies) if latencies else 0
+                speed_score = max(0.0, 1.0 - (avg_latency / 3000.0))  # 3000ms = ~0 score
+
+                benchmark_results.append({
+                    "model": model,
+                    "coding": coding,
+                    "reasoning": reasoning,
+                    "instruction": instruction,
+                    "speed_score": speed_score,
+                    "avg_latency_ms": avg_latency,
+                })
+
+                progress.advance(task_id)
+
+        # Display results table
+        _display_benchmark_results(cli_context, benchmark_results)
+
+        # Auto-assign models based on scores
+        _auto_assign_models(cli_context, registry, benchmark_results)
+
+    else:
+        # JSON mode: just collect and output raw results
+        json_results = []
+
+        for model in models_to_probe:
+            provider = provider_registry.get(model.provider_id)
+            if not provider:
+                continue
+
+            prober = ModelProber(provider, model.model_id)
+            results = await prober.run_all_probes()
+
+            profile_cache.set(model.model_id, model.provider_id, results)
+            registry._apply_probe_results(model, results)
+
+            coding = results["coding"]
+            reasoning = results["reasoning"]
+            instruction = results["instruction"]
+
             json_results.append({
                 "model_id": model.model_id,
                 "provider_id": model.provider_id,
@@ -440,23 +486,124 @@ async def _models_benchmark_async(
                     "instruction": {"score": instruction.score, "latency_ms": instruction.latency_ms, "passed": instruction.passed}
                 }
             })
-        else:
-            def format_result(res) -> str:
-                if res.latency_ms < 0:
-                    return "[red]Failed[/red]"
-                color = "green" if res.passed else "yellow"
-                return f"[{color}]{res.score:.2f}[/{color}] ({res.latency_ms:.0f}ms)"
 
-            table.add_row(
-                model.model_id,
-                model.provider_id,
-                format_result(coding),
-                format_result(reasoning),
-                format_result(instruction),
-                "empirical (forced)",
-            )
-
-    if cli_context.json_mode:
         print(json.dumps(json_results))
+
+
+def _display_benchmark_results(cli_context: Any, benchmark_results: list[dict]) -> None:
+    """Display benchmark results in a Rich table."""
+    from velune.core.types.model import CapabilityLevel
+
+    table = Table(title="Benchmark Results")
+    table.add_column("Model", style="cyan", width=30)
+    table.add_column("Provider", style="magenta", width=15)
+    table.add_column("Coding", style="green", width=14)
+    table.add_column("Reasoning", style="blue", width=14)
+    table.add_column("Instruction", style="yellow", width=14)
+    table.add_column("Speed", style="white", width=14)
+
+    for result in benchmark_results:
+        model = result["model"]
+        coding = result["coding"]
+        reasoning = result["reasoning"]
+        instruction = result["instruction"]
+        speed_score = result["speed_score"]
+        avg_latency = result["avg_latency_ms"]
+
+        def format_score(probe_result) -> str:
+            if probe_result.latency_ms < 0:
+                return "[red]Failed[/red]"
+            color = "green" if probe_result.passed else "yellow"
+            level_name = _score_to_level_name(probe_result.score)
+            return f"[{color}]{probe_result.score:.2f}[/{color}]\n{level_name}"
+
+        def format_speed() -> str:
+            color = "green" if speed_score > 0.7 else "yellow" if speed_score > 0.4 else "red"
+            level_name = _score_to_level_name(speed_score)
+            return f"[{color}]{speed_score:.2f}[/{color}]\n{level_name}"
+
+        table.add_row(
+            model.model_id,
+            model.provider_id,
+            format_score(coding),
+            format_score(reasoning),
+            format_score(instruction),
+            format_speed(),
+        )
+
+    console.print(table)
+    console.print()
+
+
+def _score_to_level_name(score: float) -> str:
+    """Convert numerical score to capability level name."""
+    if score >= 0.85:
+        return "EXPERT"
+    elif score >= 0.70:
+        return "ADVANCED"
+    elif score >= 0.50:
+        return "INTERMEDIATE"
+    elif score >= 0.25:
+        return "BASIC"
     else:
-        console.print(table)
+        return "NONE"
+
+
+def _auto_assign_models(cli_context: Any, registry: Any, benchmark_results: list[dict]) -> None:
+    """Suggest model assignments based on benchmark results."""
+    if not benchmark_results:
+        return
+
+    # Find best models for each capability
+    best_coding = max(benchmark_results, key=lambda r: r["coding"].score)
+    best_reasoning = max(benchmark_results, key=lambda r: r["reasoning"].score)
+    best_speed = max(benchmark_results, key=lambda r: r["speed_score"])
+
+    console.print("[bold]Suggested Model Assignments:[/bold]\n")
+    console.print(f"  [cyan]Coding:[/cyan] {best_coding['model'].model_id} "
+                 f"({best_coding['coding'].score:.2f} - {_score_to_level_name(best_coding['coding'].score)})")
+    console.print(f"  [blue]Reasoning:[/blue] {best_reasoning['model'].model_id} "
+                 f"({best_reasoning['reasoning'].score:.2f} - {_score_to_level_name(best_reasoning['reasoning'].score)})")
+    console.print(f"  [green]Fast Model:[/green] {best_speed['model'].model_id} "
+                 f"({best_speed['speed_score']:.2f} - {_score_to_level_name(best_speed['speed_score'])})\n")
+
+    # Prompt for confirmation
+    try:
+        response = input("[bold]Apply these assignments?[/bold] [y/N] ").strip().lower()
+        if response == "y":
+            # Save assignments to config
+            _save_model_assignments(
+                best_coding["model"].model_id,
+                best_reasoning["model"].model_id,
+                best_speed["model"].model_id,
+            )
+            console.print("[green]✓[/green] Model assignments saved.")
+        else:
+            console.print("[dim]Assignments not applied.[/dim]")
+    except (EOFError, KeyboardInterrupt):
+        console.print("[dim]Assignments not applied.[/dim]")
+
+
+def _save_model_assignments(coding_model: str, reasoning_model: str, fast_model: str) -> None:
+    """Save model assignments to the project configuration."""
+    from pathlib import Path
+    import json
+
+    config_file = Path(".velune") / "config.json"
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+
+    config = {}
+    if config_file.exists():
+        try:
+            config = json.loads(config_file.read_text())
+        except Exception:
+            pass
+
+    config["model_assignments"] = {
+        "coding_model": coding_model,
+        "reasoning_model": reasoning_model,
+        "fast_model": fast_model,
+    }
+
+    config_file.write_text(json.dumps(config, indent=2))
+    console.print(f"[dim]Saved to {config_file}[/dim]")

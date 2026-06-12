@@ -141,18 +141,25 @@ class ModelCapabilityRegistry:
         return [model for model in self.list_all() if model.provider_id == provider_id]
 
     def _apply_probe_results(self, model: ModelDescriptor, probes: dict) -> None:
-        """Map float probe scores to CapabilityLevel and update model descriptor."""
+        """Map float probe scores (0.0-1.0) to CapabilityLevel and update model descriptor.
+
+        Score mapping (empirical calibration):
+        - score > 0.85 → EXPERT (100)
+        - score > 0.70 → ADVANCED (75)
+        - score > 0.50 → INTERMEDIATE (50)
+        - else → BASIC (25)
+        """
         if not model.capabilities:
             model.capabilities = ModelCapabilityProfile()
 
         def score_to_level(score: float) -> CapabilityLevel:
-            if score >= 0.9:
+            if score > 0.85:
                 return CapabilityLevel.EXPERT
-            elif score >= 0.7:
+            elif score > 0.70:
                 return CapabilityLevel.ADVANCED
-            elif score >= 0.4:
+            elif score > 0.50:
                 return CapabilityLevel.INTERMEDIATE
-            elif score >= 0.1:
+            elif score > 0.0:
                 return CapabilityLevel.BASIC
             return CapabilityLevel.NONE
 
@@ -169,11 +176,24 @@ class ModelCapabilityRegistry:
         model.capabilities.reasoning = score_to_level(reasoning_score)
         model.capabilities.instruction_following = score_to_level(instruction_score)
 
-        # Infer other capabilities
+        # Infer other capabilities from primary scores
         if model.capabilities.reasoning >= CapabilityLevel.INTERMEDIATE:
             model.capabilities.planning = CapabilityLevel.INTERMEDIATE
         if model.capabilities.instruction_following >= CapabilityLevel.INTERMEDIATE:
             model.capabilities.tool_use = CapabilityLevel.INTERMEDIATE
+        if model.capabilities.coding >= CapabilityLevel.INTERMEDIATE:
+            model.capabilities.code_analysis = CapabilityLevel.INTERMEDIATE
+
+        logger.debug(
+            "Applied probe results to %s: coding=%s (%.2f), reasoning=%s (%.2f), instruction=%s (%.2f)",
+            model.model_id,
+            model.capabilities.coding.name,
+            coding_score,
+            model.capabilities.reasoning.name,
+            reasoning_score,
+            model.capabilities.instruction_following.name,
+            instruction_score,
+        )
 
     async def _probe_model_background(self, model: ModelDescriptor, cache: ModelProfileCache) -> None:
         """Run probes in background, update model in registry when done."""

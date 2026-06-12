@@ -80,6 +80,7 @@ def check(
         _check_vram,
         _check_model_benchmarks,
         _check_session_cost,
+        _check_memory_health,
     ]
 
     results = []
@@ -384,6 +385,39 @@ def _check_session_cost() -> dict:
         "name": "Session Cost Tracking",
         "status": "ok",
         "message": f"{total_tokens:,} tokens used · {cost_str}",
+    }
+
+
+def _check_memory_health() -> dict:
+    from velune.core.paths import cognitive_db_path, lancedb_store_path
+    import os
+
+    workspace = Path.cwd()
+
+    # Check cognitive DB
+    db_path = cognitive_db_path(workspace)
+    db_status = "missing"
+    if db_path.exists():
+        db_size = db_path.stat().st_size / (1024 * 1024)
+        db_status = f"{db_size:.1f} MB"
+
+    # Check LanceDB store
+    lancedb_path = lancedb_store_path(workspace)
+    lancedb_status = "missing"
+    if lancedb_path.exists() and lancedb_path.is_dir():
+        total_size = sum(
+            os.path.getsize(os.path.join(root, f))
+            for root, _, files in os.walk(lancedb_path)
+            for f in files
+        )
+        lancedb_status = f"{total_size / (1024 * 1024):.1f} MB"
+
+    message = f"Cognitive DB: {db_status} · LanceDB: {lancedb_status}"
+
+    return {
+        "name": "Memory Subsystem",
+        "status": "ok",
+        "message": message,
     }
 
 

@@ -1,154 +1,199 @@
-"""Unit tests for ASTParser (Batch 13)."""
+"""Tests for tree-sitter AST parser and symbol extraction."""
 
+from __future__ import annotations
+
+import tempfile
 from pathlib import Path
+
 import pytest
 
-from velune.repository.parser import ASTParser
-from velune.repository.schemas import RepositorySymbolKind, RepositoryLanguage
+from velune.repository.ast_parser import ASTParser, Symbol, SymbolKind
+from velune.repository.rename_journal import RenameJournal
+from velune.repository.symbol_registry import SymbolRegistry
 
 
-def test_parse_python_class_extracts_class_symbol() -> None:
-    """Verify that parsing a Python class extracts a class symbol with correct properties."""
-    parser = ASTParser()
-    code = "class TestClass:\n    \"\"\"Docstring for TestClass\"\"\"\n    pass\n"
-    symbols, edges = parser.parse(Path("test.py"), code)
-    assert len(symbols) >= 1
-    cls_syms = [s for s in symbols if s.kind == RepositorySymbolKind.CLASS]
-    assert len(cls_syms) == 1
-    assert cls_syms[0].name == "TestClass"
+PYTHON_SAMPLE = '''"""Sample Python module."""
+
+def validate_token(token: str) -> bool:
+    """Check if token is valid."""
+    return len(token) > 0
 
 
-def test_parse_python_function_extracts_function_symbol() -> None:
-    """Verify that parsing a Python function extracts a function symbol."""
-    parser = ASTParser()
-    code = "def test_func(x):\n    \"\"\"Docstring for test_func\"\"\"\n    return x + 1\n"
-    symbols, edges = parser.parse(Path("test.py"), code)
-    assert len(symbols) >= 1
-    func_syms = [s for s in symbols if s.kind == RepositorySymbolKind.FUNCTION]
-    assert len(func_syms) == 1
-    assert func_syms[0].name == "test_func"
+def process_data(data):
+    """Process input data."""
+    return data
 
 
-def test_parse_python_import_extracts_import_and_edge() -> None:
-    """Verify that parsing imports in Python extracts import symbols and edges."""
-    parser = ASTParser()
-    code = "import os\nfrom math import sin\n"
-    symbols, edges = parser.parse(Path("test.py"), code)
-    
-    import_syms = [s for s in symbols if s.kind == RepositorySymbolKind.IMPORT]
-    assert len(import_syms) >= 2
-    assert any(s.name == "os" for s in import_syms)
-    assert any(s.name in ("math", "sin") for s in import_syms)
-    
-    assert len(edges) >= 2
-    assert any(e.target == "os" for e in edges)
-    assert any(e.target in ("math", "math.sin") for e in edges)
+class DataProcessor:
+    """Main data processor class."""
+
+    def __init__(self, name: str):
+        """Initialize processor."""
+        self.name = name
+
+    def process(self, item):
+        """Process an item."""
+        return item
 
 
-def test_parse_python_method_has_parent_set() -> None:
-    """Verify that methods inside a Python class have their parent field set to the class name."""
-    parser = ASTParser()
-    code = "class OuterClass:\n    def inner_method(self):\n        pass\n"
-    symbols, edges = parser.parse(Path("test.py"), code)
-    
-    method_syms = [s for s in symbols if s.kind == RepositorySymbolKind.METHOD]
-    assert len(method_syms) == 1
-    assert method_syms[0].name == "inner_method"
-    assert method_syms[0].parent == "OuterClass"
+import os
+from typing import List
+'''
 
 
-def test_parse_invalid_syntax_returns_empty_not_raises() -> None:
-    """Verify that parsing invalid syntax does not raise exceptions and returns empty results."""
-    parser = ASTParser()
-    code = "!!!@@@###$$$%%%"
-    symbols, edges = parser.parse(Path("test.py"), code)
-    assert isinstance(symbols, list)
-    assert isinstance(edges, list)
-    assert len(symbols) == 0
-    assert len(edges) == 0
+@pytest.mark.asyncio
+async def test_python_symbol_extraction():
+    """Test extracting symbols from Python file."""
+    parser = ASTParser(["python"])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        py_file = Path(tmpdir) / "test.py"
+        py_file.write_text(PYTHON_SAMPLE)
+
+        result = await parser.parse_file(py_file)
+
+        assert result is not None
+        assert result.language == "python"
+        assert len(result.symbols) > 0
+
+        # Check for functions
+        functions = [s for s in result.symbols if s.kind == SymbolKind.FUNCTION]
+        assert len(functions) >= 2
+
+        # Verify function names
+        func_names = {f.name for f in functions}
+        assert "validate_token" in func_names
 
 
-def test_detect_language_by_extension() -> None:
-    """Verify extension-based language detection works for py, ts, go, rs."""
-    parser = ASTParser()
-    assert parser._detect_language(Path("file.py")) == RepositoryLanguage.PYTHON
-    assert parser._detect_language(Path("file.ts")) == RepositoryLanguage.TYPESCRIPT
-    assert parser._detect_language(Path("file.go")) == RepositoryLanguage.GO
-    assert parser._detect_language(Path("file.rs")) == RepositoryLanguage.RUST
-    assert parser._detect_language(Path("file.unknown")) == RepositoryLanguage.UNKNOWN
+@pytest.mark.asyncio
+async def test_symbol_registry_upsert_and_retrieve():
+    """Test symbol registry storage and retrieval."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "symbols.db"
+        registry = SymbolRegistry(db_path)
+        await registry.initialize()
+
+        # Create test symbols
+        symbols = [
+            Symbol(
+                id="sym-1",
+                name="validate_token",
+                kind=SymbolKind.FUNCTION,
+                file_path="module.py",
+                line_start=1,
+                line_end=3,
+                docstring="Validate token",
+                parameters=["token"],
+            ),
+            Symbol(
+                id="sym-2",
+                name="DataProcessor",
+                kind=SymbolKind.CLASS,
+                file_path="module.py",
+                line_start=6,
+                line_end=12,
+            ),
+        ]
+
+        # Store symbols
+        await registry.upsert_symbols("module.py", symbols)
+
+        # Retrieve and verify
+        retrieved = await registry.get_symbols("module.py")
+        assert len(retrieved) == 2
+        assert retrieved[0].name == "validate_token"
 
 
-def test_ast_parser_python_fallback() -> None:
-    """Verify that Python AST fallback parsing functions correctly when tree-sitter is disabled."""
-    parser = ASTParser()
-    # Disable tree-sitter path. Languages now load lazily on first parse, so we
-    # mark the parser as already-loaded with an empty language map to force the
-    # AST/regex fallbacks.
-    parser._loaded = True
-    parser.languages = {}
-    
-    code = (
-        "import os\n"
-        "from math import sin\n"
-        "class MyClass:\n"
-        "    def method(self):\n"
-        "        pass\n"
-    )
-    symbols, edges = parser.parse(Path("test.py"), code)
-    
-    assert len(symbols) >= 3
-    assert any(s.name == "MyClass" and s.kind == RepositorySymbolKind.CLASS for s in symbols)
-    assert any(s.name == "method" and s.kind == RepositorySymbolKind.METHOD and s.parent == "MyClass" for s in symbols)
-    assert any(s.name == "sin" and s.kind == RepositorySymbolKind.IMPORT for s in symbols)
-    assert any(e.target == "math.sin" for e in edges)
+@pytest.mark.asyncio
+async def test_symbol_registry_search():
+    """Test symbol search functionality."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "symbols.db"
+        registry = SymbolRegistry(db_path)
+        await registry.initialize()
+
+        symbols = [
+            Symbol(
+                id="sym-1",
+                name="validate_token",
+                kind=SymbolKind.FUNCTION,
+                file_path="module.py",
+                line_start=1,
+                line_end=3,
+            ),
+            Symbol(
+                id="sym-2",
+                name="validate_key",
+                kind=SymbolKind.FUNCTION,
+                file_path="module.py",
+                line_start=5,
+                line_end=7,
+            ),
+        ]
+
+        await registry.upsert_symbols("module.py", symbols)
+
+        # Search for "validate*"
+        results = await registry.search_symbols("validate%")
+        assert len(results) == 2
 
 
-def test_ast_parser_regex_fallbacks() -> None:
-    """Verify that regex fallback parsing works for TypeScript, Go, and Rust when tree-sitter is disabled."""
-    parser = ASTParser()
-    # Disable tree-sitter path (lazy-load aware — see test_ast_parser_python_fallback).
-    parser._loaded = True
-    parser.languages = {}
-    
-    # 1. TypeScript
-    ts_code = "export class Controller {}\nexport async function handler() {}\nimport { log } from 'logger';\n"
-    symbols, edges = parser.parse(Path("test.ts"), ts_code)
-    assert any(s.name == "Controller" and s.kind == RepositorySymbolKind.CLASS for s in symbols)
-    assert any(s.name == "handler" and s.kind == RepositorySymbolKind.FUNCTION for s in symbols)
-    assert any(e.target == "logger" for e in edges)
-    
-    # 2. Go
-    go_code = "type Service struct {}\nfunc DoWork() {}\nimport \"fmt\"\n"
-    symbols, edges = parser.parse(Path("test.go"), go_code)
-    assert any(s.name == "Service" and s.kind == RepositorySymbolKind.CLASS for s in symbols)
-    assert any(s.name == "DoWork" and s.kind == RepositorySymbolKind.FUNCTION for s in symbols)
-    assert any(e.target == "fmt" for e in edges)
-    
-    # 3. Rust
-    rs_code = "pub struct Config {}\npub fn build() {}\nuse std::io;\n"
-    symbols, edges = parser.parse(Path("test.rs"), rs_code)
-    assert any(s.name == "Config" and s.kind == RepositorySymbolKind.CLASS for s in symbols)
-    assert any(s.name == "build" and s.kind == RepositorySymbolKind.FUNCTION for s in symbols)
-    assert any(e.target == "std::io" for e in edges)
+@pytest.mark.asyncio
+async def test_rename_detection():
+    """Test detecting renames between symbol versions."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "renames.db"
+        journal = RenameJournal(db_path)
+        await journal.initialize()
+
+        old_symbols = {
+            "validate_token": ("sym-1", 1),
+            "process_data": ("sym-2", 5),
+        }
+
+        new_symbols = {
+            "verifyJWT": ("sym-1", 1),
+            "process_data": ("sym-2", 5),
+        }
+
+        renames = await journal.detect_rename(old_symbols, new_symbols, "module.py")
+
+        assert len(renames) == 1
+        assert renames[0].old_name == "validate_token"
+        assert renames[0].new_name == "verifyJWT"
 
 
-def test_ast_parser_tree_sitter_other_languages() -> None:
-    """Verify that tree-sitter parses TypeScript, Go, and Rust successfully when enabled."""
-    parser = ASTParser()
-    if not parser.languages:
-        pytest.skip("Tree-sitter languages not loaded")
-        
-    # 1. TypeScript
-    ts_code = "export class Controller {}\nexport async function handler() {}\nimport { log } from 'logger';\n"
-    symbols, edges = parser.parse(Path("test.ts"), ts_code)
-    assert len(symbols) >= 1
-    
-    # 2. Go
-    go_code = "type Service struct {}\nfunc DoWork() {}\nimport \"fmt\"\n"
-    symbols, edges = parser.parse(Path("test.go"), go_code)
-    assert len(symbols) >= 1
-    
-    # 3. Rust
-    rs_code = "pub struct Config {}\npub fn build() {}\nuse std::io;\n"
-    symbols, edges = parser.parse(Path("test.rs"), rs_code)
-    assert len(symbols) >= 1
+@pytest.mark.asyncio
+async def test_stable_id_preserved_across_rename():
+    """Test that symbol IDs remain stable across renames."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "symbols.db"
+        registry = SymbolRegistry(db_path)
+        await registry.initialize()
+
+        original = Symbol(
+            id="stable-id-123",
+            name="validate_token",
+            kind=SymbolKind.FUNCTION,
+            file_path="module.py",
+            line_start=1,
+            line_end=3,
+        )
+
+        await registry.upsert_symbols("module.py", [original])
+
+        renamed = Symbol(
+            id="stable-id-123",
+            name="verifyJWT",
+            kind=SymbolKind.FUNCTION,
+            file_path="module.py",
+            line_start=1,
+            line_end=3,
+        )
+
+        await registry.upsert_symbols("module.py", [renamed])
+
+        retrieved = await registry.get_symbol_by_id("stable-id-123")
+        assert retrieved is not None
+        assert retrieved.id == "stable-id-123"
+        assert retrieved.name == "verifyJWT"

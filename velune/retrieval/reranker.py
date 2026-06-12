@@ -1,68 +1,102 @@
-"""Cross-encoder API reranking with lightweight fallback similarity scoring."""
+"""Cross-encoder style reranking (simple scoring for Phase 2a)."""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+
+logger = logging.getLogger("velune.retrieval.reranker")
 
 
-from velune.retrieval.schemas import RetrievalHit
+class CrossEncoderReranker:
+    """Reranks retrieved chunks using combined scoring.
 
+    Phase 2a: Simple score formula (no ML model)
+    Phase 3+: Real cross-encoder when compute available
+    """
 
-class ContextReranker:
-    """Re-scores candidate hits using lexical alignment and semantic keyword density."""
+    # Score weights
+    SEMANTIC_WEIGHT = 0.5
+    RECENCY_WEIGHT = 0.3
+    TRUST_WEIGHT = 0.2
+
+    # Thresholds
+    MIN_RECENCY_SECONDS = 300
+    MAX_RECENCY_SECONDS = 2592000
 
     def __init__(self) -> None:
+        """Initialize reranker."""
         pass
 
-    def rerank(self, query: str, hits: list[RetrievalHit]) -> list[RetrievalHit]:
-        """Re-scores and re-ranks candidate hits based on similarity density."""
-        if not hits:
-            return []
+    def rerank(
+        self,
+        chunks: list[Any],
+        query: str | None = None,
+    ) -> list[Any]:
+        """Rerank chunks by combined score."""
+        start_time = time.perf_counter()
 
-        scored_hits: list[RetrievalHit] = []
-        for hit in hits:
-            score = self._compute_alignment_score(query, hit.document.content)
+        for chunk in chunks:
+            chunk.combined_score = self._calculate_combined_score(chunk)
 
-            # Combine the original retrieval score (BM25 or vector cosine) with our alignment score
-            # Vector cosine is between -1.0 and 1.0 (typically 0.4-0.9), BM25 can be larger.
-            # We scale the alignment score to a 0.0-1.0 range and merge.
-            merged_score = hit.score * 0.4 + score * 0.6
+        ranked = sorted(chunks, key=lambda c: c.combined_score, reverse=True)
+        deduplicated = self._deduplicate_by_content(ranked)
 
-            # Clone hit with new score
-            scored_hits.append(
-                RetrievalHit(
-                    document=hit.document,
-                    score=merged_score,
-                    source=hit.source,
-                    rank=0
-                )
-            )
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.debug(f"Reranking {len(chunks)} → {len(deduplicated)} in {elapsed_ms:.1f}ms")
 
-        # Sort by updated scores
-        scored_hits.sort(key=lambda x: x.score, reverse=True)
+        return deduplicated
 
-        # Apply new ranks
-        for idx, h in enumerate(scored_hits):
-            h.rank = idx + 1
+    def _calculate_combined_score(self, chunk: Any) -> float:
+        """Calculate combined score."""
+        semantic = min(1.0, max(0.0, chunk.relevance_score or 0.0))
+        recency = self._calculate_recency_score(chunk)
+        trust = self._calculate_trust_score(chunk)
 
-        return scored_hits
+        combined = (
+            (semantic * self.SEMANTIC_WEIGHT) +
+            (recency * self.RECENCY_WEIGHT) +
+            (trust * self.TRUST_WEIGHT)
+        )
 
-    def _compute_alignment_score(self, query: str, document_text: str) -> float:
-        """Computes lexical term alignment and density score (Jaccard + keyword overlaps)."""
-        q_tokens = set(query.lower().split())
-        doc_tokens = set(document_text.lower().split())
+        return min(1.0, max(0.0, combined))
 
-        if not q_tokens or not doc_tokens:
+    def _calculate_recency_score(self, chunk: Any) -> float:
+        """Calculate recency score."""
+        timestamp = chunk.metadata.get("timestamp")
+        if not timestamp:
+            return 0.5
+
+        now = time.time()
+        age_seconds = now - timestamp
+
+        if age_seconds < self.MIN_RECENCY_SECONDS:
+            return 1.0
+        if age_seconds > self.MAX_RECENCY_SECONDS:
             return 0.0
 
-        # Jaccard similarity index
-        intersection = q_tokens.intersection(doc_tokens)
-        union = q_tokens.union(doc_tokens)
-        jaccard = len(intersection) / len(union)
+        age_range = self.MAX_RECENCY_SECONDS - self.MIN_RECENCY_SECONDS
+        score = 1.0 - ((age_seconds - self.MIN_RECENCY_SECONDS) / age_range)
+        return min(1.0, max(0.0, score))
 
-        # Coverage fraction (how many query words appear in document)
-        coverage = len(intersection) / len(q_tokens)
+    def _calculate_trust_score(self, chunk: Any) -> float:
+        """Calculate trust score based on source."""
+        source_trust = {
+            "symbol": 0.9,
+            "import_graph": 0.85,
+            "lineage": 0.8,
+            "call_graph": 0.75,
+            "episodic": 0.7,
+            "semantic": 0.6,
+        }
+        return source_trust.get(chunk.source, 0.5)
 
-        # Exact substring matches (bonus weight for sequential phrase matches)
-        phrase_bonus = 0.0
-        if query.lower() in document_text.lower():
-            phrase_bonus = 0.3
-
-        # Composite score
-        return jaccard * 0.2 + coverage * 0.5 + phrase_bonus
+    def _deduplicate_by_content(self, chunks: list[Any]) -> list[Any]:
+        """Remove similar chunks keeping highest score."""
+        seen: dict[str, Any] = {}
+        for chunk in chunks:
+            content_sig = chunk.content[:100].lower()
+            if content_sig not in seen or chunk.combined_score > seen[content_sig].combined_score:
+                seen[content_sig] = chunk
+        return list(seen.values())

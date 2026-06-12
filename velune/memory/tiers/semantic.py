@@ -2,12 +2,17 @@
 
 Qdrant-backed semantic store managing dense code symbol embeddings,
 summaries, and payload-filtered contextual searches.
+
+Phase 2a also adds :class:`SemanticMemory` — a LanceDB-backed tier with an
+async embedding pipeline, background indexing queue, and REPL retrieval.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
 import uuid
 from typing import Any
 
@@ -251,3 +256,198 @@ class SemanticMemoryTier:
             logger.debug("Successfully deleted points matching filter %s from %s", payload_filter, collection_name)
         except Exception as e:
             logger.error("Failed to delete points by payload in %s: %s", collection_name, e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2a: LanceDB-backed SemanticMemory
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class RetrievedMemory:
+    """A semantically matched memory returned to the REPL's context assembly."""
+
+    __slots__ = (
+        "content", "source_type", "distance", "trust_score",
+        "session_id", "age_seconds", "attribution",
+    )
+
+    def __init__(
+        self,
+        content: str,
+        source_type: str,
+        distance: float,
+        trust_score: float,
+        session_id: str,
+        age_seconds: float,
+        attribution: str,
+    ) -> None:
+        self.content = content
+        self.source_type = source_type
+        self.distance = distance
+        self.trust_score = trust_score
+        self.session_id = session_id
+        self.age_seconds = age_seconds
+        self.attribution = attribution
+
+
+def _format_age(seconds: float) -> str:
+    """Return a human-readable relative age string for *seconds* elapsed."""
+    minutes = seconds / 60
+    hours = minutes / 60
+    days = hours / 24
+    if days >= 2:
+        return f"{int(days)} days ago"
+    if days >= 1:
+        return "yesterday"
+    if hours >= 2:
+        return f"{int(hours)} hours ago"
+    if hours >= 1:
+        return "an hour ago"
+    if minutes >= 2:
+        return f"{int(minutes)} minutes ago"
+    return "just now"
+
+
+class SemanticMemory:
+    """Phase-2a semantic memory backed by LanceDB and an async embedding pipeline.
+
+    ``index_turn()`` is intentionally non-blocking: it enqueues the turn and
+    returns immediately.  The slow Ollama call and LanceDB write happen in a
+    background worker task owned by :class:`~velune.memory.embedding_pipeline.EmbeddingPipeline`.
+
+    Usage
+    -----
+    * Call ``await memory.search(query, workspace_root)`` from the REPL to retrieve
+      semantically similar past interactions before calling the model.
+    * Call ``memory.index_turn(turn, workspace_root)`` after each conversation turn
+      (non-blocking).
+    * Call ``await memory.subscribe_to_bus(bus, workspace_root)`` to auto-index
+      turns via ``ConversationTurn`` events.
+    """
+
+    def __init__(self, store: Any, pipeline: Any) -> None:
+        self._store = store
+        self._pipeline = pipeline
+
+    # ── Search ─────────────────────────────────────────────────────────────────
+
+    async def search(
+        self,
+        query: str,
+        workspace_root: str,
+        limit: int = 5,
+    ) -> list[RetrievedMemory]:
+        """Embed *query* and return the *limit* most semantically similar memories."""
+        if not self._pipeline or not self._store:
+            return []
+        try:
+            embedding = await self._pipeline.embed_text(query)
+        except Exception as exc:
+            logger.debug("SemanticMemory.search — embedding failed: %s", exc)
+            return []
+
+        try:
+            results = await self._store.search(
+                embedding, limit=limit, workspace_root=workspace_root
+            )
+        except Exception as exc:
+            logger.debug("SemanticMemory.search — LanceDB query failed: %s", exc)
+            return []
+
+        now = time.time()
+        memories: list[RetrievedMemory] = []
+        for r in results:
+            age = max(0.0, now - r.created_at)
+            memories.append(RetrievedMemory(
+                content=r.content,
+                source_type=r.source_type,
+                distance=r.distance,
+                trust_score=r.trust_score,
+                session_id=r.session_id,
+                age_seconds=age,
+                attribution=_format_age(age),
+            ))
+        return memories
+
+    # ── Indexing ──────────────────────────────────────────────────────────────
+
+    def index_turn(self, turn: Any, workspace_root: str = "") -> None:
+        """Non-blocking: enqueue *turn* for background embedding and indexing."""
+        if not self._pipeline:
+            return
+        from velune.memory.embedding_pipeline import EmbedQueueItem
+
+        role = getattr(turn, "role", "unknown")
+        self._pipeline.enqueue(EmbedQueueItem(
+            record_id=f"mem-{uuid.uuid4().hex[:12]}",
+            turn_id=getattr(turn, "id", ""),
+            session_id=getattr(turn, "session_id", ""),
+            role=role,
+            content=getattr(turn, "content", ""),
+            source_type=f"turn_{role}",
+            workspace_root=workspace_root,
+            created_at=getattr(turn, "created_at", time.time()),
+        ))
+
+    async def index_session_summary(
+        self,
+        session_id: str,
+        summary: str,
+        workspace_root: str = "",
+    ) -> None:
+        """Non-blocking: enqueue a session summary for background embedding."""
+        if not self._pipeline:
+            return
+        from velune.memory.embedding_pipeline import EmbedQueueItem
+
+        self._pipeline.enqueue(EmbedQueueItem(
+            record_id=f"sum-{uuid.uuid4().hex[:12]}",
+            turn_id="",
+            session_id=session_id,
+            role="system",
+            content=summary,
+            source_type="session_summary",
+            workspace_root=workspace_root,
+            created_at=time.time(),
+        ))
+
+    # ── Maintenance ────────────────────────────────────────────────────────────
+
+    async def prune_low_vitality(self, threshold: float = 0.2) -> int:
+        """Delete stored entries whose trust_score is below *threshold*."""
+        if not self._store:
+            return 0
+        count = await self._store.prune_by_trust(threshold)
+        if count:
+            logger.info("SemanticMemory pruned %d low-vitality entries", count)
+        return count
+
+    # ── Event bus wiring ──────────────────────────────────────────────────────
+
+    async def subscribe_to_bus(self, bus: Any, workspace_root: str = "") -> None:
+        """Subscribe an async handler to ``ConversationTurn`` events on *bus*.
+
+        Each event enqueues the turn for background embedding — no blocking.
+        """
+
+        def _on_turn_sync(event: Any) -> None:
+            data = event.data
+            content = data.get("content")
+            if not content:
+                return
+            role = data.get("role", "unknown")
+            from velune.memory.embedding_pipeline import EmbedQueueItem
+
+            self._pipeline.enqueue(EmbedQueueItem(
+                record_id=f"mem-{uuid.uuid4().hex[:12]}",
+                turn_id=data.get("turn_id", ""),
+                session_id=data.get("session_id", ""),
+                role=role,
+                content=content,
+                source_type=f"turn_{role}",
+                workspace_root=data.get("workspace_root", workspace_root),
+                created_at=time.time(),
+            ))
+
+        await bus.subscribe("ConversationTurn", _on_turn_sync)
+        logger.debug("SemanticMemory subscribed to ConversationTurn events")
