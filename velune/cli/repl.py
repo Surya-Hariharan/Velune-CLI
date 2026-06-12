@@ -60,15 +60,15 @@ class VeluneREPL:
         style = Style.from_dict(
             {
                 "prompt.prefix": "#c084fc bold",  # Claude purple-lavender bold
-                "prompt.branch": "#8a8a8a",       # Dim gray for Git branch
-                "prompt.model": "#606060",        # Subtle gray
-                "prompt.mode": "#d4af37",         # Accent gold
-                "prompt.arrow": "#a78bfa",        # Match accent purple
-                "ctx.ok": "#00ff87 bold",         # Green
-                "ctx.warn": "#ffaf00 bold",        # Yellow
-                "ctx.danger": "#ff5f5f bold",      # Red
-                "mode.godly": "#ff00ff bold",      # Magenta
-                "mode.optimus": "#ffaf00 bold",    # Yellow
+                "prompt.branch": "#8a8a8a",  # Dim gray for Git branch
+                "prompt.model": "#606060",  # Subtle gray
+                "prompt.mode": "#d4af37",  # Accent gold
+                "prompt.arrow": "#a78bfa",  # Match accent purple
+                "ctx.ok": "#00ff87 bold",  # Green
+                "ctx.warn": "#ffaf00 bold",  # Yellow
+                "ctx.danger": "#ff5f5f bold",  # Red
+                "mode.godly": "#ff00ff bold",  # Magenta
+                "mode.optimus": "#ffaf00 bold",  # Yellow
             }
         )
 

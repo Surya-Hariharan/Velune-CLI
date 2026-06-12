@@ -16,7 +16,9 @@ def render_startup_banner(
     console.print("[dim]Keys: /help for commands, /exit to exit[/dim]")
 
     # Linked workspace path
-    pt_suffix = f" ({project_type_name})" if project_type_name and project_type_name != "Unknown" else ""
+    pt_suffix = (
+        f" ({project_type_name})" if project_type_name and project_type_name != "Unknown" else ""
+    )
     console.print(f"Linked to: [white]{workspace_path}[/white]{pt_suffix}")
 
     # Hardware/System info
