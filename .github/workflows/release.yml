@@ -38,6 +38,7 @@ jobs:
       - name: Security checks
         run: |
           pip-audit
+          python scripts/security_audit.py
           if grep -rn "shell=True" velune/ 2>/dev/null; then
             echo "❌ FATAL: shell=True found in codebase"
             exit 1
@@ -118,26 +119,11 @@ jobs:
         id: changelog
         run: |
           VERSION=${{ steps.get_version.outputs.version }}
-          if [ -f CHANGELOG.md ]; then
-            CHANGELOG=$(python -c "
-import re
-with open('CHANGELOG.md') as f:
-    content = f.read()
-    # Extract section for this version
-    pattern = f'## \[{re.escape(VERSION)}\].*?(?=## \[|$)'
-    match = re.search(pattern, content, re.DOTALL)
-    if match:
-        print(match.group(0).strip())
-    else:
-        print('Release notes not found in CHANGELOG.md')
-            ")
-            EOF=$(dd if=/dev/urandom bs=15 count=1 2>/dev/null | base64)
-            echo "body<<$EOF" >> $GITHUB_OUTPUT
-            echo "$CHANGELOG" >> $GITHUB_OUTPUT
-            echo "$EOF" >> $GITHUB_OUTPUT
-          else
-            echo "body=See commit history for changes" >> $GITHUB_OUTPUT
-          fi
+          {
+            echo "body<<CHANGELOG_EOF"
+            python scripts/extract_changelog.py "$VERSION"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
