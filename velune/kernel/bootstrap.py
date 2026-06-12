@@ -49,9 +49,11 @@ class RuntimeBootstrapper:
         env.container.register_instance("runtime.task_registry", registry)
 
         from velune.hardware.detector import HardwareDetector
+        from velune.hardware.profiles import derive_profile
 
         hardware_profile = HardwareDetector().detect()
         env.container.register_instance("runtime.hardware", hardware_profile)
+        env.container.register_instance("runtime.profile", derive_profile(hardware_profile))
         mark("hardware detected")
 
         # Modules with lifecycle_key set are lifecycle-critical (startup/shutdown

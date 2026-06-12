@@ -27,8 +27,17 @@ class VeluneREPL:
         self.console = runtime.console
         self.active_model: ModelDescriptor | None = None
         from velune.cli.modes import ModeManager
+        from velune.cli.statusbar import StatusBarState
 
-        self._mode_manager = ModeManager()
+        try:
+            self._runtime_profile = self.container.get("runtime.profile")
+        except Exception:
+            self._runtime_profile = None
+        self._mode_manager = ModeManager(runtime_profile=self._runtime_profile)
+        self._status_state = StatusBarState(
+            profile_label=self._runtime_profile.label if self._runtime_profile else None,
+        )
+        self._completer = None
         self.session_tokens: int = 0
         self.session_cost: float = 0.0
         self._history_file = Path.home() / ".velune" / "repl_history"
@@ -56,20 +65,23 @@ class VeluneREPL:
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.styles import Style
 
-        from velune.cli.autocomplete import SlashCompleter
+        from velune.cli.autocomplete import COMMAND_CATEGORIES, CommandEntry, SlashCompleter
+        from velune.cli.statusbar import STATUS_BAR_STYLES, render_status_bar
 
         style = Style.from_dict(
             {
+                "prompt.frame": "#6a6a7a",  # Dim frame glyphs ╭─ ╰─
                 "prompt.prefix": "#c084fc bold",  # Claude purple-lavender bold
                 "prompt.branch": "#8a8a8a",  # Dim gray for Git branch
                 "prompt.model": "#606060",  # Subtle gray
                 "prompt.mode": "#d4af37",  # Accent gold
-                "prompt.arrow": "#a78bfa",  # Match accent purple
+                "prompt.arrow": "#a78bfa bold",  # Match accent purple
                 "ctx.ok": "#00ff87 bold",  # Green
                 "ctx.warn": "#ffaf00 bold",  # Yellow
                 "ctx.danger": "#ff5f5f bold",  # Red
                 "mode.godly": "#ff00ff bold",  # Magenta
                 "mode.optimus": "#ffaf00 bold",  # Yellow
+                **STATUS_BAR_STYLES,
             }
         )
 
@@ -79,7 +91,19 @@ class VeluneREPL:
         except Exception:
             model_ids = []
 
-        completer = SlashCompleter(model_ids=model_ids)
+        # Derive completions from the live command registry so the menu can
+        # never advertise a command that doesn't exist.
+        entries = [
+            CommandEntry(
+                name=cmd.name,
+                description=cmd.description,
+                category=COMMAND_CATEGORIES.get(cmd.name, "General"),
+                aliases=tuple(cmd.aliases),
+            )
+            for cmd in self._registry.all_unique()
+        ]
+        completer = SlashCompleter(commands=entries, model_ids=model_ids)
+        self._completer = completer
 
         kb = KeyBindings()
 
@@ -102,6 +126,7 @@ class VeluneREPL:
             mouse_support=False,
             wrap_lines=True,
             key_bindings=kb,
+            bottom_toolbar=lambda: render_status_bar(self._status_state),
         )
 
     def _get_prompt_tokens(self) -> FormattedText:
@@ -118,7 +143,10 @@ class VeluneREPL:
             folder_name = "velune"
             active_branch = "non-git"
 
-        tokens: list[tuple[str, str]] = [("class:prompt.prefix", folder_name)]
+        tokens: list[tuple[str, str]] = [
+            ("class:prompt.frame", "╭─ "),
+            ("class:prompt.prefix", folder_name),
+        ]
 
         # Show Git active branch if available
         if active_branch and active_branch not in ("non-git", "unknown"):
@@ -136,7 +164,7 @@ class VeluneREPL:
 
         # Show active model if selected
         if self.active_model:
-            tokens.append(("class:prompt.model", f" ({self.active_model.model_id})"))
+            tokens.append(("class:prompt.model", f" · {self.active_model.model_id}"))
 
             self._context_tracker.max_tokens = self.active_model.context_length
             self._context_tracker.update(self._conversation)
@@ -152,7 +180,16 @@ class VeluneREPL:
                 bar_style = "class:ctx.danger"
             tokens.append((bar_style, f" {badge}"))
 
-        tokens.append(("class:prompt.arrow", " › "))
+        tokens.append(("class:prompt.frame", "\n╰─"))
+        tokens.append(("class:prompt.arrow", "❯ "))
+
+        # Keep the bottom status bar in sync with the session state.
+        self._status_state.model_id = self.active_model.model_id if self.active_model else None
+        self._status_state.mode_label = self._mode_manager.current.value.upper()
+        self._status_state.context_pct = (
+            self._context_tracker.percentage if self.active_model else 0.0
+        )
+
         return FormattedText(tokens)
 
     # ------------------------------------------------------------------
@@ -229,6 +266,7 @@ class VeluneREPL:
             active_model_id=model_id,
             version=__version__,
             project_type_name=pt_name,
+            runtime_profile_label=self._runtime_profile.label if self._runtime_profile else None,
         )
 
     # ------------------------------------------------------------------
@@ -247,6 +285,9 @@ class VeluneREPL:
                 f"[dim]Type /help to see all commands.[/dim]"
             )
             return
+
+        if self._completer is not None:
+            self._completer.record_use(cmd.name)
 
         try:
             await cmd.handler(args)
@@ -623,40 +664,67 @@ class VeluneREPL:
         from prompt_toolkit.layout.containers import Window
         from prompt_toolkit.layout.controls import FormattedTextControl
 
-        local = [m for m in models if m.is_local]
-        cloud = [m for m in models if not m.is_local]
-        grouped = local + cloud
+        from velune.cli.autocomplete import fuzzy_score
+        from velune.cli.model_selector import fits_hardware
+
+        selected_index = [0]
+        filter_text = [""]
+        result: list[ModelDescriptor | None] = [None]
+
+        def _visible() -> list[ModelDescriptor]:
+            pool = models
+            if filter_text[0]:
+                scored = [(fuzzy_score(filter_text[0], m.model_id), m) for m in models]
+                pool = [m for s, m in sorted(scored, key=lambda t: -t[0]) if s > 0]
+            # Local first, preserving score/registry order within each group
+            return [m for m in pool if m.is_local] + [m for m in pool if not m.is_local]
 
         # Pre-select the currently active model if it's in the list
-        selected_index = [0]
         if self.active_model:
-            for i, m in enumerate(grouped):
+            for i, m in enumerate(_visible()):
                 if m.model_id == self.active_model.model_id:
                     selected_index[0] = i
                     break
 
-        result: list[ModelDescriptor | None] = [None]
+        def _model_row(m: ModelDescriptor) -> str:
+            ctx = f"{m.context_length // 1000}k"
+            local_cloud = "local" if m.is_local else "cloud"
+            extras = [local_cloud, m.speed_tier, f"ctx {ctx}"]
+            if m.quantization:
+                extras.append(m.quantization)
+            if m.parameter_count_b:
+                extras.append(f"{m.parameter_count_b:g}B")
+            return f"{m.model_id:<40} [{' · '.join(extras)}]"
 
         def _render_list() -> FormattedText:
+            visible = _visible()
+            if visible:
+                selected_index[0] = min(selected_index[0], len(visible) - 1)
             lines: list[tuple[str, str]] = []
             lines.append(
-                ("bold", "  Select a model  (↑↓ navigate · Enter select · Esc cancel)\n\n")
+                ("bold", "  Select a model  (type to filter · ↑↓ navigate · Enter select · Esc cancel)\n")
             )
-            if local:
+            if filter_text[0]:
+                lines.append(("fg:ansicyan", f"  filter: {filter_text[0]}\n\n"))
+            else:
+                lines.append(("", "\n"))
+            if not visible:
+                lines.append(("fg:ansiyellow", "  No models match.\n"))
+                return FormattedText(lines)
+
+            local_count = sum(1 for m in visible if m.is_local)
+            if local_count:
                 lines.append(("fg:ansiyellow", "  — Local Models —\n"))
-            for i, m in enumerate(grouped):
-                if not m.is_local and i == len(local):
+            for i, m in enumerate(visible):
+                if not m.is_local and i == local_count:
                     lines.append(("fg:ansiyellow", "\n  — Cloud Models —\n"))
                 is_sel = i == selected_index[0]
                 is_cur = self.active_model is not None and m.model_id == self.active_model.model_id
                 prefix = "❯ " if is_sel else "  "
                 row_style = "bold fg:cyan" if is_sel else ""
-                ctx = f"{m.context_length // 1000}k"
-                local_cloud = "local" if m.is_local else "cloud"
-                label = (
-                    f"  {prefix}{m.model_id:<40} [{local_cloud:<5} · {m.speed_tier:<6} · ctx {ctx}]"
-                )
-                lines.append((row_style, label))
+                lines.append((row_style, f"  {prefix}{_model_row(m)}"))
+                if m.is_local and not fits_hardware(m, self._runtime_profile):
+                    lines.append(("fg:ansiyellow", " ⚠ heavy for this machine"))
                 if is_cur:
                     lines.append(("fg:ansigreen", " (active)"))
                 lines.append(("", "\n"))
@@ -666,21 +734,39 @@ class VeluneREPL:
 
         @kb.add("up")
         def _up(event) -> None:
-            selected_index[0] = (selected_index[0] - 1) % len(grouped)
+            count = len(_visible())
+            if count:
+                selected_index[0] = (selected_index[0] - 1) % count
 
         @kb.add("down")
         def _down(event) -> None:
-            selected_index[0] = (selected_index[0] + 1) % len(grouped)
+            count = len(_visible())
+            if count:
+                selected_index[0] = (selected_index[0] + 1) % count
 
         @kb.add("enter")
         def _enter(event) -> None:
-            result[0] = grouped[selected_index[0]]
+            visible = _visible()
+            if visible:
+                result[0] = visible[selected_index[0]]
             event.app.exit()
 
-        @kb.add("escape")
+        @kb.add("escape", eager=True)
         @kb.add("c-c")
         def _cancel(event) -> None:
             event.app.exit()
+
+        @kb.add("backspace")
+        def _backspace(event) -> None:
+            filter_text[0] = filter_text[0][:-1]
+            selected_index[0] = 0
+
+        @kb.add("<any>")
+        def _type(event) -> None:
+            ch = event.data
+            if ch and ch.isprintable():
+                filter_text[0] += ch
+                selected_index[0] = 0
 
         app = Application(
             layout=Layout(
@@ -1136,6 +1222,7 @@ class VeluneREPL:
         selector = ModeAwareModelSelector(
             self.container.get("runtime.model_registry"),
             self.container.get("runtime.provider_registry"),
+            runtime_profile=self._runtime_profile,
         )
         auto_model = selector.select_for_mode(config, self.active_model)
         if auto_model:
@@ -1155,6 +1242,7 @@ class VeluneREPL:
         selector = ModeAwareModelSelector(
             self.container.get("runtime.model_registry"),
             self.container.get("runtime.provider_registry"),
+            runtime_profile=self._runtime_profile,
         )
         auto_model = selector.select_for_mode(config, self.active_model)
         if auto_model:
@@ -1181,6 +1269,11 @@ class VeluneREPL:
         table.add_column("Setting", style="dim", width=22)
         table.add_column("Value", style="white")
         table.add_row("Active mode", f"[bold]{config.mode.value.upper()}[/bold]")
+        if self._runtime_profile:
+            table.add_row(
+                "Runtime profile",
+                f"{self._runtime_profile.label} [dim]— {self._runtime_profile.description}[/dim]",
+            )
         table.add_row("Description", config.description)
         table.add_row("Council tier", config.council_tier)
         table.add_row("Max context", f"{config.max_context_tokens:,} tokens")
@@ -1664,8 +1757,12 @@ class VeluneREPL:
                 timeout=2.0,
             )
             if not memories:
+                self._status_state.retrieval_note = None
                 return None
 
+            self._status_state.retrieval_note = (
+                f"{len(memories)} memor{'y' if len(memories) == 1 else 'ies'} retrieved"
+            )
             self.console.print(
                 f"[dim]↳ {len(memories)} relevant memor{'y' if len(memories) == 1 else 'ies'} retrieved[/dim]"
             )
@@ -1690,9 +1787,11 @@ class VeluneREPL:
     # ------------------------------------------------------------------
 
     async def _handle_prompt(self, text: str) -> None:
+        import time
+
         from rich.live import Live
 
-        from velune.cli.rendering import CustomMarkdown, MarkdownStreamBuffer
+        from velune.cli.rendering import CustomMarkdown, MarkdownStreamBuffer, StreamStats
         from velune.core.types.inference import InferenceRequest
 
         model, provider = await self._resolve_active_model_and_provider()
@@ -1772,6 +1871,12 @@ class VeluneREPL:
 
             if supports_stream:
                 stream_buffer = MarkdownStreamBuffer()
+                stats = StreamStats()
+                # Re-parsing markdown on every chunk dominates streaming cost at
+                # high token rates. Push a fresh renderable to Live at most
+                # every ~80ms; intermediate chunks only append to the buffer.
+                min_update_interval = 0.08
+                last_update = 0.0
                 with Live(
                     "", console=self.console, refresh_per_second=12, vertical_overflow="visible"
                 ) as live:
@@ -1779,10 +1884,20 @@ class VeluneREPL:
                         if chunk.content:
                             stream_buffer.append(chunk.content)
                             full_content.append(chunk.content)
-                            live.update(stream_buffer.get_renderable())
+                            stats.record_chunk(chunk.content)
+                            now = time.perf_counter()
+                            if now - last_update >= min_update_interval:
+                                live.update(stream_buffer.get_renderable())
+                                last_update = now
+                    live.update(stream_buffer.get_renderable())
+                self._status_state.last_latency_ms = stats.time_to_first_token_ms
+                self._status_state.last_tokens_per_sec = stats.tokens_per_second
             else:
+                start = time.perf_counter()
                 with self.console.status("[cyan]Thinking...[/cyan]"):
                     response = await provider.infer(request)
+                self._status_state.last_latency_ms = (time.perf_counter() - start) * 1000.0
+                self._status_state.last_tokens_per_sec = None
                 full_content.append(response.content)
                 tokens_used = response.tokens_used
                 self.console.print(CustomMarkdown(response.content))

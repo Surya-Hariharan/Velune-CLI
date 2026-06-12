@@ -10,6 +10,7 @@ def render_startup_banner(
     active_model_id: str | None,
     version: str = "0.1.0",
     project_type_name: str | None = None,
+    runtime_profile_label: str | None = None,
 ) -> None:
     # 1. Logo and metadata
     vram_gb = hardware_profile.vram_total_gb
@@ -21,6 +22,8 @@ def render_startup_banner(
     ram_part = f"{hardware_profile.total_ram_gb:.0f} GB RAM"
     tier_part = f"tier: {hardware_profile.tier.value}"
     hardware_info = f"{ram_part}  ·  {gpu_part}  ·  {tier_part}"
+    if runtime_profile_label:
+        hardware_info += f"  ·  profile: {runtime_profile_label}"
 
     pt_suffix = (
         f" ({project_type_name})" if project_type_name and project_type_name != "Unknown" else ""

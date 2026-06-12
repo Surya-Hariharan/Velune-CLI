@@ -1,5 +1,11 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from velune.hardware.profiles import RuntimeProfile
 
 
 class SessionMode(Enum):
@@ -67,16 +73,32 @@ MODE_CONFIGS: dict[SessionMode, ModeConfig] = {
 
 
 class ModeManager:
-    def __init__(self) -> None:
+    def __init__(self, runtime_profile: RuntimeProfile | None = None) -> None:
         self._active = SessionMode.NORMAL
+        self._profile = runtime_profile
 
     @property
     def current(self) -> SessionMode:
         return self._active
 
     @property
+    def runtime_profile(self) -> RuntimeProfile | None:
+        return self._profile
+
+    @property
     def config(self) -> ModeConfig:
-        return MODE_CONFIGS[self._active]
+        config = MODE_CONFIGS[self._active]
+        # NORMAL mode adapts to the hardware-derived runtime profile; explicit
+        # user modes (/optimus, /godly) always keep their fixed settings.
+        if self._active == SessionMode.NORMAL and self._profile is not None:
+            return replace(
+                config,
+                max_context_tokens=self._profile.max_context_tokens,
+                retrieval_depth=self._profile.retrieval_depth,
+                context_compression=self._profile.context_compression,
+                description=f"{config.description} · profile: {self._profile.label}",
+            )
+        return config
 
     def set_mode(self, mode: SessionMode) -> ModeConfig:
         self._active = mode
