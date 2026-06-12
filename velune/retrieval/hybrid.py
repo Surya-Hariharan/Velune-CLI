@@ -7,7 +7,7 @@ logger = logging.getLogger("velune.retrieval.hybrid")
 
 from velune.retrieval.graph import GraphRetriever
 from velune.retrieval.keyword import BM25Retriever
-from velune.retrieval.reranker import ContextReranker
+from velune.retrieval.reranker import CrossEncoderReranker
 from velune.retrieval.schemas import RetrievalHit, RetrievalQuery, RetrievalResult
 from velune.retrieval.vector import VectorRetriever
 
@@ -29,7 +29,7 @@ class HybridRetriever:
         )
         self.lexical_retriever = BM25Retriever()
         self.graph_retriever = GraphRetriever()
-        self.reranker = ContextReranker()
+        self.reranker = CrossEncoderReranker()
 
     def add_documents(self, docs: list[Any]) -> None:
         """Adds and indexes documents in both vector and lexical subsystems.

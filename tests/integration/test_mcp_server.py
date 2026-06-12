@@ -334,7 +334,7 @@ class TestSecurityIsolation:
             assert not validator.is_valid(str(ws2))
 
 
-class TestMCPRate Limiting:
+class TestMCPRateLimiting:
     """Test rate limiting."""
 
     def test_rate_limiter_allows_first_call(self):

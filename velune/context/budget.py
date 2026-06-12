@@ -23,8 +23,8 @@ class ContextBudget:
     total_tokens: int
     retrieval_allocation: int
     working_memory_allocation: int
-    system_allocation: int = 512
     output_reservation: int
+    system_allocation: int = 512
 
     @classmethod
     def from_mode(cls, mode: SessionMode, model_context_window: int) -> ContextBudget:

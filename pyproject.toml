@@ -72,6 +72,7 @@ dependencies = [
     "opentelemetry-api>=1.22.0",
     "opentelemetry-sdk>=1.22.0",
     "opentelemetry-exporter-otlp>=1.22.0",
+    "structlog>=24.0.0",
 
     # Utilities
     "orjson>=3.9.0",

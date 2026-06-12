@@ -3,7 +3,7 @@
 from velune.retrieval.graph import GraphRetriever
 from velune.retrieval.hybrid import HybridRetriever
 from velune.retrieval.keyword import BM25Retriever
-from velune.retrieval.reranker import ContextReranker
+from velune.retrieval.reranker import CrossEncoderReranker
 from velune.retrieval.schemas import (
     RetrievalDocument,
     RetrievalHit,
@@ -18,7 +18,7 @@ __all__ = [
     "BM25Retriever",
     "VectorRetriever",
     "GraphRetriever",
-    "ContextReranker",
+    "CrossEncoderReranker",
     "RetrievalDocument",
     "RetrievalHit",
     "RetrievalQuery",

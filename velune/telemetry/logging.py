@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -266,7 +267,7 @@ def clear_context() -> None:
     structlog.contextvars.clear_contextvars()
 
 
-@contextmanager_like
+@contextmanager
 def context_scope(**kwargs) -> Any:
     """Context manager for temporarily binding context variables.
 
@@ -280,10 +281,6 @@ def context_scope(**kwargs) -> Any:
         yield
     finally:
         structlog.contextvars.unbind_contextvars(*kwargs.keys())
-
-
-# Python 3.9+ compatible context manager
-from contextlib import contextmanager
 
 
 @contextmanager
