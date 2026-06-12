@@ -93,7 +93,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         continue-on-error: true
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          password: ${{ secrets.PYPI_TOKEN }}
 
   release:
     name: Create GitHub Release
