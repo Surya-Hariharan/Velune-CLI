@@ -20,27 +20,27 @@ def render_error(error: VeluneError) -> Panel:
 
     cause = error.get_cause()
     if cause:
-        body.append("Cause\n", style="bold dim white")
+        body.append("Cause\n", style="bold white")
         body.append(f"  {cause}\n", style="dim white")
 
     if error.fix:
-        body.append("\nFix\n", style="bold yellow")
+        body.append("\nFix\n", style="bold white")
         for step in error.fix:
-            body.append(f"  • {step}\n", style="yellow")
+            body.append(f"  • {step}\n", style="dim white")
 
     if error.docs_url:
-        body.append(f"\n  docs → {error.docs_url}", style="dim cyan underline")
+        body.append(f"\n  docs → {error.docs_url}", style="blue underline")
 
     detail = error.get_detail()
     if detail and detail != error.title:
         body.append("\n\n  Detail: ", style="dim")
         body.append(detail, style="dim white")
 
-    body.append("\n\n  Run with --verbose to see the full stack trace.", style="dim")
+    body.append("\n\n  Use --verbose for full stack trace.", style="dim")
 
     return Panel(
         body,
-        title=f"[bold red]✗  {error.title}[/bold red]",
+        title=f"[bold red]Error:[/bold red] {error.title}",
         border_style="red",
         padding=(1, 2),
     )
@@ -50,20 +50,20 @@ def render_unexpected_error(exc: Exception) -> Panel:
     """Build a Rich Panel for an unrecognised exception."""
     body = Text()
     body.append(
-        "Velune encountered an error it did not anticipate.\n\n",
+        "An unexpected error occurred.\n\n",
         style="dim white",
     )
     body.append(f"  {type(exc).__name__}: ", style="dim white")
     body.append(f"{exc}\n", style="white")
 
-    body.append("\nFix\n", style="bold yellow")
-    body.append("  • Run with --verbose to see the full stack trace\n", style="yellow")
-    body.append(f"  • File a bug report at {_BUG_REPORT_URL}\n", style="yellow")
-    body.append("  • Include the --verbose output when reporting\n", style="yellow")
+    body.append("\nWhat to do\n", style="bold white")
+    body.append("  • Use --verbose to see the full stack trace\n", style="dim white")
+    body.append(f"  • Report the issue at {_BUG_REPORT_URL}\n", style="dim white")
+    body.append("  • Include the --verbose output in your report\n", style="dim white")
 
     return Panel(
         body,
-        title="[bold red]✗  Unexpected error[/bold red]",
+        title="[bold red]Unexpected Error[/bold red]",
         border_style="red",
         padding=(1, 2),
     )

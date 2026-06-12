@@ -53,13 +53,13 @@ class VeluneREPL:
         from velune.cli.autocomplete import SlashCompleter
 
         style = Style.from_dict({
-            "prompt.prefix": "#00d7ff bold",
-            "prompt.model": "#888888",
-            "prompt.mode": "#ff8c00 bold",
-            "prompt.arrow": "#00d7ff",
-            "ctx.ok":     "#444444",
-            "ctx.warn":   "#ff8c00",
-            "ctx.danger": "#ff3333 bold",
+            "prompt.prefix": "#0087ff bold",     # Modern blue
+            "prompt.model": "#606060",           # Subtle gray
+            "prompt.mode": "#d4af37",            # Accent gold
+            "prompt.arrow": "#0087ff",           # Match prefix
+            "ctx.ok":     "#606060",             # Subtle
+            "ctx.warn":   "#d4af37",             # Warm accent
+            "ctx.danger": "#ff6b6b bold",        # Clear danger
         })
 
         try:
@@ -87,30 +87,34 @@ class VeluneREPL:
 
         tokens: list[tuple[str, str]] = [("class:prompt.prefix", "velune")]
 
+        # Show mode if not default
         if not self._mode_manager.is_normal():
-            color = self._mode_manager.config.prompt_color
-            label = self._mode_manager.current.value.upper()
-            tokens.append((f"bold fg:{color}", f" [{label}]"))
+            label = self._mode_manager.current.value
+            tokens.append(("class:prompt.mode", f"/{label}"))
 
+        # Show active model if selected
         if self.active_model:
-            tokens.append(("class:prompt.model", f" {self.active_model.model_id}"))
+            tokens.append(("class:prompt.model", f" ({self.active_model.model_id})"))
 
+            # Show context usage only if significant
             if self._conversation:
                 used = estimate_tokens(
                     " ".join(m["content"] for m in self._conversation)
                 )
                 limit = self.active_model.context_length
                 pct = min(used / limit, 1.0) if limit > 0 else 0.0
-                filled = int(pct * 8)
-                bar = "█" * filled + "░" * (8 - filled)
-                pct_int = int(pct * 100)
-                if pct < 0.6:
-                    bar_style = "class:ctx.ok"
-                elif pct < 0.85:
-                    bar_style = "class:ctx.warn"
-                else:
-                    bar_style = "class:ctx.danger"
-                tokens.append((bar_style, f" [{bar} {pct_int}%]"))
+
+                # Only show bar if >40% to reduce visual clutter
+                if pct > 0.4:
+                    filled = int(pct * 8)
+                    bar = "█" * filled + "░" * (8 - filled)
+                    if pct < 0.7:
+                        bar_style = "class:ctx.ok"
+                    elif pct < 0.9:
+                        bar_style = "class:ctx.warn"
+                    else:
+                        bar_style = "class:ctx.danger"
+                    tokens.append((bar_style, f" {bar}"))
 
         tokens.append(("class:prompt.arrow", " › "))
         return FormattedText(tokens)
@@ -339,12 +343,17 @@ class VeluneREPL:
 
     async def _cmd_help(self, args: str) -> None:
         from rich.table import Table
-        table = Table(show_header=True, border_style="dim", padding=(0, 1))
+        table = Table(
+            show_header=True,
+            border_style="blue",
+            padding=(0, 1),
+            header_style="bold blue",
+        )
         table.add_column("Command", style="cyan", width=16)
-        table.add_column("Aliases", style="dim", width=12)
-        table.add_column("Description", style="white")
+        table.add_column("Aliases", style="dim white", width=12)
+        table.add_column("Description")
         for cmd in self._registry.all_unique():
-            aliases = ", ".join(f"/{a}" for a in cmd.aliases) if cmd.aliases else "—"
+            aliases = ", ".join(f"/{a}" for a in cmd.aliases) if cmd.aliases else ""
             table.add_row(f"/{cmd.name}", aliases, cmd.description)
         self.console.print(table)
 
