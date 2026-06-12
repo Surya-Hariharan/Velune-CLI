@@ -77,7 +77,7 @@ class WorkspaceRegistry:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             for raw in data.get("workspaces", []):
-                known = {f for f in WorkspaceInfo.__dataclass_fields__}
+                known = set(WorkspaceInfo.__dataclass_fields__)
                 info = WorkspaceInfo(**{k: v for k, v in raw.items() if k in known})
                 self._entries[self._key(info.path)] = info
         except Exception as exc:

@@ -12,7 +12,6 @@ from velune.cli.interrupts import InterruptController
 from velune.cli.sessions import SessionStore, auto_title
 from velune.cli.workspaces import WorkspaceRegistry
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # InterruptController
 # ─────────────────────────────────────────────────────────────────────────────
@@ -271,8 +270,9 @@ class TestWorkspaceRegistry:
         reg.register(a)
         reg.register(b)
         # Force a strictly later timestamp for the touch.
-        import velune.cli.workspaces as ws_mod
         from datetime import datetime, timedelta
+
+        import velune.cli.workspaces as ws_mod
 
         real_now = datetime.now()
 

@@ -206,7 +206,7 @@ class SessionStore:
     def _meta_from(data: dict) -> SessionMeta:
         raw = data.get("meta")
         if raw:
-            known = {f for f in SessionMeta.__dataclass_fields__}
+            known = set(SessionMeta.__dataclass_fields__)
             return SessionMeta(**{k: v for k, v in raw.items() if k in known})
         # Legacy flat format from the original session_manager module.
         conversation = data.get("conversation", [])

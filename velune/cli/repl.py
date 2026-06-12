@@ -1263,14 +1263,16 @@ class VeluneREPL:
             except Exception:
                 return m.workspace == workspace
 
-        # Current project first, then other projects grouped by name.
-        metas.sort(key=lambda m: (not _is_current_ws(m), m.project_name, m.updated_at), reverse=False)
+        # Current project first, then other projects grouped by name. The
+        # store returns newest-first; the stable sort preserves that order
+        # within each group.
+        metas.sort(key=lambda m: (not _is_current_ws(m), m.project_name))
         items = [
             PickItem(
                 id=m.id,
                 label=m.title,
                 meta=f"{m.updated_at[:16].replace('T', ' ')} · {m.model_id} · {m.turn_count} turns",
-                group=m.project_name if _is_current_ws(m) else m.project_name,
+                group=m.project_name,
             )
             for m in metas
         ]
