@@ -1833,7 +1833,7 @@ async def run_repl(runtime: RuntimeContext) -> None:
     """Coroutine entry point for the REPL session.
 
     Callers should use ``velune.kernel.entrypoint.launch()`` to drive this from
-    a synchronous context; do not call ``asyncio.run()`` directly.
+    a synchronous context; do not call ``asyncio.run`` directly.
     """
     repl = VeluneREPL(runtime)
     await repl.run()

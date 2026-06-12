@@ -179,6 +179,7 @@ def test_sandbox_for_workspace(workspace_path: Path) -> None:
 
 def test_sandbox_result_to_dict() -> None:
     from velune.execution.sandbox import SandboxResult
+
     res = SandboxResult(
         exit_code=0,
         stdout="out",
@@ -260,4 +261,3 @@ def test_sandbox_default_executables_fallback(workspace_path: Path) -> None:
     # Tests that when config parsing fails, we fallback to DEFAULT_EXECUTABLES
     sb = SubprocessSandbox(workspace_path=workspace_path)
     assert len(sb.allowed_executables) > 0
-

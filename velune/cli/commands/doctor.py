@@ -28,15 +28,22 @@ def doctor_main(
     if ctx.invoked_subcommand is None:
         if perf:
             import time
+
             from velune.core.startup_profiler import _PROCESS_START
+
             startup_time_ms = (time.perf_counter() - _PROCESS_START) * 1000.0
-            
+
             if json_output:
                 import json
-                print(json.dumps({
-                    "startup_time_ms": round(startup_time_ms, 2),
-                    "status": "ok" if startup_time_ms < 3000 else "fail"
-                }))
+
+                print(
+                    json.dumps(
+                        {
+                            "startup_time_ms": round(startup_time_ms, 2),
+                            "status": "ok" if startup_time_ms < 3000 else "fail",
+                        }
+                    )
+                )
             else:
                 status = "OK" if startup_time_ms < 3000 else "FAIL"
                 console.print(f"Startup performance: {startup_time_ms:.2f}ms [{status}]")

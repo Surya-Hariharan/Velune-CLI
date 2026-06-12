@@ -493,11 +493,13 @@ class VeluneMCPServer:
         ]
         if self.tool_registry:
             for schema in self.tool_registry.list_tool_schemas():
-                tools.append({
-                    "name": schema["name"],
-                    "description": schema["description"],
-                    "inputSchema": schema["schema"],
-                })
+                tools.append(
+                    {
+                        "name": schema["name"],
+                        "description": schema["description"],
+                        "inputSchema": schema["schema"],
+                    }
+                )
         return tools
 
     async def handle_json_rpc_request(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -513,7 +515,7 @@ class VeluneMCPServer:
                 "error": {
                     "code": -32000,
                     "message": "Rate limit exceeded — too many tool calls per minute.",
-                }
+                },
             }
 
         if method == "velune_ask":
@@ -553,7 +555,7 @@ class VeluneMCPServer:
                     "error": {
                         "code": -32603,
                         "message": str(e),
-                    }
+                    },
                 }
         else:
             return {
@@ -562,7 +564,7 @@ class VeluneMCPServer:
                 "error": {
                     "code": -32601,
                     "message": f"Method not found: {method}",
-                }
+                },
             }
 
     async def run_stdio(self) -> None:

@@ -1,9 +1,9 @@
 """Single async runtime entry point for Velune.
 
-``asyncio.run()`` is called **exactly once** in the entire codebase — inside
+``asyncio.run`` is called **exactly once** in the entire codebase — inside
 ``run_async()`` below.  Every module that needs to bridge from sync to async
 (CLI command callbacks, deprecated sync retrieval helpers, the daemon server)
-imports and calls ``run_async()`` instead of calling ``asyncio.run()``
+imports and calls ``run_async()`` instead of calling ``asyncio.run``
 directly.
 """
 
@@ -33,7 +33,7 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
     """Run *coro* to completion from a **synchronous** call site.
 
     This is the **only** place in the entire Velune codebase that calls
-    ``asyncio.run()``.  All other callers must import and use this function.
+    ``asyncio.run``.  All other callers must import and use this function.
 
     Raises:
         RuntimeError: If called from within a running event loop.  Callers

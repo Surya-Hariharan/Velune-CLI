@@ -197,5 +197,3 @@ def test_assemble_context_budget_exceeded() -> None:
     # This shouldn't raise exception, but should log warning/error and return
     ctx, tokens = engine.assemble_context(chunks, budget, model)
     assert tokens >= 0
-
-

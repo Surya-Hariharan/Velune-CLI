@@ -22,7 +22,7 @@ def submit(coro: Coroutine[Any, Any, T]) -> T:
     inside an async context should await the coroutine directly.
 
     Delegates to ``velune.kernel.entrypoint.run_async`` so that
-    ``asyncio.run()`` is called from exactly one place in the codebase.
+    ``asyncio.run`` is called from exactly one place in the codebase.
     """
     try:
         asyncio.get_running_loop()
