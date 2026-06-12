@@ -7,13 +7,17 @@ from velune.core.errors.catalog import (
     InsufficientVRAMError,
     NoModelsAvailableError,
     OllamaNotRunningError,
-    PathTraversalError as PathTraversalVeluneError,
     ProviderUnavailableError,
     RateLimitError,
     SSRFAttemptError,
     VeluneError,
     WorkspaceNotInitializedError,
+)
+from velune.core.errors.catalog import (
     ModelNotFoundError as ModelNotFoundVeluneError,
+)
+from velune.core.errors.catalog import (
+    PathTraversalError as PathTraversalVeluneError,
 )
 from velune.core.errors.execution import (
     ExecutionError,

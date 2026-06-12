@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 _BUG_REPORT_URL = "https://github.com/velune-ai/velune/issues"
 
 
-def render_error(error: "VeluneError") -> Panel:
+def render_error(error: VeluneError) -> Panel:
     """Build a Rich Panel for a VeluneError with cause and fix sections."""
     body = Text()
 
@@ -33,7 +33,7 @@ def render_error(error: "VeluneError") -> Panel:
 
     detail = error.get_detail()
     if detail and detail != error.title:
-        body.append(f"\n\n  Detail: ", style="dim")
+        body.append("\n\n  Detail: ", style="dim")
         body.append(detail, style="dim white")
 
     body.append("\n\n  Run with --verbose to see the full stack trace.", style="dim")
@@ -69,7 +69,7 @@ def render_unexpected_error(exc: Exception) -> Panel:
     )
 
 
-def print_error(error: "VeluneError", console: Console | None = None) -> None:
+def print_error(error: VeluneError, console: Console | None = None) -> None:
     """Convenience wrapper: render and print a VeluneError to the given console."""
     (console or Console()).print(render_error(error))
 

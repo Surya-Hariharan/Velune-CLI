@@ -131,3 +131,10 @@ class SessionUsage:
             parts.append("free")
         parts.append("session total")
         return " · ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Process-level session tracker — populated by inference call sites
+# ---------------------------------------------------------------------------
+
+current_session: SessionUsage = SessionUsage()

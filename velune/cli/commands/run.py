@@ -20,12 +20,16 @@ def run_command(
     task: str = typer.Argument(..., help="Natural-language task to execute"),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help="Deliberate but do not write modifications or execute scripts"),
     force: bool = typer.Option(False, "--force", "-f", help="Force execution without human confirm thresholds"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip cost confirmation prompts (for scripting)"),
 ) -> None:
     """Deliberate with the stateful LangGraph Reasoning Council and execute in the secured sandbox."""
 
     cli_context = ctx.obj
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
+
+    # Propagate --yes into shared context so async helpers can read it
+    cli_context.yes = yes or cli_context.yes
 
     from velune.core.event_loop import submit
     submit(_run_command_async(cli_context, task, dry_run, force))
@@ -66,6 +70,10 @@ async def _run_command_async(
         console.print(Panel(f"[bold green]Task Auth:[/bold green] {task}", border_style="cyan", title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]"))
         # 4. Stream Multi-Agent Council Deliberation & Execution Graph
         console.print("[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n")
+
+    # --- Pre-operation cost estimation gate ---
+    if not cli_context.json_mode:
+        _maybe_confirm_cost(cli_context, task)
 
     from velune.orchestration.schemas import ExecutionStatus
 
@@ -153,6 +161,57 @@ async def _run_command_async(
 
     # 6. Graceful Shutdown
     await lifecycle.shutdown()
+
+
+def _maybe_confirm_cost(cli_context: CLIContext, task: str) -> None:
+    """Estimate cost of the upcoming run and prompt for confirmation if above threshold.
+
+    Raises SystemExit if the user declines.  Skipped when --yes is set.
+    """
+    from velune.telemetry.cost_estimator import CostEstimator
+
+    # Heuristic: estimate from task text alone as lower-bound; council adds far more tokens.
+    # We use a conservative 8× multiplier to account for repo context + multi-agent turns.
+    task_messages = [{"role": "user", "content": task}]
+
+    try:
+        model_registry = cli_context.container.get("runtime.model_registry")
+        models = model_registry.list_all() if model_registry else []
+    except Exception:
+        models = []
+
+    # Pick the first non-local model as the representative for cost estimation
+    cloud_model = next((m for m in models if not getattr(m, "is_local", False)), None)
+    if cloud_model is None:
+        return  # All local — no cost to warn about
+
+    estimator = CostEstimator()
+    base_tokens = estimator.estimate_tokens(task_messages, cloud_model)
+    estimated_tokens = base_tokens * 8  # council overhead multiplier
+    cost = estimator.estimate_cost(estimated_tokens, cloud_model)
+
+    if cost is None:
+        return
+
+    threshold = 0.01
+    try:
+        threshold = cli_context.config.providers.cost_threshold_usd
+    except Exception:
+        pass
+
+    if cost <= threshold:
+        return  # Below threshold — proceed silently
+
+    estimate_str = estimator.format_estimate(estimated_tokens, cost, cloud_model)
+    console.print(f"\n[yellow]Estimated cost:[/yellow] {estimate_str}")
+
+    if cli_context.yes:
+        return
+
+    answer = console.input("Proceed? [Y/n] ").strip().lower()
+    if answer in ("n", "no"):
+        console.print("[red]Aborted.[/red]")
+        raise typer.Exit(0)
 
 
 def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: CognitiveFirewall) -> str:

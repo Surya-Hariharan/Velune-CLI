@@ -62,6 +62,7 @@ def check(
     checks = [
         _check_python_version,
         _check_core_dependencies,
+        _check_internet_connectivity,
         _check_ollama_connectivity,
         _check_ollama_models,
         _check_lm_studio,
@@ -78,6 +79,7 @@ def check(
         _check_gpu,
         _check_vram,
         _check_model_benchmarks,
+        _check_session_cost,
     ]
 
     results = []
@@ -354,6 +356,36 @@ def _check_model_benchmarks() -> dict:
         except Exception:
             pass
     return {"name": "Empirical Model Benchmarks", "status": "warn", "message": "No empirical model capability benchmarks cached. Run: velune models scan --probe"}
+
+def _check_internet_connectivity() -> dict:
+    from velune.providers.health import get_checker
+    checker = get_checker()
+    if checker.is_online:
+        return {"name": "Internet Connectivity", "status": "ok", "message": "Online — cloud providers reachable"}
+    return {
+        "name": "Internet Connectivity",
+        "status": "warn",
+        "message": "Offline — router will fall back to local models only",
+    }
+
+
+def _check_session_cost() -> dict:
+    from velune.telemetry.token_tracker import current_session
+    total_tokens = current_session.total_tokens
+    total_cost = current_session.total_cost
+    if total_tokens == 0:
+        return {
+            "name": "Session Cost Tracking",
+            "status": "ok",
+            "message": "No inference calls recorded in this session",
+        }
+    cost_str = f"~${total_cost:.4f}" if total_cost > 0 else "free (local models only)"
+    return {
+        "name": "Session Cost Tracking",
+        "status": "ok",
+        "message": f"{total_tokens:,} tokens used · {cost_str}",
+    }
+
 
 def _render_results(results: list) -> None:
     table = Table(title="Velune Environment Check", show_header=True)

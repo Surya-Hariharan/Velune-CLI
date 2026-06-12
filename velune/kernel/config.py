@@ -85,6 +85,10 @@ class ProvidersConfig(BaseModel):
     """Configuration for active and fallback models."""
     default_provider: str = "openai"
     fallback_providers: list[str] = Field(default_factory=lambda: ["anthropic", "ollama"])
+    cost_threshold_usd: float = Field(
+        default=0.01,
+        description="Prompt for confirmation before cloud calls estimated to cost more than this (USD). Set to 0 to always ask.",
+    )
     openai: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(api_key_env="OPENAI_API_KEY", base_url="https://api.openai.com/v1")
     )

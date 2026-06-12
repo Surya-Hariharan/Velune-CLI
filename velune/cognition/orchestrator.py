@@ -371,6 +371,7 @@ class CouncilOrchestrator:
         budget: CouncilExecutionBudget | None = None,
     ) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt with wall-time limit."""
+        await self._maybe_gate_cost(prompt, repo_context)
         budget = budget or CouncilExecutionBudget(max_wall_time_seconds=int(self.max_wall_time_seconds))
         tier = self._resolve_tier(prompt, repo_context, council_tier)
         tier_str = tier.value
@@ -393,6 +394,78 @@ class CouncilOrchestrator:
                 budget.max_wall_time_seconds,
             )
             return self._build_timeout_result(prompt, tier_str)
+
+    async def _maybe_gate_cost(self, prompt: str, repo_context: str) -> None:
+        """Prompt for confirmation when estimated cloud cost exceeds the configured threshold.
+
+        Skipped when VELUNE_YES=1 is set or the yes flag has been propagated via CLIContext.
+        Only fires for tasks estimated > 2 000 tokens.
+        """
+        import sys
+
+        if os.environ.get("VELUNE_YES", "").lower() in ("1", "true", "yes"):
+            return
+
+        try:
+            from velune.telemetry.cost_estimator import CostEstimator
+            from velune.providers.registry import ProviderRegistry
+
+            # Resolve the registry to find which cloud model will be used
+            registry: ProviderRegistry | None = None
+            try:
+                from velune.kernel.registry import get_container
+                container = get_container()
+                if container.has("runtime.provider_registry"):
+                    registry = container.get("runtime.provider_registry")
+            except Exception:
+                pass
+
+            models: list = []
+            try:
+                if container.has("runtime.model_registry"):
+                    model_reg = container.get("runtime.model_registry")
+                    models = model_reg.list_all()
+            except Exception:
+                pass
+
+            cloud_model = next(
+                (m for m in models if not getattr(m, "is_local", False)),
+                None,
+            )
+            if cloud_model is None:
+                return
+
+            messages = [
+                {"role": "system", "content": repo_context},
+                {"role": "user", "content": prompt},
+            ]
+            estimator = CostEstimator()
+            token_count = estimator.estimate_tokens(messages, cloud_model)
+
+            if token_count <= 2000:
+                return
+
+            cost = estimator.estimate_cost(token_count, cloud_model)
+            if cost is None:
+                return
+
+            threshold = 0.01
+            if self.config and hasattr(self.config, "providers"):
+                threshold = getattr(self.config.providers, "cost_threshold_usd", 0.01)
+
+            if cost <= threshold:
+                return
+
+            estimate_str = estimator.format_estimate(token_count, cost, cloud_model)
+            sys.stdout.write(f"\nEstimated cost: {estimate_str}. Proceed? [Y/n] ")
+            sys.stdout.flush()
+            answer = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+            if answer.strip().lower() in ("n", "no"):
+                raise asyncio.CancelledError("Aborted by user due to cost estimate.")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("Cost gate skipped due to error: %s", exc)
 
     def _build_timeout_result(self, prompt: str, tier: str = "full") -> dict[str, Any]:
         from velune.cognition.council.messages import ReviewerMessage
