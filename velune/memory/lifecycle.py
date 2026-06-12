@@ -164,9 +164,7 @@ class MemoryLifecycleCoordinator:
                             metadata=turn.metadata,
                         )
                     except Exception as exc:
-                        logger.warning(
-                            "Failed to flush turn to episodic memory: %s", exc
-                        )
+                        logger.warning("Failed to flush turn to episodic memory: %s", exc)
 
         self._is_active = False
 
@@ -392,6 +390,7 @@ class MemoryLifecycleManager:
             # Create compactor if needed
             if not hasattr(self, "_compactor"):
                 from velune.memory.compaction import ContextCompactor
+
                 # Use first available provider (or default)
                 provider = None  # Will be set when needed
                 self._compactor = ContextCompactor(
@@ -410,9 +409,7 @@ class MemoryLifecycleManager:
 
             if should_compact:
                 # Schedule compaction as background task (non-blocking)
-                asyncio.create_task(
-                    self._perform_compaction(session_id)
-                )
+                asyncio.create_task(self._perform_compaction(session_id))
         except Exception as exc:
             logger.debug("Error checking compaction trigger: %s", exc)
 
@@ -516,14 +513,8 @@ class MemoryLifecycleManager:
 
         # Step 3: Semantic memory (LanceDB ANN, slower but precise)
         try:
-            if (
-                self.semantic_memory
-                and accumulated_tokens < budget
-                and self.embedding_pipeline
-            ):
-                semantic_results = await self.semantic_memory.search(
-                    query, workspace_root, limit=5
-                )
+            if self.semantic_memory and accumulated_tokens < budget and self.embedding_pipeline:
+                semantic_results = await self.semantic_memory.search(query, workspace_root, limit=5)
                 for mem in semantic_results:
                     # Map semantic memory's vitality to our enum
                     vitality = "live"
@@ -592,9 +583,7 @@ class MemoryLifecycleManager:
             logger.warning("Failed to get working context: %s", exc)
             return []
 
-    async def get_lineage_warnings(
-        self, query: str
-    ) -> tuple[list[Decision], list[Failure]]:
+    async def get_lineage_warnings(self, query: str) -> tuple[list[Decision], list[Failure]]:
         """Retrieve architectural decisions and failed experiments related to query.
 
         Returns two lists: approved decisions and past failures that might inform

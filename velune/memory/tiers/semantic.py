@@ -28,6 +28,7 @@ logger = logging.getLogger("velune.memory.tiers.semantic")
 def _qmodels() -> Any:
     """Lazily import qdrant http models."""
     from qdrant_client.http import models as qmodels
+
     return qmodels
 
 
@@ -55,7 +56,9 @@ class SemanticMemoryTier:
         self._client: Any = None
         self._degraded = os.environ.get("VELUNE_SKIP_QDRANT", "").lower() in ("1", "true", "yes")
         if self._degraded:
-            logger.warning("VELUNE_SKIP_QDRANT set — semantic memory running in degraded (no-op) mode.")
+            logger.warning(
+                "VELUNE_SKIP_QDRANT set — semantic memory running in degraded (no-op) mode."
+            )
 
     def _ensure_client(self) -> Any:
         """Create (once) and return the Qdrant client, or None in degraded mode."""
@@ -65,6 +68,7 @@ class SemanticMemoryTier:
             return self._client
         try:
             from qdrant_client import QdrantClient
+
             if self._url:
                 logger.debug("Initializing Qdrant remote client at %s", self._url)
                 self._client = QdrantClient(url=self._url, api_key=self._api_key)
@@ -208,11 +212,13 @@ class SemanticMemoryTier:
 
             output = []
             for item in results:
-                output.append({
-                    "id": item.id,
-                    "score": item.score,
-                    "payload": item.payload or {},
-                })
+                output.append(
+                    {
+                        "id": item.id,
+                        "score": item.score,
+                        "payload": item.payload or {},
+                    }
+                )
             return output
         except Exception as e:
             logger.error("Semantic search failure on %s: %s", collection_name, e)
@@ -253,7 +259,11 @@ class SemanticMemoryTier:
                 collection_name=collection_name,
                 points_selector=qmodels.FilterSelector(filter=q_filter),
             )
-            logger.debug("Successfully deleted points matching filter %s from %s", payload_filter, collection_name)
+            logger.debug(
+                "Successfully deleted points matching filter %s from %s",
+                payload_filter,
+                collection_name,
+            )
         except Exception as e:
             logger.error("Failed to delete points by payload in %s: %s", collection_name, e)
 
@@ -267,8 +277,13 @@ class RetrievedMemory:
     """A semantically matched memory returned to the REPL's context assembly."""
 
     __slots__ = (
-        "content", "source_type", "distance", "trust_score",
-        "session_id", "age_seconds", "attribution",
+        "content",
+        "source_type",
+        "distance",
+        "trust_score",
+        "session_id",
+        "age_seconds",
+        "attribution",
     )
 
     def __init__(
@@ -358,15 +373,17 @@ class SemanticMemory:
         memories: list[RetrievedMemory] = []
         for r in results:
             age = max(0.0, now - r.created_at)
-            memories.append(RetrievedMemory(
-                content=r.content,
-                source_type=r.source_type,
-                distance=r.distance,
-                trust_score=r.trust_score,
-                session_id=r.session_id,
-                age_seconds=age,
-                attribution=_format_age(age),
-            ))
+            memories.append(
+                RetrievedMemory(
+                    content=r.content,
+                    source_type=r.source_type,
+                    distance=r.distance,
+                    trust_score=r.trust_score,
+                    session_id=r.session_id,
+                    age_seconds=age,
+                    attribution=_format_age(age),
+                )
+            )
         return memories
 
     # ── Indexing ──────────────────────────────────────────────────────────────
@@ -378,16 +395,18 @@ class SemanticMemory:
         from velune.memory.embedding_pipeline import EmbedQueueItem
 
         role = getattr(turn, "role", "unknown")
-        self._pipeline.enqueue(EmbedQueueItem(
-            record_id=f"mem-{uuid.uuid4().hex[:12]}",
-            turn_id=getattr(turn, "id", ""),
-            session_id=getattr(turn, "session_id", ""),
-            role=role,
-            content=getattr(turn, "content", ""),
-            source_type=f"turn_{role}",
-            workspace_root=workspace_root,
-            created_at=getattr(turn, "created_at", time.time()),
-        ))
+        self._pipeline.enqueue(
+            EmbedQueueItem(
+                record_id=f"mem-{uuid.uuid4().hex[:12]}",
+                turn_id=getattr(turn, "id", ""),
+                session_id=getattr(turn, "session_id", ""),
+                role=role,
+                content=getattr(turn, "content", ""),
+                source_type=f"turn_{role}",
+                workspace_root=workspace_root,
+                created_at=getattr(turn, "created_at", time.time()),
+            )
+        )
 
     async def index_session_summary(
         self,
@@ -400,16 +419,18 @@ class SemanticMemory:
             return
         from velune.memory.embedding_pipeline import EmbedQueueItem
 
-        self._pipeline.enqueue(EmbedQueueItem(
-            record_id=f"sum-{uuid.uuid4().hex[:12]}",
-            turn_id="",
-            session_id=session_id,
-            role="system",
-            content=summary,
-            source_type="session_summary",
-            workspace_root=workspace_root,
-            created_at=time.time(),
-        ))
+        self._pipeline.enqueue(
+            EmbedQueueItem(
+                record_id=f"sum-{uuid.uuid4().hex[:12]}",
+                turn_id="",
+                session_id=session_id,
+                role="system",
+                content=summary,
+                source_type="session_summary",
+                workspace_root=workspace_root,
+                created_at=time.time(),
+            )
+        )
 
     # ── Maintenance ────────────────────────────────────────────────────────────
 
@@ -438,16 +459,18 @@ class SemanticMemory:
             role = data.get("role", "unknown")
             from velune.memory.embedding_pipeline import EmbedQueueItem
 
-            self._pipeline.enqueue(EmbedQueueItem(
-                record_id=f"mem-{uuid.uuid4().hex[:12]}",
-                turn_id=data.get("turn_id", ""),
-                session_id=data.get("session_id", ""),
-                role=role,
-                content=content,
-                source_type=f"turn_{role}",
-                workspace_root=data.get("workspace_root", workspace_root),
-                created_at=time.time(),
-            ))
+            self._pipeline.enqueue(
+                EmbedQueueItem(
+                    record_id=f"mem-{uuid.uuid4().hex[:12]}",
+                    turn_id=data.get("turn_id", ""),
+                    session_id=data.get("session_id", ""),
+                    role=role,
+                    content=content,
+                    source_type=f"turn_{role}",
+                    workspace_root=data.get("workspace_root", workspace_root),
+                    created_at=time.time(),
+                )
+            )
 
         await bus.subscribe("ConversationTurn", _on_turn_sync)
         logger.debug("SemanticMemory subscribed to ConversationTurn events")

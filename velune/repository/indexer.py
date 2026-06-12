@@ -28,15 +28,29 @@ class SecretFileDetector:
     """
 
     SECRET_PATTERNS = [
-        ".env", ".env.local", ".env.production", ".env.staging",
-        ".env.development", "id_rsa", "id_dsa", "id_ed25519",
-        "id_ecdsa", ".netrc", ".aws/credentials", "credentials.json",
-        "service-account.json", "gcp-credentials.json",
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.staging",
+        ".env.development",
+        "id_rsa",
+        "id_dsa",
+        "id_ed25519",
+        "id_ecdsa",
+        ".netrc",
+        ".aws/credentials",
+        "credentials.json",
+        "service-account.json",
+        "gcp-credentials.json",
     ]
     SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".crt", ".cer"]
     SECRET_CONTENT_PATTERNS = [
-        "PRIVATE KEY", "BEGIN RSA PRIVATE", "BEGIN EC PRIVATE",
-        "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+        "PRIVATE KEY",
+        "BEGIN RSA PRIVATE",
+        "BEGIN EC PRIVATE",
+        "AWS_SECRET_ACCESS_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
     ]
 
     def is_likely_secret(self, file_path: str, content: str | None = None) -> bool:
@@ -159,7 +173,7 @@ class RepositoryIndexer:
                 if not scan_result["is_safe"]:
                     logger.warning(
                         "SECURITY: Potential prompt injection in %s — using sanitized version",
-                        rel_path
+                        rel_path,
                     )
                     code = scan_result["neutralized_content"]
                     file_metadata["injection_risk"] = True
@@ -210,7 +224,7 @@ class RepositoryIndexer:
             files=files,
             symbols=all_symbols,
             edges=[],  # Edges are derived and resolved by Grapher
-            summary=summary
+            summary=summary,
         )
 
     def _compute_sha256(self, file_path: Path) -> str:

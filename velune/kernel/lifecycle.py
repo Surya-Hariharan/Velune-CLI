@@ -69,13 +69,16 @@ class LifecycleCoordinator:
 
         if self._config is not None:
             from velune.kernel.config import ConfigValidationError  # noqa: F401
+
             errors = self._config.validate()
             critical = [e for e in errors if e.severity == "CRITICAL"]
             if critical:
                 for err in critical:
                     logger.critical(
                         "Config validation failed — %s = %r: %s",
-                        err.field, err.value, err.reason,
+                        err.field,
+                        err.value,
+                        err.reason,
                     )
                 summary = "; ".join(f"{e.field}: {e.reason}" for e in critical)
                 raise RuntimeError(
@@ -86,7 +89,9 @@ class LifecycleCoordinator:
                 if warn.severity != "CRITICAL":
                     logger.warning(
                         "Config warning — %s = %r: %s",
-                        warn.field, warn.value, warn.reason,
+                        warn.field,
+                        warn.value,
+                        warn.reason,
                     )
 
         self._started = True

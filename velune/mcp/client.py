@@ -75,11 +75,13 @@ class VeluneMCPClient:
         # Convert tools to list of dict
         result = []
         for tool in self.raw_tools:
-            result.append({
-                "name": tool.name,
-                "description": tool.description or "",
-                "inputSchema": tool.inputSchema,
-            })
+            result.append(
+                {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "inputSchema": tool.inputSchema,
+                }
+            )
         return result
 
     def to_velune_tools(self) -> list[BaseTool]:

@@ -20,6 +20,7 @@ _HISTORY_MAXLEN = 1000
 
 class Event(BaseModel):
     """The central message token in the event bus."""
+
     event_id: str = Field(default_factory=lambda: f"evt-{uuid.uuid4().hex[:12]}")
     event_type: str
     timestamp: float = Field(default_factory=lambda: datetime.now(tz=UTC).timestamp())
@@ -64,7 +65,9 @@ class CognitiveBus:
             oldest = self._history[0]
             logger.debug(
                 "Event history at capacity (%d); dropping oldest: %s [%s]",
-                _HISTORY_MAXLEN, oldest.event_type, oldest.event_id,
+                _HISTORY_MAXLEN,
+                oldest.event_type,
+                oldest.event_id,
             )
         self._history.append(event)
 
@@ -197,7 +200,5 @@ class CognitiveBus:
 # Maintain legacy class name alias as fallback compatibility
 class EventBus(CognitiveBus):
     """Fallback alias for compatibility with existing modules."""
+
     pass
-
-
-

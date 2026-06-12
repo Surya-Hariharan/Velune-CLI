@@ -23,9 +23,13 @@ from velune.providers.keystore import get_key
 class HuggingFaceProvider(ModelProvider):
     """Hugging Face provider for serverless Inference API."""
 
-    def __init__(self, api_key: str | SecretStr | None = None, base_url: str = "https://api-inference.huggingface.co") -> None:
+    def __init__(
+        self,
+        api_key: str | SecretStr | None = None,
+        base_url: str = "https://api-inference.huggingface.co",
+    ) -> None:
         self._api_key = api_key or get_key("huggingface")
-        if hasattr(self._api_key, 'get_secret_value'):
+        if hasattr(self._api_key, "get_secret_value"):
             self._api_key = self._api_key.get_secret_value()
         self._base_url = base_url
         self.client: httpx.AsyncClient | None = None
@@ -43,7 +47,9 @@ class HuggingFaceProvider(ModelProvider):
     async def initialize(self) -> None:
         """Initialize client headers."""
         if not self._api_key:
-            raise ProviderAuthenticationError("Hugging Face API token (HF_TOKEN) not found in environment or config")
+            raise ProviderAuthenticationError(
+                "Hugging Face API token (HF_TOKEN) not found in environment or config"
+            )
         if not self.client:
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
@@ -51,6 +57,7 @@ class HuggingFaceProvider(ModelProvider):
     async def list_models(self) -> list[ModelDescriptor]:
         """Fetch list of local cached Hugging Face models."""
         from velune.providers.discovery.huggingface import HuggingFaceDiscovery
+
         discovery = HuggingFaceDiscovery()
         return await discovery.discover()
 
@@ -70,9 +77,7 @@ class HuggingFaceProvider(ModelProvider):
                     "max_new_tokens": request.max_tokens or 1024,
                     "top_p": request.top_p,
                 },
-                "options": {
-                    "wait_for_model": True
-                }
+                "options": {"wait_for_model": True},
             }
 
             model_path = f"/models/{request.model_id}"
@@ -87,7 +92,7 @@ class HuggingFaceProvider(ModelProvider):
                 content = data[0].get("generated_text", "")
                 # Strip the prompt from generation if the model prepends it
                 if content.startswith(prompt):
-                    content = content[len(prompt):]
+                    content = content[len(prompt) :]
             elif isinstance(data, dict):
                 content = data.get("generated_text", "")
 
@@ -95,7 +100,7 @@ class HuggingFaceProvider(ModelProvider):
                 content=content.strip(),
                 model_id=request.model_id,
                 finish_reason="stop",
-                tokens_used=0, # HF serverless doesn't return exact token metrics consistently
+                tokens_used=0,  # HF serverless doesn't return exact token metrics consistently
                 latency_ms=latency,
             )
         except httpx.HTTPError as e:
@@ -114,10 +119,8 @@ class HuggingFaceProvider(ModelProvider):
                     "max_new_tokens": request.max_tokens or 1024,
                     "top_p": request.top_p,
                 },
-                "options": {
-                    "wait_for_model": True
-                },
-                "stream": True
+                "options": {"wait_for_model": True},
+                "stream": True,
             }
 
             model_path = f"/models/{request.model_id}"
@@ -131,7 +134,9 @@ class HuggingFaceProvider(ModelProvider):
                             token_text = chunk_data.get("token", {}).get("text", "")
                             yield StreamChunk(
                                 content=token_text,
-                                finish_reason="stop" if chunk_data.get("token", {}).get("special", False) else None
+                                finish_reason="stop"
+                                if chunk_data.get("token", {}).get("special", False)
+                                else None,
                             )
                         except Exception:
                             continue
@@ -144,7 +149,9 @@ class HuggingFaceProvider(ModelProvider):
         assert self.client is not None
         try:
             model_path = f"/models/{model_id}"
-            response = await self.client.post(model_path, json={"inputs": texts, "options": {"wait_for_model": True}})
+            response = await self.client.post(
+                model_path, json={"inputs": texts, "options": {"wait_for_model": True}}
+            )
             response.raise_for_status()
             embeddings = response.json()
 
@@ -156,7 +163,7 @@ class HuggingFaceProvider(ModelProvider):
                         # Simple average pooling for token embeddings
                         pooled = []
                         for seq in embeddings:
-                            avg = [sum(col)/len(seq) for col in zip(*seq)]
+                            avg = [sum(col) / len(seq) for col in zip(*seq)]
                             pooled.append(avg)
                         return pooled
                     return embeddings

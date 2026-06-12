@@ -82,7 +82,9 @@ class CostEstimator:
         token_str = f"~{token_count:,} tokens"
 
         if cost is None:
-            if model and (getattr(model, "is_local", False) or model.provider_id in _LOCAL_PROVIDERS):
+            if model and (
+                getattr(model, "is_local", False) or model.provider_id in _LOCAL_PROVIDERS
+            ):
                 return f"{token_str} (local, no cost)"
             return f"{token_str} (cost unknown)"
 

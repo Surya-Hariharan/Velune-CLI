@@ -17,4 +17,5 @@ class GroqDiscovery:
         if not keystore.has_key("groq"):
             return []
         from velune.providers.adapters.groq import GROQ_MODELS
+
         return GROQ_MODELS

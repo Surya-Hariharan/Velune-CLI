@@ -15,11 +15,11 @@ logger = logging.getLogger("velune.repository.index_state")
 class IndexedFile:
     """Per-file metadata stored between indexing sessions."""
 
-    path: str           # Relative to workspace root (forward-slash)
-    content_hash: str   # SHA-256 of file contents at index time
-    language: str       # Detected language (e.g. "python")
-    symbol_count: int   # Number of parsed symbols (0 if parsing failed)
-    indexed_at: float   # Unix timestamp when this entry was written
+    path: str  # Relative to workspace root (forward-slash)
+    content_hash: str  # SHA-256 of file contents at index time
+    language: str  # Detected language (e.g. "python")
+    symbol_count: int  # Number of parsed symbols (0 if parsing failed)
+    indexed_at: float  # Unix timestamp when this entry was written
 
 
 @dataclass
@@ -32,8 +32,8 @@ class IndexState:
     """
 
     workspace_root: str
-    last_commit_sha: str | None       # git HEAD SHA at last full index; None if no git
-    last_indexed_at: float            # Unix timestamp of the last completed index
+    last_commit_sha: str | None  # git HEAD SHA at last full index; None if no git
+    last_indexed_at: float  # Unix timestamp of the last completed index
     file_index: dict[str, IndexedFile] = field(default_factory=dict)  # rel_path → IndexedFile
 
     # ------------------------------------------------------------------
@@ -63,9 +63,7 @@ class IndexState:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            file_index = {
-                k: IndexedFile(**v) for k, v in data.get("file_index", {}).items()
-            }
+            file_index = {k: IndexedFile(**v) for k, v in data.get("file_index", {}).items()}
             return cls(
                 workspace_root=data["workspace_root"],
                 last_commit_sha=data.get("last_commit_sha"),

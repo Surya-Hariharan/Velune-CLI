@@ -34,7 +34,7 @@ logger = logging.getLogger("velune.memory.embedding_pipeline")
 
 _TOKEN_LIMIT = 512
 _CODE_TOKEN_LIMIT = 200
-_BATCH_CONCURRENCY = 3      # max simultaneous Ollama embed calls
+_BATCH_CONCURRENCY = 3  # max simultaneous Ollama embed calls
 _BACKOFF_BASE = 1.0
 _BACKOFF_MAX = 60.0
 _QUEUE_MAXSIZE = 1_000
@@ -117,8 +117,8 @@ class EmbeddingPipeline:
 
     def __init__(
         self,
-        provider: Any,               # OllamaProvider | None
-        store: Any,                  # LanceDBStore
+        provider: Any,  # OllamaProvider | None
+        store: Any,  # LanceDBStore
         model_id: str = "nomic-embed-text",
     ) -> None:
         self._provider = provider
@@ -229,7 +229,9 @@ class EmbeddingPipeline:
             except Exception as exc:
                 logger.warning(
                     "Embedding failed for turn %s (%s) — retry in %.1fs",
-                    item.turn_id, type(exc).__name__, self._backoff,
+                    item.turn_id,
+                    type(exc).__name__,
+                    self._backoff,
                 )
                 # Re-enqueue for retry; drop silently if queue is full.
                 try:

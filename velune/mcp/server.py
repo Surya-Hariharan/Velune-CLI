@@ -68,7 +68,9 @@ class RateLimiter:
 class WorkspaceValidator:
     """Validates workspace paths against allowed list."""
 
-    def __init__(self, allowed_workspaces: list[Path] | None = None, current_dir: Path | None = None) -> None:
+    def __init__(
+        self, allowed_workspaces: list[Path] | None = None, current_dir: Path | None = None
+    ) -> None:
         self.allowed_workspaces = allowed_workspaces or [current_dir or Path.cwd()]
 
     def is_valid(self, workspace_path: str) -> bool:
@@ -168,70 +170,77 @@ class VeluneMCPServer:
             tools = []
 
             # Add Velune-native tools
-            tools.extend([
-                Tool(
-                    name="velune_ask",
-                    description="Ask Velune about your repository",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "prompt": {"type": "string", "description": "Question about the repository"},
-                            "workspace_path": {
-                                "type": "string",
-                                "description": "Path to repository (optional)",
+            tools.extend(
+                [
+                    Tool(
+                        name="velune_ask",
+                        description="Ask Velune about your repository",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "Question about the repository",
+                                },
+                                "workspace_path": {
+                                    "type": "string",
+                                    "description": "Path to repository (optional)",
+                                },
+                            },
+                            "required": ["prompt"],
+                        },
+                    ),
+                    Tool(
+                        name="velune_search_memory",
+                        description="Search Velune's memory for relevant past interactions",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string"},
+                                "workspace_path": {"type": "string"},
+                                "limit": {"type": "integer", "default": 5},
+                            },
+                            "required": ["query"],
+                        },
+                    ),
+                    Tool(
+                        name="velune_get_symbols",
+                        description="Get code symbols (functions, classes) from the repository",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "workspace_path": {"type": "string"},
+                                "name_pattern": {"type": "string", "description": "Optional regex"},
                             },
                         },
-                        "required": ["prompt"],
-                    },
-                ),
-                Tool(
-                    name="velune_search_memory",
-                    description="Search Velune's memory for relevant past interactions",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string"},
-                            "workspace_path": {"type": "string"},
-                            "limit": {"type": "integer", "default": 5},
+                    ),
+                    Tool(
+                        name="velune_estimate_blast_radius",
+                        description="Estimate impact of changing a file on the codebase",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "workspace_path": {"type": "string"},
+                                "file_path": {"type": "string"},
+                            },
+                            "required": ["file_path"],
                         },
-                        "required": ["query"],
-                    },
-                ),
-                Tool(
-                    name="velune_get_symbols",
-                    description="Get code symbols (functions, classes) from the repository",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "workspace_path": {"type": "string"},
-                            "name_pattern": {"type": "string", "description": "Optional regex"},
-                        },
-                    },
-                ),
-                Tool(
-                    name="velune_estimate_blast_radius",
-                    description="Estimate impact of changing a file on the codebase",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "workspace_path": {"type": "string"},
-                            "file_path": {"type": "string"},
-                        },
-                        "required": ["file_path"],
-                    },
-                ),
-            ])
+                    ),
+                ]
+            )
 
             # Add tools from registry if available
             if self.tool_registry:
-                tools.extend([
-                    Tool(
-                        name=schema["name"],
-                        description=schema["description"],
-                        inputSchema=schema["schema"],
-                    )
-                    for schema in self.tool_registry.list_tool_schemas()
-                ])
+                tools.extend(
+                    [
+                        Tool(
+                            name=schema["name"],
+                            description=schema["description"],
+                            inputSchema=schema["schema"],
+                        )
+                        for schema in self.tool_registry.list_tool_schemas()
+                    ]
+                )
 
             return tools
 
@@ -271,7 +280,12 @@ class VeluneMCPServer:
             else:
                 raise ValueError(f"Tool not found: {name}")
 
-            return [TextContent(type="text", text=json.dumps(result) if isinstance(result, dict) else str(result))]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(result) if isinstance(result, dict) else str(result),
+                )
+            ]
 
     # =========================================================================
     # Tool implementations
@@ -303,8 +317,9 @@ class VeluneMCPServer:
             )
 
             response = (
-                state.pending_diffs[0].get("proposed", "") if state.pending_diffs else
-                state.final_output or "No response"
+                state.pending_diffs[0].get("proposed", "")
+                if state.pending_diffs
+                else state.final_output or "No response"
             )
 
             return {"response": response, "model": "velune-council"}
@@ -361,12 +376,14 @@ class VeluneMCPServer:
                             name = match.group(3)
                             if pattern and not pattern.search(name):
                                 continue
-                            symbols.append({
-                                "name": name,
-                                "kind": kind,
-                                "file": str(file.path),
-                                "line": i,
-                            })
+                            symbols.append(
+                                {
+                                    "name": name,
+                                    "kind": kind,
+                                    "file": str(file.path),
+                                    "line": i,
+                                }
+                            )
                 except Exception:
                     continue
 
@@ -424,10 +441,8 @@ class VeluneMCPServer:
                 read_stream,
                 write_stream,
                 InitializationOptions(
-                    server_name="velune",
-                    server_version="0.1.0",
-                    capabilities={"tools": {}}
-                )
+                    server_name="velune", server_version="0.1.0", capabilities={"tools": {}}
+                ),
             )
 
     async def run_http(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
@@ -454,10 +469,9 @@ class VeluneMCPServer:
             async def handle_tools(request):
                 """Handle tool listing."""
                 tools = await self.server.list_tools()
-                return web.json_response([
-                    {"name": t.name, "description": t.description}
-                    for t in tools
-                ])
+                return web.json_response(
+                    [{"name": t.name, "description": t.description} for t in tools]
+                )
 
             app = web.Application()
             app.router.add_get("/sse", handle_sse)

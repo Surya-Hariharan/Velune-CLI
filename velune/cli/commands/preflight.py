@@ -50,8 +50,8 @@ async def run_preflight_check(container: ServiceContainer, console: Console | No
     if not (workspace / ".velune" / "index").exists():
         issues.append(
             "Workspace has not been initialized yet.\n"
-             "  [bold white]Fix:[/bold white] Run the initialization command to parse the codebase:\n"
-             "       [bold green]velune workspace init[/bold green]"
+            "  [bold white]Fix:[/bold white] Run the initialization command to parse the codebase:\n"
+            "       [bold green]velune workspace init[/bold green]"
         )
 
     # 2. Check models registry
@@ -60,8 +60,8 @@ async def run_preflight_check(container: ServiceContainer, console: Console | No
     if not models:
         issues.append(
             "No model providers or local LLM instances were detected.\n"
-             "  [bold white]Fix:[/bold white] Make sure Ollama/LM-Studio is running, or check API keys, and run:\n"
-             "       [bold green]velune models scan --probe[/bold green]"
+            "  [bold white]Fix:[/bold white] Make sure Ollama/LM-Studio is running, or check API keys, and run:\n"
+            "       [bold green]velune models scan --probe[/bold green]"
         )
 
     if issues:

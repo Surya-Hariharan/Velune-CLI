@@ -45,6 +45,7 @@ def _keyring_get(provider_id: str) -> str | None:
     """Raw, uncached OS-keyring lookup. Lazily imports keyring."""
     try:
         import keyring
+
         return keyring.get_password(_SERVICE.format(provider_id), _USERNAME)
     except Exception:
         return None
@@ -64,6 +65,7 @@ def _resolve_uncached(provider_id: str) -> str | None:
 def save_key(provider_id: str, api_key: str) -> None:
     """Persist *api_key* for *provider_id* in the OS keyring."""
     import keyring
+
     keyring.set_password(_SERVICE.format(provider_id), _USERNAME, api_key)
 
 
@@ -76,6 +78,7 @@ def delete_key(provider_id: str) -> None:
     """Remove the stored key for *provider_id* from the OS keyring."""
     import keyring
     import keyring.errors
+
     try:
         keyring.delete_password(_SERVICE.format(provider_id), _USERNAME)
     except keyring.errors.PasswordDeleteError:
@@ -95,6 +98,7 @@ def is_ollama_live(timeout: float = 1.0) -> bool:
     """
     try:
         import httpx
+
         r = httpx.get("http://localhost:11434/api/tags", timeout=timeout)
         return r.status_code == 200
     except Exception:

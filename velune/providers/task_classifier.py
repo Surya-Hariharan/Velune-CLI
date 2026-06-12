@@ -9,6 +9,7 @@ from typing import Any
 
 class TaskType(StrEnum):
     """Task type categories for routing."""
+
     CODING = "coding"
     REASONING = "reasoning"
     SUMMARIZATION = "summarization"
@@ -18,6 +19,7 @@ class TaskType(StrEnum):
 
 class ComplexityLevel(StrEnum):
     """Task complexity estimation."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -26,6 +28,7 @@ class ComplexityLevel(StrEnum):
 @dataclass
 class TaskProfile:
     """Profile of a task for routing decisions."""
+
     task_type: TaskType
     complexity: ComplexityLevel
     latency_sensitive: bool
@@ -40,35 +43,102 @@ class TaskClassifier:
 
     # Coding-related keywords
     CODING_KEYWORDS = {
-        "implement", "write", "code", "function", "class", "method",
-        "fix", "bug", "error", "debug", "refactor", "rewrite",
-        "modify", "change", "update", "add", "remove", "delete",
-        "script", "program", "algorithm", "library", "framework",
-        "test", "unittest", "pytest", "jest", "mocha",
-        "sql", "query", "database", "schema",
+        "implement",
+        "write",
+        "code",
+        "function",
+        "class",
+        "method",
+        "fix",
+        "bug",
+        "error",
+        "debug",
+        "refactor",
+        "rewrite",
+        "modify",
+        "change",
+        "update",
+        "add",
+        "remove",
+        "delete",
+        "script",
+        "program",
+        "algorithm",
+        "library",
+        "framework",
+        "test",
+        "unittest",
+        "pytest",
+        "jest",
+        "mocha",
+        "sql",
+        "query",
+        "database",
+        "schema",
     }
 
     # Reasoning-related keywords
     REASONING_KEYWORDS = {
-        "explain", "why", "how", "analyze", "reason", "infer",
-        "deduce", "conclude", "derive", "solve", "think",
-        "understand", "interpret", "clarify", "elaborate",
-        "compare", "contrast", "difference", "similarity",
-        "logic", "argument", "evidence", "proof",
+        "explain",
+        "why",
+        "how",
+        "analyze",
+        "reason",
+        "infer",
+        "deduce",
+        "conclude",
+        "derive",
+        "solve",
+        "think",
+        "understand",
+        "interpret",
+        "clarify",
+        "elaborate",
+        "compare",
+        "contrast",
+        "difference",
+        "similarity",
+        "logic",
+        "argument",
+        "evidence",
+        "proof",
     }
 
     # Summarization-related keywords
     SUMMARIZATION_KEYWORDS = {
-        "summarize", "summary", "tldr", "brief", "overview",
-        "outline", "abstract", "condense", "digest", "recap",
-        "highlight", "extract", "key", "main", "point",
-        "synopsis", "summary", "gist",
+        "summarize",
+        "summary",
+        "tldr",
+        "brief",
+        "overview",
+        "outline",
+        "abstract",
+        "condense",
+        "digest",
+        "recap",
+        "highlight",
+        "extract",
+        "key",
+        "main",
+        "point",
+        "synopsis",
+        "summary",
+        "gist",
     }
 
     # Quick question patterns (low complexity)
     QUICK_PATTERNS = {
-        "what is", "what's", "who is", "who's", "when is", "where is",
-        "how many", "how much", "why", "define", "meaning",
+        "what is",
+        "what's",
+        "who is",
+        "who's",
+        "when is",
+        "where is",
+        "how many",
+        "how much",
+        "why",
+        "define",
+        "meaning",
     }
 
     def classify(self, prompt: str, context: dict[str, Any] | None = None) -> TaskProfile:
@@ -95,14 +165,10 @@ class TaskClassifier:
         task_type = self._classify_task_type(prompt)
 
         # Estimate complexity
-        complexity = self._estimate_complexity(
-            prompt, task_type, total_tokens, context
-        )
+        complexity = self._estimate_complexity(prompt, task_type, total_tokens, context)
 
         # Determine if latency sensitive
-        latency_sensitive = self._is_latency_sensitive(
-            prompt, task_type, complexity
-        )
+        latency_sensitive = self._is_latency_sensitive(prompt, task_type, complexity)
 
         # Check if long context needed
         requires_long_context = total_tokens > 8000
@@ -120,7 +186,7 @@ class TaskClassifier:
             metadata={
                 "prompt_tokens": prompt_tokens,
                 "context_tokens": context_tokens,
-            }
+            },
         )
 
     def _classify_task_type(self, prompt: str) -> TaskType:
@@ -207,8 +273,17 @@ class TaskClassifier:
     def _requires_tools(self, prompt: str, context: dict[str, Any]) -> bool:
         """Determine if the task likely needs external tools/APIs."""
         tool_keywords = {
-            "api", "request", "fetch", "call", "network", "http",
-            "search", "browse", "lookup", "query", "database",
+            "api",
+            "request",
+            "fetch",
+            "call",
+            "network",
+            "http",
+            "search",
+            "browse",
+            "lookup",
+            "query",
+            "database",
         }
         lower = prompt.lower()
         return any(kw in lower for kw in tool_keywords)

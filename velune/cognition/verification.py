@@ -41,10 +41,10 @@ class ReasoningVerifier:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for name in node.names:
-                    imported_modules.add(name.name.split('.')[0])
+                    imported_modules.add(name.name.split(".")[0])
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
-                    imported_modules.add(node.module.split('.')[0])
+                    imported_modules.add(node.module.split(".")[0])
 
         for mod_name in imported_modules:
             # 1. Check if it's standard library or currently imported
@@ -67,7 +67,9 @@ class ReasoningVerifier:
             if os.path.isdir(local_path_dir) or os.path.isfile(local_path_file):
                 continue
 
-            issues.append(f"Potential hallucinated import: module '{mod_name}' could not be resolved.")
+            issues.append(
+                f"Potential hallucinated import: module '{mod_name}' could not be resolved."
+            )
 
         return {
             "success": len(issues) == 0,
@@ -191,7 +193,9 @@ class ReasoningVerifier:
         else:
             critique_lines.append("No architectural or signature contradictions detected.")
 
-        critique_lines.append("\nAssess this patch for architectural regression. List potential failure vectors.")
+        critique_lines.append(
+            "\nAssess this patch for architectural regression. List potential failure vectors."
+        )
 
         return {
             "passed": passed,

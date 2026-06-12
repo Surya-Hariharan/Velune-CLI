@@ -17,6 +17,7 @@ logger = logging.getLogger("velune.context.token_counter")
 # Attempt to load tiktoken for accurate OpenAI-family token counting
 try:
     import tiktoken
+
     HAS_TIKTOKEN = True
 except ImportError:
     HAS_TIKTOKEN = False
@@ -71,10 +72,7 @@ class TokenCounter:
         structure_overhead = len(messages) * 4
 
         # Count tokens in all message content
-        content_tokens = sum(
-            TokenCounter.count(msg.get("content", ""), model)
-            for msg in messages
-        )
+        content_tokens = sum(TokenCounter.count(msg.get("content", ""), model) for msg in messages)
 
         return structure_overhead + content_tokens
 
@@ -91,18 +89,13 @@ class TokenCounter:
             # Determine appropriate encoding
             encoding_name = TokenCounter._select_encoding(model_id)
             if encoding_name not in TokenCounter._ENCODING_CACHE:
-                TokenCounter._ENCODING_CACHE[encoding_name] = (
-                    tiktoken.get_encoding(encoding_name)
-                )
+                TokenCounter._ENCODING_CACHE[encoding_name] = tiktoken.get_encoding(encoding_name)
             encoding = TokenCounter._ENCODING_CACHE[encoding_name]
 
             # Count tokens, allowing special characters
             return len(encoding.encode(text, disallowed_special=()))
         except Exception as e:
-            logger.debug(
-                f"tiktoken counting failed for {model_id}: {e}; "
-                "falling back to heuristic"
-            )
+            logger.debug(f"tiktoken counting failed for {model_id}: {e}; falling back to heuristic")
             return TokenCounter._count_heuristic(text)
 
     @staticmethod

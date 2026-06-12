@@ -26,13 +26,15 @@ class CouncilDisplayView:
         self.console.print(
             Panel(
                 Text.assemble(
-                    ("[bold magenta]VELUNE COGNITIVE OS[/bold magenta] — [cyan]Reasoning Council Active[/cyan]\n"),
-                    ("[dim]Objective:[/dim] ", "[italic white]" + task + "[/italic white]")
+                    (
+                        "[bold magenta]VELUNE COGNITIVE OS[/bold magenta] — [cyan]Reasoning Council Active[/cyan]\n"
+                    ),
+                    ("[dim]Objective:[/dim] ", "[italic white]" + task + "[/italic white]"),
                 ),
                 border_style="magenta",
                 box=ROUNDED,
                 title="[bold white]🧠 Cognitive Deliberation[/bold white]",
-                title_align="left"
+                title_align="left",
             )
         )
 
@@ -42,7 +44,7 @@ class CouncilDisplayView:
             title="[bold cyan]Mapped Council Specializations[/bold cyan]",
             box=ROUNDED,
             border_style="dim",
-            expand=True
+            expand=True,
         )
         table.add_column("Council Seat", style="bold yellow")
         table.add_column("Provider / Endpoint", style="green")
@@ -56,19 +58,22 @@ class CouncilDisplayView:
                     level = getattr(desc.capabilities, cap_name, None)
                     if level and level > 0:
                         caps.append(f"{cap_name} ({level.name})")
-            tags = ", ".join(caps) if caps else ", ".join(desc.tags) if getattr(desc, "tags", None) else "reasoning"
-            table.add_row(
-                role.value.upper(),
-                desc.provider_id.capitalize(),
-                desc.model_id,
-                tags
+            tags = (
+                ", ".join(caps)
+                if caps
+                else ", ".join(desc.tags)
+                if getattr(desc, "tags", None)
+                else "reasoning"
             )
+            table.add_row(role.value.upper(), desc.provider_id.capitalize(), desc.model_id, tags)
         self.console.print(table)
         self.console.print()
 
     def render_step_header(self, step_name: str, agent_emoji: str = "🤖") -> None:
         """Draw an elegant boundary indicating a change in agent active deliberation."""
-        self.console.print(f"\n[bold magenta]●[/bold magenta] [bold white]{agent_emoji} {step_name}[/bold white] is deliberating...")
+        self.console.print(
+            f"\n[bold magenta]●[/bold magenta] [bold white]{agent_emoji} {step_name}[/bold white] is deliberating..."
+        )
 
     def render_planner_dag(self, plan: TaskPlan) -> None:
         """Render the Planner's task plan DAG as a neat hierarchical or sequential table."""
@@ -76,7 +81,7 @@ class CouncilDisplayView:
             title="[bold yellow]Execution Plan Compiled by Council Planner[/bold yellow]",
             box=ROUNDED,
             border_style="yellow",
-            expand=True
+            expand=True,
         )
         table.add_column("ID", style="bold cyan", width=8)
         table.add_column("Description", style="white")
@@ -86,12 +91,7 @@ class CouncilDisplayView:
         for step in plan.steps:
             deps = ", ".join(step.dependencies) if step.dependencies else "[dim]None[/dim]"
             val = step.metadata.get("test_command") or "Syntax check + File existence"
-            table.add_row(
-                step.id,
-                step.description,
-                deps,
-                str(val)
-            )
+            table.add_row(step.id, step.description, deps, str(val))
         self.console.print(table)
         self.console.print()
 
@@ -103,7 +103,7 @@ class CouncilDisplayView:
                 title="[bold green]💻 Coder Proposed Patch[/bold green]",
                 border_style="green",
                 box=ROUNDED,
-                expand=True
+                expand=True,
             )
         )
 
@@ -118,7 +118,9 @@ class CouncilDisplayView:
             confidence = report.confidence_rating
             issues = report.critical_issues
 
-        status_text = "[bold green]PASS[/bold green]" if passed else "[bold red]FAIL / BLOCKED[/bold red]"
+        status_text = (
+            "[bold green]PASS[/bold green]" if passed else "[bold red]FAIL / BLOCKED[/bold red]"
+        )
         border_style = "green" if passed else "red"
 
         content = []
@@ -130,7 +132,9 @@ class CouncilDisplayView:
             for issue in issues:
                 content.append(f"  [red]•[/red] {issue}")
         else:
-            content.append("\n[green]✓ Static static checks passed. No syntactical or safety concerns raised.[/green]")
+            content.append(
+                "\n[green]✓ Static static checks passed. No syntactical or safety concerns raised.[/green]"
+            )
 
         self.console.print(
             Panel(
@@ -138,7 +142,7 @@ class CouncilDisplayView:
                 title="[bold]🔍 Reviewer Audit[/bold]",
                 border_style=border_style,
                 box=ROUNDED,
-                expand=True
+                expand=True,
             )
         )
 
@@ -154,14 +158,18 @@ class CouncilDisplayView:
         border_style = "yellow" if severity > 0.4 else "dim"
 
         content = []
-        content.append(f"[bold]Adversarial Severity Rating:[/bold] [bold red]{severity:.2f}[/bold red] / 1.00")
+        content.append(
+            f"[bold]Adversarial Severity Rating:[/bold] [bold red]{severity:.2f}[/bold red] / 1.00"
+        )
 
         if vectors:
             content.append("\n[bold yellow]⚡ Failure Vectors Simulated:[/bold yellow]")
             for vec in vectors:
                 content.append(f"  [yellow]•[/yellow] {vec}")
         else:
-            content.append("\n[dim]No significant failure vectors or edge-case gaps simulated.[/dim]")
+            content.append(
+                "\n[dim]No significant failure vectors or edge-case gaps simulated.[/dim]"
+            )
 
         self.console.print(
             Panel(
@@ -169,7 +177,7 @@ class CouncilDisplayView:
                 title="[bold]⚡ Challenger Adversarial Check[/bold]",
                 border_style=border_style,
                 box=ROUNDED,
-                expand=True
+                expand=True,
             )
         )
 
@@ -196,10 +204,16 @@ class CouncilDisplayView:
             conf_str = f"[bold yellow]{confidence * 100:.1f}% (Medium Confidence)[/bold yellow]"
             border_style = "yellow"
         else:
-            conf_str = f"[bold red]{confidence * 100:.1f}% (Low Confidence / High Volatility)[/bold red]"
+            conf_str = (
+                f"[bold red]{confidence * 100:.1f}% (Low Confidence / High Volatility)[/bold red]"
+            )
             border_style = "red"
 
-        status_text = "[bold red]YES (Blocked / Escalate)[/bold red]" if review_required else "[bold green]NO (Autonomous Pass)[/bold green]"
+        status_text = (
+            "[bold red]YES (Blocked / Escalate)[/bold red]"
+            if review_required
+            else "[bold green]NO (Autonomous Pass)[/bold green]"
+        )
 
         content = []
         content.append(f"[bold]Calibrated Council Confidence Score:[/bold] {conf_str}")
@@ -223,7 +237,7 @@ class CouncilDisplayView:
                 title="[bold white]⚖️ Council Arbitration Engine[/bold white]",
                 border_style=border_style,
                 box=ROUNDED,
-                expand=True
+                expand=True,
             )
         )
 
@@ -235,6 +249,6 @@ class CouncilDisplayView:
                 title="[bold magenta]🚀 Deliberated Walkthrough & Accomplishments[/bold magenta]",
                 border_style="magenta",
                 box=ROUNDED,
-                expand=True
+                expand=True,
             )
         )

@@ -30,6 +30,7 @@ class GraphRetriever:
             # Resolve the active RepositoryCognitionService from the kernel container
             try:
                 from velune.kernel.registry import get_container
+
                 repo_service = get_container().get("runtime.repository_cognition")
             except (KeyError, Exception):
                 return []
@@ -55,7 +56,9 @@ class GraphRetriever:
 
             file_map = {f.path: f for f in snapshot.files}
             symbol_by_id = {s.symbol_id: s for s in snapshot.symbols if s.symbol_id}
-            symbol_by_qualified = {s.qualified_name: s for s in snapshot.symbols if s.qualified_name}
+            symbol_by_qualified = {
+                s.qualified_name: s for s in snapshot.symbols if s.qualified_name
+            }
             symbol_by_name = {s.name: s for s in snapshot.symbols}
 
             rank = 1
@@ -71,9 +74,12 @@ class GraphRetriever:
                         "path": f.path,
                         "language": f.language.value,
                         "size_bytes": f.size_bytes,
-                        "sha256": f.sha256
+                        "sha256": f.sha256,
                     }
-                    content = f"File: {f.path}\nLanguage: {f.language.value}\nSymbols: " + ", ".join(sym.name for sym in f.symbols)
+                    content = (
+                        f"File: {f.path}\nLanguage: {f.language.value}\nSymbols: "
+                        + ", ".join(sym.name for sym in f.symbols)
+                    )
                 # Check if neighbor is a symbol (by symbol_id, qualified_name, or name)
                 elif n in symbol_by_id:
                     s = symbol_by_id[n]
@@ -89,7 +95,7 @@ class GraphRetriever:
                         "file_path": s.file_path,
                         "parent": s.parent or "",
                         "symbol_id": s.symbol_id or "",
-                        "qualified_name": s.qualified_name or ""
+                        "qualified_name": s.qualified_name or "",
                     }
                     content = f"Symbol: {s.name}\nKind: {s.kind.value}\nDefined in: {s.file_path}\nLine range: {s.line_start}-{s.line_end}"
                     if s.docstring:
@@ -100,14 +106,15 @@ class GraphRetriever:
                         id=f"graph-{n}",
                         content=content,
                         namespace="repository_graph",
-                        metadata=metadata
+                        metadata=metadata,
                     )
                     hits.append(
                         RetrievalHit(
                             document=doc,
-                            score=1.0 / (depth + 0.1),  # Closer connections get higher heuristic weightings
+                            score=1.0
+                            / (depth + 0.1),  # Closer connections get higher heuristic weightings
                             source=RetrievalSource.GRAPH,
-                            rank=rank
+                            rank=rank,
                         )
                     )
                     rank += 1

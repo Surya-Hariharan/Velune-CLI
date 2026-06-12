@@ -11,51 +11,51 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 PROVIDER_COSTS: dict[str, dict[str, float]] = {
     "anthropic": {
-        "claude-opus-4-5":    0.015,
-        "claude-sonnet-4-5":  0.003,
-        "claude-haiku-4-5":   0.00025,
+        "claude-opus-4-5": 0.015,
+        "claude-sonnet-4-5": 0.003,
+        "claude-haiku-4-5": 0.00025,
     },
     "openai": {
-        "gpt-4o":      0.005,
+        "gpt-4o": 0.005,
         "gpt-4o-mini": 0.00015,
-        "o1":          0.015,
-        "o1-mini":     0.003,
+        "o1": 0.015,
+        "o1-mini": 0.003,
     },
     "xai": {
-        "grok-2":      0.002,
+        "grok-2": 0.002,
         "grok-2-mini": 0.0002,
     },
     "google": {
-        "gemini-2.0-flash":              0.000075,
-        "gemini-1.5-pro":               0.00125,
-        "gemini-1.5-flash":             0.000075,
+        "gemini-2.0-flash": 0.000075,
+        "gemini-1.5-pro": 0.00125,
+        "gemini-1.5-flash": 0.000075,
         "gemini-2.0-flash-thinking-exp": 0.0,
     },
     "groq": {
         # All free tier
         "llama-3.3-70b-versatile": 0.0,
-        "llama-3.1-8b-instant":    0.0,
-        "mixtral-8x7b-32768":      0.0,
-        "gemma2-9b-it":            0.0,
+        "llama-3.1-8b-instant": 0.0,
+        "mixtral-8x7b-32768": 0.0,
+        "gemma2-9b-it": 0.0,
         "llama-3.2-11b-vision-preview": 0.0,
     },
     "together": {
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo":        0.00088,
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo": 0.00088,
         "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo": 0.00018,
-        "Qwen/Qwen2.5-Coder-32B-Instruct":                0.0008,
-        "deepseek-ai/DeepSeek-R1":                         0.003,
-        "mistralai/Mistral-7B-Instruct-v0.3":              0.0002,
+        "Qwen/Qwen2.5-Coder-32B-Instruct": 0.0008,
+        "deepseek-ai/DeepSeek-R1": 0.003,
+        "mistralai/Mistral-7B-Instruct-v0.3": 0.0002,
     },
     "fireworks": {
-        "accounts/fireworks/models/llama-v3p3-70b-instruct":    0.0009,
-        "accounts/fireworks/models/deepseek-r1":                0.003,
+        "accounts/fireworks/models/llama-v3p3-70b-instruct": 0.0009,
+        "accounts/fireworks/models/deepseek-r1": 0.003,
         "accounts/fireworks/models/qwen2p5-coder-32b-instruct": 0.0009,
-        "accounts/fireworks/models/mixtral-8x22b-instruct":     0.0009,
+        "accounts/fireworks/models/mixtral-8x22b-instruct": 0.0009,
     },
     "openrouter": {},  # Dynamic — set from model metadata
-    "ollama":     {},  # Always free (local)
-    "lmstudio":   {},  # Always free (local)
-    "llamacpp":   {},  # Always free (local)
+    "ollama": {},  # Always free (local)
+    "lmstudio": {},  # Always free (local)
+    "llamacpp": {},  # Always free (local)
 }
 
 

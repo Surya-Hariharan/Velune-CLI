@@ -42,6 +42,7 @@ class RepositoryCognitionService:
 
         try:
             from rich.console import Console
+
             console = Console(stderr=True)
         except Exception:
             console = None  # type: ignore[assignment]
@@ -65,9 +66,7 @@ class RepositoryCognitionService:
 
         n = delta.total
         _print(f"[dim]Indexing {n} changed file(s)...[/dim]")
-        self._bg_index_task = asyncio.create_task(
-            self._background_apply(inc, delta, n)
-        )
+        self._bg_index_task = asyncio.create_task(self._background_apply(inc, delta, n))
 
     async def shutdown(self) -> None:
         """Cancel any pending background indexing task."""
@@ -214,9 +213,8 @@ class RepositoryCognitionService:
         all_volatility = self.tracker.get_all_file_volatility(days=90)
         file_volatility: dict[str, int] = {}
         for f in snapshot.files:
-            file_volatility[f.path] = (
-                all_volatility.get(f.path, 0)
-                or all_volatility.get(f.path.replace("/", "\\"), 0)
+            file_volatility[f.path] = all_volatility.get(f.path, 0) or all_volatility.get(
+                f.path.replace("/", "\\"), 0
             )
 
         # Architecture analysis (pure Python)
@@ -235,25 +233,27 @@ class RepositoryCognitionService:
                     pass
         frameworks = self.analyzer.detect_framework_footprint(code_files)
 
-        snapshot.summary.update({
-            "git": {
-                "active_branch": branch,
-                "uncommitted_changes_count": len(changes),
-                "uncommitted_changes": changes[:10],
-                "recent_commits": recent_commits,
-            },
-            "architecture": {
-                "layers": {k: len(v) for k, v in layers.items()},
-                "violations_count": len(violations),
-                "violations": violations[:5],
-                "frameworks_detected": frameworks,
-            },
-            "metrics": {
-                "high_volatility_files": sorted(
-                    file_volatility.items(), key=lambda x: x[1], reverse=True
-                )[:5],
-            },
-        })
+        snapshot.summary.update(
+            {
+                "git": {
+                    "active_branch": branch,
+                    "uncommitted_changes_count": len(changes),
+                    "uncommitted_changes": changes[:10],
+                    "recent_commits": recent_commits,
+                },
+                "architecture": {
+                    "layers": {k: len(v) for k, v in layers.items()},
+                    "violations_count": len(violations),
+                    "violations": violations[:5],
+                    "frameworks_detected": frameworks,
+                },
+                "metrics": {
+                    "high_volatility_files": sorted(
+                        file_volatility.items(), key=lambda x: x[1], reverse=True
+                    )[:5],
+                },
+            }
+        )
 
         return snapshot
 
@@ -264,18 +264,14 @@ class RepositoryCognitionService:
         state = IndexState.load(self._state_path)
         return state.last_commit_sha if state else None
 
-    def _persist_index_state(
-        self, inc: object, snapshot: RepositorySnapshot
-    ) -> None:
+    def _persist_index_state(self, inc: object, snapshot: RepositorySnapshot) -> None:
         """Update IndexState on disk after a full index run."""
         from velune.repository.index_state import IndexedFile, IndexState
         import time
 
         try:
             git_sha = inc._get_git_sha()  # type: ignore[attr-defined]
-            state = IndexState.load(self._state_path) or IndexState.empty(
-                str(self.root_path)
-            )
+            state = IndexState.load(self._state_path) or IndexState.empty(str(self.root_path))
             now = time.time()
             state.file_index = {
                 f.path: IndexedFile(
@@ -302,6 +298,7 @@ class RepositoryCognitionService:
         """Apply a delta in the background and announce completion."""
         try:
             from rich.console import Console
+
             console = Console(stderr=True)
         except Exception:
             console = None  # type: ignore[assignment]

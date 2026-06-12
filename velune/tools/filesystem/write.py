@@ -40,6 +40,7 @@ class WriteFile(BaseTool):
         auto_accept: bool = False,
     ) -> str:
         from velune.execution.diff_preview import DiffDecision, DiffPreview
+
         preview = DiffPreview(self.console)
         decision = await preview.preview_and_confirm(path, content, auto_accept=auto_accept)
         if decision == DiffDecision.ACCEPT:
@@ -89,6 +90,7 @@ class CreateFile(BaseTool):
         validate_workspace_path(path, self.workspace, label="CreateFile")
 
         from velune.execution.diff_preview import DiffDecision, DiffPreview
+
         preview = DiffPreview(self.console)
         # Treat create-empty as a write of empty content so the diff shows "NEW FILE"
         decision = await preview.preview_and_confirm(path, "", auto_accept=False)
@@ -137,6 +139,7 @@ class DeleteFile(BaseTool):
             raise FileNotFoundError(f"File not found: {file_path}")
 
         from velune.execution.diff_preview import DiffDecision, DiffPreview
+
         # proposed="" marks this as a deletion in FileDiff
         preview = DiffPreview(self.console)
         decision = await preview.preview_and_confirm(path, "", auto_accept=False)

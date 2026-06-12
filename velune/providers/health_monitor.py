@@ -21,7 +21,9 @@ class ProviderHealthMonitor:
         self._registry = registry
         self._manifests: dict[str, CapabilityManifest] = {}
         self._latency_windows: dict[str, deque[int]] = defaultdict(lambda: deque(maxlen=5))
-        self._health_history: dict[str, deque[ProviderHealth]] = defaultdict(lambda: deque(maxlen=3))
+        self._health_history: dict[str, deque[ProviderHealth]] = defaultdict(
+            lambda: deque(maxlen=3)
+        )
         self._polling_task: asyncio.Task | None = None
         self._poll_interval = 30.0  # seconds
         self._health_check_timeout = 2.0  # seconds
@@ -60,15 +62,27 @@ class ProviderHealthMonitor:
         """Record a call latency for rolling average calculation."""
         self._latency_windows[provider_id].append(latency_ms)
         if manifest := self._manifests.get(provider_id):
-            avg_latency = int(sum(self._latency_windows[provider_id]) / len(self._latency_windows[provider_id]))
+            avg_latency = int(
+                sum(self._latency_windows[provider_id]) / len(self._latency_windows[provider_id])
+            )
             manifest.estimated_latency_ms = avg_latency
 
     async def _polling_loop(self) -> None:
         """Background task that polls all providers every 30 seconds."""
         # Standard provider IDs that may be registered
         standard_providers = [
-            "ollama", "openai", "anthropic", "google", "groq", "xai",
-            "openrouter", "together", "fireworks", "huggingface", "lmstudio", "llamacpp"
+            "ollama",
+            "openai",
+            "anthropic",
+            "google",
+            "groq",
+            "xai",
+            "openrouter",
+            "together",
+            "fireworks",
+            "huggingface",
+            "lmstudio",
+            "llamacpp",
         ]
 
         while self._running:
@@ -100,8 +114,7 @@ class ProviderHealthMonitor:
         try:
             # Call health_check with timeout
             health = await asyncio.wait_for(
-                provider.health_check(),
-                timeout=self._health_check_timeout
+                provider.health_check(), timeout=self._health_check_timeout
             )
         except asyncio.TimeoutError:
             health = ProviderHealth.DEGRADED
@@ -113,8 +126,7 @@ class ProviderHealthMonitor:
         try:
             # Get list of available models
             available_models = await asyncio.wait_for(
-                provider.list_models(),
-                timeout=self._health_check_timeout
+                provider.list_models(), timeout=self._health_check_timeout
             )
         except (asyncio.TimeoutError, Exception):
             available_models = []
@@ -132,8 +144,11 @@ class ProviderHealthMonitor:
             available_models=available_models,
             rate_limit_remaining=None,  # Would be populated from response headers
             rate_limit_reset_at=None,
-            estimated_latency_ms=int(sum(self._latency_windows[provider_id]) / len(self._latency_windows[provider_id]))
-                                 if self._latency_windows[provider_id] else 0,
+            estimated_latency_ms=int(
+                sum(self._latency_windows[provider_id]) / len(self._latency_windows[provider_id])
+            )
+            if self._latency_windows[provider_id]
+            else 0,
             supports_streaming=capabilities.supports_streaming,
             supports_tools=capabilities.supports_function_calling,
             is_online=True,  # Connected check would be done here

@@ -102,7 +102,8 @@ class OllamaProvider(ModelProvider):
             if latency > 30000.0:
                 logger.warning(
                     "Slow inference on %s (%.1fs). Consider a smaller model for your hardware.",
-                    request.model_id, latency / 1000.0
+                    request.model_id,
+                    latency / 1000.0,
                 )
 
             return InferenceResponse(
@@ -157,7 +158,9 @@ class OllamaProvider(ModelProvider):
         embeddings: list[list[float]] = []
         try:
             for text in texts:
-                resp = await self.client.post("/api/embeddings", json={"model": model_id, "prompt": text})
+                resp = await self.client.post(
+                    "/api/embeddings", json={"model": model_id, "prompt": text}
+                )
                 resp.raise_for_status()
                 embeddings.append(resp.json()["embedding"])
             return embeddings

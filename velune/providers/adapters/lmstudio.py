@@ -144,7 +144,9 @@ class LMStudioProvider(ModelProvider):
         await self.initialize()
         assert self.client is not None
         try:
-            response = await self.client.post("/embeddings", json={"model": model_id, "input": texts})
+            response = await self.client.post(
+                "/embeddings", json={"model": model_id, "input": texts}
+            )
             response.raise_for_status()
             data = response.json()
             sorted_data = sorted(data["data"], key=lambda x: x["index"])

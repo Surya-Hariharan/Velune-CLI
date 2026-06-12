@@ -139,10 +139,8 @@ class ContextAssembler:
             total_tokens_assembled=final_token_count,
             sections_present=list(assembled_sections.keys()),
             sections_trimmed=sections_trimmed,
-            chunks_dropped=len(chunks) - sum(
-                len(assembled_sections.get(s, []))
-                for s in ContextSection
-            ),
+            chunks_dropped=len(chunks)
+            - sum(len(assembled_sections.get(s, [])) for s in ContextSection),
             budget_exceeded=budget_exceeded,
         )
 
@@ -203,9 +201,7 @@ class ContextAssembler:
         )
         return kept_chunks, tokens_trimmed
 
-    def _trim_repository_snapshot(
-        self, chunks: list[ContextChunk]
-    ) -> list[ContextChunk]:
+    def _trim_repository_snapshot(self, chunks: list[ContextChunk]) -> list[ContextChunk]:
         """Reduce REPOSITORY_SNAPSHOT to architecture summary if over 2000 tokens.
 
         Currently returns chunks as-is. Future enhancement: extract and preserve
@@ -219,9 +215,7 @@ class ContextAssembler:
             )
         return chunks
 
-    def _render_section(
-        self, section: ContextSection, chunks: list[ContextChunk]
-    ) -> str:
+    def _render_section(self, section: ContextSection, chunks: list[ContextChunk]) -> str:
         """Render a section with header, content, and footer."""
         section_name = section.name
         section_number = section.value
@@ -232,9 +226,7 @@ class ContextAssembler:
 
         return f"{header}\n{content}\n{footer}"
 
-    def _render_assembled_context(
-        self, sections: dict[ContextSection, str]
-    ) -> str:
+    def _render_assembled_context(self, sections: dict[ContextSection, str]) -> str:
         """Render all sections in canonical order with separators."""
         rendered = []
         for section in sorted(ContextSection):

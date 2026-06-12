@@ -60,12 +60,14 @@ class CouncilOrchestrator:
             self.lineage_memory: LineageMemoryTier | None = lineage_memory
         elif pool is not None:
             from velune.memory.tiers.lineage import LineageMemoryTier as _LineageMemoryTier
+
             self.lineage_memory = _LineageMemoryTier(pool)
         else:
             self.lineage_memory = None
         self.analytics = analytics or CognitivePerformanceAnalytics(sqlite_manager=sqlite_manager)
 
         from velune.cognition.firewall import CognitiveFirewall
+
         self.firewall = CognitiveFirewall()
 
         self.max_wall_time_seconds = float(
@@ -76,9 +78,7 @@ class CouncilOrchestrator:
 
         # Extracted Subsystems
         self.agent_factory = CouncilAgentFactory(
-            provider_registry=self.provider_registry,
-            mapper=self.mapper,
-            live_lock=self._live_lock
+            provider_registry=self.provider_registry, mapper=self.mapper, live_lock=self._live_lock
         )
         self.style_resolver = StyleResolver(lineage_memory=self.lineage_memory)
 
@@ -86,6 +86,7 @@ class CouncilOrchestrator:
         task_registry = None
         try:
             from velune.kernel.registry import get_container
+
             container = get_container()
             if container.has("runtime.task_registry"):
                 task_registry = container.get("runtime.task_registry")
@@ -98,10 +99,9 @@ class CouncilOrchestrator:
             max_tier = config.cognition.max_council_tier
             default_override = config.cognition.default_tier_override
 
-        low_resource_mode = (
-            (config and config.execution.low_resource_mode) or
-            os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
-        )
+        low_resource_mode = (config and config.execution.low_resource_mode) or os.environ.get(
+            "VELUNE_LOW_RESOURCE", ""
+        ).lower() in ("true", "1", "yes")
 
         self.tier_classifier = TierClassifier(
             task_registry=task_registry,
@@ -143,6 +143,7 @@ class CouncilOrchestrator:
         repo_context = "Repository context summary."
         try:
             from velune.kernel.registry import get_container
+
             container = get_container()
             if container.has("runtime.repository_cognition"):
                 repository_cognition = container.get("runtime.repository_cognition")
@@ -158,19 +159,21 @@ class CouncilOrchestrator:
                     scan_res = self.firewall.scan_file_for_injection("repo_context", repo_context)
                     if scan_res.get("quarantined"):
                         repo_context = scan_res.get("neutralized_content", "")
-                        logger.warning("Repository context neutralized by firewall before prompt injection.")
+                        logger.warning(
+                            "Repository context neutralized by firewall before prompt injection."
+                        )
                     # Always wrap in untrusted-content boundary markers so agents treat
                     # this as data, even when the content passed the injection scan.
-                    repo_context = self.firewall.wrap_workspace_content("repository_context", repo_context)
+                    repo_context = self.firewall.wrap_workspace_content(
+                        "repository_context", repo_context
+                    )
         except Exception as e:
             logger.warning("Could not gather repository snapshot: %s", e)
 
         async def run_execution():
             try:
                 result = await self.execute_task(
-                    prompt=prompt,
-                    repo_context=repo_context,
-                    progress_callback=progress_callback
+                    prompt=prompt, repo_context=repo_context, progress_callback=progress_callback
                 )
                 final_summary = result.get("final_summary", "Execution completed successfully.")
                 status = ExecutionStatus.COMPLETED
@@ -230,7 +233,6 @@ class CouncilOrchestrator:
                 except asyncio.CancelledError:
                     pass
 
-
     async def _get_or_refresh_style_profile(self, target_file: str) -> dict[str, Any] | None:
         """Queries the style profile from database, or scans and caches it if missing/stale."""
         return await self.style_resolver.get_or_refresh_style_profile(target_file)
@@ -246,6 +248,7 @@ class CouncilOrchestrator:
         # 1. Integrate target-file structural awareness and fan-in signal
         try:
             from velune.kernel.registry import get_container
+
             container = get_container()
             if container.has("runtime.repository_cognition"):
                 repo_service = container.get("runtime.repository_cognition")
@@ -268,9 +271,26 @@ class CouncilOrchestrator:
 
         # 2. Structural indicators
         structural_keywords = [
-            "redesign", "architect", "concurrency", "thread", "async", "lock", "database",
-            "class", "interface", "refactor", "performance", "scalability", "security",
-            "cohesion", "module", "coupling", "sandbox", "boundary", "lcom", "critic"
+            "redesign",
+            "architect",
+            "concurrency",
+            "thread",
+            "async",
+            "lock",
+            "database",
+            "class",
+            "interface",
+            "refactor",
+            "performance",
+            "scalability",
+            "security",
+            "cohesion",
+            "module",
+            "coupling",
+            "sandbox",
+            "boundary",
+            "lcom",
+            "critic",
         ]
 
         for kw in structural_keywords:
@@ -278,7 +298,15 @@ class CouncilOrchestrator:
                 return True
 
         # 3. Simple indicators
-        simple_keywords = ["typo", "comment", "format", "rename variable", "ui text", "alignment", "simple tweak"]
+        simple_keywords = [
+            "typo",
+            "comment",
+            "format",
+            "rename variable",
+            "ui text",
+            "alignment",
+            "simple tweak",
+        ]
         for kw in simple_keywords:
             if kw in prompt_lower:
                 return False
@@ -304,6 +332,7 @@ class CouncilOrchestrator:
 
         try:
             from velune.kernel.registry import get_container
+
             container = get_container()
             if not container.has("runtime.repository_cognition"):
                 return default_score
@@ -348,7 +377,9 @@ class CouncilOrchestrator:
         coder_model = roles.get(CouncilRole.CODER)
         estimated_tps = 8.0  # conservative default
         if coder_model:
-            profile = self.mapper.profiler.get_profile(coder_model.provider_id, coder_model.model_id)
+            profile = self.mapper.profiler.get_profile(
+                coder_model.provider_id, coder_model.model_id
+            )
             if profile and profile.tps > 0.0:
                 estimated_tps = profile.tps
 
@@ -372,7 +403,9 @@ class CouncilOrchestrator:
     ) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt with wall-time limit."""
         await self._maybe_gate_cost(prompt, repo_context)
-        budget = budget or CouncilExecutionBudget(max_wall_time_seconds=int(self.max_wall_time_seconds))
+        budget = budget or CouncilExecutionBudget(
+            max_wall_time_seconds=int(self.max_wall_time_seconds)
+        )
         tier = self._resolve_tier(prompt, repo_context, council_tier)
         tier_str = tier.value
 
@@ -389,8 +422,7 @@ class CouncilOrchestrator:
             )
         except TimeoutError:
             logger.error(
-                "Council wall-time limit reached (%ds). "
-                "Returning partial result.",
+                "Council wall-time limit reached (%ds). Returning partial result.",
                 budget.max_wall_time_seconds,
             )
             return self._build_timeout_result(prompt, tier_str)
@@ -414,6 +446,7 @@ class CouncilOrchestrator:
             registry: ProviderRegistry | None = None
             try:
                 from velune.kernel.registry import get_container
+
                 container = get_container()
                 if container.has("runtime.provider_registry"):
                     registry = container.get("runtime.provider_registry")
@@ -469,11 +502,16 @@ class CouncilOrchestrator:
 
     def _build_timeout_result(self, prompt: str, tier: str = "full") -> dict[str, Any]:
         from velune.cognition.council.messages import ReviewerMessage
+
         return {
             "tier": tier,
             "task_plan": None,
             "coder_proposal": None,
-            "reviewer_report": ReviewerMessage(passed=False, critical_issues=["Council execution timed out."], confidence_rating=0.0),
+            "reviewer_report": ReviewerMessage(
+                passed=False,
+                critical_issues=["Council execution timed out."],
+                confidence_rating=0.0,
+            ),
             "challenger_report": None,
             "scalability_report": None,
             "security_report": None,
@@ -525,16 +563,26 @@ class CouncilOrchestrator:
         budget = budget or CouncilExecutionBudget()
 
         with TraceContext(run_id=run_id):
-            logger.info("Reasoning Council starting execution in %s tier for goal: %s", tier.value.upper(), prompt[:50])
+            logger.info(
+                "Reasoning Council starting execution in %s tier for goal: %s",
+                tier.value.upper(),
+                prompt[:50],
+            )
 
             start_time = time.time()
 
             # Security scan for Instant tier (or all tiers, kept for parity with old _execute_instant)
             if tier_level == 1:
                 firewall = CognitiveFirewall()
-                if not firewall.scan_file_for_injection("workspace_context", repo_context)["is_safe"]:
-                    logger.error("Security: prompt injection detected in workspace context during Instant execution")
-                    raise ValueError("Security: Potential prompt injection detected in workspace context")
+                if not firewall.scan_file_for_injection("workspace_context", repo_context)[
+                    "is_safe"
+                ]:
+                    logger.error(
+                        "Security: prompt injection detected in workspace context during Instant execution"
+                    )
+                    raise ValueError(
+                        "Security: Potential prompt injection detected in workspace context"
+                    )
 
             target_file = self._extract_target_file(prompt)
             style_profile = await self._get_or_refresh_style_profile(target_file)
@@ -546,18 +594,32 @@ class CouncilOrchestrator:
             synthesizer = self.agent_factory.create_synthesizer(run_id) if tier_level >= 3 else None
 
             challenger = self.agent_factory.create_challenger(run_id) if tier_level == 4 else None
-            scalability_critic = self.agent_factory.create_scalability_critic(run_id) if tier_level == 4 else None
-            security_critic = self.agent_factory.create_security_critic(run_id) if tier_level == 4 else None
-            performance_critic = self.agent_factory.create_performance_critic(run_id) if tier_level == 4 else None
-            maintainability_critic = self.agent_factory.create_maintainability_critic(run_id) if tier_level == 4 else None
+            scalability_critic = (
+                self.agent_factory.create_scalability_critic(run_id) if tier_level == 4 else None
+            )
+            security_critic = (
+                self.agent_factory.create_security_critic(run_id) if tier_level == 4 else None
+            )
+            performance_critic = (
+                self.agent_factory.create_performance_critic(run_id) if tier_level == 4 else None
+            )
+            maintainability_critic = (
+                self.agent_factory.create_maintainability_critic(run_id)
+                if tier_level == 4
+                else None
+            )
 
             # Enriched Context for Full Tier
             enriched_repo_context = repo_context
             shi = None
             if tier_level == 4:
                 architectural_context = ""
-                if self._is_structural_change(prompt, repo_context) and ("class " in repo_context or "def " in repo_context):
-                    audit_res = self.architecture_agent.audit_architecture(target_file, repo_context)
+                if self._is_structural_change(prompt, repo_context) and (
+                    "class " in repo_context or "def " in repo_context
+                ):
+                    audit_res = self.architecture_agent.audit_architecture(
+                        target_file, repo_context
+                    )
                     shi = audit_res.get("shi")
                     debt_items = self.architecture_agent.ledger.get_items()
                     if debt_items:
@@ -565,15 +627,23 @@ class CouncilOrchestrator:
                         for item in debt_items:
                             architectural_context += f"- [{item['category'].upper()}] in '{item['file_path']}': {item['description']} (Severity: {item['severity']})\n"
                         architectural_context += "Please ensure the proposed code fixes or avoids increasing this technical debt.\n"
-                        layering_violations = [item for item in debt_items if item["category"] == "layering"]
+                        layering_violations = [
+                            item for item in debt_items if item["category"] == "layering"
+                        ]
                         if layering_violations:
-                            architectural_context += "\n==================================================\n"
-                            architectural_context += "!!! ARCHITECTURE DRIFT ALARM (ADA) ACTIVE BLOCK !!!\n"
+                            architectural_context += (
+                                "\n==================================================\n"
+                            )
+                            architectural_context += (
+                                "!!! ARCHITECTURE DRIFT ALARM (ADA) ACTIVE BLOCK !!!\n"
+                            )
                             architectural_context += "The following layering boundary violations MUST BE RESOLVED IMMEDIATELY:\n"
                             for item in layering_violations:
                                 architectural_context += f"- BLOCKING DRIFT: {item['description']} (File: {item['file_path']})\n"
                             architectural_context += "You MUST plan to fix these import boundary violations in this execution pass.\n"
-                            architectural_context += "==================================================\n\n"
+                            architectural_context += (
+                                "==================================================\n\n"
+                            )
 
                 decisions, failures = (
                     await self.lineage_memory.query_continuity_warnings(prompt, repo_context)
@@ -596,11 +666,17 @@ class CouncilOrchestrator:
                         for fail in failures:
                             continuity_context += f"- Failed Experiment {fail['id']} in Subsystem: {fail['target_subsystem']}\n"
                             continuity_context += f"  Approach / Patch:\n{fail['patch']}\n"
-                            continuity_context += f"  Failure Error ({fail['error_type']}): {fail['error_message']}\n"
+                            continuity_context += (
+                                f"  Failure Error ({fail['error_type']}): {fail['error_message']}\n"
+                            )
 
                 firewall = CognitiveFirewall()
-                architectural_context = firewall.wrap_workspace_content("architectural_debt_ledger", architectural_context)
-                continuity_context = firewall.wrap_workspace_content("continuity_warnings", continuity_context)
+                architectural_context = firewall.wrap_workspace_content(
+                    "architectural_debt_ledger", architectural_context
+                )
+                continuity_context = firewall.wrap_workspace_content(
+                    "continuity_warnings", continuity_context
+                )
                 enriched_repo_context = repo_context + architectural_context + continuity_context
 
             # 1. Planner Phase
@@ -608,7 +684,8 @@ class CouncilOrchestrator:
             plan_desc = "Direct implementation (Instant path chosen)."
             if planner:
                 logger.info("Council Phase: Planner")
-                if progress_callback: progress_callback("[Planner] Decomposing task...")
+                if progress_callback:
+                    progress_callback("[Planner] Decomposing task...")
                 try:
                     task_plan = await asyncio.wait_for(
                         planner.generate_plan(prompt, enriched_repo_context),
@@ -619,12 +696,14 @@ class CouncilOrchestrator:
                     task_plan = None
                 plan_desc = (
                     "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
-                    if task_plan else "Direct implementation (Planner timed out)."
+                    if task_plan
+                    else "Direct implementation (Planner timed out)."
                 )
 
             # 2. Coder Phase
             logger.info("Council Phase: Coder")
-            if progress_callback: progress_callback("[Coder] Designing code implementation...")
+            if progress_callback:
+                progress_callback("[Coder] Designing code implementation...")
             try:
                 coder_proposal = await asyncio.wait_for(
                     coder.write_code(
@@ -643,13 +722,17 @@ class CouncilOrchestrator:
             if tier_level < 3:
                 arbitration_dict = {"overall_confidence": 0.85, "requires_human_review": False}
                 if tier_level == 2 and task_plan:
-                    if progress_callback: progress_callback("[Arbitration] Arbitrating proposal...")
+                    if progress_callback:
+                        progress_callback("[Arbitration] Arbitrating proposal...")
                     arbitration = self.arbitrator.arbitrate(
                         plan_steps=[s.description for s in task_plan.steps],
                         coder_proposal=coder_proposal,
-                        reviewer_report=None, challenger_report=None,
-                        scalability_report=None, security_report=None,
-                        performance_report=None, maintainability_report=None
+                        reviewer_report=None,
+                        challenger_report=None,
+                        scalability_report=None,
+                        security_report=None,
+                        performance_report=None,
+                        maintainability_report=None,
                     )
                     arbitration_dict = arbitration.to_dict()
 
@@ -657,9 +740,7 @@ class CouncilOrchestrator:
                 _est_completion = len(coder_proposal.encode()) // 4
                 _est_total = _est_prompt + _est_completion
                 if progress_callback:
-                    progress_callback(
-                        f"[Usage] ~{_est_total:,} tokens across 1 agent (estimated)"
-                    )
+                    progress_callback(f"[Usage] ~{_est_total:,} tokens across 1 agent (estimated)")
 
                 logger.info("Executed %s tier in %.2fs", tier.value, time.time() - start_time)
                 return {
@@ -674,10 +755,15 @@ class CouncilOrchestrator:
 
             # 3. Review / Critique Phase
             logger.info("Council Phase: Reviewer/Critics")
-            if progress_callback: progress_callback("[Reviewer] Running review and critique...")
+            if progress_callback:
+                progress_callback("[Reviewer] Running review and critique...")
 
-            reviewer_report = ReviewerMessage(passed=True, confidence_rating=0.5, critical_issues=[])
-            challenger_report = ChallengerMessage(assumptions_challenged=[], failure_vectors=[], severity_rating=0.0)
+            reviewer_report = ReviewerMessage(
+                passed=True, confidence_rating=0.5, critical_issues=[]
+            )
+            challenger_report = ChallengerMessage(
+                assumptions_challenged=[], failure_vectors=[], severity_rating=0.0
+            )
             scalability_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
             security_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
             performance_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
@@ -685,13 +771,25 @@ class CouncilOrchestrator:
 
             tasks = [reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)]
             if tier_level == 4:
-                tasks.extend([
-                    challenger.challenge(task=prompt, proposal=coder_proposal, context=repo_context),
-                    scalability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context),
-                    security_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context),
-                    performance_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context),
-                    maintainability_critic.critique(task=prompt, proposal=coder_proposal, context=repo_context)
-                ])
+                tasks.extend(
+                    [
+                        challenger.challenge(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
+                        scalability_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
+                        security_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
+                        performance_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
+                        maintainability_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
+                    ]
+                )
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -702,25 +800,37 @@ class CouncilOrchestrator:
                 reviewer_report.critical_issues = ["Reviewer unavailable"]
 
             if tier_level == 4:
-                if not isinstance(results[1], Exception): challenger_report = results[1]
-                if not isinstance(results[2], Exception): scalability_report = results[2]
-                if not isinstance(results[3], Exception): security_report = results[3]
-                if not isinstance(results[4], Exception): performance_report = results[4]
-                if not isinstance(results[5], Exception): maintainability_report = results[5]
+                if not isinstance(results[1], Exception):
+                    challenger_report = results[1]
+                if not isinstance(results[2], Exception):
+                    scalability_report = results[2]
+                if not isinstance(results[3], Exception):
+                    security_report = results[3]
+                if not isinstance(results[4], Exception):
+                    performance_report = results[4]
+                if not isinstance(results[5], Exception):
+                    maintainability_report = results[5]
 
             # 4. Debate Phase
             objections = []
-            if not reviewer_report.passed: objections.append(f"Reviewer: {reviewer_report.critical_issues}")
-            if not scalability_report.passed: objections.append(f"Scalability Critic: {scalability_report.issues}")
-            if not security_report.passed: objections.append(f"Security Critic: {security_report.issues}")
-            if not performance_report.passed: objections.append(f"Performance Critic: {performance_report.issues}")
-            if not maintainability_report.passed: objections.append(f"Maintainability Critic: {maintainability_report.issues}")
-            if challenger_report.severity_rating > 0.6: objections.append(f"Challenger (Severity: {challenger_report.severity_rating}): {challenger_report.failure_vectors}")
+            if not reviewer_report.passed:
+                objections.append(f"Reviewer: {reviewer_report.critical_issues}")
+            if not scalability_report.passed:
+                objections.append(f"Scalability Critic: {scalability_report.issues}")
+            if not security_report.passed:
+                objections.append(f"Security Critic: {security_report.issues}")
+            if not performance_report.passed:
+                objections.append(f"Performance Critic: {performance_report.issues}")
+            if not maintainability_report.passed:
+                objections.append(f"Maintainability Critic: {maintainability_report.issues}")
+            if challenger_report.severity_rating > 0.6:
+                objections.append(
+                    f"Challenger (Severity: {challenger_report.severity_rating}): {challenger_report.failure_vectors}"
+                )
 
             low_resource = (
-                (self.config and self.config.execution.low_resource_mode) or
-                os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
-            )
+                self.config and self.config.execution.low_resource_mode
+            ) or os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
 
             max_debate_turns = 0
             if tier_level == 3 and objections and not low_resource:
@@ -740,7 +850,7 @@ class CouncilOrchestrator:
 
             refined_proposal = coder_proposal
             initial_objection_count = len(objections)
-            converged = (initial_objection_count == 0)
+            converged = initial_objection_count == 0
             turns_required = 0
             debate_start_time = time.time()
 
@@ -748,7 +858,17 @@ class CouncilOrchestrator:
                 logger.info("[COUNCIL - DEBATE] Objections detected. Initiating Debate Loop...")
 
                 async def _run_debate_loop() -> None:
-                    nonlocal coder_proposal, refined_proposal, reviewer_report, scalability_report, security_report, performance_report, maintainability_report, objections, converged, turns_required
+                    nonlocal \
+                        coder_proposal, \
+                        refined_proposal, \
+                        reviewer_report, \
+                        scalability_report, \
+                        security_report, \
+                        performance_report, \
+                        maintainability_report, \
+                        objections, \
+                        converged, \
+                        turns_required
 
                     debate_turn = 1
                     refined_proposal = coder_proposal
@@ -758,12 +878,18 @@ class CouncilOrchestrator:
                         if elapsed >= budget.max_wall_time_seconds:
                             logger.warning(
                                 "[COUNCIL - DEBATE] Wall-time budget exhausted (%.1fs >= %ds); stopping debate.",
-                                elapsed, budget.max_wall_time_seconds,
+                                elapsed,
+                                budget.max_wall_time_seconds,
                             )
                             break
 
-                        logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
-                        if progress_callback: progress_callback(f"[Debate] Running debate turn {debate_turn}...")
+                        logger.info(
+                            "[COUNCIL - DEBATE] Debate Loop Turn %d/%d",
+                            debate_turn,
+                            max_debate_turns,
+                        )
+                        if progress_callback:
+                            progress_callback(f"[Debate] Running debate turn {debate_turn}...")
                         turns_required = debate_turn
 
                         objections_text = "\n".join([f"- {obj}" for obj in objections])
@@ -786,7 +912,8 @@ class CouncilOrchestrator:
                         except TimeoutError:
                             logger.error(
                                 "[COUNCIL - DEBATE] Coder timed out on turn %d after %ds; stopping debate.",
-                                debate_turn, budget.coder_timeout_seconds,
+                                debate_turn,
+                                budget.coder_timeout_seconds,
                             )
                             break
 
@@ -794,20 +921,40 @@ class CouncilOrchestrator:
                         re_critics = []
 
                         if not reviewer_report.passed:
-                            re_tasks.append(reviewer.review(task=prompt, proposal=refined_proposal, context=repo_context))
+                            re_tasks.append(
+                                reviewer.review(
+                                    task=prompt, proposal=refined_proposal, context=repo_context
+                                )
+                            )
                             re_critics.append("reviewer")
                         if tier_level == 4:
                             if not scalability_report.passed:
-                                re_tasks.append(scalability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_tasks.append(
+                                    scalability_critic.critique(
+                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                    )
+                                )
                                 re_critics.append("scalability")
                             if not security_report.passed:
-                                re_tasks.append(security_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_tasks.append(
+                                    security_critic.critique(
+                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                    )
+                                )
                                 re_critics.append("security")
                             if not performance_report.passed:
-                                re_tasks.append(performance_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_tasks.append(
+                                    performance_critic.critique(
+                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                    )
+                                )
                                 re_critics.append("performance")
                             if not maintainability_report.passed:
-                                re_tasks.append(maintainability_critic.critique(task=prompt, proposal=refined_proposal, context=repo_context))
+                                re_tasks.append(
+                                    maintainability_critic.critique(
+                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                    )
+                                )
                                 re_critics.append("maintainability")
 
                         if re_tasks:
@@ -816,21 +963,41 @@ class CouncilOrchestrator:
                             for name, res in zip(re_critics, raw_re_results):
                                 if isinstance(res, Exception):
                                     if name == "reviewer":
-                                        res = ReviewerMessage(passed=True, confidence_rating=0.5, critical_issues=["Reviewer unavailable during refinement"])
+                                        res = ReviewerMessage(
+                                            passed=True,
+                                            confidence_rating=0.5,
+                                            critical_issues=[
+                                                "Reviewer unavailable during refinement"
+                                            ],
+                                        )
                                     else:
-                                        res = CriticMessage(passed=True, issues=[f"{name} unavailable during refinement"], score=0.9, rationale="")
+                                        res = CriticMessage(
+                                            passed=True,
+                                            issues=[f"{name} unavailable during refinement"],
+                                            score=0.9,
+                                            rationale="",
+                                        )
                                 re_results.append(res)
 
                             for name, res in zip(re_critics, re_results):
-                                if name == "reviewer": reviewer_report = res
-                                elif name == "scalability": scalability_report = res
-                                elif name == "security": security_report = res
-                                elif name == "performance": performance_report = res
-                                elif name == "maintainability": maintainability_report = res
+                                if name == "reviewer":
+                                    reviewer_report = res
+                                elif name == "scalability":
+                                    scalability_report = res
+                                elif name == "security":
+                                    security_report = res
+                                elif name == "performance":
+                                    performance_report = res
+                                elif name == "maintainability":
+                                    maintainability_report = res
 
                             all_passed_with_high_score = True
                             for name, res in zip(re_critics, re_results):
-                                score = res.confidence_rating if name == "reviewer" else getattr(res, "score", 1.0)
+                                score = (
+                                    res.confidence_rating
+                                    if name == "reviewer"
+                                    else getattr(res, "score", 1.0)
+                                )
                                 if not res.passed or score <= 0.8:
                                     all_passed_with_high_score = False
                                     break
@@ -844,11 +1011,18 @@ class CouncilOrchestrator:
                             new_objections = []
                             for name, res in zip(re_critics, re_results):
                                 if not res.passed:
-                                    if name == "reviewer": new_objections.append(f"Reviewer: {res.critical_issues}")
-                                    elif name == "scalability": new_objections.append(f"Scalability Critic: {res.issues}")
-                                    elif name == "security": new_objections.append(f"Security Critic: {res.issues}")
-                                    elif name == "performance": new_objections.append(f"Performance Critic: {res.issues}")
-                                    elif name == "maintainability": new_objections.append(f"Maintainability Critic: {res.issues}")
+                                    if name == "reviewer":
+                                        new_objections.append(f"Reviewer: {res.critical_issues}")
+                                    elif name == "scalability":
+                                        new_objections.append(f"Scalability Critic: {res.issues}")
+                                    elif name == "security":
+                                        new_objections.append(f"Security Critic: {res.issues}")
+                                    elif name == "performance":
+                                        new_objections.append(f"Performance Critic: {res.issues}")
+                                    elif name == "maintainability":
+                                        new_objections.append(
+                                            f"Maintainability Critic: {res.issues}"
+                                        )
                             objections = new_objections
                         else:
                             objections = []
@@ -883,7 +1057,8 @@ class CouncilOrchestrator:
 
             # 5. Arbitration Phase
             logger.info("Council Phase: Arbitration")
-            if progress_callback: progress_callback("[Arbitration] Arbitrating proposal...")
+            if progress_callback:
+                progress_callback("[Arbitration] Arbitrating proposal...")
             arbitration = self.arbitrator.arbitrate(
                 plan_steps=[s.description for s in task_plan.steps],
                 coder_proposal=coder_proposal,
@@ -898,17 +1073,20 @@ class CouncilOrchestrator:
 
             # 6. Synthesis Phase
             logger.info("Council Phase: Synthesis")
-            if progress_callback: progress_callback("[Synthesis] Synthesizing final summary...")
+            if progress_callback:
+                progress_callback("[Synthesis] Synthesizing final summary...")
 
             audit_reports = [reviewer_report.model_dump()]
             if tier_level == 4:
-                audit_reports.extend([
-                    challenger_report.model_dump(),
-                    scalability_report.model_dump(),
-                    security_report.model_dump(),
-                    performance_report.model_dump(),
-                    maintainability_report.model_dump()
-                ])
+                audit_reports.extend(
+                    [
+                        challenger_report.model_dump(),
+                        scalability_report.model_dump(),
+                        security_report.model_dump(),
+                        performance_report.model_dump(),
+                        maintainability_report.model_dump(),
+                    ]
+                )
 
             try:
                 final_summary = await synthesizer.synthesize(
@@ -945,7 +1123,20 @@ class CouncilOrchestrator:
                 )
             elif self.lineage_memory is not None and tier_level == 4:
                 subsystem_target = target_file
-                for key in ["database", "concurrency", "lock", "thread", "async", "cache", "sandbox", "security", "telemetry", "model", "routing", "memory"]:
+                for key in [
+                    "database",
+                    "concurrency",
+                    "lock",
+                    "thread",
+                    "async",
+                    "cache",
+                    "sandbox",
+                    "security",
+                    "telemetry",
+                    "model",
+                    "routing",
+                    "memory",
+                ]:
                     if key in prompt.lower():
                         subsystem_target = key
                         break
@@ -971,21 +1162,25 @@ class CouncilOrchestrator:
                         rationale=final_summary[:300],
                         architectural_impact=impact,
                         consequences="Approved and validated by Reasoning Council.",
-                        alternatives=[{
-                            "option_name": "Proposed Solution",
-                            "tradeoffs": {"confidence": arbitration.overall_confidence},
-                            "rejected_reason": ""
-                        }]
+                        alternatives=[
+                            {
+                                "option_name": "Proposed Solution",
+                                "tradeoffs": {"confidence": arbitration.overall_confidence},
+                                "rejected_reason": "",
+                            }
+                        ],
                     )
 
             # Token usage summary — estimate from text lengths since agent
             # responses are strings, not InferenceResponse objects.
             _agent_texts = [
-                t for t in [
+                t
+                for t in [
                     coder_proposal,
                     final_summary,
                     getattr(reviewer_report, "model_dump", lambda: {})().get("critical_issues", ""),
-                ] if t
+                ]
+                if t
             ]
             _total_prompt = len(prompt.encode()) // 4
             _total_completion = sum(len(str(t).encode()) // 4 for t in _agent_texts)

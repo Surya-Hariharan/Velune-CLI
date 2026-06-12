@@ -178,8 +178,7 @@ class ImportGraphBuilder:
 
             # Check if imported by any test file
             metrics.is_imported_by_tests = any(
-                "test_" in importer or ".test." in importer
-                for importer in metrics.importers
+                "test_" in importer or ".test." in importer for importer in metrics.importers
             )
 
     def get_metrics(self, module_path: str) -> ImportMetrics | None:

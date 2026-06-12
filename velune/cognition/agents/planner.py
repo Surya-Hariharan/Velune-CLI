@@ -83,7 +83,8 @@ class PlannerAgent(BaseCouncilAgent):
 
         logger.info(
             "Planner starting plan generation (timeout: %ds, wall budget: %.1fs remaining)",
-            timeout, remaining
+            timeout,
+            remaining,
         )
 
         try:

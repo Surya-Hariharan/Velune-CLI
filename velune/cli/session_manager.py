@@ -31,13 +31,15 @@ def list_sessions() -> list[dict]:
     for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
-            sessions.append({
-                "id": data["id"],
-                "timestamp": data["timestamp"],
-                "model_id": data.get("model_id", "unknown"),
-                "turns": data.get("turn_count", 0),
-                "workspace": data.get("workspace", ""),
-            })
+            sessions.append(
+                {
+                    "id": data["id"],
+                    "timestamp": data["timestamp"],
+                    "model_id": data.get("model_id", "unknown"),
+                    "turns": data.get("turn_count", 0),
+                    "workspace": data.get("workspace", ""),
+                }
+            )
         except Exception:
             pass
     return sessions[:20]

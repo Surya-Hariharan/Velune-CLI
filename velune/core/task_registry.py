@@ -35,7 +35,7 @@ class BackgroundTaskRegistry:
             logger.error(
                 "BackgroundTaskRegistry.submit('%s') called outside an async context. "
                 "Background tasks must be submitted from within a running event loop.",
-                name
+                name,
             )
             with self._lock:
                 self._dropped_count += 1
@@ -84,10 +84,7 @@ class BackgroundTaskRegistry:
         done, pending = await asyncio.wait(tasks, timeout=timeout)
 
         if pending:
-            logger.warning(
-                "%d background tasks did not cancel within %.1fs",
-                len(pending), timeout
-            )
+            logger.warning("%d background tasks did not cancel within %.1fs", len(pending), timeout)
 
         # Shutdown stats reporting of dropped tasks
         stats = self.stats()

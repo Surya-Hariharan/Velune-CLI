@@ -86,11 +86,14 @@ class CouncilOrchestrator:
         try:
             logger.info(
                 "[COUNCIL] Starting deliberation (wall_budget=%ds, max_cycles=%d)",
-                budget.max_wall_time_seconds, budget.max_review_cycles
+                budget.max_wall_time_seconds,
+                budget.max_review_cycles,
             )
 
             # Phase 1: Planner
-            logger.info("[COUNCIL] Phase 1/5: Planner (timeout=%ds)", budget.planner_timeout_seconds)
+            logger.info(
+                "[COUNCIL] Phase 1/5: Planner (timeout=%ds)", budget.planner_timeout_seconds
+            )
             await self._run_planner_phase(state, retrieved_context)
 
             # Phase 2: Initial Coder
@@ -98,7 +101,9 @@ class CouncilOrchestrator:
             await self._run_coder_phase(state, retrieved_context, style_profile)
 
             # Phase 3: Initial Review
-            logger.info("[COUNCIL] Phase 3/5: Reviewer (timeout=%ds)", budget.reviewer_timeout_seconds)
+            logger.info(
+                "[COUNCIL] Phase 3/5: Reviewer (timeout=%ds)", budget.reviewer_timeout_seconds
+            )
             await self._run_review_phase(state)
 
             # Phase 4: Debate Loop (if needed)
@@ -107,7 +112,8 @@ class CouncilOrchestrator:
             # Phase 5: Mark complete
             logger.info(
                 "[COUNCIL] Deliberation complete (elapsed=%.1fs, decision=%s)",
-                state.elapsed_seconds(), state.review_decision or "N/A"
+                state.elapsed_seconds(),
+                state.review_decision or "N/A",
             )
             state.mark_complete()
 
@@ -142,7 +148,9 @@ class CouncilOrchestrator:
         try:
             plan_context = ""
             if state.task_plan:
-                plan_context = "\n".join([f"- {s.id}: {s.description}" for s in state.task_plan.steps])
+                plan_context = "\n".join(
+                    [f"- {s.id}: {s.description}" for s in state.task_plan.steps]
+                )
 
             await self.coder.generate_code(
                 task=state.task,
@@ -195,7 +203,9 @@ class CouncilOrchestrator:
             cycle = state.review_cycle_count
             logger.info(
                 "[COUNCIL - DEBATE] Revision cycle %d/%d (wall_budget: %.1fs remaining)",
-                cycle, state.budget.max_review_cycles, state.remaining_budget_seconds()
+                cycle,
+                state.budget.max_review_cycles,
+                state.remaining_budget_seconds(),
             )
 
             if state.is_budget_exhausted():
@@ -232,12 +242,15 @@ class CouncilOrchestrator:
                     state=state,
                 )
             except Exception as e:
-                logger.error("[COUNCIL - DEBATE] Reviewer re-audit failed on cycle %d: %s", cycle, e)
+                logger.error(
+                    "[COUNCIL - DEBATE] Reviewer re-audit failed on cycle %d: %s", cycle, e
+                )
                 break
 
             logger.info(
                 "[COUNCIL - DEBATE] Cycle %d completed: decision=%s",
-                cycle, state.review_decision.value if state.review_decision else "N/A"
+                cycle,
+                state.review_decision.value if state.review_decision else "N/A",
             )
 
     def _format_diffs_for_review(self, pending_diffs: list[dict[str, Any]]) -> str:

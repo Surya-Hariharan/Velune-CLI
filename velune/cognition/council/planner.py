@@ -77,7 +77,10 @@ class PlannerAgent(BaseCouncilAgent):
             result = await self.typed_deliberate(user_messages, PlannerMessage, temperature=0.2)
 
             if result.parse_error:
-                logger.error("Failed to parse Planner JSON output. Falling back to default single step. Error: %s", result.parse_error)
+                logger.error(
+                    "Failed to parse Planner JSON output. Falling back to default single step. Error: %s",
+                    result.parse_error,
+                )
                 # Create a fallback single-step plan
                 return self._create_fallback_plan(prompt)
 
@@ -99,7 +102,9 @@ class PlannerAgent(BaseCouncilAgent):
                 steps=steps,
             )
         except Exception as e:
-            logger.error("Exception during generate_plan: %s. Falling back to default single step.", e)
+            logger.error(
+                "Exception during generate_plan: %s. Falling back to default single step.", e
+            )
             return self._create_fallback_plan(prompt)
 
     def _create_fallback_plan(self, prompt: str) -> TaskPlan:

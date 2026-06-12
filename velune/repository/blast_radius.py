@@ -34,7 +34,9 @@ class BlastRadiusScore:
 
     def __repr__(self) -> str:
         boundary_str = f" [{self.boundary_type}]" if self.boundary_type else ""
-        return f"BlastRadius({self.file_path}: {self.score:.2f}{boundary_str}, fan_in={self.fan_in})"
+        return (
+            f"BlastRadius({self.file_path}: {self.score:.2f}{boundary_str}, fan_in={self.fan_in})"
+        )
 
 
 class BlastRadiusEstimator:
@@ -119,9 +121,7 @@ class BlastRadiusEstimator:
         self._score_cache[file_path] = score
         return score
 
-    def rank_files_by_blast_radius(
-        self, file_paths: list[str]
-    ) -> list[tuple[str, float]]:
+    def rank_files_by_blast_radius(self, file_paths: list[str]) -> list[tuple[str, float]]:
         """Rank files by blast radius (highest first).
 
         Parameters
@@ -173,7 +173,11 @@ class BlastRadiusEstimator:
         list[BlastRadiusScore]:
             Files with score >= threshold, sorted descending.
         """
-        scores = [self.compute_score(path) for path in file_paths if self.compute_score(path).score >= threshold]
+        scores = [
+            self.compute_score(path)
+            for path in file_paths
+            if self.compute_score(path).score >= threshold
+        ]
         return sorted(scores, key=lambda s: s.score, reverse=True)
 
     def clear_cache(self) -> None:
@@ -226,9 +230,13 @@ class BlastRadiusEstimator:
         if score.fan_in == 0:
             lines.append("  • Structural: No incoming dependencies (low impact)")
         elif score.fan_in <= 5:
-            lines.append(f"  • Structural: {score.fan_in} modules depend on this (low-medium impact)")
+            lines.append(
+                f"  • Structural: {score.fan_in} modules depend on this (low-medium impact)"
+            )
         elif score.fan_in <= 15:
-            lines.append(f"  • Structural: {score.fan_in} modules depend on this (medium-high impact)")
+            lines.append(
+                f"  • Structural: {score.fan_in} modules depend on this (medium-high impact)"
+            )
         else:
             lines.append(f"  • Structural: {score.fan_in} modules depend on this (HIGH impact)")
 

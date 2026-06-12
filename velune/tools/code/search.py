@@ -93,12 +93,16 @@ class SymbolSearch(BaseTool):
             symbols, _ = parser.parse(file_path, code)
             for symbol in symbols:
                 if symbol.name == symbol_name:
-                    results.append({
-                        "name": symbol.name,
-                        "kind": symbol.kind.value if hasattr(symbol.kind, "value") else symbol.kind,
-                        "file": str(file_path),
-                        "line": symbol.line_start,
-                    })
+                    results.append(
+                        {
+                            "name": symbol.name,
+                            "kind": symbol.kind.value
+                            if hasattr(symbol.kind, "value")
+                            else symbol.kind,
+                            "file": str(file_path),
+                            "line": symbol.line_start,
+                        }
+                    )
 
         return results
 

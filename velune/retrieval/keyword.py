@@ -57,7 +57,9 @@ class BM25Retriever:
             elapsed = time.time() - start_time
             logger.debug("BM25 index rebuilt: %d documents, %.3fs", len(self.documents), elapsed)
 
-    def retrieve(self, query: str, top_k: int = 10, namespace: str | None = None) -> list[RetrievalHit]:
+    def retrieve(
+        self, query: str, top_k: int = 10, namespace: str | None = None
+    ) -> list[RetrievalHit]:
         """Queries the BM25 lexical index and scores candidates."""
         if not self.documents:
             return []
@@ -83,10 +85,7 @@ class BM25Retriever:
             if score > 0.0:  # Only capture positive keyword matches
                 hits.append(
                     RetrievalHit(
-                        document=doc,
-                        score=float(score),
-                        source=RetrievalSource.LEXICAL,
-                        rank=0
+                        document=doc, score=float(score), source=RetrievalSource.LEXICAL, rank=0
                     )
                 )
 
@@ -107,7 +106,26 @@ class BM25Retriever:
 
         # Remove extremely common short English stop words to filter noise
         stop_words = {
-            "a", "an", "the", "and", "or", "but", "if", "then", "else",
-            "to", "of", "in", "for", "on", "with", "at", "by", "from", "is", "this", "that"
+            "a",
+            "an",
+            "the",
+            "and",
+            "or",
+            "but",
+            "if",
+            "then",
+            "else",
+            "to",
+            "of",
+            "in",
+            "for",
+            "on",
+            "with",
+            "at",
+            "by",
+            "from",
+            "is",
+            "this",
+            "that",
         }
         return [w for w in words if w not in stop_words and len(w) > 1]

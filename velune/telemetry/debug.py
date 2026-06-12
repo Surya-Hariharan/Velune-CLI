@@ -152,12 +152,14 @@ class RoutingDecision:
             reasoning: Explanation of score
             **attributes: Additional attributes
         """
-        self.candidates.append({
-            "path": path_name,
-            "score": score,
-            "reasoning": reasoning,
-            **attributes,
-        })
+        self.candidates.append(
+            {
+                "path": path_name,
+                "score": score,
+                "reasoning": reasoning,
+                **attributes,
+            }
+        )
 
         logger.debug(
             "[ROUTING] Candidate evaluated",
@@ -189,9 +191,7 @@ class RoutingDecision:
         logger.debug(f"  Task: {self.task_description}")
 
         # Sort candidates by score
-        sorted_candidates = sorted(
-            self.candidates, key=lambda x: -x["score"]
-        )
+        sorted_candidates = sorted(self.candidates, key=lambda x: -x["score"])
 
         for i, candidate in enumerate(sorted_candidates, 1):
             marker = "→ SELECTED" if candidate["path"] == self.selected else ""

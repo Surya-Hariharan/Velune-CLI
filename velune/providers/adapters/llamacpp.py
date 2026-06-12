@@ -72,6 +72,7 @@ class LlamaCppProvider(ModelProvider):
             return self._loaded_models[model_id]
 
         from llama_cpp import Llama
+
         model_path = self._resolve_model_path(model_id)
 
         # Load the model in-memory.
@@ -79,7 +80,7 @@ class LlamaCppProvider(ModelProvider):
         llm = Llama(
             model_path=str(model_path),
             n_ctx=context_window,
-            n_gpu_layers=-1, # Load as many layers as possible to GPU if available
+            n_gpu_layers=-1,  # Load as many layers as possible to GPU if available
             verbose=False,
         )
         self._loaded_models[model_id] = llm
@@ -89,6 +90,7 @@ class LlamaCppProvider(ModelProvider):
         """List local GGUF models via filesystem discovery."""
         await self.initialize()
         from velune.providers.discovery.gguf import GGUFDiscovery
+
         return await GGUFDiscovery().discover()
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
@@ -102,7 +104,9 @@ class LlamaCppProvider(ModelProvider):
             llm = await asyncio.to_thread(self._get_model, request.model_id, ctx_len)
 
             # Map standard messages to llama_cpp chat completions format
-            messages = [{"role": msg.get("role"), "content": msg.get("content")} for msg in request.messages]
+            messages = [
+                {"role": msg.get("role"), "content": msg.get("content")} for msg in request.messages
+            ]
 
             completion = await asyncio.to_thread(
                 llm.create_chat_completion,
@@ -133,7 +137,9 @@ class LlamaCppProvider(ModelProvider):
         try:
             ctx_len = request.max_tokens or 4096
             llm = await asyncio.to_thread(self._get_model, request.model_id, ctx_len)
-            messages = [{"role": msg.get("role"), "content": msg.get("content")} for msg in request.messages]
+            messages = [
+                {"role": msg.get("role"), "content": msg.get("content")} for msg in request.messages
+            ]
 
             # Run the generator in a thread pool and yield chunks back to async loop
             def run_stream():

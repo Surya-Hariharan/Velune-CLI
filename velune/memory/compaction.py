@@ -18,6 +18,7 @@ logger = logging.getLogger("velune.memory.compaction")
 @dataclass
 class CompactionStats:
     """Statistics from a compaction operation."""
+
     original_turn_count: int
     original_token_count: int
     summary_token_count: int
@@ -94,12 +95,16 @@ class ContextCompactor:
             return turn_count > self.KEEP_LAST_N_TURNS
 
         if turn_count > self.MIN_TURNS_FOR_COMPACTION:
-            logger.debug(f"Compaction triggered: {turn_count} turns > {self.MIN_TURNS_FOR_COMPACTION}")
+            logger.debug(
+                f"Compaction triggered: {turn_count} turns > {self.MIN_TURNS_FOR_COMPACTION}"
+            )
             return True
 
         utilization = current_token_count / self.max_context_tokens
         if utilization > self.CONTEXT_UTILIZATION_THRESHOLD:
-            logger.debug(f"Compaction triggered: {utilization:.1%} utilization > {self.CONTEXT_UTILIZATION_THRESHOLD:.0%}")
+            logger.debug(
+                f"Compaction triggered: {utilization:.1%} utilization > {self.CONTEXT_UTILIZATION_THRESHOLD:.0%}"
+            )
             return True
 
         return False
@@ -141,9 +146,7 @@ class ContextCompactor:
         original_turn_count = len(turns_to_summarize)
         original_token_count = self._estimate_tokens(turns_to_summarize)
 
-        logger.debug(
-            f"Compacting {original_turn_count} turns ({original_token_count} tokens)"
-        )
+        logger.debug(f"Compacting {original_turn_count} turns ({original_token_count} tokens)")
 
         # Generate summary
         summary = await self._generate_summary(turns_to_summarize)
@@ -178,7 +181,9 @@ class ContextCompactor:
         # Replace old turns in working memory with summary
         self._replace_turns_with_summary(turns_to_summarize, summary)
 
-        compression_ratio = original_token_count / summary_token_count if summary_token_count > 0 else 0
+        compression_ratio = (
+            original_token_count / summary_token_count if summary_token_count > 0 else 0
+        )
 
         stats = CompactionStats(
             original_turn_count=original_turn_count,
@@ -236,7 +241,9 @@ Provide a compact summary:"""
 
         try:
             request = InferenceRequest(
-                model_id=self.provider.default_model if hasattr(self.provider, "default_model") else "gpt-4",
+                model_id=self.provider.default_model
+                if hasattr(self.provider, "default_model")
+                else "gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=1000,
@@ -456,7 +463,9 @@ Provide a brief (200-300 word) session summary:"""
 
         try:
             request = InferenceRequest(
-                model_id=self.provider.default_model if hasattr(self.provider, "default_model") else "gpt-4",
+                model_id=self.provider.default_model
+                if hasattr(self.provider, "default_model")
+                else "gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=500,

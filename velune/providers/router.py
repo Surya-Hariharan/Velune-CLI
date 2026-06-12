@@ -88,7 +88,9 @@ class ProviderRouter:
         # Filter by health status first
         candidates = self._filter_by_health(models_list)
         if not candidates:
-            logger.warning("No providers available after health filtering; falling back to all models")
+            logger.warning(
+                "No providers available after health filtering; falling back to all models"
+            )
             candidates = models_list
 
         # Filter candidates by capability tier
@@ -121,23 +123,29 @@ class ProviderRouter:
                 _offline_warned = True
                 try:
                     from rich.console import Console
+
                     Console().print(
                         "[yellow]Offline mode: routing all tasks to local models[/yellow]"
                     )
                 except Exception:
                     import sys
+
                     print("Offline mode: routing all tasks to local models", file=sys.stderr)
 
         # Priority 1: Local models (always first when offline or explicitly preferred)
         if effective_local_preferred:
-            local_options = [m for m in qualified if getattr(m, "is_local", False)
-                             or m.provider_id in _LOCAL_PROVIDER_IDS]
+            local_options = [
+                m
+                for m in qualified
+                if getattr(m, "is_local", False) or m.provider_id in _LOCAL_PROVIDER_IDS
+            ]
             if local_options:
                 return self._select_best_by_score(local_options, task_category, latency_sensitive)
 
             if not online:
                 # No local models available and we're offline — fail with a clear message
                 from velune.core.errors import NoModelsAvailableError
+
                 raise NoModelsAvailableError(
                     "No internet connection and no local models configured for this task type",
                     cause_override=(
@@ -162,8 +170,11 @@ class ProviderRouter:
         latency_sensitive: bool,
     ) -> ModelDescriptor | None:
         """Route using empirical probe scores with local preference heuristic."""
-        local_models = [m for m in qualified if getattr(m, "is_local", False)
-                        or m.provider_id in _LOCAL_PROVIDER_IDS]
+        local_models = [
+            m
+            for m in qualified
+            if getattr(m, "is_local", False) or m.provider_id in _LOCAL_PROVIDER_IDS
+        ]
         cloud_models = [m for m in qualified if m not in local_models]
 
         # Get best score from all models
@@ -180,16 +191,15 @@ class ProviderRouter:
 
         # Check if local model is within 85% of best score (local preference threshold)
         if local_models:
-            best_local = max(
-                local_models,
-                key=lambda m: self._get_task_score(m, task_category)
-            )
+            best_local = max(local_models, key=lambda m: self._get_task_score(m, task_category))
             local_score = self._get_task_score(best_local, task_category)
 
             if local_score >= (0.85 * best_score):
                 logger.debug(
                     "Local model %s (score %.2f) is competitive with best (%.2f), preferring local",
-                    best_local.model_id, local_score, best_score
+                    best_local.model_id,
+                    local_score,
+                    best_score,
                 )
                 return best_local
 
@@ -202,6 +212,7 @@ class ProviderRouter:
         latency_sensitive: bool,
     ) -> ModelDescriptor:
         """Sort models by task capability score, with latency consideration."""
+
         def score_fn(model: ModelDescriptor) -> tuple:
             task_score = self._get_task_score(model, task_category)
 

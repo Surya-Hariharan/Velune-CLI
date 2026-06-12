@@ -23,9 +23,11 @@ from velune.providers.keystore import get_key
 class OpenAIProvider(ModelProvider):
     """OpenAI provider for GPT chat and embedding models."""
 
-    def __init__(self, api_key: str | SecretStr | None = None, base_url: str = "https://api.openai.com/v1") -> None:
+    def __init__(
+        self, api_key: str | SecretStr | None = None, base_url: str = "https://api.openai.com/v1"
+    ) -> None:
         self._api_key = api_key or get_key("openai")
-        if hasattr(self._api_key, 'get_secret_value'):
+        if hasattr(self._api_key, "get_secret_value"):
             self._api_key = self._api_key.get_secret_value()
         self._base_url = base_url
         self.client: httpx.AsyncClient | None = None
@@ -43,7 +45,9 @@ class OpenAIProvider(ModelProvider):
     async def initialize(self) -> None:
         """Initialize headers and async client connection."""
         if not self._api_key:
-            raise ProviderAuthenticationError("OpenAI API key not found in configuration or environment")
+            raise ProviderAuthenticationError(
+                "OpenAI API key not found in configuration or environment"
+            )
         if not self.client:
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
@@ -177,7 +181,9 @@ class OpenAIProvider(ModelProvider):
         await self.initialize()
         assert self.client is not None
         try:
-            response = await self.client.post("/embeddings", json={"model": model_id, "input": texts})
+            response = await self.client.post(
+                "/embeddings", json={"model": model_id, "input": texts}
+            )
             response.raise_for_status()
             data = response.json()
             # Sort by index to maintain token alignments

@@ -26,6 +26,7 @@ def print_provider_health_report(console: Console | None = None) -> dict[str, An
 
     try:
         from velune.kernel.registry import get_container
+
         container = get_container()
         if not container.has("runtime.provider_health_monitor"):
             return {"providers": []}
@@ -83,6 +84,7 @@ def print_provider_health_report(console: Console | None = None) -> dict[str, An
         if manifest.rate_limit_remaining is not None:
             if manifest.rate_limit_reset_at:
                 import time
+
                 reset_delta = int(manifest.rate_limit_reset_at - time.time())
                 reset_min = max(0, reset_delta // 60)
                 limit_str = f"{manifest.rate_limit_remaining} remaining (↻ {reset_min}m)"
@@ -92,13 +94,15 @@ def print_provider_health_report(console: Console | None = None) -> dict[str, An
             limit_str = "N/A (local)"
 
         table.add_row(provider_id, status_str, latency_str, models_str, limit_str)
-        provider_data.append({
-            "provider": provider_id,
-            "health": str(manifest.health),
-            "latency_ms": manifest.estimated_latency_ms,
-            "model_count": model_count,
-            "rate_limit": manifest.rate_limit_remaining,
-        })
+        provider_data.append(
+            {
+                "provider": provider_id,
+                "health": str(manifest.health),
+                "latency_ms": manifest.estimated_latency_ms,
+                "model_count": model_count,
+                "rate_limit": manifest.rate_limit_remaining,
+            }
+        )
 
     console.print(table)
     return {"providers": provider_data}
@@ -164,9 +168,7 @@ def print_telemetry_report(console: Console | None = None) -> dict[str, Any]:
             time_str = start_time.strftime("%Y-%m-%d %H:%M")
 
             # Format models
-            models_str = ", ".join(
-                f"{m}({t:,})" for m, t in session.model_breakdown.items()
-            )
+            models_str = ", ".join(f"{m}({t:,})" for m, t in session.model_breakdown.items())
 
             # Format cost
             cost_str = f"${session.total_cost:.2f}" if session.total_cost else "—"
@@ -185,9 +187,7 @@ def print_telemetry_report(console: Console | None = None) -> dict[str, Any]:
     if stats["session_count"] > 0:
         avg_tokens_per_session = stats["total_tokens"] // stats["session_count"]
         avg_cost_per_session = (
-            stats["total_cost"] / stats["session_count"]
-            if stats["total_cost"]
-            else None
+            stats["total_cost"] / stats["session_count"] if stats["total_cost"] else None
         )
 
         console.print("\n[bold]Averages per Session:[/bold]")
@@ -211,9 +211,7 @@ def print_telemetry_report(console: Console | None = None) -> dict[str, Any]:
             "completions_7d": stats["completion_count"],
             "most_used_model": stats["most_used_model"],
             "avg_tokens_per_session": (
-                stats["total_tokens"] // stats["session_count"]
-                if stats["session_count"] > 0
-                else 0
+                stats["total_tokens"] // stats["session_count"] if stats["session_count"] > 0 else 0
             ),
         },
         "recent_sessions": [

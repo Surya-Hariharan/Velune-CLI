@@ -60,7 +60,9 @@ class FileCheckpointer:
                 backup_file.parent.mkdir(parents=True, exist_ok=True)
 
                 shutil.copy2(abs_file, backup_file)
-                backup_rel_str = str(backup_file.relative_to(self.workspace_path)).replace("\\", "/")
+                backup_rel_str = str(backup_file.relative_to(self.workspace_path)).replace(
+                    "\\", "/"
+                )
                 copied_files[rel_str] = backup_rel_str
             except Exception as e:
                 raise SnapshotError(f"Failed to checkpoint file {file}: {e}")

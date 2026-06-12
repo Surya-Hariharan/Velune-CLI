@@ -19,6 +19,7 @@ logger = logging.getLogger("velune.retrieval.vector")
 def _qmodels() -> Any:
     """Lazily import qdrant http models (defers the qdrant_client import)."""
     from qdrant_client.http import models as qmodels
+
     return qmodels
 
 
@@ -48,6 +49,7 @@ class VectorRetriever:
                 self._client = self._client_provider()
             else:
                 from qdrant_client import QdrantClient
+
                 loc = self.location
                 if loc.startswith(".") or "/" in loc or "\\" in loc:
                     self._client = QdrantClient(path=loc)
@@ -77,7 +79,9 @@ class VectorRetriever:
                     logger.warning(
                         "Embedding dimension changed from %d to %d. "
                         "Recreating collection '%s'. Existing vectors lost.",
-                        existing_dim, dim, self.collection_name
+                        existing_dim,
+                        dim,
+                        self.collection_name,
                     )
                     client.delete_collection(self.collection_name)
                     existing = None
@@ -85,12 +89,11 @@ class VectorRetriever:
             if not existing:
                 client.create_collection(
                     collection_name=self.collection_name,
-                    vectors_config=qmodels.VectorParams(
-                        size=dim,
-                        distance=qmodels.Distance.COSINE
-                    )
+                    vectors_config=qmodels.VectorParams(size=dim, distance=qmodels.Distance.COSINE),
                 )
-                logger.info("Collection '%s' initialized with dimension %d", self.collection_name, dim)
+                logger.info(
+                    "Collection '%s' initialized with dimension %d", self.collection_name, dim
+                )
 
             self._detected_dimension = dim
         except Exception as e:
@@ -119,15 +122,17 @@ class VectorRetriever:
                             "doc_id": doc.id,
                             "content": doc.content,
                             "namespace": doc.namespace,
-                            **doc.metadata
-                        }
+                            **doc.metadata,
+                        },
                     )
-                ]
+                ],
             )
         except Exception as e:
             logger.error("Failed to upsert document: %s", e)
 
-    def retrieve(self, query_vector: list[float], top_k: int = 10, namespace: str | None = None) -> list[RetrievalHit]:
+    def retrieve(
+        self, query_vector: list[float], top_k: int = 10, namespace: str | None = None
+    ) -> list[RetrievalHit]:
         """Queries Qdrant vector spaces and returns matching document hits."""
         client = self.client
         if client is None:
@@ -150,7 +155,8 @@ class VectorRetriever:
             logger.error(
                 "Query dimension mismatch — skipping vector retrieval. "
                 "Query dimension %d != collection dimension %d.",
-                len(query_vector), self._detected_dimension
+                len(query_vector),
+                self._detected_dimension,
             )
             return []
 
@@ -162,8 +168,7 @@ class VectorRetriever:
                 query_filter = qmodels.Filter(
                     must=[
                         qmodels.FieldCondition(
-                            key="namespace",
-                            match=qmodels.MatchValue(value=namespace)
+                            key="namespace", match=qmodels.MatchValue(value=namespace)
                         )
                     ]
                 )
@@ -172,7 +177,7 @@ class VectorRetriever:
                 collection_name=self.collection_name,
                 query=query_vector,
                 query_filter=query_filter,
-                limit=top_k
+                limit=top_k,
             ).points
 
             for rank, res in enumerate(results):
@@ -181,14 +186,15 @@ class VectorRetriever:
                     id=payload.get("doc_id", str(res.id)),
                     content=payload.get("content", ""),
                     namespace=payload.get("namespace", "default"),
-                    metadata={k: v for k, v in payload.items() if k not in ("doc_id", "content", "namespace")}
+                    metadata={
+                        k: v
+                        for k, v in payload.items()
+                        if k not in ("doc_id", "content", "namespace")
+                    },
                 )
                 hits.append(
                     RetrievalHit(
-                        document=doc,
-                        score=res.score,
-                        source=RetrievalSource.VECTOR,
-                        rank=rank + 1
+                        document=doc, score=res.score, source=RetrievalSource.VECTOR, rank=rank + 1
                     )
                 )
         except Exception as e:

@@ -1,7 +1,6 @@
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.text import Text
-from rich.table import Table
 
 
 def render_startup_banner(
@@ -24,22 +23,14 @@ def render_startup_banner(
 
     # Model status (primary)
     if active_model_id:
-        status_items.append(
-            (Text("model", style="dim"), Text(active_model_id, style="cyan"))
-        )
+        status_items.append((Text("model", style="dim"), Text(active_model_id, style="cyan")))
     else:
-        status_items.append(
-            (Text("model", style="dim"), Text("not selected", style="yellow"))
-        )
+        status_items.append((Text("model", style="dim"), Text("not selected", style="yellow")))
 
     # Workspace
-    status_items.append(
-        (Text("workspace", style="dim"), Text(workspace_name, style="white"))
-    )
+    status_items.append((Text("workspace", style="dim"), Text(workspace_name, style="white")))
 
     # Hardware (condensed)
-    tier = hardware_profile.tier.value
-    tier_color = "green" if tier in ("capable", "powerful", "elite") else "yellow"
     vram_gb = hardware_profile.vram_total_gb
     gpu_part = (
         f"{hardware_profile.gpu_name} ({vram_gb:.0f}GB)"
@@ -47,9 +38,7 @@ def render_startup_banner(
         else (hardware_profile.gpu_name or "CPU only")
     )
     hw_text = f"{hardware_profile.total_ram_gb:.0f}GB RAM • {gpu_part}"
-    status_items.append(
-        (Text("hardware", style="dim"), Text(hw_text, style="white"))
-    )
+    status_items.append((Text("hardware", style="dim"), Text(hw_text, style="white")))
 
     # Providers (condensed)
     provider_list = []
@@ -72,9 +61,7 @@ def render_startup_banner(
 
     # Project type (if relevant)
     if project_type_name and project_type_name != "Unknown":
-        status_items.append(
-            (Text("project", style="dim"), Text(project_type_name, style="green"))
-        )
+        status_items.append((Text("project", style="dim"), Text(project_type_name, style="green")))
 
     # Build status table
     body_lines = [title, Text()]
@@ -92,11 +79,13 @@ def render_startup_banner(
     hint.append(" for commands", style="dim")
     body_lines.append(hint)
 
-    console.print(Panel(
-        Group(*body_lines),
-        border_style="blue",
-        padding=(0, 2),
-    ))
+    console.print(
+        Panel(
+            Group(*body_lines),
+            border_style="blue",
+            padding=(0, 2),
+        )
+    )
 
     # Warnings/suggestions below panel (cleaner)
     if hardware_profile.warnings:

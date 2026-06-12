@@ -22,7 +22,9 @@ logger = structlog.get_logger()
 # Context variables for span propagation
 _run_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("run_id", default=None)
 _span_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("span_id", default=None)
-_parent_span_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("parent_span_id", default=None)
+_parent_span_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "parent_span_id", default=None
+)
 
 
 @dataclass

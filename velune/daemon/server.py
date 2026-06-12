@@ -16,6 +16,7 @@ class VeluneDaemon:
     async def start(self):
         """Initialize runtime and start IPC server."""
         from velune.core.runtime import build_runtime
+
         self.runtime = build_runtime(self.workspace)
         await self.runtime.container.get("runtime.lifecycle").startup()
 
@@ -57,7 +58,10 @@ class VeluneDaemon:
     async def _handle_models_list(self, request: dict) -> dict:
         try:
             models = self.runtime.container.get("runtime.model_registry").list_all()
-            return {"status": "success", "models": [m.to_dict() if hasattr(m, "to_dict") else str(m) for m in models]}
+            return {
+                "status": "success",
+                "models": [m.to_dict() if hasattr(m, "to_dict") else str(m) for m in models],
+            }
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -76,7 +80,10 @@ class VeluneDaemon:
 
                 from velune.models.probes import ModelProber
                 from velune.models.profile_cache import ModelProfileCache
-                profile_cache = ModelProfileCache(self.workspace / ".velune" / "model_profiles.json")
+
+                profile_cache = ModelProfileCache(
+                    self.workspace / ".velune" / "model_profiles.json"
+                )
 
                 prober = ModelProber(provider, model_id)
                 results = await prober.run_all_probes()
@@ -92,7 +99,11 @@ class VeluneDaemon:
                 pass
 
         asyncio.create_task(run_probe())
-        return {"status": "success", "message": f"Started probing for model {model_id} in daemon background."}
+        return {
+            "status": "success",
+            "message": f"Started probing for model {model_id} in daemon background.",
+        }
+
 
 if __name__ == "__main__":
     import sys

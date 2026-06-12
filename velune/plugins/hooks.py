@@ -37,6 +37,7 @@ class PluginHookDispatcher:
             try:
                 # Handle both async and sync callbacks cleanly
                 import asyncio
+
                 if asyncio.iscoroutinefunction(callback):
                     res = await callback(*args, **kwargs)
                 else:

@@ -71,7 +71,9 @@ class ModelProfileCache:
 
         # Atomically write to temp file, then rename/replace
         temp_dir = self.cache_path.parent
-        with tempfile.NamedTemporaryFile("w", dir=temp_dir, delete=False, encoding="utf-8") as temp_file:
+        with tempfile.NamedTemporaryFile(
+            "w", dir=temp_dir, delete=False, encoding="utf-8"
+        ) as temp_file:
             json.dump(data, temp_file, indent=2)
             temp_file_name = temp_file.name
         try:

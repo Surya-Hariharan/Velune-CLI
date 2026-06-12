@@ -9,21 +9,21 @@ from pathlib import Path
 
 class ProjectType(Enum):
     PYTHON_FASTAPI = "python-fastapi"
-    PYTHON_DJANGO  = "python-django"
-    PYTHON_FLASK   = "python-flask"
-    PYTHON_CLI     = "python-cli"
+    PYTHON_DJANGO = "python-django"
+    PYTHON_FLASK = "python-flask"
+    PYTHON_CLI = "python-cli"
     PYTHON_GENERIC = "python"
-    NODE_REACT     = "node-react"
-    NODE_NEXTJS    = "node-nextjs"
-    NODE_EXPRESS   = "node-express"
-    NODE_GENERIC   = "node"
-    RUST           = "rust"
-    GO             = "go"
-    JAVA_SPRING    = "java-spring"
-    JAVA_GENERIC   = "java"
-    DOTNET         = "dotnet"
-    FLUTTER        = "flutter"
-    UNKNOWN        = "unknown"
+    NODE_REACT = "node-react"
+    NODE_NEXTJS = "node-nextjs"
+    NODE_EXPRESS = "node-express"
+    NODE_GENERIC = "node"
+    RUST = "rust"
+    GO = "go"
+    JAVA_SPRING = "java-spring"
+    JAVA_GENERIC = "java"
+    DOTNET = "dotnet"
+    FLUTTER = "flutter"
+    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -35,7 +35,7 @@ class ProjectProfile:
     entry_points: list[str]
     test_directories: list[str]
     config_files: list[str]
-    suggested_model_skill: str    # "coding" | "reasoning" | "balanced"
+    suggested_model_skill: str  # "coding" | "reasoning" | "balanced"
     context_hints: list[str]
     system_prompt_addon: str
 
@@ -79,40 +79,40 @@ PROJECT_SYSTEM_PROMPTS: dict[ProjectType, str] = {
 
 _DISPLAY_NAMES: dict[ProjectType, str] = {
     ProjectType.PYTHON_FASTAPI: "Python / FastAPI",
-    ProjectType.PYTHON_DJANGO:  "Python / Django",
-    ProjectType.PYTHON_FLASK:   "Python / Flask",
-    ProjectType.PYTHON_CLI:     "Python / CLI",
+    ProjectType.PYTHON_DJANGO: "Python / Django",
+    ProjectType.PYTHON_FLASK: "Python / Flask",
+    ProjectType.PYTHON_CLI: "Python / CLI",
     ProjectType.PYTHON_GENERIC: "Python",
-    ProjectType.NODE_REACT:     "Node.js / React",
-    ProjectType.NODE_NEXTJS:    "Node.js / Next.js",
-    ProjectType.NODE_EXPRESS:   "Node.js / Express",
-    ProjectType.NODE_GENERIC:   "Node.js",
-    ProjectType.RUST:           "Rust",
-    ProjectType.GO:             "Go",
-    ProjectType.JAVA_SPRING:    "Java / Spring",
-    ProjectType.JAVA_GENERIC:   "Java",
-    ProjectType.DOTNET:         ".NET",
-    ProjectType.FLUTTER:        "Flutter / Dart",
-    ProjectType.UNKNOWN:        "Unknown",
+    ProjectType.NODE_REACT: "Node.js / React",
+    ProjectType.NODE_NEXTJS: "Node.js / Next.js",
+    ProjectType.NODE_EXPRESS: "Node.js / Express",
+    ProjectType.NODE_GENERIC: "Node.js",
+    ProjectType.RUST: "Rust",
+    ProjectType.GO: "Go",
+    ProjectType.JAVA_SPRING: "Java / Spring",
+    ProjectType.JAVA_GENERIC: "Java",
+    ProjectType.DOTNET: ".NET",
+    ProjectType.FLUTTER: "Flutter / Dart",
+    ProjectType.UNKNOWN: "Unknown",
 }
 
 _LANGUAGE_MAP: dict[ProjectType, str] = {
     ProjectType.PYTHON_FASTAPI: "python",
-    ProjectType.PYTHON_DJANGO:  "python",
-    ProjectType.PYTHON_FLASK:   "python",
-    ProjectType.PYTHON_CLI:     "python",
+    ProjectType.PYTHON_DJANGO: "python",
+    ProjectType.PYTHON_FLASK: "python",
+    ProjectType.PYTHON_CLI: "python",
     ProjectType.PYTHON_GENERIC: "python",
-    ProjectType.NODE_REACT:     "typescript",
-    ProjectType.NODE_NEXTJS:    "typescript",
-    ProjectType.NODE_EXPRESS:   "javascript",
-    ProjectType.NODE_GENERIC:   "javascript",
-    ProjectType.RUST:           "rust",
-    ProjectType.GO:             "go",
-    ProjectType.JAVA_SPRING:    "java",
-    ProjectType.JAVA_GENERIC:   "java",
-    ProjectType.DOTNET:         "csharp",
-    ProjectType.FLUTTER:        "dart",
-    ProjectType.UNKNOWN:        "unknown",
+    ProjectType.NODE_REACT: "typescript",
+    ProjectType.NODE_NEXTJS: "typescript",
+    ProjectType.NODE_EXPRESS: "javascript",
+    ProjectType.NODE_GENERIC: "javascript",
+    ProjectType.RUST: "rust",
+    ProjectType.GO: "go",
+    ProjectType.JAVA_SPRING: "java",
+    ProjectType.JAVA_GENERIC: "java",
+    ProjectType.DOTNET: "csharp",
+    ProjectType.FLUTTER: "dart",
+    ProjectType.UNKNOWN: "unknown",
 }
 
 
@@ -147,9 +147,7 @@ class ProjectTypeDetector:
         except Exception:
             return set()
 
-    def _classify(
-        self, workspace: Path, files: set[str]
-    ) -> tuple[ProjectType, list[str]]:
+    def _classify(self, workspace: Path, files: set[str]) -> tuple[ProjectType, list[str]]:
         # ── Rust ──────────────────────────────────────────────────────
         if "Cargo.toml" in files:
             return ProjectType.RUST, ["cargo"]
@@ -170,6 +168,7 @@ class ProjectTypeDetector:
         if "package.json" in files:
             try:
                 import json
+
                 pkg = json.loads((workspace / "package.json").read_text())
                 deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
                 if "next" in deps:
@@ -242,15 +241,15 @@ class ProjectTypeDetector:
     def _find_entry_points(self, workspace: Path, pt: ProjectType) -> list[str]:
         candidates: dict[ProjectType, list[str]] = {
             ProjectType.PYTHON_FASTAPI: ["main.py", "app/main.py", "src/main.py"],
-            ProjectType.PYTHON_DJANGO:  ["manage.py"],
-            ProjectType.PYTHON_FLASK:   ["app.py", "run.py", "main.py"],
-            ProjectType.PYTHON_CLI:     ["main.py", "cli.py", "__main__.py"],
+            ProjectType.PYTHON_DJANGO: ["manage.py"],
+            ProjectType.PYTHON_FLASK: ["app.py", "run.py", "main.py"],
+            ProjectType.PYTHON_CLI: ["main.py", "cli.py", "__main__.py"],
             ProjectType.PYTHON_GENERIC: ["main.py", "__main__.py"],
-            ProjectType.NODE_REACT:     ["src/main.tsx", "src/App.tsx", "src/index.tsx"],
-            ProjectType.NODE_NEXTJS:    ["app/page.tsx", "pages/index.tsx"],
-            ProjectType.NODE_EXPRESS:   ["index.js", "server.js", "app.js"],
-            ProjectType.RUST:           ["src/main.rs", "src/lib.rs"],
-            ProjectType.GO:             ["main.go", "cmd/main.go"],
+            ProjectType.NODE_REACT: ["src/main.tsx", "src/App.tsx", "src/index.tsx"],
+            ProjectType.NODE_NEXTJS: ["app/page.tsx", "pages/index.tsx"],
+            ProjectType.NODE_EXPRESS: ["index.js", "server.js", "app.js"],
+            ProjectType.RUST: ["src/main.rs", "src/lib.rs"],
+            ProjectType.GO: ["main.go", "cmd/main.go"],
         }
         found = []
         for rel in candidates.get(pt, []):
@@ -264,10 +263,18 @@ class ProjectTypeDetector:
 
     def _find_config_files(self, workspace: Path, files: set[str]) -> list[str]:
         candidates = [
-            "pyproject.toml", "package.json", "Cargo.toml", "go.mod",
-            "tsconfig.json", ".eslintrc.json", "webpack.config.js",
-            "vite.config.ts", "next.config.js", "docker-compose.yml",
-            "Dockerfile", ".env.example",
+            "pyproject.toml",
+            "package.json",
+            "Cargo.toml",
+            "go.mod",
+            "tsconfig.json",
+            ".eslintrc.json",
+            "webpack.config.js",
+            "vite.config.ts",
+            "next.config.js",
+            "docker-compose.yml",
+            "Dockerfile",
+            ".env.example",
         ]
         return [f for f in candidates if f in files]
 

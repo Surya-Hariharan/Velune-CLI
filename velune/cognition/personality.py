@@ -172,10 +172,10 @@ class RepositoryPersonalityAgent:
 
         # Calculate naming conventions
         naming_totals = (
-            visitor.snake_case_count +
-            visitor.camel_case_count +
-            visitor.pascal_case_count +
-            visitor.upper_case_count
+            visitor.snake_case_count
+            + visitor.camel_case_count
+            + visitor.pascal_case_count
+            + visitor.upper_case_count
         )
 
         naming_stats = {
@@ -196,7 +196,9 @@ class RepositoryPersonalityAgent:
         # Calculate type hinting strictness
         total_annotations = visitor.total_params + visitor.total_returns
         annotated_total = visitor.annotated_params + visitor.annotated_returns
-        type_strictness = round(annotated_total / total_annotations, 3) if total_annotations > 0 else 1.0
+        type_strictness = (
+            round(annotated_total / total_annotations, 3) if total_annotations > 0 else 1.0
+        )
 
         # Calculate OOP vs Functional Paradigm
         # If classes are dominant,OOP. If top-level functions are dominant, Functional. Else hybrid.

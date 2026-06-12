@@ -67,7 +67,7 @@ class BenchmarkResult:
         self.label = label
         self.latency_ms = latency_ms
         self.peak_rss_kb = peak_rss_kb
-        self.cpu_factor: float = 1.0     # set by SubsystemBenchmarker.compare()
+        self.cpu_factor: float = 1.0  # set by SubsystemBenchmarker.compare()
         self.error = error
 
     def to_dict(self) -> dict[str, Any]:
@@ -237,9 +237,7 @@ class SubsystemBenchmarker:
     # Private helpers
     # ─────────────────────────────────────────────────────────────────────
 
-    def _run_once(
-        self, code_snippet: str, label: str, rep: int
-    ) -> tuple[float, float, str]:
+    def _run_once(self, code_snippet: str, label: str, rep: int) -> tuple[float, float, str]:
         """Execute the snippet once and parse the harness output.
 
         Returns:
@@ -259,9 +257,15 @@ class SubsystemBenchmarker:
         try:
             run_env = {**os.environ}
             for dangerous in (
-                "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PYTHONPATH",
-                "PYTHONSTARTUP", "PYTHONUSERBASE", "PYTHONINSPECT",
-                "BASH_ENV", "ENV", "PROMPT_COMMAND"
+                "LD_PRELOAD",
+                "DYLD_INSERT_LIBRARIES",
+                "PYTHONPATH",
+                "PYTHONSTARTUP",
+                "PYTHONUSERBASE",
+                "PYTHONINSPECT",
+                "BASH_ENV",
+                "ENV",
+                "PROMPT_COMMAND",
             ):
                 run_env.pop(dangerous, None)
             run_env["PYTHONNOUSERSITE"] = "1"

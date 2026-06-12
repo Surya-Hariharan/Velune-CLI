@@ -20,9 +20,9 @@ logger = logging.getLogger("velune.memory.vitality")
 class Vitality(enum.Enum):
     """Recency-based memory state for retrieval eligibility."""
 
-    LIVE = "live"           # Turn from last 3 sessions; always retrieved
-    ZOMBIE = "zombie"       # Turn from 4-10 sessions ago; retrieved only on LIVE miss
-    ARCHIVED = "archived"   # Turn > 10 sessions old; never retrieved (unless explicit)
+    LIVE = "live"  # Turn from last 3 sessions; always retrieved
+    ZOMBIE = "zombie"  # Turn from 4-10 sessions ago; retrieved only on LIVE miss
+    ARCHIVED = "archived"  # Turn > 10 sessions old; never retrieved (unless explicit)
 
 
 class VitalityClassifier:

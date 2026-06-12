@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class AgentRole(StrEnum):
     """Agent role definitions."""
+
     PLANNER = "planner"
     CODER = "coder"
     REASONER = "reasoner"
@@ -20,6 +21,7 @@ class AgentRole(StrEnum):
 
 class AgentMessageType(StrEnum):
     """Typed message protocol for agent communication."""
+
     TASK_REQUEST = "task_request"
     TASK_RESPONSE = "task_response"
     STATUS_UPDATE = "status_update"
@@ -31,6 +33,7 @@ class AgentMessageType(StrEnum):
 
 class AgentMessage(BaseModel):
     """Typed message for inter-agent communication."""
+
     message_type: AgentMessageType
     sender: str
     recipient: str
@@ -42,6 +45,7 @@ class AgentMessage(BaseModel):
 
 class AgentResult(BaseModel):
     """Result from agent execution."""
+
     success: bool
     output: Any | None = None
     error: str | None = None

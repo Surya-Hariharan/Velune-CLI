@@ -200,9 +200,7 @@ class BoundaryClassifier:
         """
         return self.classify(file_path, content="")
 
-    def batch_classify(
-        self, file_paths: list[str]
-    ) -> dict[str, BoundaryType | None]:
+    def batch_classify(self, file_paths: list[str]) -> dict[str, BoundaryType | None]:
         """Classify multiple files efficiently.
 
         Parameters

@@ -32,10 +32,7 @@ class OllamaDiscovery:
     async def _get_model_details(self, model_name: str) -> dict:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.post(
-                    f"{self.base_url}/api/show",
-                    json={"name": model_name}
-                )
+                r = await client.post(f"{self.base_url}/api/show", json={"name": model_name})
                 data = r.json()
                 modelfile = data.get("modelfile", "")
                 for line in modelfile.splitlines():

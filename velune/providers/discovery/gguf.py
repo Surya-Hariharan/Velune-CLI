@@ -17,6 +17,7 @@ class GGUFDiscovery:
     async def discover(self) -> list[ModelDescriptor]:
         """Discover GGUF models across all well-known paths."""
         from velune.providers.local_resolver import LocalModelResolver
+
         resolver = LocalModelResolver()
         files = resolver.scan_gguf_files()
 

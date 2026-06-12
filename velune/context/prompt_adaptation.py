@@ -458,9 +458,7 @@ class PromptAdaptationEngine:
 
         return [{"role": "user", "content": formatted_text}]
 
-    def get_capabilities(
-        self, model: ModelDescriptor
-    ) -> dict[str, bool | int]:
+    def get_capabilities(self, model: ModelDescriptor) -> dict[str, bool | int]:
         """Get formatting capabilities for a model.
 
         Parameters

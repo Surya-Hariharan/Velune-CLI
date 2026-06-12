@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class ContextPriority(StrEnum):
     """Context chunk priority levels."""
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -16,6 +17,7 @@ class ContextPriority(StrEnum):
 
 class ContextChunk(BaseModel):
     """A chunk of context with metadata."""
+
     content: str
     source: str
     priority: ContextPriority
@@ -27,6 +29,7 @@ class ContextChunk(BaseModel):
 
 class ContextWindow(BaseModel):
     """The assembled context window for inference."""
+
     chunks: list[ContextChunk]
     total_tokens: int
     max_tokens: int

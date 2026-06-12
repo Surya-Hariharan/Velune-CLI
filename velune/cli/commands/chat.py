@@ -20,6 +20,7 @@ def chat_command(ctx: typer.Context) -> None:
         raise typer.BadParameter("CLI context was not properly initialized")
 
     from velune.core.event_loop import submit
+
     submit(_chat_command_async(cli_context))
 
 
@@ -38,6 +39,7 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
 
     # Onboarding preflight check gate
     from velune.cli.commands.preflight import run_preflight_check
+
     if not await run_preflight_check(container, console):
         await lifecycle.shutdown()
         return
@@ -48,9 +50,14 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
     if not coder_model:
         from velune.cli.rendering.error_panel import render_error
         from velune.core.errors.catalog import NoModelsAvailableError
-        console.print(render_error(NoModelsAvailableError(
-            cause_override="No Coder model is assigned or found in the model catalog."
-        )))
+
+        console.print(
+            render_error(
+                NoModelsAvailableError(
+                    cause_override="No Coder model is assigned or found in the model catalog."
+                )
+            )
+        )
         await lifecycle.shutdown()
         return
 
@@ -73,17 +80,18 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
                 "Your objective is to answer questions, explain code, and assist with natural language tasks concisely and directly.\n"
                 "You have access to the user's workspace context details below.\n"
                 "Keep responses focused, and do not use verbose pleasantries."
-            )
+            ),
         },
-        {
-            "role": "system",
-            "content": f"User's workspace context summary:\n{formatted_snap}"
-        }
+        {"role": "system", "content": f"User's workspace context summary:\n{formatted_snap}"},
     ]
 
     console.print()
-    console.print("[bold green]Velune Chat Mode[/bold green] (type [cyan]!exit[/cyan] to quit, [cyan]!run <task>[/cyan] to escalate to full council)")
-    console.print("--------------------------------------------------------------------------------")
+    console.print(
+        "[bold green]Velune Chat Mode[/bold green] (type [cyan]!exit[/cyan] to quit, [cyan]!run <task>[/cyan] to escalate to full council)"
+    )
+    console.print(
+        "--------------------------------------------------------------------------------"
+    )
 
     while True:
         try:
@@ -103,9 +111,13 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
         if user_input.startswith("!run "):
             task = user_input[5:].strip()
             if not task:
-                console.print("[yellow]Usage: !run <task>  — please specify a task to execute[/yellow]")
+                console.print(
+                    "[yellow]Usage: !run <task>  — please specify a task to execute[/yellow]"
+                )
                 continue
-            console.print(f"[bold cyan]Escalating task to full Reasoning Council: '{task}'...[/bold cyan]")
+            console.print(
+                f"[bold cyan]Escalating task to full Reasoning Council: '{task}'...[/bold cyan]"
+            )
 
             orchestration_engine = container.get("runtime.orchestration_engine")
             try:
@@ -125,17 +137,26 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
                 state = orchestration_engine.get_state(run_id) if run_id else None
                 if state:
                     from velune.orchestration.schemas import ExecutionStatus
+
                     success = state.status == ExecutionStatus.COMPLETED
                     if success:
-                        console.print(f"[bold green]✓ Execution completed successfully: {state.output or 'Done'}[/bold green]")
+                        console.print(
+                            f"[bold green]✓ Execution completed successfully: {state.output or 'Done'}[/bold green]"
+                        )
                     else:
                         from velune.cli.rendering.error_panel import render_unexpected_error
-                        console.print(render_unexpected_error(RuntimeError(state.error or "Unknown execution failure")))
+
+                        console.print(
+                            render_unexpected_error(
+                                RuntimeError(state.error or "Unknown execution failure")
+                            )
+                        )
                 else:
                     console.print("[dim]Council run completed but returned no state.[/dim]")
             except Exception as e:
                 from velune.cli.rendering.error_panel import render_error, render_unexpected_error
                 from velune.core.errors.catalog import VeluneError
+
                 if isinstance(e, VeluneError):
                     console.print(render_error(e))
                 else:
@@ -145,6 +166,7 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
         # 7. Low-latency, streaming conversational execution
         messages.append({"role": "user", "content": user_input})
         from velune.core.types.inference import InferenceRequest
+
         request = InferenceRequest(
             model_id=coder_model.model_id,
             messages=messages,
@@ -156,7 +178,9 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
 
         try:
             capabilities = provider.get_capabilities()
-            supports_streaming = getattr(capabilities, "supports_streaming", False) and hasattr(provider, "stream")
+            supports_streaming = getattr(capabilities, "supports_streaming", False) and hasattr(
+                provider, "stream"
+            )
 
             if supports_streaming:
                 try:
@@ -180,6 +204,7 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
             print()
             from velune.cli.rendering.error_panel import render_error, render_unexpected_error
             from velune.core.errors.catalog import VeluneError
+
             if isinstance(e, VeluneError):
                 console.print(render_error(e))
             else:

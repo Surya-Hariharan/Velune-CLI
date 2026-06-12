@@ -25,22 +25,18 @@ __all__ = [
     "ComponentStatus",
     "Event",
     "HealthReport",
-
     # Bus
     "CognitiveBus",
     "Subscription",
     "EventBus",
     "EventHandler",
-
     # Registry
     "ServiceContainer",
     "inject",
     "get_container",
-
     # Lifecycle
     "LifecycleCoordinator",
     "Subsystem",
-
     # Config
     "VeluneConfig",
     "ConfigValidationError",
@@ -54,7 +50,6 @@ __all__ = [
     "ConfigLoader",
     "ConfigService",
     "get_default_config",
-
     # Health
     "SubsystemHealthMonitor",
 ]

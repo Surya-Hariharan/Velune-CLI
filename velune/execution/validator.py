@@ -88,7 +88,9 @@ class PostExecutionValidator:
                 from velune.execution.command_spec import CommandSpec
 
                 try:
-                    spec = CommandSpec.from_string(test_command, cwd=self.workspace_path, timeout=test_timeout)
+                    spec = CommandSpec.from_string(
+                        test_command, cwd=self.workspace_path, timeout=test_timeout
+                    )
                 except SandboxError as e:
                     self.sandbox.emit_rejection(test_command, str(e))
                     raise e

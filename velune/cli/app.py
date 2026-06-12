@@ -59,7 +59,11 @@ def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
     for index in range(1, len(lines) + 1):
         body = "\n".join(lines[:index])
         if index == len(lines):
-            body += "\n\n[bold cyan]Welcome to Velune CLI![/bold cyan]\n[dim]v" + __version__ + "[/dim]\n\n[bold]What would you like to build today?[/bold]"
+            body += (
+                "\n\n[bold cyan]Welcome to Velune CLI![/bold cyan]\n[dim]v"
+                + __version__
+                + "[/dim]\n\n[bold]What would you like to build today?[/bold]"
+            )
         frames.append(
             Panel(
                 Text.from_markup(body),
@@ -93,6 +97,7 @@ def _show_startup_banner(console: Console, workspace: Path, config_path: Path | 
     perceived speed comes from an instant prompt, not a reveal animation.
     """
     import sys
+
     if not sys.stdout.isatty():
         return  # Skip banner in CI, piped output, --quiet mode
 
@@ -114,17 +119,24 @@ def create_app() -> typer.Typer:
     def main(
         ctx: typer.Context,
         workspace: Path = typer.Option(Path.cwd(), "--workspace", "-w", help="Workspace root"),
-        config_path: Path | None = typer.Option(None, "--config", "-c", help="Explicit velune.toml path"),
+        config_path: Path | None = typer.Option(
+            None, "--config", "-c", help="Explicit velune.toml path"
+        ),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
         version: bool = typer.Option(False, "--version", help="Show version and exit"),
-        json_mode: bool = typer.Option(False, "--json", help="Enable machine-readable JSON output mode"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Auto-accept all file changes without prompting"),
+        json_mode: bool = typer.Option(
+            False, "--json", help="Enable machine-readable JSON output mode"
+        ),
+        yes: bool = typer.Option(
+            False, "--yes", "-y", help="Auto-accept all file changes without prompting"
+        ),
     ) -> None:
         """Initialize process-wide runtime state for every CLI invocation."""
 
         if version:
             if json_mode:
                 import json
+
                 print(json.dumps({"version": __version__}))
             else:
                 Console().print(f"Velune v{__version__}")
@@ -138,6 +150,7 @@ def create_app() -> typer.Typer:
 
         if yes:
             from velune.execution.diff_preview import configure as _configure_diff
+
             _configure_diff(auto_accept=True)
 
         try:
@@ -145,10 +158,12 @@ def create_app() -> typer.Typer:
         except Exception as e:
             if json_mode:
                 import json
+
                 print(json.dumps({"error": f"Velune failed to start: {e}"}))
             else:
                 from velune.cli.rendering.error_panel import render_error, render_unexpected_error
                 from velune.core.errors.catalog import VeluneError, WorkspaceNotInitializedError
+
                 if isinstance(e, VeluneError):
                     Console().print(render_error(e))
                 elif "velune.toml" in str(e).lower() or "workspace" in str(e).lower():
@@ -171,27 +186,36 @@ def create_app() -> typer.Typer:
         if ctx.invoked_subcommand is None:
             if json_mode:
                 import json
-                print(json.dumps({
-                    "status": "ready",
-                    "workspace": str(workspace),
-                    "config_path": str(config_path) if config_path else None,
-                    "version": __version__
-                }))
+
+                print(
+                    json.dumps(
+                        {
+                            "status": "ready",
+                            "workspace": str(workspace),
+                            "config_path": str(config_path) if config_path else None,
+                            "version": __version__,
+                        }
+                    )
+                )
             else:
                 from velune.providers.keystore import list_configured_providers
+
                 # list_configured_providers already includes a (short, deduped)
                 # Ollama reachability probe, so a single call suffices.
                 configured = list_configured_providers()
 
                 if not configured:
-                    runtime.console.print(Panel(
-                        "[yellow]No AI providers configured.[/yellow]\n"
-                        "[dim]Velune needs at least one provider to work.[/dim]",
-                        border_style="yellow",
-                    ))
+                    runtime.console.print(
+                        Panel(
+                            "[yellow]No AI providers configured.[/yellow]\n"
+                            "[dim]Velune needs at least one provider to work.[/dim]",
+                            border_style="yellow",
+                        )
+                    )
                     run_now = typer.confirm("Run setup now?", default=True)
                     if run_now:
                         from velune.cli.commands.setup import run_setup_wizard
+
                         run_setup_wizard()
                     else:
                         runtime.console.print(
@@ -203,6 +227,7 @@ def create_app() -> typer.Typer:
                 _show_startup_banner(runtime.console, workspace, config_path)
                 _startup_mark("REPL handoff (prompt visible)")
                 from velune.kernel.entrypoint import launch
+
                 launch(runtime)
 
     register_commands(app, ServiceContainer())

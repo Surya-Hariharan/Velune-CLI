@@ -23,9 +23,11 @@ from velune.providers.keystore import get_key
 class AnthropicProvider(ModelProvider):
     """Anthropic provider for Claude models."""
 
-    def __init__(self, api_key: str | SecretStr | None = None, base_url: str = "https://api.anthropic.com") -> None:
+    def __init__(
+        self, api_key: str | SecretStr | None = None, base_url: str = "https://api.anthropic.com"
+    ) -> None:
         self._api_key = api_key or get_key("anthropic")
-        if hasattr(self._api_key, 'get_secret_value'):
+        if hasattr(self._api_key, "get_secret_value"):
             self._api_key = self._api_key.get_secret_value()
         self._base_url = base_url
         self.client: httpx.AsyncClient | None = None
@@ -43,7 +45,9 @@ class AnthropicProvider(ModelProvider):
     async def initialize(self) -> None:
         """Initialize HTTP client with Anthropic specific headers."""
         if not self._api_key:
-            raise ProviderAuthenticationError("Anthropic API key not found in configuration or environment")
+            raise ProviderAuthenticationError(
+                "Anthropic API key not found in configuration or environment"
+            )
         if not self.client:
             headers = {
                 "x-api-key": self._api_key,
@@ -218,6 +222,7 @@ class AnthropicProvider(ModelProvider):
         """Record latency to health monitor if available."""
         try:
             from velune.kernel.registry import get_container
+
             container = get_container()
             if container.has("runtime.provider_health_monitor"):
                 monitor = container.get("runtime.provider_health_monitor")

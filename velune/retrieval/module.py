@@ -4,6 +4,7 @@ from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 def _create_hybrid_retriever(env: RuntimeEnvironment):
     from velune.core.paths import qdrant_store_path
     from velune.retrieval.hybrid import HybridRetriever
+
     vector_path = str(qdrant_store_path(env.workspace))
     semantic_tier = env.container.get("runtime.semantic_memory")
     # Share the semantic tier's single Qdrant connection, but resolve it lazily
@@ -12,6 +13,7 @@ def _create_hybrid_retriever(env: RuntimeEnvironment):
         location=vector_path,
         client_provider=lambda: semantic_tier.client,
     )
+
 
 RETRIEVAL_MODULES = [
     SubsystemModule(

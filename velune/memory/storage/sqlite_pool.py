@@ -103,9 +103,7 @@ class SQLiteConnectionPool:
         write contention.
         """
         if self._write_conn is None:
-            raise RuntimeError(
-                "SQLiteConnectionPool has not been started — call startup() first."
-            )
+            raise RuntimeError("SQLiteConnectionPool has not been started — call startup() first.")
         async with self._write_lock:
             try:
                 yield self._write_conn

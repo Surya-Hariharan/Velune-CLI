@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     from rich.console import Console
 
 _SKILL_STYLES: dict[str, str] = {
-    "coding":    "fg:ansigreen",
+    "coding": "fg:ansigreen",
     "reasoning": "fg:ansimagenta",
     "embedding": "fg:ansicyan",
-    "general":   "fg:ansibrightblack",
+    "general": "fg:ansibrightblack",
 }
 
 
@@ -53,8 +53,7 @@ async def run_pull_ui(
             row_style = "bold fg:cyan" if is_active else ""
             model_id = model["model_id"]
             is_local = any(
-                m == model_id or m.split(":")[0] == model_id.split(":")[0]
-                and m == model_id
+                m == model_id or m.split(":")[0] == model_id.split(":")[0] and m == model_id
                 for m in local_models
             )
             fits = _fits(model)
@@ -71,10 +70,12 @@ async def run_pull_ui(
                 status = ""
                 status_style = ""
 
-            lines.append((
-                row_style,
-                f"  {prefix}{model_id:<34} {model['size_gb']:4.1f} GB  ",
-            ))
+            lines.append(
+                (
+                    row_style,
+                    f"  {prefix}{model_id:<34} {model['size_gb']:4.1f} GB  ",
+                )
+            )
             lines.append((skill_style, f"[{skill}]"))
             if status:
                 lines.append((status_style, status))
@@ -82,7 +83,9 @@ async def run_pull_ui(
 
             if is_active:
                 lines.append(("fg:ansibrightblack", f"         {model['description']}\n"))
-                lines.append(("fg:ansibrightblack", f"         RAM needed: {model['ram_needed']}\n"))
+                lines.append(
+                    ("fg:ansibrightblack", f"         RAM needed: {model['ram_needed']}\n")
+                )
 
         return FormattedText(lines)
 
@@ -107,9 +110,11 @@ async def run_pull_ui(
         event.app.exit()
 
     app = Application(
-        layout=Layout(Window(
-            content=FormattedTextControl(render_list, focusable=True),
-        )),
+        layout=Layout(
+            Window(
+                content=FormattedTextControl(render_list, focusable=True),
+            )
+        ),
         key_bindings=kb,
         full_screen=False,
         mouse_support=False,

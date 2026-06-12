@@ -3,7 +3,9 @@ from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 def _create_repository_cognition(env: RuntimeEnvironment):
     from velune.repository.cognition import RepositoryCognitionService
+
     return RepositoryCognitionService(env.workspace)
+
 
 REPOSITORY_MODULES = [
     SubsystemModule(

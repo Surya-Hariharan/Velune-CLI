@@ -34,4 +34,3 @@ class CLIContext:
     @property
     def container(self) -> ServiceContainer:
         return self.runtime.container
-

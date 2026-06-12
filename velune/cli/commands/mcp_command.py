@@ -96,9 +96,7 @@ def get_mcp_group() -> click.Group:
             os.kill(pid, 0)  # Check if process exists
             console.print(
                 Panel(
-                    f"[bold green]MCP Server Running[/bold green]\n"
-                    f"PID: {pid}\n"
-                    f"Log: {MCP_LOG_FILE}",
+                    f"[bold green]MCP Server Running[/bold green]\nPID: {pid}\nLog: {MCP_LOG_FILE}",
                     title="Status",
                 )
             )

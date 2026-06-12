@@ -12,12 +12,12 @@ class ModelBenchmarkMetrics:
     """Live performance metrics recorded during model benchmarks."""
 
     def __init__(self) -> None:
-        self.ttft_ms: float = 0.0          # Time to first token
-        self.tps: float = 0.0               # Tokens per second
-        self.total_latency_ms: float = 0.0 # Total latency in ms
+        self.ttft_ms: float = 0.0  # Time to first token
+        self.tps: float = 0.0  # Tokens per second
+        self.total_latency_ms: float = 0.0  # Total latency in ms
         self.tokens_generated: int = 0
-        self.tool_accuracy: float = 0.0     # Percentage correctness for tools
-        self.json_validity: float = 0.0     # Percentage valid JSON formats
+        self.tool_accuracy: float = 0.0  # Percentage correctness for tools
+        self.json_validity: float = 0.0  # Percentage valid JSON formats
 
 
 class ProviderBenchmarker:
@@ -27,7 +27,9 @@ class ProviderBenchmarker:
         self.provider = provider
         self.model_id = model_id
 
-    async def run_latency_probe(self, prompt: str = "Hello, respond with exactly 'pong'.") -> ModelBenchmarkMetrics:
+    async def run_latency_probe(
+        self, prompt: str = "Hello, respond with exactly 'pong'."
+    ) -> ModelBenchmarkMetrics:
         """Probe time-to-first-token and total generation latency."""
         metrics = ModelBenchmarkMetrics()
         request = InferenceRequest(
@@ -74,7 +76,7 @@ class ProviderBenchmarker:
                 metrics.ttft_ms = metrics.total_latency_ms  # No stream TTFT estimation
                 metrics.tokens_generated = response.tokens_used or int(len(response.content) / 4.0)
 
-                duration = (end_time - start_time)
+                duration = end_time - start_time
                 if duration > 0:
                     metrics.tps = metrics.tokens_generated / duration
             except Exception:
@@ -113,6 +115,7 @@ class ProviderBenchmarker:
                         content = content[4:].strip()
 
             import json
+
             parsed = json.loads(content)
             json_valid = 1.0
 

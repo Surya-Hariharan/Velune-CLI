@@ -28,6 +28,7 @@ class ModelCapabilityRegistry:
 
             profile_cache = ModelProfileCache(Path(".velune") / "model_profiles.json")
             from velune.models.probes import FastProbe
+
             fast_probe = FastProbe()
 
             probing_tasks = []
@@ -43,6 +44,7 @@ class ModelCapabilityRegistry:
                     provider = None
                     try:
                         from velune.kernel.registry import get_container
+
                         provider_reg = get_container().get("runtime.provider_registry")
                         provider = provider_reg.get(model.provider_id)
                     except Exception:
@@ -63,6 +65,7 @@ class ModelCapabilityRegistry:
                         model.metadata["validated"] = True
                         try:
                             from velune.daemon.client import DaemonClient
+
                             if DaemonClient.is_running():
                                 # Delegate background probing to the active persistent Velune daemon!
                                 # Using create_task to fire-and-forget the IPC dispatch call
@@ -73,9 +76,13 @@ class ModelCapabilityRegistry:
                                         provider_id=model.provider_id,
                                     )
                                 )
-                                logger.info("Delegated full probing of model %s to the active Velune daemon process.", model.model_id)
+                                logger.info(
+                                    "Delegated full probing of model %s to the active Velune daemon process.",
+                                    model.model_id,
+                                )
                             else:
                                 from velune.kernel.registry import get_container
+
                                 task_reg = get_container().get("runtime.task_registry")
                                 task_reg.submit(
                                     name=f"full_probe_{model.model_id}",
@@ -95,9 +102,11 @@ class ModelCapabilityRegistry:
                 if model.model_id not in self._models:
                     self._models[model.model_id] = model
 
-            logger.info("Indexed %d models (%d validated)",
+            logger.info(
+                "Indexed %d models (%d validated)",
                 len(discovered),
-                sum(1 for m in discovered if m.metadata.get("validated", True)))
+                sum(1 for m in discovered if m.metadata.get("validated", True)),
+            )
         except Exception as e:
             logger.error("Failed to discover models during catalog refresh: %s", e)
 
@@ -164,13 +173,23 @@ class ModelCapabilityRegistry:
             return CapabilityLevel.NONE
 
         coding_data = probes.get("coding", {})
-        coding_score = coding_data.score if hasattr(coding_data, "score") else coding_data.get("score", 0.0)
+        coding_score = (
+            coding_data.score if hasattr(coding_data, "score") else coding_data.get("score", 0.0)
+        )
 
         reasoning_data = probes.get("reasoning", {})
-        reasoning_score = reasoning_data.score if hasattr(reasoning_data, "score") else reasoning_data.get("score", 0.0)
+        reasoning_score = (
+            reasoning_data.score
+            if hasattr(reasoning_data, "score")
+            else reasoning_data.get("score", 0.0)
+        )
 
         instruction_data = probes.get("instruction", {})
-        instruction_score = instruction_data.score if hasattr(instruction_data, "score") else instruction_data.get("score", 0.0)
+        instruction_score = (
+            instruction_data.score
+            if hasattr(instruction_data, "score")
+            else instruction_data.get("score", 0.0)
+        )
 
         model.capabilities.coding = score_to_level(coding_score)
         model.capabilities.reasoning = score_to_level(reasoning_score)
@@ -195,13 +214,19 @@ class ModelCapabilityRegistry:
             instruction_score,
         )
 
-    async def _probe_model_background(self, model: ModelDescriptor, cache: ModelProfileCache) -> None:
+    async def _probe_model_background(
+        self, model: ModelDescriptor, cache: ModelProfileCache
+    ) -> None:
         """Run probes in background, update model in registry when done."""
         try:
             from velune.kernel.registry import get_container
+
             container = get_container()
             if not container.has("runtime.provider_registry"):
-                logger.debug("No provider registry registered yet, skipping background probe for %s.", model.model_id)
+                logger.debug(
+                    "No provider registry registered yet, skipping background probe for %s.",
+                    model.model_id,
+                )
                 return
 
             provider_registry = container.get("runtime.provider_registry")
@@ -211,11 +236,16 @@ class ModelCapabilityRegistry:
                 return
 
             from velune.models.probes import ModelProber
+
             prober = ModelProber(provider, model.model_id)
             results = await prober.run_all_probes()
             cache.set(model.model_id, model.provider_id, results)
             self._apply_probe_results(model, results)
-            logger.info("Successfully probed %s: coding=%.2f reasoning=%.2f",
-                        model.model_id, results["coding"].score, results["reasoning"].score)
+            logger.info(
+                "Successfully probed %s: coding=%.2f reasoning=%.2f",
+                model.model_id,
+                results["coding"].score,
+                results["reasoning"].score,
+            )
         except Exception as e:
             logger.debug("Background probe failed for %s: %s", model.model_id, e)

@@ -17,7 +17,7 @@ def extractive_compress(text: str, target_tokens: int) -> str:
         return text  # Already fits
 
     # Score each sentence
-    word_freq = Counter(re.findall(r'\w+', text.lower()))
+    word_freq = Counter(re.findall(r"\w+", text.lower()))
     total_words = sum(word_freq.values())
 
     scored = []
@@ -29,7 +29,7 @@ def extractive_compress(text: str, target_tokens: int) -> str:
         if i == len(sentences) - 1:
             score += 0.3
         # Boost sentences with code-like content
-        if any(c in sentence for c in ('def ', 'class ', 'import ', '() ->', ':=')):
+        if any(c in sentence for c in ("def ", "class ", "import ", "() ->", ":=")):
             score += 0.4
         scored.append((score, i, sentence))
 
@@ -47,33 +47,34 @@ def extractive_compress(text: str, target_tokens: int) -> str:
 
     # Sort selected sentences back to original order
     selected.sort(key=lambda x: x[0])
-    result = ' '.join(s for _, s in selected)
+    result = " ".join(s for _, s in selected)
 
     if len(text) > len(result) + 50:
         result += f"\n[COMPRESSED: {len(text)} → {len(result)} chars]"
 
     return result
 
+
 def _score_sentence(sentence: str, word_freq: Counter, total: int) -> float:
-    words = re.findall(r'\w+', sentence.lower())
+    words = re.findall(r"\w+", sentence.lower())
     if not words:
         return 0.0
     # TF-IDF inspired: sum of term frequencies of uncommon words
     score = sum(1.0 / (word_freq[w] + 1) for w in words if len(w) > 3)
     return score / len(words)
 
+
 def _split_sentences(text: str) -> list[str]:
     # Split on sentence endings, preserve code blocks intact
-    return re.split(r'(?<=[.!?])\s+', text)
+    return re.split(r"(?<=[.!?])\s+", text)
 
 
-def compress_conversation(
-    conversation: list[dict], max_tokens: int
-) -> list[dict]:
+def compress_conversation(conversation: list[dict], max_tokens: int) -> list[dict]:
     """Drop oldest conversation turns until the total fits within max_tokens."""
     try:
         from velune.context.window import estimate_tokens
     except ImportError:
+
         def estimate_tokens(text: str) -> int:  # type: ignore[misc]
             return len(text) // 4
 

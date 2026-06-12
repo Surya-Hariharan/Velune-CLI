@@ -8,12 +8,12 @@ from enum import Enum
 
 
 class HardwareTier(Enum):
-    CRITICAL = "critical"   # < 8 GB RAM, no GPU — cannot run any local LLM
-    LOW      = "low"        # 8 GB RAM, integrated GPU — 3B models only
-    MARGINAL = "marginal"   # 16 GB RAM, integrated GPU — 3B fast / 7B slow
-    CAPABLE  = "capable"    # 16 GB RAM + 6-8 GB VRAM — 7B comfortably
-    POWERFUL = "powerful"   # 32 GB RAM + 12+ GB VRAM — 13B comfortably
-    ELITE    = "elite"      # 64 GB+ or Apple Silicon 36 GB+ — 70B capable
+    CRITICAL = "critical"  # < 8 GB RAM, no GPU — cannot run any local LLM
+    LOW = "low"  # 8 GB RAM, integrated GPU — 3B models only
+    MARGINAL = "marginal"  # 16 GB RAM, integrated GPU — 3B fast / 7B slow
+    CAPABLE = "capable"  # 16 GB RAM + 6-8 GB VRAM — 7B comfortably
+    POWERFUL = "powerful"  # 32 GB RAM + 12+ GB VRAM — 13B comfortably
+    ELITE = "elite"  # 64 GB+ or Apple Silicon 36 GB+ — 70B capable
 
 
 @dataclass
@@ -24,9 +24,9 @@ class HardwareProfile:
     vram_total_gb: float | None
     is_apple_silicon: bool
     cpu_cores: int
-    platform: str                   # "linux" | "darwin" | "windows"
+    platform: str  # "linux" | "darwin" | "windows"
     tier: HardwareTier
-    recommended_model_size: str     # "3B" | "7B" | "13B" | "30B" | "70B" | "none"
+    recommended_model_size: str  # "3B" | "7B" | "13B" | "30B" | "70B" | "none"
     can_run_local_llm: bool
     warnings: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
@@ -47,14 +47,11 @@ class HardwareDetector:
 
         import psutil
 
-        total_ram = psutil.virtual_memory().total / (1024 ** 3)
-        available_ram = psutil.virtual_memory().available / (1024 ** 3)
+        total_ram = psutil.virtual_memory().total / (1024**3)
+        available_ram = psutil.virtual_memory().available / (1024**3)
         cpu_cores = psutil.cpu_count(logical=False) or 1
         sys_platform = platform.system().lower()
-        is_apple_silicon = (
-            sys_platform == "darwin"
-            and platform.processor() == "arm"
-        )
+        is_apple_silicon = sys_platform == "darwin" and platform.processor() == "arm"
 
         gpu_name, vram_gb = self._detect_gpu()
         tier, rec_model, can_run = self._classify(total_ram, vram_gb, is_apple_silicon)
@@ -82,6 +79,7 @@ class HardwareDetector:
         # GPU is probed twice (~0.4-0.6s of duplicated subprocess/driver work).
         try:
             from velune.providers.discovery import gpu as _gpu_mod
+
             cache = _gpu_mod._GPU_CACHE
             if cache is not None:
                 # Runtime already completed a GPU probe — trust it rather than
@@ -98,28 +96,34 @@ class HardwareDetector:
         # NVIDIA via pynvml
         try:
             import pynvml
+
             pynvml.nvmlInit()
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             name = pynvml.nvmlDeviceGetName(handle)
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            vram_gb = mem.total / (1024 ** 3)
+            vram_gb = mem.total / (1024**3)
             return name, round(vram_gb, 1)
         except Exception:
             pass
 
         # Apple Silicon — unified memory: all RAM is usable as VRAM
         import platform
+
         if platform.system() == "Darwin" and platform.processor() == "arm":
             import psutil
-            total_ram = psutil.virtual_memory().total / (1024 ** 3)
+
+            total_ram = psutil.virtual_memory().total / (1024**3)
             return "Apple Silicon (unified memory)", round(total_ram, 1)
 
         # AMD via ROCm
         try:
             import subprocess
+
             result = subprocess.run(
                 ["rocm-smi", "--showmeminfo", "vram"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
@@ -166,9 +170,7 @@ class HardwareDetector:
         suggestions: list[str] = []
 
         if tier == HardwareTier.CRITICAL:
-            warnings.append(
-                f"Only {ram_gb:.0f} GB RAM detected — cannot run any local LLM"
-            )
+            warnings.append(f"Only {ram_gb:.0f} GB RAM detected — cannot run any local LLM")
             suggestions.append("Configure a cloud provider (Groq free tier recommended)")
             suggestions.append("Run: velune init --provider groq")
 

@@ -18,9 +18,18 @@ run_cmd = typer.Typer(help="Autonomous council run commands")
 def run_command(
     ctx: typer.Context,
     task: str = typer.Argument(..., help="Natural-language task to execute"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-d", help="Deliberate but do not write modifications or execute scripts"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force execution without human confirm thresholds"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip cost confirmation prompts (for scripting)"),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-d",
+        help="Deliberate but do not write modifications or execute scripts",
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force execution without human confirm thresholds"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip cost confirmation prompts (for scripting)"
+    ),
 ) -> None:
     """Deliberate with the stateful LangGraph Reasoning Council and execute in the secured sandbox."""
 
@@ -32,6 +41,7 @@ def run_command(
     cli_context.yes = yes or cli_context.yes
 
     from velune.core.event_loop import submit
+
     submit(_run_command_async(cli_context, task, dry_run, force))
 
 
@@ -53,23 +63,41 @@ async def _run_command_async(
 
     # 3. Refresh model catalog scan to assign specialized seats
     if not cli_context.json_mode:
-        console.print("[bold cyan]⠋[/bold cyan] Probing system hardware and local/remote providers...")
+        console.print(
+            "[bold cyan]⠋[/bold cyan] Probing system hardware and local/remote providers..."
+        )
     await model_registry.refresh()
 
     # Onboarding preflight check gate
     from velune.cli.commands.preflight import run_preflight_check
+
     if not await run_preflight_check(container, console if not cli_context.json_mode else None):
         if cli_context.json_mode:
             import json
-            print(json.dumps({"error": "Preflight check failed. Ensure workspace is initialized and models are scanned."}))
+
+            print(
+                json.dumps(
+                    {
+                        "error": "Preflight check failed. Ensure workspace is initialized and models are scanned."
+                    }
+                )
+            )
         await lifecycle.shutdown()
         return
 
     if not cli_context.json_mode:
         console.print()
-        console.print(Panel(f"[bold green]Task Auth:[/bold green] {task}", border_style="cyan", title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]"))
+        console.print(
+            Panel(
+                f"[bold green]Task Auth:[/bold green] {task}",
+                border_style="cyan",
+                title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]",
+            )
+        )
         # 4. Stream Multi-Agent Council Deliberation & Execution Graph
-        console.print("[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n")
+        console.print(
+            "[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n"
+        )
 
     # --- Pre-operation cost estimation gate ---
     if not cli_context.json_mode:
@@ -103,6 +131,7 @@ async def _run_command_async(
     if state is None:
         if cli_context.json_mode:
             import json
+
             print(json.dumps({"error": "Pipeline failed to initialize state."}))
         else:
             console.print("[bold red]✗ Pipeline failed to initialize state.[/bold red]")
@@ -116,16 +145,21 @@ async def _run_command_async(
 
     if cli_context.json_mode:
         import json
-        print(json.dumps({
-            "success": success,
-            "run_id": state.run_id,
-            "plan_steps": plan_steps,
-            "retry_attempts": attempts_count,
-            "checkpoints_saved": checkpoints_count,
-            "output": state.output or "Execution completed successfully.",
-            "error": state.error,
-            "validation_issues": state.validation_issues or [],
-        }))
+
+        print(
+            json.dumps(
+                {
+                    "success": success,
+                    "run_id": state.run_id,
+                    "plan_steps": plan_steps,
+                    "retry_attempts": attempts_count,
+                    "checkpoints_saved": checkpoints_count,
+                    "output": state.output or "Execution completed successfully.",
+                    "error": state.error,
+                    "validation_issues": state.validation_issues or [],
+                }
+            )
+        )
     else:
         if success:
             console.print(
@@ -137,10 +171,10 @@ async def _run_command_async(
                         (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
                         (f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"),
                         ("[bold green]Synthesized Output:[/bold green]\n"),
-                        (state.output or "Execution completed successfully.")
+                        (state.output or "Execution completed successfully."),
                     ),
                     border_style="green",
-                    title="[bold green]Success Report[/bold green]"
+                    title="[bold green]Success Report[/bold green]",
                 )
             )
         else:
@@ -149,13 +183,19 @@ async def _run_command_async(
                     Text.assemble(
                         ("[bold red]✗ AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"),
                         (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
-                        (f"Failure Reason: [bold red]{state.error or 'Validation/Execution mismatch'}[/bold red]\n"),
+                        (
+                            f"Failure Reason: [bold red]{state.error or 'Validation/Execution mismatch'}[/bold red]\n"
+                        ),
                         (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
-                        (f"Validation Issues: [bold yellow]{', '.join(state.validation_issues) if state.validation_issues else 'None'}[/bold yellow]\n\n"),
-                        ("[yellow]State checkpointer stashed checkpoints, and Git workspace states have been preserved/rolled back.[/yellow]")
+                        (
+                            f"Validation Issues: [bold yellow]{', '.join(state.validation_issues) if state.validation_issues else 'None'}[/bold yellow]\n\n"
+                        ),
+                        (
+                            "[yellow]State checkpointer stashed checkpoints, and Git workspace states have been preserved/rolled back.[/yellow]"
+                        ),
                     ),
                     border_style="red",
-                    title="[bold red]Rollback Execution Report[/bold red]"
+                    title="[bold red]Rollback Execution Report[/bold red]",
                 )
             )
 

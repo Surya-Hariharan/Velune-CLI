@@ -26,19 +26,26 @@ def config_set(
     if not cli_context:
         if ctx.obj and getattr(ctx.obj, "json_mode", False):
             import json
+
             print(json.dumps({"error": "CLI context is uninitialized"}))
         else:
             from velune.cli.rendering.error_panel import render_error
             from velune.core.errors.catalog import WorkspaceNotInitializedError
-            console.print(render_error(WorkspaceNotInitializedError(
-                cause_override="CLI context was not properly initialized before this command."
-            )))
+
+            console.print(
+                render_error(
+                    WorkspaceNotInitializedError(
+                        cause_override="CLI context was not properly initialized before this command."
+                    )
+                )
+            )
         raise typer.Exit(1)
 
     config_path = cli_context.config_path or (cli_context.workspace / "velune.toml")
 
     # Load raw TOML
     import toml
+
     try:
         if config_path.exists():
             data = toml.load(config_path)
@@ -47,9 +54,11 @@ def config_set(
     except Exception as e:
         if cli_context.json_mode:
             import json
+
             print(json.dumps({"error": f"Failed to load existing config: {e}"}))
         else:
             from velune.cli.rendering.error_panel import render_unexpected_error
+
             console.print(render_unexpected_error(e))
         data = {}
 
@@ -85,15 +94,24 @@ def config_set(
             toml.dump(data, f)
         if cli_context.json_mode:
             import json
-            print(json.dumps({"success": True, "key": key, "value": typed_val, "path": str(config_path)}))
+
+            print(
+                json.dumps(
+                    {"success": True, "key": key, "value": typed_val, "path": str(config_path)}
+                )
+            )
         else:
-            console.print(f"[green]✓ Successfully set [bold]{key}[/bold] to [bold]{typed_val}[/bold] in {config_path}[/green]")
+            console.print(
+                f"[green]✓ Successfully set [bold]{key}[/bold] to [bold]{typed_val}[/bold] in {config_path}[/green]"
+            )
     except Exception as e:
         if cli_context.json_mode:
             import json
+
             print(json.dumps({"error": f"Failed to save config: {e}"}))
         else:
             from velune.cli.rendering.error_panel import render_unexpected_error
+
             console.print(render_unexpected_error(e))
         raise typer.Exit(1)
 
@@ -108,13 +126,19 @@ def config_get(
     if not cli_context:
         if ctx.obj and getattr(ctx.obj, "json_mode", False):
             import json
+
             print(json.dumps({"error": "CLI context is uninitialized"}))
         else:
             from velune.cli.rendering.error_panel import render_error
             from velune.core.errors.catalog import WorkspaceNotInitializedError
-            console.print(render_error(WorkspaceNotInitializedError(
-                cause_override="CLI context was not properly initialized before this command."
-            )))
+
+            console.print(
+                render_error(
+                    WorkspaceNotInitializedError(
+                        cause_override="CLI context was not properly initialized before this command."
+                    )
+                )
+            )
         raise typer.Exit(1)
 
     # Fetch from the active loaded config object which is resolved and typed
@@ -130,6 +154,7 @@ def config_get(
         else:
             if cli_context.json_mode:
                 import json
+
                 print(json.dumps({"error": f"Key '{key}' not found in active configuration"}))
             else:
                 console.print(f"[red]Key '{key}' not found in active configuration.[/red]")
@@ -137,6 +162,7 @@ def config_get(
 
     if cli_context.json_mode:
         import json
+
         print(json.dumps({"key": key, "value": curr}))
     else:
         console.print(f"[bold]{key}[/bold] = {curr}")
@@ -150,6 +176,7 @@ def config_show(ctx: typer.Context) -> None:
     if cli_context is None:
         if ctx.obj and getattr(ctx.obj, "json_mode", False):
             import json
+
             print(json.dumps({"error": "Configuration not yet loaded"}))
         else:
             console.print(Panel.fit("Configuration not yet loaded.", title="Configuration"))
@@ -158,24 +185,29 @@ def config_show(ctx: typer.Context) -> None:
     config = cli_context.config
     if cli_context.json_mode:
         import json
-        print(json.dumps({
-            "project": {
-                "name": config.project.name,
-                "version": config.project.version,
-            },
-            "providers": {
-                "default": config.providers.default_provider,
-            },
-            "workspace": {
-                "index_on_init": config.workspace.index_on_init,
-                "watch_files": config.workspace.watch_files,
-                "git_aware": config.workspace.git_aware,
-            },
-            "telemetry": {
-                "enabled": config.telemetry.enabled,
-                "log_level": config.telemetry.log_level,
-            }
-        }))
+
+        print(
+            json.dumps(
+                {
+                    "project": {
+                        "name": config.project.name,
+                        "version": config.project.version,
+                    },
+                    "providers": {
+                        "default": config.providers.default_provider,
+                    },
+                    "workspace": {
+                        "index_on_init": config.workspace.index_on_init,
+                        "watch_files": config.workspace.watch_files,
+                        "git_aware": config.workspace.git_aware,
+                    },
+                    "telemetry": {
+                        "enabled": config.telemetry.enabled,
+                        "log_level": config.telemetry.log_level,
+                    },
+                }
+            )
+        )
     else:
         console.print(
             Panel.fit(

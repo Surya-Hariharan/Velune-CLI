@@ -16,6 +16,7 @@ class ReviewerMessage(BaseModel):
     def get(self, item: str, default: Any = None) -> Any:
         return getattr(self, item, default)
 
+
 class ChallengerMessage(BaseModel):
     assumptions_challenged: list[str] = Field(default_factory=list)
     failure_vectors: list[str] = Field(default_factory=list)
@@ -27,6 +28,7 @@ class ChallengerMessage(BaseModel):
 
     def get(self, item: str, default: Any = None) -> Any:
         return getattr(self, item, default)
+
 
 class CriticMessage(BaseModel):
     passed: bool = True
@@ -40,6 +42,7 @@ class CriticMessage(BaseModel):
 
     def get(self, item: str, default: Any = None) -> Any:
         return getattr(self, item, default)
+
 
 class PlannerMessage(BaseModel):
     task_id: str = "task-main"

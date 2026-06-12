@@ -12,7 +12,9 @@ _step_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("step_id",
 class TraceContext:
     """Context manager to manage the active run, agent, and step trace ids in context variables."""
 
-    def __init__(self, run_id: str, agent_id: str | None = None, step_id: str | None = None) -> None:
+    def __init__(
+        self, run_id: str, agent_id: str | None = None, step_id: str | None = None
+    ) -> None:
         self._tokens: list[contextvars.Token[str | None]] = []
         self.run_id = run_id
         self.agent_id = agent_id
@@ -34,6 +36,7 @@ class TraceContext:
 def get_trace_prefix() -> str:
     """Generate the structured trace prefix string from active context variables."""
     import os
+
     if os.environ.get("VELUNE_LOG_FORMAT", "").lower() == "json":
         return ""
     parts = []

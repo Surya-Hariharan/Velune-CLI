@@ -13,6 +13,7 @@ from velune.core.types.task import TaskPlan
 
 class ReviewDecision(StrEnum):
     """Review outcome decision."""
+
     APPROVE = "approve"
     REJECT = "reject"
     REVISE = "revise"
@@ -63,7 +64,9 @@ class CouncilState:
         self.task_plan = task_plan
         self.retrieved_context = retrieved_context
 
-    def set_coder_output(self, diffs: list[dict[str, Any]], artifacts: list[str] | None = None) -> None:
+    def set_coder_output(
+        self, diffs: list[dict[str, Any]], artifacts: list[str] | None = None
+    ) -> None:
         """Coder writes diffs and optional artifacts. Called only by coder agent."""
         self.pending_diffs = diffs
         if artifacts:

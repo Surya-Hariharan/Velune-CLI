@@ -139,9 +139,7 @@ class ContextOrchestrationEngine:
 
         # Phase 2: Retrieve context within budget
         if self.retrieval_pipeline is None:
-            logger.warning(
-                "No retrieval pipeline available; returning empty context"
-            )
+            logger.warning("No retrieval pipeline available; returning empty context")
             return [], budget
 
         # Create task profile if not provided
@@ -176,9 +174,7 @@ class ContextOrchestrationEngine:
 
         # Phase 3: Convert retrieval results to context chunks
         chunks = self._convert_retrieval_results(retrieved, budget)
-        logger.debug(
-            f"Converted {len(chunks)} retrieval results to context chunks"
-        )
+        logger.debug(f"Converted {len(chunks)} retrieval results to context chunks")
 
         return chunks, budget
 

@@ -30,6 +30,7 @@ _DEFAULT_TTL_SECONDS: float = 7200.0
 
 class MemoryTurn(BaseModel):
     """A single turn in the working memory."""
+
     role: str
     content: str
     timestamp: float = Field(default_factory=time.time)
@@ -147,11 +148,13 @@ class WorkingMemoryTier:
 
     def log_execution_step(self, step_name: str, payload: dict[str, Any]) -> None:
         """Record a transient execution step log."""
-        self._execution_logs.append({
-            "step": step_name,
-            "payload": payload,
-            "timestamp": time.time(),
-        })
+        self._execution_logs.append(
+            {
+                "step": step_name,
+                "payload": payload,
+                "timestamp": time.time(),
+            }
+        )
 
     def get_execution_logs(self) -> list[dict[str, Any]]:
         """Get all transient execution logs."""

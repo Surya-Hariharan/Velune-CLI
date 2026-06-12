@@ -3,11 +3,13 @@ from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 def _create_provider_registry(env: RuntimeEnvironment):
     from velune.providers.registry import ProviderRegistry
+
     return ProviderRegistry(env.config.providers)
 
 
 def _create_provider_health_monitor(env: RuntimeEnvironment):
     from velune.providers.health_monitor import ProviderHealthMonitor
+
     registry = env.container.get("runtime.provider_registry")
     monitor = ProviderHealthMonitor(registry)
     # Don't auto-start; let the application start it when needed
@@ -16,6 +18,7 @@ def _create_provider_health_monitor(env: RuntimeEnvironment):
 
 def _create_provider_router(env: RuntimeEnvironment):
     from velune.providers.router import ProviderRouter
+
     registry = env.container.get("runtime.provider_registry")
     router = ProviderRouter(registry)
     # Wire health monitor to router

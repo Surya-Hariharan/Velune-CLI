@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class TaskStatus(StrEnum):
     """Task execution status."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -17,6 +18,7 @@ class TaskStatus(StrEnum):
 
 class Task(BaseModel):
     """A task to be executed."""
+
     id: str
     description: str
     status: TaskStatus = TaskStatus.PENDING
@@ -27,6 +29,7 @@ class Task(BaseModel):
 
 class TaskStep(BaseModel):
     """A step within a task plan."""
+
     id: str
     description: str
     agent_role: str
@@ -38,6 +41,7 @@ class TaskStep(BaseModel):
 
 class TaskPlan(BaseModel):
     """A plan for executing a task."""
+
     task_id: str
     steps: list[TaskStep]
     estimated_duration_ms: int | None = None
@@ -46,6 +50,7 @@ class TaskPlan(BaseModel):
 
 class TaskResult(BaseModel):
     """Result from task execution."""
+
     task_id: str
     success: bool
     output: Any | None = None

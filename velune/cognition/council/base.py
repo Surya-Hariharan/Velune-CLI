@@ -7,7 +7,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-T = TypeVar('T', bound=BaseModel)
+T = TypeVar("T", bound=BaseModel)
 
 from velune.core.trace import TracedLogger
 from velune.core.types.inference import InferenceRequest
@@ -79,9 +79,12 @@ class BaseCouncilAgent(ABC):
             timeout = agent_timeouts.get(self.role, 120.0)
 
             import time
+
             start = time.perf_counter()
             try:
-                logger.info("Agent %s (%s) initiating inference...", self.role.value, self.model.model_id)
+                logger.info(
+                    "Agent %s (%s) initiating inference...", self.role.value, self.model.model_id
+                )
 
                 supports_streaming = False
                 try:
@@ -132,9 +135,11 @@ class BaseCouncilAgent(ABC):
                                     border_style=color,
                                     padding=(1, 2),
                                     subtitle="[dim]Streaming response...[/dim]",
-                                    subtitle_align="right"
+                                    subtitle_align="right",
                                 )
-                                with Live(panel, console=console, refresh_per_second=10, transient=False) as live:
+                                with Live(
+                                    panel, console=console, refresh_per_second=10, transient=False
+                                ) as live:
                                     async for chunk in self.provider.stream(request):
                                         full_content.append(chunk.content)
                                         current_text = "".join(full_content)
@@ -144,7 +149,7 @@ class BaseCouncilAgent(ABC):
                                             border_style=color,
                                             padding=(1, 2),
                                             subtitle=f"[dim]Streaming: {len(current_text)} chars[/dim]",
-                                            subtitle_align="right"
+                                            subtitle_align="right",
                                         )
                                         live.update(panel)
                             else:
@@ -169,14 +174,10 @@ class BaseCouncilAgent(ABC):
 
                 elapsed = time.perf_counter() - start
                 logger.info(
-                    "Agent %s completed in %.1fs (%d chars)",
-                    self.role.value, elapsed, len(content)
+                    "Agent %s completed in %.1fs (%d chars)", self.role.value, elapsed, len(content)
                 )
                 if elapsed > 60.0:
-                    logger.warning(
-                        "Agent %s took %.1fs (>60s)",
-                        self.role.value, elapsed
-                    )
+                    logger.warning("Agent %s took %.1fs (>60s)", self.role.value, elapsed)
                 return content
             except TimeoutError:
                 logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)
@@ -199,7 +200,7 @@ class BaseCouncilAgent(ABC):
         cleaned = raw.strip()
         for prefix in ("```json", "```"):
             if cleaned.startswith(prefix):
-                cleaned = cleaned[len(prefix):]
+                cleaned = cleaned[len(prefix) :]
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3]
         cleaned = cleaned.strip()
@@ -208,8 +209,7 @@ class BaseCouncilAgent(ABC):
             return response_type.model_validate_json(cleaned)
         except (ValidationError, Exception) as e:
             logger.error(
-                "Agent %s returned unparseable response: %s\nRaw: %s",
-                self.role.value, e, raw[:200]
+                "Agent %s returned unparseable response: %s\nRaw: %s", self.role.value, e, raw[:200]
             )
             try:
                 return response_type.model_construct(parse_error=str(e))

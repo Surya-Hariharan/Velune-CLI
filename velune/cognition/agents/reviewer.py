@@ -82,7 +82,8 @@ class ReviewerAgent(BaseCouncilAgent):
 
         logger.info(
             "Reviewer starting proposal audit (timeout: %ds, wall budget: %.1fs remaining)",
-            timeout, remaining
+            timeout,
+            remaining,
         )
 
         try:
@@ -116,7 +117,9 @@ class ReviewerAgent(BaseCouncilAgent):
             state.set_reviewer_output(decision, notes)
             logger.info(
                 "Reviewer completed: decision=%s, cycle=%d/%d",
-                decision.value, state.review_cycle_count, state.budget.max_review_cycles
+                decision.value,
+                state.review_cycle_count,
+                state.budget.max_review_cycles,
             )
 
             return decision, notes
@@ -125,7 +128,9 @@ class ReviewerAgent(BaseCouncilAgent):
             logger.error("Reviewer timed out after %ds", timeout)
             raise
 
-    def _make_decision(self, review: ReviewerMessage, state: CouncilState) -> tuple[ReviewDecision, str]:
+    def _make_decision(
+        self, review: ReviewerMessage, state: CouncilState
+    ) -> tuple[ReviewDecision, str]:
         """Convert reviewer message into structured decision + notes.
 
         Logic:
@@ -156,7 +161,8 @@ class ReviewerAgent(BaseCouncilAgent):
                 # Cycles remaining: request refinement
                 logger.info(
                     "Reviewer: REVISE (cycles=%d/%d)",
-                    state.review_cycle_count, state.budget.max_review_cycles
+                    state.review_cycle_count,
+                    state.budget.max_review_cycles,
                 )
                 return ReviewDecision.REVISE, notes
 
@@ -164,7 +170,8 @@ class ReviewerAgent(BaseCouncilAgent):
                 # Cycles exhausted: reject with warning
                 logger.warning(
                     "Reviewer: REJECT (max cycles exhausted, %d/%d)",
-                    state.review_cycle_count, state.budget.max_review_cycles
+                    state.review_cycle_count,
+                    state.budget.max_review_cycles,
                 )
                 return ReviewDecision.REJECT, notes
 
@@ -176,7 +183,10 @@ class ReviewerAgent(BaseCouncilAgent):
                 logger.warning("Reviewer: REJECT (failed, no cycles remaining)")
                 return ReviewDecision.REJECT, notes
 
-        if review.confidence_rating < 0.8 and state.review_cycle_count < state.budget.max_review_cycles:
+        if (
+            review.confidence_rating < 0.8
+            and state.review_cycle_count < state.budget.max_review_cycles
+        ):
             logger.info("Reviewer: REVISE (low confidence=%.2f)", review.confidence_rating)
             return ReviewDecision.REVISE, notes
 

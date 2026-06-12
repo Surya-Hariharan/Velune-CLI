@@ -45,8 +45,7 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
         pass
     else:
         raise RuntimeError(
-            "run_async() called from a running event loop — "
-            "await the coroutine directly instead."
+            "run_async() called from a running event loop — await the coroutine directly instead."
         )
     _install_uvloop()
     try:

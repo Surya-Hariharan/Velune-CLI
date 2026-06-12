@@ -20,21 +20,41 @@ _QUANT_PATTERNS: list[tuple[str, str]] = [
     ("q5_k_m", "Q5_K_M"),
     ("q5_k_s", "Q5_K_S"),
     ("q5_0", "Q5_0"),
-    ("q6_k",   "Q6_K"),
-    ("q8_0",   "Q8_0"),
-    ("fp16",   "FP16"),
-    ("f16",    "FP16"),
-    ("f32",    "FP32"),
-    ("q4",     "Q4"),
-    ("q5",     "Q5"),
-    ("q8",     "Q8"),
+    ("q6_k", "Q6_K"),
+    ("q8_0", "Q8_0"),
+    ("fp16", "FP16"),
+    ("f16", "FP16"),
+    ("f32", "FP32"),
+    ("q4", "Q4"),
+    ("q5", "Q5"),
+    ("q8", "Q8"),
 ]
 
 _FAMILIES = [
-    "llama", "qwen", "mistral", "phi", "gemma", "falcon", "mpt",
-    "bloom", "gpt", "codellama", "deepseek", "starcoder", "yi",
-    "baichuan", "internlm", "vicuna", "alpaca", "wizard", "orca",
-    "hermes", "solar", "openchat", "nous", "neural",
+    "llama",
+    "qwen",
+    "mistral",
+    "phi",
+    "gemma",
+    "falcon",
+    "mpt",
+    "bloom",
+    "gpt",
+    "codellama",
+    "deepseek",
+    "starcoder",
+    "yi",
+    "baichuan",
+    "internlm",
+    "vicuna",
+    "alpaca",
+    "wizard",
+    "orca",
+    "hermes",
+    "solar",
+    "openchat",
+    "nous",
+    "neural",
 ]
 
 
@@ -159,6 +179,7 @@ class LocalModelResolver:
 
     def _metadata_from_gguf_lib(self, path: Path) -> dict:
         from gguf import GGUFReader  # type: ignore[import]
+
         reader = GGUFReader(str(path))
         meta = reader.metadata
 

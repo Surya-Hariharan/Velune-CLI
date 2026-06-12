@@ -52,7 +52,9 @@ async def run_councilmodel_ui(
             lines.append((row_style, f"  {prefix}{role:<14} {desc}\n"))
             current = role_map.get(role)
             if current:
-                lines.append(("fg:ansibrightblack", f"               currently: {current.model_id}\n"))
+                lines.append(
+                    ("fg:ansibrightblack", f"               currently: {current.model_id}\n")
+                )
         return FormattedText(lines)
 
     kb1 = KeyBindings()
@@ -76,9 +78,11 @@ async def run_councilmodel_ui(
         event.app.exit()  # role_result stays None
 
     app1 = Application(
-        layout=Layout(Window(
-            content=FormattedTextControl(render_role_list, focusable=True),
-        )),
+        layout=Layout(
+            Window(
+                content=FormattedTextControl(render_role_list, focusable=True),
+            )
+        ),
         key_bindings=kb1,
         full_screen=False,
         mouse_support=False,
@@ -115,12 +119,14 @@ async def run_councilmodel_ui(
             local_cloud = "local" if model.is_local else "cloud"
             cost = getattr(model, "cost_per_1k_tokens", None)
             free_str = " free" if cost == 0.0 else ""
-            lines.append((
-                row_style,
-                f"  {prefix}{model.model_id:<42}"
-                f" [{local_cloud}{free_str} · {model.speed_tier}]"
-                f"{current_marker}\n",
-            ))
+            lines.append(
+                (
+                    row_style,
+                    f"  {prefix}{model.model_id:<42}"
+                    f" [{local_cloud}{free_str} · {model.speed_tier}]"
+                    f"{current_marker}\n",
+                )
+            )
         return FormattedText(lines)
 
     kb2 = KeyBindings()
@@ -144,9 +150,11 @@ async def run_councilmodel_ui(
         event.app.exit()  # model_result stays _CANCELLED
 
     app2 = Application(
-        layout=Layout(Window(
-            content=FormattedTextControl(render_model_list, focusable=True),
-        )),
+        layout=Layout(
+            Window(
+                content=FormattedTextControl(render_model_list, focusable=True),
+            )
+        ),
         key_bindings=kb2,
         full_screen=False,
         mouse_support=False,

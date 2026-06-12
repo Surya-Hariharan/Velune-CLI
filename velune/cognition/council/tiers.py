@@ -3,10 +3,10 @@ from typing import Any
 
 
 class CouncilTier(StrEnum):
-    INSTANT = "instant"     # Coder only, no review. Read-only queries, explanations.
-    MINIMAL = "minimal"     # Planner + Coder, no Reviewer. Simple bug fixes on fast hardware.
-    STANDARD = "standard"   # Coder + Reviewer. Small edits, bug fixes.
-    FULL = "full"           # All agents. Architecture changes, multi-file edits.
+    INSTANT = "instant"  # Coder only, no review. Read-only queries, explanations.
+    MINIMAL = "minimal"  # Planner + Coder, no Reviewer. Simple bug fixes on fast hardware.
+    STANDARD = "standard"  # Coder + Reviewer. Small edits, bug fixes.
+    FULL = "full"  # All agents. Architecture changes, multi-file edits.
 
 
 def classify_task_tier(
@@ -43,9 +43,16 @@ def classify_task_tier(
 
     # FULL: architectural, multi-file, security, concurrency
     full_signals = [
-        "refactor", "redesign", "architect", "migrate",
-        "security", "concurrent", "async", "database schema",
-        "multiple files", "all files",
+        "refactor",
+        "redesign",
+        "architect",
+        "migrate",
+        "security",
+        "concurrent",
+        "async",
+        "database schema",
+        "multiple files",
+        "all files",
     ]
     if any(s in prompt_lower for s in full_signals):
         if queue_depth > 2:
@@ -139,6 +146,7 @@ class TierClassifier:
             import re
 
             from velune.kernel.registry import get_container
+
             container = get_container()
             if container.has("runtime.repository_cognition"):
                 repo_service = container.get("runtime.repository_cognition")
@@ -178,4 +186,3 @@ class TierClassifier:
             tier = CouncilTier.STANDARD
 
         return tier
-

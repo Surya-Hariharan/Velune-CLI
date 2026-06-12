@@ -348,9 +348,7 @@ class LineageMemoryTier:
             logger.error("Failed to query repository personality style: %s", exc)
             return None
 
-    async def get_evolution_timeline(
-        self, subsystem: str, limit: int = 50
-    ) -> list[dict[str, Any]]:
+    async def get_evolution_timeline(self, subsystem: str, limit: int = 50) -> list[dict[str, Any]]:
         """Fetch the evolution snapshots for a subsystem, most recent first."""
         try:
             async with self._pool.read() as conn:
@@ -379,9 +377,26 @@ class LineageMemoryTier:
         """Match task keywords against stored decisions and failed experiments."""
         combined_text = (prompt + " " + repo_context).lower()
         subsystem_keys = [
-            "database", "db", "concurrency", "lock", "thread", "async", "cache",
-            "sandbox", "security", "telemetry", "model", "routing", "memory", "graph",
-            "watcher", "file", "lifecycle", "executor", "bus", "registry",
+            "database",
+            "db",
+            "concurrency",
+            "lock",
+            "thread",
+            "async",
+            "cache",
+            "sandbox",
+            "security",
+            "telemetry",
+            "model",
+            "routing",
+            "memory",
+            "graph",
+            "watcher",
+            "file",
+            "lifecycle",
+            "executor",
+            "bus",
+            "registry",
         ]
 
         matched_decisions: list[dict[str, Any]] = []

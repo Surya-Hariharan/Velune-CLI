@@ -21,7 +21,9 @@ ask_cmd = typer.Typer(help="Interactive prompt entry point")
 def ask_command(
     ctx: typer.Context,
     prompt: str | None = typer.Argument(None, help="Question or task to route through Velune"),
-    council_tier: str | None = typer.Option(None, "--council-tier", help="Override council execution tier (instant, standard, full)"),
+    council_tier: str | None = typer.Option(
+        None, "--council-tier", help="Override council execution tier (instant, standard, full)"
+    ),
 ) -> None:
     """Deliberates with the Reasoning Council for conceptual answers and code reviews without execution."""
 
@@ -35,6 +37,7 @@ def ask_command(
     if not prompt:
         if cli_context.json_mode:
             import json
+
             print(json.dumps({"error": "Prompt argument is required in JSON mode"}))
             raise typer.Exit(code=1)
         # Prompt user interactively if no prompt argument is given
@@ -44,10 +47,13 @@ def ask_command(
             return
 
     from velune.core.event_loop import submit
+
     submit(_ask_command_async(cli_context, prompt, council_tier))
 
 
-async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier: str | None = None) -> None:
+async def _ask_command_async(
+    cli_context: CLIContext, prompt: str, council_tier: str | None = None
+) -> None:
     # 1. Access services from DI container
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
@@ -64,10 +70,18 @@ async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier:
 
     # Onboarding preflight check gate
     from velune.cli.commands.preflight import run_preflight_check
+
     if not await run_preflight_check(container, console if not cli_context.json_mode else None):
         if cli_context.json_mode:
             import json
-            print(json.dumps({"error": "Preflight check failed. Ensure workspace is initialized and models are scanned."}))
+
+            print(
+                json.dumps(
+                    {
+                        "error": "Preflight check failed. Ensure workspace is initialized and models are scanned."
+                    }
+                )
+            )
         await lifecycle.shutdown()
         return
 
@@ -81,6 +95,7 @@ async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier:
         display.render_role_assignments(roles)
 
     from velune.cognition.firewall import CognitiveFirewall
+
     firewall = CognitiveFirewall()
 
     # 4. Ingest and Scan AST Snapshot
@@ -96,25 +111,36 @@ async def _ask_command_async(cli_context: CLIContext, prompt: str, council_tier:
     # 5. deliberating debate loop
     council_res = None
     if not cli_context.json_mode:
-        with console.status("[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]"):
-            council_res = await orchestrator.execute_task(prompt, formatted_snap, council_tier=council_tier)
+        with console.status(
+            "[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]"
+        ):
+            council_res = await orchestrator.execute_task(
+                prompt, formatted_snap, council_tier=council_tier
+            )
     else:
-        council_res = await orchestrator.execute_task(prompt, formatted_snap, council_tier=council_tier)
+        council_res = await orchestrator.execute_task(
+            prompt, formatted_snap, council_tier=council_tier
+        )
 
     arbitration = council_res["arbitration"]
     final_summary = council_res["final_summary"]
 
     if cli_context.json_mode:
         import json
+
         roles_dict = {role.value: model_id for role, model_id in roles.items()}
-        print(json.dumps({
-            "prompt": prompt,
-            "roles": roles_dict,
-            "reviewer_report": council_res["reviewer_report"],
-            "challenger_report": council_res["challenger_report"],
-            "arbitration": arbitration,
-            "final_summary": final_summary,
-        }))
+        print(
+            json.dumps(
+                {
+                    "prompt": prompt,
+                    "roles": roles_dict,
+                    "reviewer_report": council_res["reviewer_report"],
+                    "challenger_report": council_res["challenger_report"],
+                    "arbitration": arbitration,
+                    "final_summary": final_summary,
+                }
+            )
+        )
     else:
         # 6. Render reports
         display.render_step_header("Council Reviewer", "🔍")

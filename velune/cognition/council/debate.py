@@ -4,11 +4,13 @@ from dataclasses import dataclass
 @dataclass
 class DebateConfig:
     """Controls Council debate dynamics."""
+
     max_turns: int = 3
     min_turns: int = 1
     convergence_threshold: float = 0.0  # Stop if 0 objections remain
-    severity_turn_boost: float = 0.8    # If avg severity > this, add extra turn
+    severity_turn_boost: float = 0.8  # If avg severity > this, add extra turn
     critical_issue_hard_stop: bool = True  # Stop if reviewer flags critical security issue
+
 
 def calculate_max_debate_turns(
     initial_objections: list[str],

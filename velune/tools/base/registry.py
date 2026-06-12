@@ -15,6 +15,7 @@ class ToolRegistry:
     def validate_tool(self, tool: BaseTool) -> bool:
         """Validate a tool by calling get_name() and get_schema()."""
         import logging
+
         logger = logging.getLogger("velune")
         try:
             tool.get_name()
@@ -78,7 +79,9 @@ class ToolRegistry:
                     "name": tool.get_name(),
                     "description": tool.get_description(),
                     "schema": tool.get_schema(),
-                    "permissions": sorted(permission.value for permission in tool.get_required_permissions()),
+                    "permissions": sorted(
+                        permission.value for permission in tool.get_required_permissions()
+                    ),
                 }
             )
         return schemas

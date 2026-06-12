@@ -37,7 +37,7 @@ class MemoryRecord:
     id: str
     embedding: list[float]
     content: str
-    source_type: str        # "turn_user", "turn_assistant", "session_summary"
+    source_type: str  # "turn_user", "turn_assistant", "session_summary"
     session_id: str
     turn_id: str
     workspace_root: str
@@ -78,9 +78,11 @@ class LanceDBStore:
         self._embedding_dim = embedding_dim
         self._db: Any = None
         self._table: Any = None
-        self._degraded: bool = os.environ.get(
-            "VELUNE_SKIP_LANCEDB", ""
-        ).lower() in ("1", "true", "yes")
+        self._degraded: bool = os.environ.get("VELUNE_SKIP_LANCEDB", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if self._degraded:
             logger.warning("VELUNE_SKIP_LANCEDB set — LanceDB running in degraded mode.")
 
@@ -117,17 +119,19 @@ class LanceDBStore:
             self._table = self._db.open_table(_TABLE_NAME)
             logger.debug("Opened existing LanceDB table '%s'", _TABLE_NAME)
         else:
-            schema = pa.schema([
-                pa.field("id",             pa.utf8()),
-                pa.field("embedding",      pa.list_(pa.float32(), self._embedding_dim)),
-                pa.field("content",        pa.utf8()),
-                pa.field("source_type",    pa.utf8()),
-                pa.field("session_id",     pa.utf8()),
-                pa.field("turn_id",        pa.utf8()),
-                pa.field("workspace_root", pa.utf8()),
-                pa.field("created_at",     pa.float64()),
-                pa.field("trust_score",    pa.float32()),
-            ])
+            schema = pa.schema(
+                [
+                    pa.field("id", pa.utf8()),
+                    pa.field("embedding", pa.list_(pa.float32(), self._embedding_dim)),
+                    pa.field("content", pa.utf8()),
+                    pa.field("source_type", pa.utf8()),
+                    pa.field("session_id", pa.utf8()),
+                    pa.field("turn_id", pa.utf8()),
+                    pa.field("workspace_root", pa.utf8()),
+                    pa.field("created_at", pa.float64()),
+                    pa.field("trust_score", pa.float32()),
+                ]
+            )
             self._table = self._db.create_table(_TABLE_NAME, schema=schema)
             logger.info("Created LanceDB table '%s'", _TABLE_NAME)
 
@@ -153,15 +157,15 @@ class LanceDBStore:
 
         rows = [
             {
-                "id":             r.id,
-                "embedding":      [float(x) for x in r.embedding],
-                "content":        r.content,
-                "source_type":    r.source_type,
-                "session_id":     r.session_id,
-                "turn_id":        r.turn_id,
+                "id": r.id,
+                "embedding": [float(x) for x in r.embedding],
+                "content": r.content,
+                "source_type": r.source_type,
+                "session_id": r.session_id,
+                "turn_id": r.turn_id,
                 "workspace_root": r.workspace_root,
-                "created_at":     float(r.created_at),
-                "trust_score":    float(r.trust_score),
+                "created_at": float(r.created_at),
+                "trust_score": float(r.trust_score),
             }
             for r in records
         ]
@@ -208,9 +212,7 @@ class LanceDBStore:
         if self._degraded or self._table is None:
             return []
         try:
-            return await asyncio.to_thread(
-                self._search_sync, embedding, limit, workspace_root
-            )
+            return await asyncio.to_thread(self._search_sync, embedding, limit, workspace_root)
         except Exception as exc:
             logger.error("LanceDB search failed: %s", exc)
             return []
@@ -233,16 +235,18 @@ class LanceDBStore:
         rows = q.limit(limit).to_list()
         results: list[SearchResult] = []
         for row in rows:
-            results.append(SearchResult(
-                id=row["id"],
-                content=row["content"],
-                source_type=row["source_type"],
-                distance=float(row.get("_distance", 0.0)),
-                trust_score=float(row["trust_score"]),
-                session_id=row["session_id"],
-                turn_id=row["turn_id"],
-                created_at=float(row.get("created_at", 0.0)),
-            ))
+            results.append(
+                SearchResult(
+                    id=row["id"],
+                    content=row["content"],
+                    source_type=row["source_type"],
+                    distance=float(row.get("_distance", 0.0)),
+                    trust_score=float(row["trust_score"]),
+                    session_id=row["session_id"],
+                    turn_id=row["turn_id"],
+                    created_at=float(row.get("created_at", 0.0)),
+                )
+            )
         return results
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -271,6 +275,7 @@ class LanceDBStore:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _esc(s: str) -> str:
     """Escape single quotes for safe SQL string literals in LanceDB WHERE clauses."""

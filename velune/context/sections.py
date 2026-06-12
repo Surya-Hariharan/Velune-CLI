@@ -18,13 +18,13 @@ class ContextSection(IntEnum):
     CURRENT_PROMPT (always last).
     """
 
-    SYSTEM_PROMPT = 1          # System instructions and role definition
-    COGNITIVE_CONTINUITY = 2   # Lineage decisions, failed experiments, lessons learned
-    ARCHITECTURAL_DRIFT = 3    # URGENT: Current violations, breaking changes
-    REPOSITORY_SNAPSHOT = 4    # File structure, detected architecture, codebase state
-    RETRIEVED_CONTEXT = 5      # Results from RetrievalPipeline (most droppable)
-    WORKING_MEMORY = 6         # Current session turns, conversation history
-    CURRENT_PROMPT = 7         # The immediate user request (always last)
+    SYSTEM_PROMPT = 1  # System instructions and role definition
+    COGNITIVE_CONTINUITY = 2  # Lineage decisions, failed experiments, lessons learned
+    ARCHITECTURAL_DRIFT = 3  # URGENT: Current violations, breaking changes
+    REPOSITORY_SNAPSHOT = 4  # File structure, detected architecture, codebase state
+    RETRIEVED_CONTEXT = 5  # Results from RetrievalPipeline (most droppable)
+    WORKING_MEMORY = 6  # Current session turns, conversation history
+    CURRENT_PROMPT = 7  # The immediate user request (always last)
 
 
 @dataclass
@@ -38,9 +38,9 @@ class ContextChunk:
     section: ContextSection
     content: str
     token_count: int
-    source: str                    # Debugging: where did this chunk come from?
-    trust_score: float = 1.0       # 0.0 to 1.0 (lower = more likely to trim)
-    priority: float = 0.5          # Within-section priority for trimming
+    source: str  # Debugging: where did this chunk come from?
+    trust_score: float = 1.0  # 0.0 to 1.0 (lower = more likely to trim)
+    priority: float = 0.5  # Within-section priority for trimming
     metadata: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:

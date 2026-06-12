@@ -42,7 +42,11 @@ class GPUDetector:
         """Detect NVIDIA GPU via nvidia-smi."""
         try:
             result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader"],
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,memory.total,memory.free",
+                    "--format=csv,noheader",
+                ],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -99,6 +103,7 @@ class GPUDetector:
 
             # Apple Silicon has unified memory
             import psutil
+
             total_memory = psutil.virtual_memory().total / (1024**3)  # GB
 
             return {

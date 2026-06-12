@@ -13,7 +13,8 @@ class ModeAwareModelSelector:
         current_model: ModelDescriptor | None,
     ) -> ModelDescriptor | None:
         all_models = [
-            m for m in self.model_registry.list_all()
+            m
+            for m in self.model_registry.list_all()
             if self.provider_registry.get(m.provider_id) is not None
         ]
         if not all_models:
@@ -32,13 +33,19 @@ class ModeAwareModelSelector:
                 caps = m.capabilities
                 if not caps:
                     return 0
-                return sum([
-                    getattr(caps, f, 0).value if hasattr(
-                        getattr(caps, f, None), "value"
-                    ) else 0
-                    for f in ["coding", "reasoning", "planning",
-                               "summarization", "instruction_following"]
-                ])
+                return sum(
+                    [
+                        getattr(caps, f, 0).value if hasattr(getattr(caps, f, None), "value") else 0
+                        for f in [
+                            "coding",
+                            "reasoning",
+                            "planning",
+                            "summarization",
+                            "instruction_following",
+                        ]
+                    ]
+                )
+
             return max(all_models, key=capability_score)
 
         return current_model

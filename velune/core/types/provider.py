@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class ProviderHealth(StrEnum):
     """Provider health status."""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNAVAILABLE = "unavailable"
@@ -19,6 +20,7 @@ class ProviderHealth(StrEnum):
 
 class ProviderConfig(BaseModel):
     """Configuration for a provider."""
+
     name: str
     base_url: str
     api_key: str | None = None
@@ -30,6 +32,7 @@ class ProviderConfig(BaseModel):
 
 class ProviderCapabilities(BaseModel):
     """Capabilities offered by a provider."""
+
     supports_streaming: bool = False
     supports_function_calling: bool = False
     supports_embeddings: bool = False
@@ -41,6 +44,7 @@ class ProviderCapabilities(BaseModel):
 @dataclass
 class CapabilityManifest:
     """Real-time capability and health manifest for a provider."""
+
     provider_id: str
     health: ProviderHealth
     available_models: list[Any]
@@ -50,7 +54,7 @@ class CapabilityManifest:
     supports_streaming: bool = False
     supports_tools: bool = False
     is_online: bool = True
-    refreshed_at: float = field(default_factory=lambda: __import__('time').time())
+    refreshed_at: float = field(default_factory=lambda: __import__("time").time())
 
     @property
     def is_available(self) -> bool:

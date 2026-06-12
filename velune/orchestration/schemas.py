@@ -96,4 +96,3 @@ class StreamProgress(BaseModel):
         if self.phase:
             return f"[{self.run_id}] {self.phase}: {self.message}"
         return f"[{self.run_id}] {self.message}"
-

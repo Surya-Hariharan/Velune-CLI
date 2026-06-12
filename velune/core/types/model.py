@@ -27,6 +27,7 @@ class ModelCapability(StrEnum):
 
 class CapabilityLevel(IntEnum):
     """Capability proficiency levels."""
+
     NONE = 0
     BASIC = 25
     INTERMEDIATE = 50
@@ -36,6 +37,7 @@ class CapabilityLevel(IntEnum):
 
 class ModelCapabilityProfile(BaseModel):
     """Capability profile for a model."""
+
     coding: CapabilityLevel = CapabilityLevel.NONE
     reasoning: CapabilityLevel = CapabilityLevel.NONE
     planning: CapabilityLevel = CapabilityLevel.NONE
@@ -49,6 +51,7 @@ class ModelCapabilityProfile(BaseModel):
 
 class ModelDescriptor(BaseModel):
     """Descriptor for a model."""
+
     model_config = ConfigDict(extra="allow")
 
     model_id: str

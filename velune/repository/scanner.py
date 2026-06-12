@@ -153,7 +153,9 @@ class FilesystemScanner:
         self._recursive_scan(self.root_path, extensions, files)
         return files
 
-    def _recursive_scan(self, current_dir: Path, extensions: list[str] | None, accumulator: list[Path]) -> None:
+    def _recursive_scan(
+        self, current_dir: Path, extensions: list[str] | None, accumulator: list[Path]
+    ) -> None:
         """Recurses through directory structure, skipping ignored directories entirely to optimize speed."""
         try:
             for item in current_dir.iterdir():
@@ -171,7 +173,21 @@ class FilesystemScanner:
     def scan_code_files(self) -> list[Path]:
         """Convenience method to scan for common source code extensions."""
         code_extensions = [
-            ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java",
-            ".c", ".cpp", ".h", ".cs", ".php", ".rb", ".swift", ".kt"
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".go",
+            ".rs",
+            ".java",
+            ".c",
+            ".cpp",
+            ".h",
+            ".cs",
+            ".php",
+            ".rb",
+            ".swift",
+            ".kt",
         ]
         return self.scan(code_extensions)

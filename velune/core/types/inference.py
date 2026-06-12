@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class InferenceRequest(BaseModel):
     """Request for model inference."""
+
     model_id: str
     messages: list[dict[str, str]]
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -18,6 +19,7 @@ class InferenceRequest(BaseModel):
 
 class StreamChunk(BaseModel):
     """A chunk of streamed inference response."""
+
     content: str
     finish_reason: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -25,6 +27,7 @@ class StreamChunk(BaseModel):
 
 class InferenceResponse(BaseModel):
     """Response from model inference."""
+
     content: str
     model_id: str
     finish_reason: str

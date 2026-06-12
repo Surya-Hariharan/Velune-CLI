@@ -17,6 +17,7 @@ logger = logging.getLogger("velune.repository.ast_parser")
 
 class SymbolKind(StrEnum):
     """Type of code symbol."""
+
     FUNCTION = "function"
     CLASS = "class"
     METHOD = "method"
@@ -31,6 +32,7 @@ class SymbolKind(StrEnum):
 @dataclass
 class Symbol:
     """Extracted code symbol from AST."""
+
     id: str  # Stable UUID
     name: str
     kind: SymbolKind
@@ -47,6 +49,7 @@ class Symbol:
 @dataclass
 class ParsedFile:
     """Result of parsing a single file."""
+
     file_path: Path
     language: str
     symbols: list[Symbol]
@@ -186,7 +189,9 @@ class ASTParser:
                     if child.type == "block":
                         for subchild in child.children:
                             if subchild.type == "function_definition":
-                                method = self._parse_python_function(subchild, source_lines, file_path, is_method=True)
+                                method = self._parse_python_function(
+                                    subchild, source_lines, file_path, is_method=True
+                                )
                                 if method:
                                     symbols.append(method)
             elif node.type in ("import_statement", "import_from_statement"):
@@ -232,7 +237,13 @@ class ASTParser:
             params = self._extract_parameters(params_node, source_lines) if params_node else []
             docstring = self._extract_python_docstring(node, source_lines)
 
-            kind = SymbolKind.ASYNC_FUNCTION if is_async else SymbolKind.METHOD if is_method else SymbolKind.FUNCTION
+            kind = (
+                SymbolKind.ASYNC_FUNCTION
+                if is_async
+                else SymbolKind.METHOD
+                if is_method
+                else SymbolKind.FUNCTION
+            )
 
             return Symbol(
                 id=str(uuid.uuid4()),
@@ -248,7 +259,9 @@ class ASTParser:
             logger.debug(f"Error parsing Python function: {e}")
             return None
 
-    def _parse_python_class(self, node: Any, source_lines: list[str], file_path: str) -> Symbol | None:
+    def _parse_python_class(
+        self, node: Any, source_lines: list[str], file_path: str
+    ) -> Symbol | None:
         """Parse a Python class node."""
         try:
             name_node = None
@@ -276,7 +289,9 @@ class ASTParser:
             logger.debug(f"Error parsing Python class: {e}")
             return None
 
-    def _parse_python_import(self, node: Any, source_lines: list[str], file_path: str) -> Symbol | None:
+    def _parse_python_import(
+        self, node: Any, source_lines: list[str], file_path: str
+    ) -> Symbol | None:
         """Parse a Python import statement."""
         try:
             text = self._get_node_text(node, source_lines).strip()
@@ -328,7 +343,9 @@ class ASTParser:
                     if child.type == "class_body":
                         for method_node in child.children:
                             if method_node.type in ("method_definition", "function_definition"):
-                                method = self._parse_js_function(method_node, source_lines, file_path, is_method=True)
+                                method = self._parse_js_function(
+                                    method_node, source_lines, file_path, is_method=True
+                                )
                                 if method:
                                     symbols.append(method)
             elif node.type in ("import_statement", "import_specifier"):
@@ -372,7 +389,13 @@ class ASTParser:
             name = self._get_node_text(name_node, source_lines)
             params = self._extract_parameters(params_node, source_lines) if params_node else []
 
-            kind = SymbolKind.ASYNC_FUNCTION if is_async else SymbolKind.METHOD if is_method else SymbolKind.FUNCTION
+            kind = (
+                SymbolKind.ASYNC_FUNCTION
+                if is_async
+                else SymbolKind.METHOD
+                if is_method
+                else SymbolKind.FUNCTION
+            )
 
             return Symbol(
                 id=str(uuid.uuid4()),
@@ -459,7 +482,9 @@ class ASTParser:
                 # Extract methods from impl block
                 for child in node.children:
                     if child.type == "function_item":
-                        method = self._parse_rust_function(child, source_lines, file_path, is_method=True)
+                        method = self._parse_rust_function(
+                            child, source_lines, file_path, is_method=True
+                        )
                         if method:
                             symbols.append(method)
 
@@ -501,7 +526,9 @@ class ASTParser:
             logger.debug(f"Error parsing Rust function: {e}")
             return None
 
-    def _parse_rust_struct(self, node: Any, source_lines: list[str], file_path: str) -> Symbol | None:
+    def _parse_rust_struct(
+        self, node: Any, source_lines: list[str], file_path: str
+    ) -> Symbol | None:
         """Parse a Rust struct node."""
         try:
             name_node = None
@@ -571,7 +598,11 @@ class ASTParser:
                 # Handle struct/interface definitions
                 for child in node.children:
                     if child.type in ("struct_type", "interface_type"):
-                        kind = SymbolKind.INTERFACE if child.type == "interface_type" else SymbolKind.CLASS
+                        kind = (
+                            SymbolKind.INTERFACE
+                            if child.type == "interface_type"
+                            else SymbolKind.CLASS
+                        )
                         sym = self._parse_go_type(child, source_lines, file_path, kind)
                         if sym:
                             symbols.append(sym)
@@ -695,7 +726,7 @@ class ASTParser:
                                     # Remove quotes
                                     if text.startswith('"""') or text.startswith("'''"):
                                         return text[3:-3].strip()
-                                    return text.strip('"\'')
+                                    return text.strip("\"'")
             return None
         except Exception:
             return None

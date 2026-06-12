@@ -3,24 +3,24 @@ from enum import Enum
 
 
 class SessionMode(Enum):
-    NORMAL  = "normal"
+    NORMAL = "normal"
     OPTIMUS = "optimus"
-    GODLY   = "godly"
+    GODLY = "godly"
 
 
 @dataclass
 class ModeConfig:
     mode: SessionMode
-    council_tier: str           # "instant" | "minimal" | "standard" | "full" | "auto"
-    context_compression: bool   # compress context before each call
-    max_context_tokens: int     # hard cap on context sent per call
+    council_tier: str  # "instant" | "minimal" | "standard" | "full" | "auto"
+    context_compression: bool  # compress context before each call
+    max_context_tokens: int  # hard cap on context sent per call
     temperature: float
-    retrieval_depth: int        # how many memory + repo chunks to pull
-    use_fastest_model: bool     # optimus: pick smallest capable model
-    use_largest_model: bool     # godly: pick largest available model
-    disable_critics: bool       # optimus: skip critic agents
+    retrieval_depth: int  # how many memory + repo chunks to pull
+    use_fastest_model: bool  # optimus: pick smallest capable model
+    use_largest_model: bool  # godly: pick largest available model
+    disable_critics: bool  # optimus: skip critic agents
     description: str
-    prompt_color: str           # Rich color for prompt badge
+    prompt_color: str  # Rich color for prompt badge
 
 
 MODE_CONFIGS: dict[SessionMode, ModeConfig] = {

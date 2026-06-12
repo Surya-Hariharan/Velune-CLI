@@ -26,7 +26,9 @@ class AnthropicDiscovery:
 
         return models
 
-    def _create_model_descriptor(self, model_id: str, context_length: int, cost_per_1k: float) -> ModelDescriptor:
+    def _create_model_descriptor(
+        self, model_id: str, context_length: int, cost_per_1k: float
+    ) -> ModelDescriptor:
         """Create a model descriptor."""
         capabilities = self._classify_capabilities(model_id)
 

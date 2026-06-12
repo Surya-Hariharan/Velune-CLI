@@ -53,12 +53,14 @@ class GitLog(BaseTool):
         def _fetch() -> list[dict]:
             commits = []
             for commit in repo.iter_commits(max_count=max(1, int(limit))):
-                commits.append({
-                    "hash": commit.hexsha,
-                    "author": commit.author.name,
-                    "date": commit.authored_datetime.isoformat(),
-                    "message": commit.message.strip(),
-                })
+                commits.append(
+                    {
+                        "hash": commit.hexsha,
+                        "author": commit.author.name,
+                        "date": commit.authored_datetime.isoformat(),
+                        "message": commit.message.strip(),
+                    }
+                )
             return commits
 
         return await asyncio.to_thread(_fetch)
@@ -150,12 +152,16 @@ class GitBlame(BaseTool):
             lines: list[dict] = []
             for commit, line_group in repo.blame("HEAD", rel):
                 for content in line_group:
-                    lines.append({
-                        "commit": commit.hexsha,
-                        "author": commit.author.name,
-                        "date": commit.authored_datetime.isoformat(),
-                        "content": content if isinstance(content, str) else content.decode("utf-8", errors="replace"),
-                    })
+                    lines.append(
+                        {
+                            "commit": commit.hexsha,
+                            "author": commit.author.name,
+                            "date": commit.authored_datetime.isoformat(),
+                            "content": content
+                            if isinstance(content, str)
+                            else content.decode("utf-8", errors="replace"),
+                        }
+                    )
             return lines
 
         return await asyncio.to_thread(_fetch)

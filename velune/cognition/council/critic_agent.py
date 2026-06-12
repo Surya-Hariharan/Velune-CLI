@@ -16,7 +16,9 @@ logger = logging.getLogger("velune.cognition.council.critic_agent")
 class CriticAgent(BaseCouncilAgent):
     """Configurable critic agent. Replace all specific critic classes with this."""
 
-    def __init__(self, config: CriticConfig, model: ModelDescriptor, provider: ModelProvider) -> None:
+    def __init__(
+        self, config: CriticConfig, model: ModelDescriptor, provider: ModelProvider
+    ) -> None:
         super().__init__(
             role=config.council_role,
             model=model,
@@ -32,7 +34,9 @@ class CriticAgent(BaseCouncilAgent):
                 "content": f"TASK: {task}\n\nPROPOSAL:\n{proposal}\n\nCONTEXT:\n{context}",
             }
         ]
-        result = await self.typed_deliberate(user_messages, CriticMessage, temperature=self.config.temperature)
+        result = await self.typed_deliberate(
+            user_messages, CriticMessage, temperature=self.config.temperature
+        )
         if result.parse_error:
             logger.warning("%sCritic parse failed: %s", self.config.name, result.parse_error)
             result.rationale = f"Critic output was unparseable: {result.parse_error}"

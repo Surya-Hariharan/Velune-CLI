@@ -68,5 +68,7 @@ class ReviewerAgent(BaseCouncilAgent):
         if result.parse_error:
             logger.warning("Reviewer parse failed, using degraded default: %s", result.parse_error)
             # Re-construct suggestions to contain a useful note
-            result.suggestions.append(f"Review executed but results were unparseable: {result.parse_error}")
+            result.suggestions.append(
+                f"Review executed but results were unparseable: {result.parse_error}"
+            )
         return result

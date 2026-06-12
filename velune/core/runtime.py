@@ -34,6 +34,7 @@ def build_runtime(
 ) -> RuntimeContext:
     """Create and register the shared runtime services using the declarative bootstrapper."""
     from velune.core.startup_profiler import mark
+
     mark("build_runtime: enter")
     # 1. Setup Logging and Console
     console = Console(highlight=False)
@@ -70,6 +71,7 @@ def build_runtime(
     # Detect and persist GPU info
     try:
         from velune.providers.discovery.gpu import GPUDetector
+
         gpu_info = GPUDetector().detect()
     except Exception as e:
         logger.warning("GPU detection failed, using safe defaults: %s", e)

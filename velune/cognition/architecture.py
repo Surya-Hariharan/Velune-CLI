@@ -14,6 +14,7 @@ logger = logging.getLogger("velune.cognition.architecture")
 
 class ArchitectureDriftAlarm(Exception):
     """Exception raised when an architectural layering boundary rule is violated."""
+
     pass
 
 
@@ -72,21 +73,31 @@ class CognitiveDebtLedger:
         except Exception as e:
             logger.error("Failed to write to technical debt ledger: %s", e)
 
-    def add_debt_item(self, file_path: str, category: str, description: str, severity: float) -> None:
+    def add_debt_item(
+        self, file_path: str, category: str, description: str, severity: float
+    ) -> None:
         """Add or update an item in the debt ledger."""
         # Check if duplicate exists
         for item in self.data["debt_items"]:
-            if item["file_path"] == file_path and item["category"] == category and item["description"] == description:
+            if (
+                item["file_path"] == file_path
+                and item["category"] == category
+                and item["description"] == description
+            ):
                 item["severity"] = severity
-                item["updated_at"] = os.path.getmtime(str(self.ledger_path)) if self.ledger_path.exists() else 0.0
+                item["updated_at"] = (
+                    os.path.getmtime(str(self.ledger_path)) if self.ledger_path.exists() else 0.0
+                )
                 break
         else:
-            self.data["debt_items"].append({
-                "file_path": file_path,
-                "category": category,
-                "description": description,
-                "severity": severity,
-            })
+            self.data["debt_items"].append(
+                {
+                    "file_path": file_path,
+                    "category": category,
+                    "description": description,
+                    "severity": severity,
+                }
+            )
 
         # Recompute total severity
         self.data["total_severity"] = sum(item["severity"] for item in self.data["debt_items"])
@@ -94,7 +105,9 @@ class CognitiveDebtLedger:
 
     def clear_file_debt(self, file_path: str) -> None:
         """Clear all debt items registered for a specific file."""
-        self.data["debt_items"] = [item for item in self.data["debt_items"] if item["file_path"] != file_path]
+        self.data["debt_items"] = [
+            item for item in self.data["debt_items"] if item["file_path"] != file_path
+        ]
         self.data["total_severity"] = sum(item["severity"] for item in self.data["debt_items"])
         self._save_ledger()
 
@@ -108,7 +121,9 @@ class ArchitectureCognitionAgent:
     verifies architectural boundary coupling, and records technical debt.
     """
 
-    def __init__(self, workspace_root: str | None = None, ledger: CognitiveDebtLedger | None = None) -> None:
+    def __init__(
+        self, workspace_root: str | None = None, ledger: CognitiveDebtLedger | None = None
+    ) -> None:
         self.workspace_root = workspace_root or os.getcwd()
         self.ledger = ledger or CognitiveDebtLedger()
 
@@ -307,7 +322,9 @@ class ArchitectureCognitionAgent:
         proposal += "3. **Clear Technical Debt**: Address the boundary layering violations and resolve critical warnings immediately.\n"
         return proposal
 
-    def verify_boundaries(self, proposed_code: str, file_path: str, raise_on_violation: bool = False) -> list[str]:
+    def verify_boundaries(
+        self, proposed_code: str, file_path: str, raise_on_violation: bool = False
+    ) -> list[str]:
         """
         Checks proposed Python code for clean architecture layering and modular boundary violations.
         Returns a list of violations found.

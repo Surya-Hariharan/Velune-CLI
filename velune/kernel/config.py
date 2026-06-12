@@ -14,6 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 @dataclass
 class ConfigValidationError:
     """A single configuration validation problem."""
+
     field: str
     value: str | None
     reason: str
@@ -22,12 +23,14 @@ class ConfigValidationError:
 
 class ProjectConfig(BaseModel):
     """Project-level metadata."""
+
     name: str = "velune"
     version: str = "0.1.0"
 
 
 class WorkspaceConfig(BaseModel):
     """Workspace cognition settings."""
+
     index_on_init: bool = True
     watch_files: bool = True
     git_aware: bool = True
@@ -36,6 +39,7 @@ class WorkspaceConfig(BaseModel):
 
 class ContextConfig(BaseModel):
     """Context window budgeting settings."""
+
     max_tokens: int = 128000
     compression_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     priority_tiers: list[str] = Field(default_factory=lambda: ["critical", "high", "medium", "low"])
@@ -43,6 +47,7 @@ class ContextConfig(BaseModel):
 
 class MemoryConfig(BaseModel):
     """Memory retention and thresholds."""
+
     working_memory_ttl: int = 3600  # seconds
     episodic_retention_days: int = 30
     semantic_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
@@ -52,6 +57,7 @@ class MemoryConfig(BaseModel):
 
 class RetrievalConfig(BaseModel):
     """Hybrid retrieval fusion weightings."""
+
     vector_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     lexical_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     graph_weight: float = Field(default=0.2, ge=0.0, le=1.0)
@@ -60,6 +66,7 @@ class RetrievalConfig(BaseModel):
 
 class ExecutionConfig(BaseModel):
     """Safety and sandboxing options."""
+
     sandbox_enabled: bool = True
     auto_snapshot: bool = True
     require_confirmation: bool = True
@@ -67,22 +74,39 @@ class ExecutionConfig(BaseModel):
     low_resource_mode: bool = False
     allowed_executables: list[str] = Field(
         default_factory=lambda: [
-            "python", "python3", "pytest", "ruff", "mypy",
-            "git", "node", "npm", "cargo", "go",
-            "make", "cmake", "gcc", "clang",
-            "echo", "cat", "ls", "find", "grep"
+            "python",
+            "python3",
+            "pytest",
+            "ruff",
+            "mypy",
+            "git",
+            "node",
+            "npm",
+            "cargo",
+            "go",
+            "make",
+            "cmake",
+            "gcc",
+            "clang",
+            "echo",
+            "cat",
+            "ls",
+            "find",
+            "grep",
         ]
     )
 
 
 class ProviderEntry(BaseModel):
     """Target address and API key names for LLM providers."""
+
     api_key_env: str | None = None
     base_url: str | None = None
 
 
 class ProvidersConfig(BaseModel):
     """Configuration for active and fallback models."""
+
     default_provider: str = "openai"
     fallback_providers: list[str] = Field(default_factory=lambda: ["anthropic", "ollama"])
     cost_threshold_usd: float = Field(
@@ -90,10 +114,14 @@ class ProvidersConfig(BaseModel):
         description="Prompt for confirmation before cloud calls estimated to cost more than this (USD). Set to 0 to always ask.",
     )
     openai: ProviderEntry | None = Field(
-        default_factory=lambda: ProviderEntry(api_key_env="OPENAI_API_KEY", base_url="https://api.openai.com/v1")
+        default_factory=lambda: ProviderEntry(
+            api_key_env="OPENAI_API_KEY", base_url="https://api.openai.com/v1"
+        )
     )
     anthropic: ProviderEntry | None = Field(
-        default_factory=lambda: ProviderEntry(api_key_env="ANTHROPIC_API_KEY", base_url="https://api.anthropic.com")
+        default_factory=lambda: ProviderEntry(
+            api_key_env="ANTHROPIC_API_KEY", base_url="https://api.anthropic.com"
+        )
     )
     ollama: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(base_url="http://localhost:11434")
@@ -101,16 +129,17 @@ class ProvidersConfig(BaseModel):
     lmstudio: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(base_url="http://localhost:1234/v1")
     )
-    llamacpp: ProviderEntry | None = Field(
-        default_factory=lambda: ProviderEntry(base_url="")
-    )
+    llamacpp: ProviderEntry | None = Field(default_factory=lambda: ProviderEntry(base_url=""))
     huggingface: ProviderEntry | None = Field(
-        default_factory=lambda: ProviderEntry(api_key_env="HF_TOKEN", base_url="https://api-inference.huggingface.co")
+        default_factory=lambda: ProviderEntry(
+            api_key_env="HF_TOKEN", base_url="https://api-inference.huggingface.co"
+        )
     )
 
 
 class TelemetryConfig(BaseModel):
     """Observability options."""
+
     enabled: bool = True
     export_otlp: bool = False
     log_level: str = "INFO"
@@ -118,11 +147,13 @@ class TelemetryConfig(BaseModel):
 
 class MCPConfig(BaseModel):
     """MCP configuration settings."""
+
     servers: dict[str, str] = Field(default_factory=dict)
 
 
 class CognitionConfig(BaseModel):
     """Cognitive routing and agent council settings."""
+
     max_council_tier: str = "full"  # instant, minimal, standard, full
     default_tier_override: str = "auto"  # auto, instant, minimal, standard, full
 
@@ -174,65 +205,77 @@ class VeluneConfig(BaseSettings):
         provider_entry: ProviderEntry | None = getattr(self.providers, provider_name, None)
 
         if not isinstance(provider_entry, ProviderEntry):
-            errors.append(ConfigValidationError(
-                field="providers.default_provider",
-                value=provider_name,
-                reason=(
-                    f"Provider '{provider_name}' is not defined in the [providers] section. "
-                    f"Add a [{provider_name}] entry or change default_provider."
-                ),
-                severity="CRITICAL",
-            ))
+            errors.append(
+                ConfigValidationError(
+                    field="providers.default_provider",
+                    value=provider_name,
+                    reason=(
+                        f"Provider '{provider_name}' is not defined in the [providers] section. "
+                        f"Add a [{provider_name}] entry or change default_provider."
+                    ),
+                    severity="CRITICAL",
+                )
+            )
         else:
             # Remote providers require an API key env var to be populated.
             if provider_entry.api_key_env:
                 resolved = os.getenv(provider_entry.api_key_env)
                 if not resolved:
-                    errors.append(ConfigValidationError(
-                        field=f"providers.{provider_name}.api_key_env",
-                        value=provider_entry.api_key_env,
-                        reason=(
-                            f"Environment variable '{provider_entry.api_key_env}' is not set. "
-                            f"Provider '{provider_name}' requires an API key to function."
-                        ),
-                        severity="CRITICAL",
-                    ))
+                    errors.append(
+                        ConfigValidationError(
+                            field=f"providers.{provider_name}.api_key_env",
+                            value=provider_entry.api_key_env,
+                            reason=(
+                                f"Environment variable '{provider_entry.api_key_env}' is not set. "
+                                f"Provider '{provider_name}' requires an API key to function."
+                            ),
+                            severity="CRITICAL",
+                        )
+                    )
 
         # Optional workspace root — validate if explicitly configured.
         if self.workspace.root is not None:
             wp = Path(self.workspace.root)
             if not wp.exists():
-                errors.append(ConfigValidationError(
-                    field="workspace.root",
-                    value=str(wp),
-                    reason=f"Workspace path '{wp}' does not exist.",
-                    severity="CRITICAL",
-                ))
+                errors.append(
+                    ConfigValidationError(
+                        field="workspace.root",
+                        value=str(wp),
+                        reason=f"Workspace path '{wp}' does not exist.",
+                        severity="CRITICAL",
+                    )
+                )
             elif not os.access(wp, os.R_OK):
-                errors.append(ConfigValidationError(
-                    field="workspace.root",
-                    value=str(wp),
-                    reason=f"Workspace path '{wp}' exists but is not readable.",
-                    severity="CRITICAL",
-                ))
+                errors.append(
+                    ConfigValidationError(
+                        field="workspace.root",
+                        value=str(wp),
+                        reason=f"Workspace path '{wp}' exists but is not readable.",
+                        severity="CRITICAL",
+                    )
+                )
 
         # Optional memory storage directory — validate writability if configured.
         if self.memory.storage_dir is not None:
             sd = Path(self.memory.storage_dir)
             if not sd.exists():
-                errors.append(ConfigValidationError(
-                    field="memory.storage_dir",
-                    value=str(sd),
-                    reason=f"Storage directory '{sd}' does not exist.",
-                    severity="WARNING",
-                ))
+                errors.append(
+                    ConfigValidationError(
+                        field="memory.storage_dir",
+                        value=str(sd),
+                        reason=f"Storage directory '{sd}' does not exist.",
+                        severity="WARNING",
+                    )
+                )
             elif not os.access(sd, os.W_OK):
-                errors.append(ConfigValidationError(
-                    field="memory.storage_dir",
-                    value=str(sd),
-                    reason=f"Storage directory '{sd}' exists but is not writable.",
-                    severity="CRITICAL",
-                ))
+                errors.append(
+                    ConfigValidationError(
+                        field="memory.storage_dir",
+                        value=str(sd),
+                        reason=f"Storage directory '{sd}' exists but is not writable.",
+                        severity="CRITICAL",
+                    )
+                )
 
         return errors
 
@@ -259,6 +302,7 @@ class VeluneConfig(BaseSettings):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _hardcoded_defaults() -> dict:
     """Return a pure-default VeluneConfig dict, unaffected by environment variables."""

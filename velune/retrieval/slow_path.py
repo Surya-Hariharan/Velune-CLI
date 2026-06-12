@@ -111,7 +111,9 @@ class SlowPathRetriever:
         logger.debug(f"Slow path complete: {len(filtered_chunks)} new chunks in {elapsed_ms:.0f}ms")
 
         if elapsed_ms > self.TARGET_LATENCY_MS:
-            logger.warning(f"Slow path exceeded target latency: {elapsed_ms:.0f}ms > {self.TARGET_LATENCY_MS}ms")
+            logger.warning(
+                f"Slow path exceeded target latency: {elapsed_ms:.0f}ms > {self.TARGET_LATENCY_MS}ms"
+            )
 
         return filtered_chunks
 

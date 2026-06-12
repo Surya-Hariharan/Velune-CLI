@@ -16,6 +16,7 @@ logger = logging.getLogger("velune.retrieval.pipeline")
 @dataclass
 class TaskProfile:
     """Task profile for retrieval decisions."""
+
     task_type: str  # CODING, REASONING, SUMMARIZATION, etc.
     complexity: str  # LOW, MEDIUM, HIGH
     requires_long_context: bool = False
@@ -25,6 +26,7 @@ class TaskProfile:
 @dataclass
 class ContextChunk:
     """A chunk of retrieved context."""
+
     id: str
     source: str  # "semantic", "symbol", "episodic", "lineage"
     content: str
@@ -38,6 +40,7 @@ class ContextChunk:
 @dataclass
 class RetrievedContext:
     """Results from retrieval pipeline."""
+
     chunks: list[ContextChunk]
     total_tokens: int
     fast_path_tokens: int
@@ -288,7 +291,7 @@ class RetrievalPipeline:
         selected: list[ContextChunk] = []
         total_tokens = 0
 
-        for chunk in chunks[:self.max_total_chunks]:
+        for chunk in chunks[: self.max_total_chunks]:
             chunk_tokens = chunk.metadata.get("tokens", 100)
 
             if total_tokens + chunk_tokens > budget.retrieval_allocation:

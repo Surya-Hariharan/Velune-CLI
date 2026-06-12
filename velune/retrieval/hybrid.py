@@ -127,9 +127,7 @@ class HybridRetriever:
         reranked_hits = self.reranker.rerank(query.text, all_hits)
 
         return RetrievalResult(
-            query=query,
-            hits=reranked_hits[:query.top_k],
-            strategy="hybrid-fusion-reranked"
+            query=query, hits=reranked_hits[: query.top_k], strategy="hybrid-fusion-reranked"
         )
 
     def search_sync(self, query: RetrievalQuery) -> RetrievalResult:
@@ -207,10 +205,13 @@ class HybridRetriever:
         """
         try:
             from velune.kernel.registry import get_container
+
             container = get_container()
             if container.has("runtime.provider_registry"):
                 provider_registry = container.get("runtime.provider_registry")
-                config = container.get("runtime.config") if container.has("runtime.config") else None
+                config = (
+                    container.get("runtime.config") if container.has("runtime.config") else None
+                )
 
                 provider_name = "openai"
                 if config and hasattr(config, "providers") and config.providers:
@@ -223,11 +224,13 @@ class HybridRetriever:
                         if not caps.supports_embeddings:
                             logger.info(
                                 "Provider %s does not support embeddings. Skipping vector embedding generation.",
-                                provider_name
+                                provider_name,
                             )
                             return None
                     except Exception as e:
-                        logger.warning("Could not query capabilities for provider %s: %s", provider_name, e)
+                        logger.warning(
+                            "Could not query capabilities for provider %s: %s", provider_name, e
+                        )
 
                     model_id = "text-embedding-3-small"
                     if provider_name == "ollama":
@@ -236,16 +239,22 @@ class HybridRetriever:
                     res = await provider.embed([text], model_id=model_id)
                     emb = res[0] if res else None
                     if emb:
-                        logger.debug("Generated embedding: dim=%d, provider=%s", len(emb), provider_name)
+                        logger.debug(
+                            "Generated embedding: dim=%d, provider=%s", len(emb), provider_name
+                        )
                         return emb
         except Exception as e:
             import logging
+
             logging.getLogger("velune.retrieval.hybrid").warning(
-                "Failed to generate embedding using ModelProvider: %s. Falling back to deterministic embedding.", e
+                "Failed to generate embedding using ModelProvider: %s. Falling back to deterministic embedding.",
+                e,
             )
 
         # No provider available
-        allow_fallback = os.environ.get("VELUNE_ALLOW_FALLBACK_EMBEDDING", "false").lower() == "true"
+        allow_fallback = (
+            os.environ.get("VELUNE_ALLOW_FALLBACK_EMBEDDING", "false").lower() == "true"
+        )
         if allow_fallback:
             logger.warning(
                 "Using character-frequency fallback embedding. "
@@ -260,5 +269,3 @@ class HybridRetriever:
             "Set VELUNE_ALLOW_FALLBACK_EMBEDDING=true to enable degraded mode."
         )
         return None
-
-

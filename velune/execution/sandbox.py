@@ -74,10 +74,12 @@ class SubprocessSandbox:
         else:
             try:
                 from velune.kernel.config import ConfigLoader
+
                 config = ConfigLoader(self.workspace_path / "velune.toml").load()
                 self.allowed_executables = frozenset(config.execution.allowed_executables)
             except Exception:
                 from velune.execution.command_spec import ALLOWED_EXECUTABLES
+
                 self.allowed_executables = ALLOWED_EXECUTABLES
 
         self.blocked_keywords = [
@@ -100,12 +102,14 @@ class SubprocessSandbox:
         if self.bus:
             try:
                 from velune.kernel.schemas import Event as KernelEvent
+
                 event = KernelEvent(
                     event_type="command_rejected",
                     source="execution",
                     data={"command": command, "reason": reason},
                 )
                 import asyncio
+
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
@@ -159,7 +163,9 @@ class SubprocessSandbox:
             # Defense-in-depth check
             cmd_str = " ".join(spec.to_argv())
             if not self._is_safe_command(cmd_str):
-                raise SandboxError(f"Command contains blocked pattern or is unsafe (defense-in-depth): {cmd_str}")
+                raise SandboxError(
+                    f"Command contains blocked pattern or is unsafe (defense-in-depth): {cmd_str}"
+                )
         except SandboxError as e:
             cmd_rep = " ".join([spec.executable, *spec.args]) if spec else "unknown"
             self.emit_rejection(cmd_rep, str(e))
@@ -169,9 +175,15 @@ class SubprocessSandbox:
         run_env.update(spec.env_additions)
         # Remove dangerous env vars
         for dangerous in (
-            "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PYTHONPATH",
-            "PYTHONSTARTUP", "PYTHONUSERBASE", "PYTHONINSPECT",
-            "BASH_ENV", "ENV", "PROMPT_COMMAND"
+            "LD_PRELOAD",
+            "DYLD_INSERT_LIBRARIES",
+            "PYTHONPATH",
+            "PYTHONSTARTUP",
+            "PYTHONUSERBASE",
+            "PYTHONINSPECT",
+            "BASH_ENV",
+            "ENV",
+            "PROMPT_COMMAND",
         ):
             run_env.pop(dangerous, None)
         run_env["PYTHONNOUSERSITE"] = "1"
@@ -183,7 +195,7 @@ class SubprocessSandbox:
             logger.debug("Executing command with argv: %s", argv)
             process = subprocess.Popen(
                 argv,
-                shell=False,           # NEVER shell=True
+                shell=False,  # NEVER shell=True
                 cwd=str(spec.cwd),
                 env=run_env,
                 stdout=subprocess.PIPE,
@@ -254,4 +266,3 @@ class SubprocessSandbox:
             peak_memory_mb=peak_memory,
             peak_cpu_pct=peak_cpu,
         )
-

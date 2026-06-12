@@ -65,6 +65,10 @@ class ChallengerAgent(BaseCouncilAgent):
 
         result = await self.typed_deliberate(user_messages, ChallengerMessage, temperature=0.6)
         if result.parse_error:
-            logger.warning("Challenger parse failed, using degraded default: %s", result.parse_error)
-            result.failure_vectors.append(f"Challenger was active but output format was unparseable: {result.parse_error}")
+            logger.warning(
+                "Challenger parse failed, using degraded default: %s", result.parse_error
+            )
+            result.failure_vectors.append(
+                f"Challenger was active but output format was unparseable: {result.parse_error}"
+            )
         return result

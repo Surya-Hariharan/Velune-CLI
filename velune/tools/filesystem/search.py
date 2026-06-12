@@ -36,7 +36,9 @@ class GrepFiles(BaseTool):
 
         extensions = None
         if file_pattern and file_pattern != "*":
-            if file_pattern.startswith("*.") and not any(c in file_pattern[2:] for c in ["*", "?", "[", "]"]):
+            if file_pattern.startswith("*.") and not any(
+                c in file_pattern[2:] for c in ["*", "?", "[", "]"]
+            ):
                 extensions = [file_pattern[1:]]
 
         files = scanner.scan(extensions)
@@ -54,11 +56,13 @@ class GrepFiles(BaseTool):
 
                 if re.search(regex, content):
                     for match in regex.finditer(content):
-                        results.append({
-                            "file": str(file_path),
-                            "match": match.group(),
-                            "line": content[:match.start()].count("\n") + 1,
-                        })
+                        results.append(
+                            {
+                                "file": str(file_path),
+                                "match": match.group(),
+                                "line": content[: match.start()].count("\n") + 1,
+                            }
+                        )
             except Exception:
                 pass
 

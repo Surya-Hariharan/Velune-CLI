@@ -36,7 +36,9 @@ class PluginRegistry:
                 callback = getattr(instance, method_name)
                 if callable(callback):
                     self.hook_dispatcher.register_hook(clean_hook_name, callback)
-                    logger.info("Associated plugin %s with hook: %s", manifest.name, clean_hook_name)
+                    logger.info(
+                        "Associated plugin %s with hook: %s", manifest.name, clean_hook_name
+                    )
             else:
                 logger.warning(
                     "Plugin %s declared hook %s but lacks method %s",

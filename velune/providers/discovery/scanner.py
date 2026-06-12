@@ -54,6 +54,7 @@ class ModelDiscoveryScanner:
         if discoverer.provider_id in _LOCAL_PROVIDERS:
             return True
         from velune.providers.keystore import has_key
+
         return has_key(discoverer.provider_id)
 
     async def _collect(self, discoverer) -> list[ModelDescriptor]:

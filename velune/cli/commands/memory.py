@@ -48,6 +48,7 @@ def memory_stats(ctx: typer.Context) -> None:
 
     if cli_context.json_mode:
         import json
+
         print(json.dumps(stats))
         return
 
@@ -58,9 +59,13 @@ def memory_stats(ctx: typer.Context) -> None:
 @memory_cmd.command("inspect")
 def memory_inspect(
     ctx: typer.Context,
-    tier: str = typer.Option("all", "--tier", "-t", help="Memory tier to inspect (working, episodic, all)"),
+    tier: str = typer.Option(
+        "all", "--tier", "-t", help="Memory tier to inspect (working, episodic, all)"
+    ),
     limit: int = typer.Option(10, "--limit", "-l", help="Number of records to show"),
-    session_id: str = typer.Option("", "--session", "-s", help="Filter by session ID (empty = all)"),
+    session_id: str = typer.Option(
+        "", "--session", "-s", help="Filter by session ID (empty = all)"
+    ),
 ) -> None:
     """Inspect stored records across different memory tiers.
 
@@ -73,6 +78,7 @@ def memory_inspect(
         raise typer.BadParameter("CLI context was not properly initialized")
 
     from velune.core.event_loop import submit
+
     submit(_memory_inspect_async(cli_context, tier, limit, session_id))
 
 
@@ -97,13 +103,17 @@ async def _memory_inspect_async(
                 for turn in working.get_recent_turns(limit=limit):
                     if session_id and getattr(turn, "session_id", "") != session_id:
                         continue
-                    records.append({
-                        "id": f"wrk-{turn.timestamp:.0f}",
-                        "tier": "working",
-                        "importance": 0.0,  # working tier has no importance scores yet
-                        "content_preview": (turn.content[:120] + "…") if len(turn.content) > 120 else turn.content,
-                        "status": turn.role,
-                    })
+                    records.append(
+                        {
+                            "id": f"wrk-{turn.timestamp:.0f}",
+                            "tier": "working",
+                            "importance": 0.0,  # working tier has no importance scores yet
+                            "content_preview": (turn.content[:120] + "…")
+                            if len(turn.content) > 120
+                            else turn.content,
+                            "status": turn.role,
+                        }
+                    )
         except Exception as exc:
             if not cli_context.json_mode:
                 console.print(f"[yellow]⚠ Could not read working memory: {exc}[/yellow]")
@@ -118,19 +128,24 @@ async def _memory_inspect_async(
                 sid = session_id or "default"
                 turns = episodic.get_turns(sid)
                 for turn in turns[-limit:]:
-                    records.append({
-                        "id": f"eps-{turn.id or turn.timestamp:.0f}",
-                        "tier": "episodic",
-                        "importance": 0.0,
-                        "content_preview": (turn.content[:120] + "…") if len(turn.content) > 120 else turn.content,
-                        "status": turn.role,
-                    })
+                    records.append(
+                        {
+                            "id": f"eps-{turn.id or turn.timestamp:.0f}",
+                            "tier": "episodic",
+                            "importance": 0.0,
+                            "content_preview": (turn.content[:120] + "…")
+                            if len(turn.content) > 120
+                            else turn.content,
+                            "status": turn.role,
+                        }
+                    )
         except Exception as exc:
             if not cli_context.json_mode:
                 console.print(f"[yellow]⚠ Could not read episodic memory: {exc}[/yellow]")
 
     if cli_context.json_mode:
         import json
+
         print(json.dumps({"records": records[:limit]}))
     else:
         display = MemoryDisplayView(console)
@@ -170,6 +185,7 @@ def memory_clear(
         )
 
     from velune.core.event_loop import submit
+
     submit(_memory_clear_async(cli_context, tier, session_id))
 
 
@@ -203,6 +219,7 @@ async def _memory_clear_async(cli_context: CLIContext, tier: str, session_id: st
 
     if cli_context.json_mode:
         import json
+
         print(json.dumps({"success": not errors, "cleared": cleared, "errors": errors}))
     else:
         for c in cleared:
@@ -226,6 +243,7 @@ def memory_compact(ctx: typer.Context) -> None:
         raise typer.BadParameter("CLI context was not properly initialized")
 
     from velune.core.event_loop import submit
+
     submit(_memory_compact_async(cli_context))
 
 
@@ -256,14 +274,20 @@ async def _memory_compact_async(cli_context: CLIContext) -> None:
             console.print(f"[red]✗ Compaction error: {exc}[/red]")
         if cli_context.json_mode:
             import json
+
             print(json.dumps({"success": False, "error": str(exc)}))
         return
 
     if cli_context.json_mode:
         import json
-        print(json.dumps({
-            "success": True,
-            "message": "Working memory flushed to episodic SQLite. Semantic compaction not yet implemented.",
-        }))
+
+        print(
+            json.dumps(
+                {
+                    "success": True,
+                    "message": "Working memory flushed to episodic SQLite. Semantic compaction not yet implemented.",
+                }
+            )
+        )
     else:
         console.print("[bold green]Memory flush complete.[/bold green]")

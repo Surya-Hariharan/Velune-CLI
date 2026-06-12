@@ -72,7 +72,9 @@ def configure_logging(
         add_log_level,
         add_logger_name,
         TimeStamper(fmt="iso"),
-        CallsiteParameterAdder(parameters=[CallsiteParameterAdder.FILENAME, CallsiteParameterAdder.LINENO]),
+        CallsiteParameterAdder(
+            parameters=[CallsiteParameterAdder.FILENAME, CallsiteParameterAdder.LINENO]
+        ),
         format_exc_info,
     ]
 
@@ -115,7 +117,8 @@ def configure_logging(
 
     # Configure structlog
     structlog.configure(
-        processors=shared_processors + [
+        processors=shared_processors
+        + [
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         context_class=dict,
@@ -208,10 +211,10 @@ class _ConsoleRenderer:
     def _colorize_level(self, level: str) -> str:
         """Add ANSI color codes to log level."""
         colors = {
-            "DEBUG": "\033[36m[DEBUG]\033[0m",      # Cyan
-            "INFO": "\033[32m[INFO]\033[0m",        # Green
+            "DEBUG": "\033[36m[DEBUG]\033[0m",  # Cyan
+            "INFO": "\033[32m[INFO]\033[0m",  # Green
             "WARNING": "\033[33m[WARNING]\033[0m",  # Yellow
-            "ERROR": "\033[31m[ERROR]\033[0m",      # Red
+            "ERROR": "\033[31m[ERROR]\033[0m",  # Red
             "CRITICAL": "\033[35m[CRITICAL]\033[0m",  # Magenta
         }
         return colors.get(level, f"[{level}]")

@@ -29,4 +29,4 @@ __all__ = [
     "doctor_cmd",
     "mcp_cmd",
     "mcp_serve",
-]
+]

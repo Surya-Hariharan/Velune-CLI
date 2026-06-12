@@ -27,6 +27,7 @@ class VeluneREPL:
         self.console = runtime.console
         self.active_model: ModelDescriptor | None = None
         from velune.cli.modes import ModeManager
+
         self._mode_manager = ModeManager()
         self.session_tokens: int = 0
         self.session_cost: float = 0.0
@@ -34,6 +35,7 @@ class VeluneREPL:
         self._history_file.parent.mkdir(parents=True, exist_ok=True)
         self._conversation: list[dict] = []
         from velune.orchestration.role_assignments import CouncilRoleMap
+
         self._assignments_path = Path.home() / ".velune" / "council_roles.json"
         self._role_map = CouncilRoleMap.load(self._assignments_path)
         self._project_profile = self._load_project_profile()
@@ -52,15 +54,17 @@ class VeluneREPL:
 
         from velune.cli.autocomplete import SlashCompleter
 
-        style = Style.from_dict({
-            "prompt.prefix": "#0087ff bold",     # Modern blue
-            "prompt.model": "#606060",           # Subtle gray
-            "prompt.mode": "#d4af37",            # Accent gold
-            "prompt.arrow": "#0087ff",           # Match prefix
-            "ctx.ok":     "#606060",             # Subtle
-            "ctx.warn":   "#d4af37",             # Warm accent
-            "ctx.danger": "#ff6b6b bold",        # Clear danger
-        })
+        style = Style.from_dict(
+            {
+                "prompt.prefix": "#0087ff bold",  # Modern blue
+                "prompt.model": "#606060",  # Subtle gray
+                "prompt.mode": "#d4af37",  # Accent gold
+                "prompt.arrow": "#0087ff",  # Match prefix
+                "ctx.ok": "#606060",  # Subtle
+                "ctx.warn": "#d4af37",  # Warm accent
+                "ctx.danger": "#ff6b6b bold",  # Clear danger
+            }
+        )
 
         try:
             models = self.container.get("runtime.model_registry").list_all()
@@ -98,9 +102,7 @@ class VeluneREPL:
 
             # Show context usage only if significant
             if self._conversation:
-                used = estimate_tokens(
-                    " ".join(m["content"] for m in self._conversation)
-                )
+                used = estimate_tokens(" ".join(m["content"] for m in self._conversation))
                 limit = self.active_model.context_length
                 pct = min(used / limit, 1.0) if limit > 0 else 0.0
 
@@ -147,6 +149,7 @@ class VeluneREPL:
             except Exception as e:
                 from velune.cli.rendering.error_panel import render_error, render_unexpected_error
                 from velune.core.errors.catalog import VeluneError
+
                 if isinstance(e, VeluneError):
                     self.console.print(render_error(e))
                 else:
@@ -214,6 +217,7 @@ class VeluneREPL:
         except Exception as e:
             from velune.cli.rendering.error_panel import render_error, render_unexpected_error
             from velune.core.errors.catalog import VeluneError
+
             if isinstance(e, VeluneError):
                 self.console.print(render_error(e))
             else:
@@ -221,120 +225,177 @@ class VeluneREPL:
 
     def _build_registry(self) -> SlashCommandRegistry:
         registry = SlashCommandRegistry()
-        registry.register(SlashCommand(
-            name="help", aliases=["h", "?"],
-            description="Show all available commands",
-            usage="/help",
-            handler=self._cmd_help,
-        ))
-        registry.register(SlashCommand(
-            name="exit", aliases=["quit", "q"],
-            description="Exit the Velune session",
-            usage="/exit",
-            handler=self._cmd_exit,
-        ))
-        registry.register(SlashCommand(
-            name="clear", aliases=["cls"],
-            description="Clear the terminal screen and conversation context",
-            usage="/clear",
-            handler=self._cmd_clear,
-        ))
-        registry.register(SlashCommand(
-            name="doctor", aliases=["diag"],
-            description="Run environment health checks",
-            usage="/doctor",
-            handler=self._cmd_doctor,
-        ))
-        registry.register(SlashCommand(
-            name="model", aliases=["m"],
-            description="Switch the active model interactively",
-            usage="/model [model-id]",
-            handler=self._cmd_model,
-        ))
-        registry.register(SlashCommand(
-            name="models", aliases=["ls"],
-            description="List all available models",
-            usage="/models",
-            handler=self._cmd_models,
-        ))
-        registry.register(SlashCommand(
-            name="run", aliases=["r"],
-            description="Execute a task through the Reasoning Council",
-            usage="/run <task description>",
-            handler=self._cmd_run,
-        ))
-        registry.register(SlashCommand(
-            name="council", aliases=["c"],
-            description="Force full council tier regardless of task complexity",
-            usage="/council <task description>",
-            handler=self._cmd_council,
-        ))
-        registry.register(SlashCommand(
-            name="diff", aliases=["d"],
-            description="Show uncommitted file changes from the last council run",
-            usage="/diff",
-            handler=self._cmd_diff,
-        ))
-        registry.register(SlashCommand(
-            name="memory", aliases=["mem"],
-            description="Inspect memory tiers and stats",
-            usage="/memory [clear|stats]",
-            handler=self._cmd_memory,
-        ))
-        registry.register(SlashCommand(
-            name="session", aliases=["s"],
-            description="Manage persistent sessions: list, resume, summary, save, export",
-            usage="/session [list|resume <id>|summary <id>|save|export]",
-            handler=self._cmd_session,
-        ))
-        registry.register(SlashCommand(
-            name="context", aliases=["ctx"],
-            description="Show context window usage for the current conversation",
-            usage="/context",
-            handler=self._cmd_context,
-        ))
-        registry.register(SlashCommand(
-            name="optimus", aliases=["fast", "opt"],
-            description="Speed mode — instant tier, compressed context, smallest model",
-            usage="/optimus",
-            handler=self._cmd_optimus,
-        ))
-        registry.register(SlashCommand(
-            name="godly", aliases=["full", "god"],
-            description="Max power — full council, largest model, full context",
-            usage="/godly",
-            handler=self._cmd_godly,
-        ))
-        registry.register(SlashCommand(
-            name="normal", aliases=["reset", "n"],
-            description="Return to balanced normal mode",
-            usage="/normal",
-            handler=self._cmd_normal,
-        ))
-        registry.register(SlashCommand(
-            name="mode", aliases=["status"],
-            description="Show the current session mode and its settings",
-            usage="/mode",
-            handler=self._cmd_mode,
-        ))
-        registry.register(SlashCommand(
-            name="councilmodel", aliases=["cm", "roles"],
-            description="Assign specific models to council agent roles",
-            usage="/councilmodel [show|reset]",
-            handler=self._cmd_councilmodel,
-        ))
-        registry.register(SlashCommand(
-            name="pull", aliases=["download", "get"],
-            description="Download an Ollama model interactively",
-            usage="/pull [model-id]",
-            handler=self._cmd_pull,
-        ))
-        registry.register(SlashCommand(
-            name="delete", aliases=["remove", "rm"],
-            description="Delete a locally installed Ollama model",
-            usage="/delete <model-id>",
-            handler=self._cmd_delete,
-        ))
+        registry.register(
+            SlashCommand(
+                name="help",
+                aliases=["h", "?"],
+                description="Show all available commands",
+                usage="/help",
+                handler=self._cmd_help,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="exit",
+                aliases=["quit", "q"],
+                description="Exit the Velune session",
+                usage="/exit",
+                handler=self._cmd_exit,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="clear",
+                aliases=["cls"],
+                description="Clear the terminal screen and conversation context",
+                usage="/clear",
+                handler=self._cmd_clear,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="doctor",
+                aliases=["diag"],
+                description="Run environment health checks",
+                usage="/doctor",
+                handler=self._cmd_doctor,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="model",
+                aliases=["m"],
+                description="Switch the active model interactively",
+                usage="/model [model-id]",
+                handler=self._cmd_model,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="models",
+                aliases=["ls"],
+                description="List all available models",
+                usage="/models",
+                handler=self._cmd_models,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="run",
+                aliases=["r"],
+                description="Execute a task through the Reasoning Council",
+                usage="/run <task description>",
+                handler=self._cmd_run,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="council",
+                aliases=["c"],
+                description="Force full council tier regardless of task complexity",
+                usage="/council <task description>",
+                handler=self._cmd_council,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="diff",
+                aliases=["d"],
+                description="Show uncommitted file changes from the last council run",
+                usage="/diff",
+                handler=self._cmd_diff,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="memory",
+                aliases=["mem"],
+                description="Inspect memory tiers and stats",
+                usage="/memory [clear|stats]",
+                handler=self._cmd_memory,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="session",
+                aliases=["s"],
+                description="Manage persistent sessions: list, resume, summary, save, export",
+                usage="/session [list|resume <id>|summary <id>|save|export]",
+                handler=self._cmd_session,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="context",
+                aliases=["ctx"],
+                description="Show context window usage for the current conversation",
+                usage="/context",
+                handler=self._cmd_context,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="optimus",
+                aliases=["fast", "opt"],
+                description="Speed mode — instant tier, compressed context, smallest model",
+                usage="/optimus",
+                handler=self._cmd_optimus,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="godly",
+                aliases=["full", "god"],
+                description="Max power — full council, largest model, full context",
+                usage="/godly",
+                handler=self._cmd_godly,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="normal",
+                aliases=["reset", "n"],
+                description="Return to balanced normal mode",
+                usage="/normal",
+                handler=self._cmd_normal,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="mode",
+                aliases=["status"],
+                description="Show the current session mode and its settings",
+                usage="/mode",
+                handler=self._cmd_mode,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="councilmodel",
+                aliases=["cm", "roles"],
+                description="Assign specific models to council agent roles",
+                usage="/councilmodel [show|reset]",
+                handler=self._cmd_councilmodel,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="pull",
+                aliases=["download", "get"],
+                description="Download an Ollama model interactively",
+                usage="/pull [model-id]",
+                handler=self._cmd_pull,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="delete",
+                aliases=["remove", "rm"],
+                description="Delete a locally installed Ollama model",
+                usage="/delete <model-id>",
+                handler=self._cmd_delete,
+            )
+        )
         return registry
 
     # ------------------------------------------------------------------
@@ -343,6 +404,7 @@ class VeluneREPL:
 
     async def _cmd_help(self, args: str) -> None:
         from rich.table import Table
+
         table = Table(
             show_header=True,
             border_style="blue",
@@ -390,13 +452,25 @@ class VeluneREPL:
             _check_vram,
             _render_results,
         )
+
         checks = [
-            _check_python_version, _check_core_dependencies,
-            _check_ollama_connectivity, _check_ollama_models,
-            _check_lm_studio, _check_openai_api_key, _check_anthropic_api_key,
-            _check_groq, _check_velune_dir, _check_sqlite, _check_qdrant,
-            _check_config, _check_treesitter, _check_git,
-            _check_gpu, _check_vram, _check_model_benchmarks,
+            _check_python_version,
+            _check_core_dependencies,
+            _check_ollama_connectivity,
+            _check_ollama_models,
+            _check_lm_studio,
+            _check_openai_api_key,
+            _check_anthropic_api_key,
+            _check_groq,
+            _check_velune_dir,
+            _check_sqlite,
+            _check_qdrant,
+            _check_config,
+            _check_treesitter,
+            _check_git,
+            _check_gpu,
+            _check_vram,
+            _check_model_benchmarks,
         ]
         results = []
         with self.console.status("[cyan]Running health checks...[/cyan]"):
@@ -404,11 +478,15 @@ class VeluneREPL:
                 try:
                     results.append(check_fn())
                 except Exception as e:
-                    results.append({
-                        "name": check_fn.__name__.replace("_check_", "").replace("_", " ").title(),
-                        "status": "error",
-                        "message": str(e),
-                    })
+                    results.append(
+                        {
+                            "name": check_fn.__name__.replace("_check_", "")
+                            .replace("_", " ")
+                            .title(),
+                            "status": "error",
+                            "message": str(e),
+                        }
+                    )
         _render_results(results)
         failures = sum(1 for r in results if r["status"] == "fail")
         if failures:
@@ -435,6 +513,7 @@ class VeluneREPL:
             else:
                 from velune.cli.rendering.error_panel import render_error
                 from velune.core.errors.catalog import ModelNotFoundError
+
                 self.console.print(render_error(ModelNotFoundError(f"'{args.strip()}'")))
             return
 
@@ -447,10 +526,7 @@ class VeluneREPL:
             )
             return
 
-        available = [
-            m for m in models
-            if provider_registry.get(m.provider_id) is not None
-        ]
+        available = [m for m in models if provider_registry.get(m.provider_id) is not None]
         if not available:
             self.console.print("[yellow]No providers are currently reachable.[/yellow]")
             return
@@ -465,9 +541,7 @@ class VeluneREPL:
                 f"{'local' if selected.is_local else 'cloud'}[/dim]"
             )
 
-    async def _show_model_picker(
-        self, models: list[ModelDescriptor]
-    ) -> ModelDescriptor | None:
+    async def _show_model_picker(self, models: list[ModelDescriptor]) -> ModelDescriptor | None:
         from prompt_toolkit.application import Application
         from prompt_toolkit.formatted_text import FormattedText
         from prompt_toolkit.key_binding import KeyBindings
@@ -491,24 +565,22 @@ class VeluneREPL:
 
         def _render_list() -> FormattedText:
             lines: list[tuple[str, str]] = []
-            lines.append(("bold", "  Select a model  (↑↓ navigate · Enter select · Esc cancel)\n\n"))
+            lines.append(
+                ("bold", "  Select a model  (↑↓ navigate · Enter select · Esc cancel)\n\n")
+            )
             if local:
                 lines.append(("fg:ansiyellow", "  — Local Models —\n"))
             for i, m in enumerate(grouped):
                 if not m.is_local and i == len(local):
                     lines.append(("fg:ansiyellow", "\n  — Cloud Models —\n"))
                 is_sel = i == selected_index[0]
-                is_cur = (
-                    self.active_model is not None
-                    and m.model_id == self.active_model.model_id
-                )
+                is_cur = self.active_model is not None and m.model_id == self.active_model.model_id
                 prefix = "❯ " if is_sel else "  "
                 row_style = "bold fg:cyan" if is_sel else ""
                 ctx = f"{m.context_length // 1000}k"
                 local_cloud = "local" if m.is_local else "cloud"
                 label = (
-                    f"  {prefix}{m.model_id:<40} "
-                    f"[{local_cloud:<5} · {m.speed_tier:<6} · ctx {ctx}]"
+                    f"  {prefix}{m.model_id:<40} [{local_cloud:<5} · {m.speed_tier:<6} · ctx {ctx}]"
                 )
                 lines.append((row_style, label))
                 if is_cur:
@@ -537,9 +609,11 @@ class VeluneREPL:
             event.app.exit()
 
         app = Application(
-            layout=Layout(Window(
-                content=FormattedTextControl(_render_list, focusable=True),
-            )),
+            layout=Layout(
+                Window(
+                    content=FormattedTextControl(_render_list, focusable=True),
+                )
+            ),
             key_bindings=kb,
             full_screen=False,
             mouse_support=False,
@@ -578,10 +652,7 @@ class VeluneREPL:
                     if isinstance(level, int) and level >= CapabilityLevel.ADVANCED:
                         top_skill = attr
                         break
-            is_active = (
-                self.active_model is not None
-                and m.model_id == self.active_model.model_id
-            )
+            is_active = self.active_model is not None and m.model_id == self.active_model.model_id
             name_col = f"{m.model_id} [green]✓[/green]" if is_active else m.model_id
             table.add_row(
                 name_col,
@@ -595,21 +666,16 @@ class VeluneREPL:
 
     async def _cmd_run(self, args: str) -> None:
         force_tier = (
-            None if self._mode_manager.is_normal()
-            else self._mode_manager.config.council_tier
+            None if self._mode_manager.is_normal() else self._mode_manager.config.council_tier
         )
         await self._execute_council_task(args, force_tier=force_tier)
 
     async def _cmd_council(self, args: str) -> None:
         await self._execute_council_task(args, force_tier="full")
 
-    async def _execute_council_task(
-        self, task: str, force_tier: str | None
-    ) -> None:
+    async def _execute_council_task(self, task: str, force_tier: str | None) -> None:
         if not task.strip():
-            self.console.print(
-                "[yellow]Usage: /run <task>  or  /council <task>[/yellow]"
-            )
+            self.console.print("[yellow]Usage: /run <task>  or  /council <task>[/yellow]")
             return
 
         orchestrator = self.container.get("runtime.council_orchestrator")
@@ -661,6 +727,7 @@ class VeluneREPL:
         except Exception as e:
             from velune.cli.rendering.error_panel import render_error, render_unexpected_error
             from velune.core.errors.catalog import VeluneError
+
             if isinstance(e, VeluneError):
                 self.console.print(render_error(e))
             else:
@@ -671,12 +738,14 @@ class VeluneREPL:
             state = orchestrator.get_state(last_run_id)
             if state and state.output:
                 self.console.print()
-                self.console.print(Panel(
-                    state.output,
-                    title="[bold cyan]Council Result[/bold cyan]",
-                    border_style="cyan",
-                    padding=(1, 2),
-                ))
+                self.console.print(
+                    Panel(
+                        state.output,
+                        title="[bold cyan]Council Result[/bold cyan]",
+                        border_style="cyan",
+                        padding=(1, 2),
+                    )
+                )
                 self._conversation.append({"role": "user", "content": f"/run {task}"})
                 self._conversation.append({"role": "assistant", "content": state.output})
 
@@ -706,12 +775,14 @@ class VeluneREPL:
             text=True,
         )
         if full.stdout:
-            self.console.print(Syntax(
-                full.stdout[:8000],
-                "diff",
-                theme="monokai",
-                line_numbers=False,
-            ))
+            self.console.print(
+                Syntax(
+                    full.stdout[:8000],
+                    "diff",
+                    theme="monokai",
+                    line_numbers=False,
+                )
+            )
 
     async def _cmd_memory(self, args: str) -> None:
         from rich.table import Table
@@ -753,8 +824,8 @@ class VeluneREPL:
         )
 
         table.add_row("Tier 3 · Semantic", "[green]active[/green]", "—", "Qdrant local")
-        table.add_row("Tier 4 · Graph",    "[green]active[/green]", "—", "SQLite graph")
-        table.add_row("Tier 5 · Lineage",  "[green]active[/green]", "—", "Decision + FEL store")
+        table.add_row("Tier 4 · Graph", "[green]active[/green]", "—", "SQLite graph")
+        table.add_row("Tier 5 · Lineage", "[green]active[/green]", "—", "Decision + FEL store")
         self.console.print(table)
 
         recent = working.get_recent_turns(3)
@@ -777,9 +848,7 @@ class VeluneREPL:
 
         if sub == "save" or not args.strip():
             session_id = save_session(self._conversation, model_id, workspace)
-            self.console.print(
-                f"[green]✓ Session saved:[/green] [cyan]{session_id}[/cyan]"
-            )
+            self.console.print(f"[green]✓ Session saved:[/green] [cyan]{session_id}[/cyan]")
 
         elif sub == "list":
             await self._cmd_session_list(workspace)
@@ -854,9 +923,7 @@ class VeluneREPL:
             return
 
         if not turns:
-            self.console.print(
-                f"[red]Session '{session_id}' not found or has no turns.[/red]"
-            )
+            self.console.print(f"[red]Session '{session_id}' not found or has no turns.[/red]")
             return
 
         self._conversation = [{"role": t.role, "content": t.content} for t in turns]
@@ -876,37 +943,39 @@ class VeluneREPL:
 
         existing = await episodic.get_session_summary(session_id)
         if existing:
-            self.console.print(Panel(
-                existing,
-                title=f"[bold cyan]Session Summary — {session_id}[/bold cyan]",
-                border_style="cyan",
-            ))
+            self.console.print(
+                Panel(
+                    existing,
+                    title=f"[bold cyan]Session Summary — {session_id}[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
             return
 
         turns = await episodic.get_session_history(session_id)
         if not turns:
-            self.console.print(
-                f"[yellow]No turns found for session '{session_id}'.[/yellow]"
-            )
+            self.console.print(f"[yellow]No turns found for session '{session_id}'.[/yellow]")
             return
 
         model, provider = await self._resolve_active_model_and_provider()
         if not model or not provider:
-            self.console.print(
-                "[yellow]No model available to generate summary.[/yellow]"
-            )
+            self.console.print("[yellow]No model available to generate summary.[/yellow]")
             return
 
-        turn_text = "\n".join(
-            f"{t.role.upper()}: {t.content[:300]}" for t in turns[:20]
-        )
+        turn_text = "\n".join(f"{t.role.upper()}: {t.content[:300]}" for t in turns[:20])
         from velune.core.types.inference import InferenceRequest
+
         req = InferenceRequest(
             model_id=model.model_id,
-            messages=[{"role": "user", "content": (
-                "Summarize this conversation in 2–3 sentences, "
-                "focusing on what was accomplished:\n\n" + turn_text
-            )}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Summarize this conversation in 2–3 sentences, "
+                        "focusing on what was accomplished:\n\n" + turn_text
+                    ),
+                }
+            ],
             temperature=0.3,
             max_tokens=256,
         )
@@ -914,11 +983,13 @@ class VeluneREPL:
             response = await provider.infer(req)
         summary_text = response.content.strip()
         await episodic.set_session_summary(session_id, summary_text)
-        self.console.print(Panel(
-            summary_text,
-            title=f"[bold cyan]Session Summary — {session_id}[/bold cyan]",
-            border_style="cyan",
-        ))
+        self.console.print(
+            Panel(
+                summary_text,
+                title=f"[bold cyan]Session Summary — {session_id}[/bold cyan]",
+                border_style="cyan",
+            )
+        )
 
     async def _cmd_context(self, args: str) -> None:
         from velune.context.window import estimate_tokens
@@ -937,8 +1008,7 @@ class VeluneREPL:
         )
         if pct > 85:
             self.console.print(
-                "[yellow]⚠ Context window nearly full. "
-                "Type /clear to reset conversation.[/yellow]"
+                "[yellow]⚠ Context window nearly full. Type /clear to reset conversation.[/yellow]"
             )
 
     # ------------------------------------------------------------------
@@ -948,6 +1018,7 @@ class VeluneREPL:
     async def _cmd_optimus(self, args: str) -> None:
         from velune.cli.model_selector import ModeAwareModelSelector
         from velune.cli.modes import SessionMode
+
         config = self._mode_manager.set_mode(SessionMode.OPTIMUS)
         selector = ModeAwareModelSelector(
             self.container.get("runtime.model_registry"),
@@ -966,6 +1037,7 @@ class VeluneREPL:
     async def _cmd_godly(self, args: str) -> None:
         from velune.cli.model_selector import ModeAwareModelSelector
         from velune.cli.modes import SessionMode
+
         config = self._mode_manager.set_mode(SessionMode.GODLY)
         selector = ModeAwareModelSelector(
             self.container.get("runtime.model_registry"),
@@ -984,10 +1056,9 @@ class VeluneREPL:
 
     async def _cmd_normal(self, args: str) -> None:
         from velune.cli.modes import SessionMode
+
         config = self._mode_manager.set_mode(SessionMode.NORMAL)
-        self.console.print(
-            f"[cyan]● NORMAL MODE[/cyan] — {config.description}"
-        )
+        self.console.print(f"[cyan]● NORMAL MODE[/cyan] — {config.description}")
 
     async def _cmd_mode(self, args: str) -> None:
         from rich.table import Table
@@ -1003,10 +1074,7 @@ class VeluneREPL:
         table.add_row("Compression", "on" if config.context_compression else "off")
         table.add_row("Retrieval depth", str(config.retrieval_depth))
         table.add_row("Critics", "disabled" if config.disable_critics else "enabled")
-        table.add_row(
-            "Current model",
-            self.active_model.model_id if self.active_model else "none"
-        )
+        table.add_row("Current model", self.active_model.model_id if self.active_model else "none")
         self.console.print(table)
 
     # ------------------------------------------------------------------
@@ -1020,6 +1088,7 @@ class VeluneREPL:
             if not orchestrator or not hasattr(orchestrator, "mapper"):
                 return
             from velune.models.specializations import CouncilRole
+
             orchestrator.mapper.overrides.clear()
             for role_str, assignment in self._role_map.assignments.items():
                 try:
@@ -1046,14 +1115,14 @@ class VeluneREPL:
         model_registry = self.container.get("runtime.model_registry")
         provider_registry = self.container.get("runtime.provider_registry")
         available = [
-            m for m in model_registry.list_all()
-            if provider_registry.get(m.provider_id) is not None
+            m for m in model_registry.list_all() if provider_registry.get(m.provider_id) is not None
         ]
         if not available:
             self.console.print("[yellow]No models available. Run /doctor to diagnose.[/yellow]")
             return
 
         from velune.cli.councilmodel_ui import run_councilmodel_ui
+
         updated = await run_councilmodel_ui(self._role_map, available, self.console)
         if updated is not None:
             self._role_map = updated
@@ -1075,14 +1144,14 @@ class VeluneREPL:
             model_str = assignment.model_id if assignment else "[dim]auto-routed[/dim]"
             provider_str = assignment.provider_id if assignment else "—"
             table.add_row(
-                role, model_str, provider_str,
+                role,
+                model_str,
+                provider_str,
                 ROLE_DESCRIPTIONS.get(role, "")[:45],
             )
         self.console.print(table)
         if not self._role_map.assignments:
-            self.console.print(
-                "[dim]No custom assignments. Use /councilmodel to assign.[/dim]"
-            )
+            self.console.print("[dim]No custom assignments. Use /councilmodel to assign.[/dim]")
 
     # ------------------------------------------------------------------
     # Ollama pull / delete command handlers
@@ -1090,12 +1159,12 @@ class VeluneREPL:
 
     async def _cmd_pull(self, args: str) -> None:
         from velune.providers.ollama_manager import OllamaManager
+
         manager = OllamaManager()
 
         if not await manager.is_running():
             self.console.print(
-                "[red]Ollama is not running.[/red]\n"
-                "[dim]Start it with: ollama serve[/dim]"
+                "[red]Ollama is not running.[/red]\n[dim]Start it with: ollama serve[/dim]"
             )
             return
 
@@ -1105,6 +1174,7 @@ class VeluneREPL:
                 await self._refresh_model_registry()
         else:
             from velune.cli.pull_ui import run_pull_ui
+
             local_models = await manager.list_local_models()
             hardware = self.container.get("runtime.hardware")
             ram_gb = float(hardware.total_ram_gb) if hardware else 16.0
@@ -1124,6 +1194,7 @@ class VeluneREPL:
         from rich.prompt import Confirm
 
         from velune.providers.ollama_manager import OllamaManager
+
         model_id = args.strip()
         confirm = Confirm.ask(
             f"  Delete [cyan]{model_id}[/cyan] from Ollama? This cannot be undone.",
@@ -1145,9 +1216,7 @@ class VeluneREPL:
         try:
             await model_registry.refresh()
             count = len(model_registry.list_all())
-            self.console.print(
-                f"[dim]Model registry refreshed: {count} models available.[/dim]"
-            )
+            self.console.print(f"[dim]Model registry refreshed: {count} models available.[/dim]")
         except Exception:
             pass
 
@@ -1164,9 +1233,7 @@ class VeluneREPL:
             workspace = str(self.container.get("runtime.workspace") or "")
             model_id = self.active_model.model_id if self.active_model else "unknown"
             mode = self._mode_manager.current.value
-            self._episodic_session_id = await episodic.start_session(
-                workspace, model_id, mode
-            )
+            self._episodic_session_id = await episodic.start_session(workspace, model_id, mode)
             try:
                 bus = self.container.get("runtime.bus")
                 if bus is not None:
@@ -1216,30 +1283,35 @@ class VeluneREPL:
                 return
             workspace = str(self.container.get("runtime.workspace") or "")
             from velune.events import Event
-            await bus.emit(Event(
-                event_type="ConversationTurn",
-                source="repl",
-                data={
-                    "session_id": self._episodic_session_id,
-                    "role": "user",
-                    "content": user_text,
-                    "model_used": model_id,
-                    "tokens_used": None,
-                    "workspace_root": workspace,
-                },
-            ))
-            await bus.emit(Event(
-                event_type="ConversationTurn",
-                source="repl",
-                data={
-                    "session_id": self._episodic_session_id,
-                    "role": "assistant",
-                    "content": assistant_text,
-                    "model_used": model_id,
-                    "tokens_used": tokens,
-                    "workspace_root": workspace,
-                },
-            ))
+
+            await bus.emit(
+                Event(
+                    event_type="ConversationTurn",
+                    source="repl",
+                    data={
+                        "session_id": self._episodic_session_id,
+                        "role": "user",
+                        "content": user_text,
+                        "model_used": model_id,
+                        "tokens_used": None,
+                        "workspace_root": workspace,
+                    },
+                )
+            )
+            await bus.emit(
+                Event(
+                    event_type="ConversationTurn",
+                    source="repl",
+                    data={
+                        "session_id": self._episodic_session_id,
+                        "role": "assistant",
+                        "content": assistant_text,
+                        "model_used": model_id,
+                        "tokens_used": tokens,
+                        "workspace_root": workspace,
+                    },
+                )
+            )
         except Exception as exc:
             _log.debug("Failed to emit turn events: %s", exc)
 
@@ -1273,7 +1345,7 @@ class VeluneREPL:
                 lines.append(f"• ({m.attribution}): {preview}")
             lines.append("[END RETRIEVED CONTEXT]")
             return "\n".join(lines)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _log.debug("Semantic retrieval timed out — skipping context injection")
             return None
         except Exception as exc:
@@ -1294,15 +1366,21 @@ class VeluneREPL:
         if not model or not provider:
             from velune.cli.rendering.error_panel import render_error
             from velune.core.errors.catalog import NoModelsAvailableError
-            self.console.print(render_error(NoModelsAvailableError(
-                cause_override="No model is configured for this session."
-            )))
+
+            self.console.print(
+                render_error(
+                    NoModelsAvailableError(
+                        cause_override="No model is configured for this session."
+                    )
+                )
+            )
             return
 
         # Inject project-aware system prompt on the very first turn
         if not self._conversation and self._project_profile:
             try:
                 from velune.repository.project_type import PROJECT_SYSTEM_PROMPTS, ProjectType
+
                 pt_value = (
                     self._project_profile.get("project_type")
                     if isinstance(self._project_profile, dict)
@@ -1310,10 +1388,12 @@ class VeluneREPL:
                 )
                 addon = PROJECT_SYSTEM_PROMPTS.get(ProjectType(pt_value), "")
                 if addon:
-                    self._conversation.append({
-                        "role": "system",
-                        "content": f"You are a coding assistant. {addon}",
-                    })
+                    self._conversation.append(
+                        {
+                            "role": "system",
+                            "content": f"You are a coding assistant. {addon}",
+                        }
+                    )
             except Exception:
                 pass
 
@@ -1323,6 +1403,7 @@ class VeluneREPL:
 
         if mode_config.context_compression and self._conversation:
             from velune.context.extractive import compress_conversation
+
             self._conversation = compress_conversation(
                 self._conversation,
                 max_tokens=mode_config.max_context_tokens,
@@ -1331,7 +1412,7 @@ class VeluneREPL:
         # Retrieve semantically similar past interactions (2s timeout, non-blocking)
         retrieved_context = await self._retrieve_semantic_context(text)
 
-        base_messages = self._conversation[-50:]   # Hard cap at 50 turns
+        base_messages = self._conversation[-50:]  # Hard cap at 50 turns
         if retrieved_context:
             # Inject just before the current user message so the model sees it
             # as background context, not as part of the conversation history.
@@ -1358,8 +1439,9 @@ class VeluneREPL:
 
             if supports_stream:
                 buffer = ""
-                with Live("", console=self.console, refresh_per_second=12,
-                          vertical_overflow="visible") as live:
+                with Live(
+                    "", console=self.console, refresh_per_second=12, vertical_overflow="visible"
+                ) as live:
                     async for chunk in provider.stream(request):
                         if chunk.content:
                             buffer += chunk.content
@@ -1435,11 +1517,13 @@ class VeluneREPL:
         if profile_path.exists():
             try:
                 import json
+
                 return json.loads(profile_path.read_text())
             except Exception:
                 pass
         try:
             from velune.repository.project_type import ProjectTypeDetector
+
             return ProjectTypeDetector().detect(Path(workspace))
         except Exception:
             return None

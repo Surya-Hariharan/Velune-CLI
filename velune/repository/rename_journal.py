@@ -15,6 +15,7 @@ logger = logging.getLogger("velune.repository.rename_journal")
 @dataclass
 class RenameRecord:
     """Record of a symbol rename."""
+
     symbol_id: str
     old_name: str
     new_name: str

@@ -78,13 +78,16 @@ _container = ServiceContainer()
 
 def inject(service_name: str):
     """Decorator to inject a registered kernel component into function arguments."""
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
             if service_name not in kwargs:
                 kwargs[service_name] = _container.get(service_name)
             return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 

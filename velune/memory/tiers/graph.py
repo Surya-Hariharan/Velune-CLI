@@ -64,6 +64,7 @@ _SCHEMA_SQL = """
 
 class GraphNode(BaseModel):
     """A single entity node in the Knowledge Graph."""
+
     id: str
     node_type: str
     properties: dict[str, Any] = Field(default_factory=dict)
@@ -71,6 +72,7 @@ class GraphNode(BaseModel):
 
 class GraphEdge(BaseModel):
     """A directed edge connecting two entities in the Knowledge Graph."""
+
     source: str
     target: str
     relation_type: str
@@ -319,15 +321,17 @@ class GraphMemoryTier:
                 )
                 rows = await cursor.fetchall()
             for row in rows:
-                attempts.append({
-                    "id": row["id"],
-                    "task_id": row["task_id"],
-                    "node_type": row["node_type"],
-                    "status": row["status"],
-                    "parameters": json.loads(row["parameters"]),
-                    "outcome": row["outcome"],
-                    "timestamp": row["timestamp"],
-                })
+                attempts.append(
+                    {
+                        "id": row["id"],
+                        "task_id": row["task_id"],
+                        "node_type": row["node_type"],
+                        "status": row["status"],
+                        "parameters": json.loads(row["parameters"]),
+                        "outcome": row["outcome"],
+                        "timestamp": row["timestamp"],
+                    }
+                )
         except Exception as exc:
             logger.error("Failed to query execution lineage for %s: %s", file_path, exc)
         return attempts

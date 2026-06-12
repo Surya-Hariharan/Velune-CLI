@@ -14,20 +14,24 @@ _logger = logging.getLogger(__name__)
 @dataclass
 class SubsystemModule:
     """Declares a subsystem's factory and dependencies."""
+
     name: str
-    factory: Callable[['RuntimeEnvironment'], Any]
+    factory: Callable[["RuntimeEnvironment"], Any]
     container_key: str
     lifecycle_key: str | None = None  # None = not lifecycle-managed
     dependencies: list[str] = field(default_factory=list)  # container keys this needs
 
+
 @dataclass
 class RuntimeEnvironment:
     """Everything a subsystem factory needs to initialize itself."""
+
     workspace: Path
     config: VeluneConfig
     container: ServiceContainer
     lifecycle: LifecycleCoordinator
     verbose: bool = False
+
 
 class RuntimeBootstrapper:
     def __init__(self) -> None:
@@ -40,10 +44,12 @@ class RuntimeBootstrapper:
         """Initialize all modules in dependency order."""
         from velune.core.startup_profiler import mark
         from velune.core.task_registry import BackgroundTaskRegistry
+
         registry = BackgroundTaskRegistry()
         env.container.register_instance("runtime.task_registry", registry)
 
         from velune.hardware.detector import HardwareDetector
+
         hardware_profile = HardwareDetector().detect()
         env.container.register_instance("runtime.hardware", hardware_profile)
         mark("hardware detected")
@@ -61,12 +67,16 @@ class RuntimeBootstrapper:
                 if module.lifecycle_key:
                     _logger.critical(
                         "Critical module '%s' (%s) failed to initialize: %s",
-                        module.name, module.container_key, exc,
+                        module.name,
+                        module.container_key,
+                        exc,
                     )
                     raise
                 _logger.warning(
                     "Optional module '%s' (%s) failed to initialize, skipping: %s",
-                    module.name, module.container_key, exc,
+                    module.name,
+                    module.container_key,
+                    exc,
                 )
                 continue
             env.container.register_instance(module.container_key, instance)
@@ -92,7 +102,10 @@ class RuntimeBootstrapper:
 
         # Find all modules with in_degree == 0
         from collections import deque
-        queue = deque([mod.container_key for mod in self._modules if in_degree[mod.container_key] == 0])
+
+        queue = deque(
+            [mod.container_key for mod in self._modules if in_degree[mod.container_key] == 0]
+        )
 
         resolved_keys = []
         while queue:
@@ -105,6 +118,8 @@ class RuntimeBootstrapper:
 
         if len(resolved_keys) != len(self._modules):
             unresolved = set(key_to_mod.keys()) - set(resolved_keys)
-            raise ValueError(f"Circular dependency or missing module dependency detected in bootstrap! Unresolved: {unresolved}")
+            raise ValueError(
+                f"Circular dependency or missing module dependency detected in bootstrap! Unresolved: {unresolved}"
+            )
 
         return [key_to_mod[key] for key in resolved_keys]

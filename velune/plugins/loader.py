@@ -49,7 +49,9 @@ class PluginLoader:
         entry_file = folder_path / manifest.entry_point
 
         if not entry_file.exists():
-            raise FileNotFoundError(f"Entry point file {manifest.entry_point} not found in {folder_path}")
+            raise FileNotFoundError(
+                f"Entry point file {manifest.entry_point} not found in {folder_path}"
+            )
 
         # Dynamic import setup
         module_name = f"velune.plugins.dynamic.{manifest.name}"
@@ -84,12 +86,16 @@ class PluginLoader:
             method_name = f"on_{hook}" if not hook.startswith("on_") else hook
             if hasattr(instance, method_name):
                 original = getattr(instance, method_name)
+
                 # Inline async wrapper — catches all plugin failures without crashing the process
-                async def _safe_callback(*args: Any, _orig: Any = original, _name: str = method_name, **kwargs: Any) -> Any:
+                async def _safe_callback(
+                    *args: Any, _orig: Any = original, _name: str = method_name, **kwargs: Any
+                ) -> Any:
                     try:
                         return await _orig(*args, **kwargs)
                     except Exception as e:
                         logger.error("Plugin callback %s failed: %s", _name, e)
                         return None
+
                 setattr(instance, method_name, _safe_callback)
         return instance

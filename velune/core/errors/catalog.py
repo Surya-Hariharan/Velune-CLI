@@ -44,12 +44,10 @@ class VeluneError(Exception):
 # Provider / model errors
 # ---------------------------------------------------------------------------
 
+
 class OllamaNotRunningError(VeluneError):
     title = "Ollama is not running"
-    cause = (
-        "Velune tried to connect to Ollama at localhost:11434 but the "
-        "connection was refused."
-    )
+    cause = "Velune tried to connect to Ollama at localhost:11434 but the connection was refused."
     fix = [
         "Run `ollama serve` in a separate terminal window",
         "Then retry your command, or run `velune doctor` to verify all providers",
@@ -79,8 +77,7 @@ class NoModelsAvailableError(VeluneError):
 class APIKeyMissingError(VeluneError):
     title = "API key missing"
     cause = (
-        "A cloud provider is configured but no API key was found in the "
-        "environment or keystore."
+        "A cloud provider is configured but no API key was found in the environment or keystore."
     )
     fix = [
         "Set the API key with `velune config set providers.<name>.api_key <key>`",
@@ -91,10 +88,7 @@ class APIKeyMissingError(VeluneError):
 
 class ProviderUnavailableError(VeluneError):
     title = "Provider unavailable"
-    cause = (
-        "The model provider failed its health check and cannot accept "
-        "inference requests."
-    )
+    cause = "The model provider failed its health check and cannot accept inference requests."
     fix = [
         "Run `velune doctor check` to identify which providers are unreachable",
         "Verify the provider service is running (e.g. `ollama serve` for Ollama)",
@@ -114,10 +108,7 @@ class RateLimitError(VeluneError):
 
 class ContextWindowExceededError(VeluneError):
     title = "Context window exceeded"
-    cause = (
-        "The combined prompt and context is larger than the model's maximum "
-        "context length."
-    )
+    cause = "The combined prompt and context is larger than the model's maximum context length."
     fix = [
         "Use a model with a larger context window (`velune models list`)",
         "Reduce the amount of repository context by narrowing the file selection",
@@ -127,10 +118,7 @@ class ContextWindowExceededError(VeluneError):
 
 class InsufficientVRAMError(VeluneError):
     title = "Insufficient VRAM"
-    cause = (
-        "The selected local model requires more GPU memory than is currently "
-        "available."
-    )
+    cause = "The selected local model requires more GPU memory than is currently available."
     fix = [
         "Close other GPU-intensive applications to free VRAM",
         "Use a smaller quantized version of the model (e.g. q4_K_M instead of q8_0)",
@@ -142,12 +130,10 @@ class InsufficientVRAMError(VeluneError):
 # Workspace / configuration errors
 # ---------------------------------------------------------------------------
 
+
 class WorkspaceNotInitializedError(VeluneError):
     title = "Workspace not initialized"
-    cause = (
-        "This directory does not contain a Velune workspace "
-        "(velune.toml not found)."
-    )
+    cause = "This directory does not contain a Velune workspace (velune.toml not found)."
     fix = [
         "Run `velune workspace init` to initialize this directory as a Velune workspace",
         "Or change to a directory that already contains a velune.toml",
@@ -158,6 +144,7 @@ class WorkspaceNotInitializedError(VeluneError):
 # ---------------------------------------------------------------------------
 # Security errors
 # ---------------------------------------------------------------------------
+
 
 class PathTraversalError(VeluneError):
     title = "Path traversal blocked"
@@ -189,6 +176,7 @@ class SSRFAttemptError(VeluneError):
 # ---------------------------------------------------------------------------
 # Repository / indexing errors
 # ---------------------------------------------------------------------------
+
 
 class IndexingFailedError(VeluneError):
     title = "Repository indexing failed"

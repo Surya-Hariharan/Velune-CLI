@@ -64,7 +64,7 @@ class SQLiteManager:
         is raised on the next use.  We catch that case here and transparently
         recreate the connection so callers never see the error.
         """
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
+        if not hasattr(self._local, "conn") or self._local.conn is None:
             self._local.conn = self._new_read_connection()
         else:
             # Probe for a closed/stale handle without querying the DB
@@ -105,7 +105,7 @@ class SQLiteManager:
             logger.warning(
                 "SQLiteManager write queue depth exceeds 50 (current depth: %d). "
                 "Possible performance bottleneck or write queue saturation.",
-                qsize
+                qsize,
             )
         self._write_queue.put(item)
 
@@ -130,8 +130,8 @@ class SQLiteManager:
         if not completed:
             if timeout > 5.0:
                 logger.warning(
-                    "SQLite write sync taking longer than expected (5s elapsed). "
-                    "Queue depth: %d", self._write_queue.qsize()
+                    "SQLite write sync taking longer than expected (5s elapsed). Queue depth: %d",
+                    self._write_queue.qsize(),
                 )
                 completed = done.wait(timeout=timeout - 5.0)
 
@@ -145,7 +145,7 @@ class SQLiteManager:
                 timeout,
                 self._write_queue.qsize(),
                 alive,
-                query[:100]
+                query[:100],
             )
             raise TimeoutError(
                 f"SQLite write queue timeout after {timeout}s. "
@@ -172,8 +172,8 @@ class SQLiteManager:
         if not completed:
             if timeout > 5.0:
                 logger.warning(
-                    "SQLite batch write taking longer than expected (5s elapsed). "
-                    "Queue depth: %d", self._write_queue.qsize()
+                    "SQLite batch write taking longer than expected (5s elapsed). Queue depth: %d",
+                    self._write_queue.qsize(),
                 )
                 completed = done.wait(timeout=timeout - 5.0)
 
@@ -187,7 +187,7 @@ class SQLiteManager:
                 timeout,
                 len(queries),
                 self._write_queue.qsize(),
-                alive
+                alive,
             )
             raise TimeoutError(
                 f"SQLite batch write timeout after {timeout}s. "
@@ -218,8 +218,8 @@ class SQLiteManager:
         if not completed:
             if timeout > 5.0:
                 logger.warning(
-                    "SQLite script taking longer than expected (5s elapsed). "
-                    "Queue depth: %d", self._write_queue.qsize()
+                    "SQLite script taking longer than expected (5s elapsed). Queue depth: %d",
+                    self._write_queue.qsize(),
                 )
                 completed = done.wait(timeout=timeout - 5.0)
 
@@ -238,7 +238,7 @@ class SQLiteManager:
 
         Safe to call multiple times — subsequent calls are no-ops.
         """
-        conn = getattr(self._local, 'conn', None)
+        conn = getattr(self._local, "conn", None)
         if conn is not None:
             try:
                 conn.close()
@@ -249,9 +249,11 @@ class SQLiteManager:
 
     def is_healthy(self) -> bool:
         """Returns True if the write thread is alive and queue depth is under 100."""
-        return (self._write_thread is not None and
-                self._write_thread.is_alive() and
-                self._write_queue.qsize() < 100)
+        return (
+            self._write_thread is not None
+            and self._write_thread.is_alive()
+            and self._write_queue.qsize() < 100
+        )
 
     def _process_writes(self) -> None:
         self._thread_healthy.set()
@@ -274,14 +276,10 @@ class SQLiteManager:
                         self._do_write(query, params)
                     except Exception as write_error:
                         logger.error(
-                            "SQLite write error (query: %s): %s",
-                            str(query)[:80],
-                            write_error
+                            "SQLite write error (query: %s): %s", str(query)[:80], write_error
                         )
                         if error_holder is not None:
-                            error_holder.append(
-                                RuntimeError(f"SQLite write failed: {write_error}")
-                            )
+                            error_holder.append(RuntimeError(f"SQLite write failed: {write_error}"))
                     finally:
                         if done_event:
                             done_event.set()
@@ -322,7 +320,9 @@ class SQLiteManager:
                     logger.debug(
                         "SQLite lock contention in _do_write. "
                         "Attempt %d/5 failed with error: %s. Retrying in %ss...",
-                        attempt + 1, e, backoff
+                        attempt + 1,
+                        e,
+                        backoff,
                     )
                     time.sleep(backoff)
                     continue
@@ -343,6 +343,7 @@ class SQLiteManager:
         self._is_running = False
         # Drain with timeout — do not block forever
         try:
+
             def drain():
                 try:
                     self._write_queue.join()
@@ -360,7 +361,7 @@ class SQLiteManager:
         self._write_thread.join(timeout=5.0)
 
         # Clean up thread local connections
-        if hasattr(self._local, 'conn') and self._local.conn is not None:
+        if hasattr(self._local, "conn") and self._local.conn is not None:
             try:
                 self._local.conn.close()
             except Exception:

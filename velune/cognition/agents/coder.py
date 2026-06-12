@@ -73,7 +73,8 @@ class CoderAgent(BaseCouncilAgent):
 
         logger.info(
             "Coder starting implementation (timeout: %ds, wall budget: %.1fs remaining)",
-            timeout, remaining
+            timeout,
+            remaining,
         )
 
         # Build style guidance block
@@ -170,34 +171,40 @@ class CoderAgent(BaseCouncilAgent):
             if "/" in line and any(ext in line for ext in [".py", ".js", ".ts", ".go", ".rs"]):
                 # Save previous file if any
                 if current_file and current_block:
-                    diffs.append({
-                        "file_path": current_file,
-                        "original": "",
-                        "proposed": "\n".join(current_block),
-                        "is_new_file": True,
-                        "is_deletion": False,
-                    })
+                    diffs.append(
+                        {
+                            "file_path": current_file,
+                            "original": "",
+                            "proposed": "\n".join(current_block),
+                            "is_new_file": True,
+                            "is_deletion": False,
+                        }
+                    )
                 current_file = line.strip()
                 current_block = []
 
         # Save final block
         if current_file and current_block:
-            diffs.append({
-                "file_path": current_file,
-                "original": "",
-                "proposed": "\n".join(current_block),
-                "is_new_file": True,
-                "is_deletion": False,
-            })
+            diffs.append(
+                {
+                    "file_path": current_file,
+                    "original": "",
+                    "proposed": "\n".join(current_block),
+                    "is_new_file": True,
+                    "is_deletion": False,
+                }
+            )
 
         # If no structured diffs found, return the raw response as a single diff
         if not diffs:
-            diffs.append({
-                "file_path": "generated_output.txt",
-                "original": "",
-                "proposed": response,
-                "is_new_file": True,
-                "is_deletion": False,
-            })
+            diffs.append(
+                {
+                    "file_path": "generated_output.txt",
+                    "original": "",
+                    "proposed": response,
+                    "is_new_file": True,
+                    "is_deletion": False,
+                }
+            )
 
         return diffs

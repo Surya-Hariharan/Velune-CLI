@@ -59,6 +59,7 @@ def mcp_serve_subcmd(ctx: typer.Context) -> None:
     server = VeluneMCPServer(tool_registry)
 
     import logging
+
     logging.getLogger("velune").setLevel(logging.WARNING)
 
     submit(server.run_stdio())
@@ -75,6 +76,7 @@ def mcp_serve(ctx: typer.Context) -> None:
     server = VeluneMCPServer(tool_registry)
 
     import logging
+
     logging.getLogger("velune").setLevel(logging.WARNING)
 
     submit(server.run_stdio())

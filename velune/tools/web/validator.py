@@ -2,18 +2,20 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
-BLOCKED_HOSTS = frozenset({
-    "169.254.169.254",        # AWS IMDS v1
-    "169.254.170.2",          # AWS ECS metadata
-    "metadata.google.internal",
-    "metadata.goog",          # GCP metadata alternate
-    "169.254.0.0",            # link-local broadcast
-    "fd00:ec2::254",          # AWS IPv6 IMDS
-    "100.100.100.200",        # Alibaba Cloud metadata
-})
+BLOCKED_HOSTS = frozenset(
+    {
+        "169.254.169.254",  # AWS IMDS v1
+        "169.254.170.2",  # AWS ECS metadata
+        "metadata.google.internal",
+        "metadata.goog",  # GCP metadata alternate
+        "169.254.0.0",  # link-local broadcast
+        "fd00:ec2::254",  # AWS IPv6 IMDS
+        "100.100.100.200",  # Alibaba Cloud metadata
+    }
+)
 
 BLOCKED_PREFIXES = (
-    "169.254.",               # link-local range (catch-all)
+    "169.254.",  # link-local range (catch-all)
 )
 
 # Explicit additional blocked networks not guaranteed by ip.is_private across all
@@ -21,7 +23,7 @@ BLOCKED_PREFIXES = (
 # correctness on older runtimes too.
 _BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
     ipaddress.ip_network("100.64.0.0/10"),  # Carrier-grade NAT (RFC 6598) / Alibaba Cloud
-    ipaddress.ip_network("fc00::/7"),        # IPv6 ULA (includes fd00::/8 — AWS IPv6 metadata)
+    ipaddress.ip_network("fc00::/7"),  # IPv6 ULA (includes fd00::/8 — AWS IPv6 metadata)
 ]
 
 
@@ -69,6 +71,7 @@ def _is_private_ip(address: str) -> tuple[bool, str]:
         except TypeError:
             pass  # IPv4 address vs IPv6 network (or vice-versa) — skip
     return False, ""
+
 
 def validate_url(url: str, allow_http: bool = False) -> tuple[bool, str | None]:
     """

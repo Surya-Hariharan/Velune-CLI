@@ -26,7 +26,7 @@ class CodebaseAnalyzer:
             "tools": [],
             "plugins": [],
             "telemetry": [],
-            "other": []
+            "other": [],
         }
 
         for path in file_paths:
@@ -45,7 +45,9 @@ class CodebaseAnalyzer:
 
         return layers
 
-    def detect_dependency_violations(self, layers: dict[str, list[str]], import_edges: list[tuple]) -> list[dict[str, str]]:
+    def detect_dependency_violations(
+        self, layers: dict[str, list[str]], import_edges: list[tuple]
+    ) -> list[dict[str, str]]:
         """Identifies circular dependencies or violations of layered architectural boundaries.
 
         Rules:
@@ -77,7 +79,7 @@ class CodebaseAnalyzer:
             "plugins": 9,
             "cli": 10,
             "telemetry": 0,  # Telemetry can be imported everywhere
-            "other": 10
+            "other": 10,
         }
 
         for source, target in import_edges:
@@ -90,13 +92,15 @@ class CodebaseAnalyzer:
 
                 # Violation: Lower layer imports a strictly higher layer (excluding telemetry)
                 if src_val < tgt_val and tgt_layer != "telemetry":
-                    violations.append({
-                        "source": source,
-                        "target": target,
-                        "source_layer": src_layer,
-                        "target_layer": tgt_layer,
-                        "rule": f"Layer violation: Fundamental '{src_layer}' layer imports higher-level '{tgt_layer}' layer."
-                    })
+                    violations.append(
+                        {
+                            "source": source,
+                            "target": target,
+                            "source_layer": src_layer,
+                            "target_layer": tgt_layer,
+                            "rule": f"Layer violation: Fundamental '{src_layer}' layer imports higher-level '{tgt_layer}' layer.",
+                        }
+                    )
 
         return violations
 

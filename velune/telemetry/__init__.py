@@ -25,7 +25,11 @@ from velune.telemetry.debug import (
     PipelineMetrics,
     log_debug_info,
 )
-from velune.telemetry.doctor import print_telemetry_report, get_telemetry_status, print_provider_health_report
+from velune.telemetry.doctor import (
+    print_telemetry_report,
+    get_telemetry_status,
+    print_provider_health_report,
+)
 
 __all__ = [
     "CognitivePerformanceAnalytics",

@@ -69,11 +69,7 @@ class ContextBudget:
     @property
     def usable_tokens(self) -> int:
         """Total tokens available for context (minus output and system)."""
-        return (
-            self.total_tokens
-            - self.system_allocation
-            - self.output_reservation
-        )
+        return self.total_tokens - self.system_allocation - self.output_reservation
 
     @property
     def unallocated_tokens(self) -> int:

@@ -95,12 +95,8 @@ class SessionUsageTracker:
                 )
                 """
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_session_id ON usage_records(session_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON usage_records(session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)")
             conn.commit()
 
     def record_completion(

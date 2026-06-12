@@ -61,5 +61,7 @@ class MemoryPrioritizer:
         """
         Apply a retrieval boost when a node is fetched/replayed.
         """
-        boosted_score = current_score + (self.retrieval_boost_factor * (self.max_importance - current_score))
+        boosted_score = current_score + (
+            self.retrieval_boost_factor * (self.max_importance - current_score)
+        )
         return max(0.0, min(self.max_importance, boosted_score))

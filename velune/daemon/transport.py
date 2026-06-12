@@ -10,10 +10,12 @@ DAEMON_SOCKET_PATH = Path.home() / ".velune" / "daemon.sock"
 DAEMON_PID_FILE = Path.home() / ".velune" / "daemon.pid"
 DAEMON_PIPE_ADDRESS = r"\\.\pipe\velune_daemon"
 
+
 def get_ipc_address() -> str:
     if sys.platform == "win32":
         return DAEMON_PIPE_ADDRESS
     return str(DAEMON_SOCKET_PATH)
+
 
 class IpcServer:
     def __init__(self, address: str, handle_callback: Callable[[dict[str, Any]], Any]):
@@ -66,6 +68,7 @@ class IpcServer:
         finally:
             writer.close()
 
+
 class _WindowsNamedPipeServer:
     def __init__(self, address: str, handle_callback: Callable[[dict[str, Any]], Any]):
         self.address = address
@@ -75,7 +78,8 @@ class _WindowsNamedPipeServer:
 
     def start(self):
         from multiprocessing.connection import Listener
-        self.listener = Listener(self.address, 'AF_PIPE')
+
+        self.listener = Listener(self.address, "AF_PIPE")
         self.is_running = True
 
     def close(self):
@@ -83,7 +87,8 @@ class _WindowsNamedPipeServer:
         # Wake up the blocked accept() thread with a dummy connection on Windows
         try:
             from multiprocessing.connection import Client
-            conn = Client(self.address, 'AF_PIPE')
+
+            conn = Client(self.address, "AF_PIPE")
             conn.close()
         except Exception:
             pass
@@ -119,6 +124,7 @@ class _WindowsNamedPipeServer:
             except Exception:
                 pass
 
+
 class IpcClient:
     @staticmethod
     def is_running(address: str) -> bool:
@@ -136,8 +142,9 @@ class IpcClient:
                 return False
         else:
             from multiprocessing.connection import Client
+
             try:
-                conn = Client(address, 'AF_PIPE')
+                conn = Client(address, "AF_PIPE")
                 conn.close()
                 return True
             except Exception:
@@ -157,13 +164,16 @@ class IpcClient:
                 writer.close()
         else:
             from multiprocessing.connection import Client
+
             loop = asyncio.get_running_loop()
+
             def _send():
-                conn = Client(address, 'AF_PIPE')
+                conn = Client(address, "AF_PIPE")
                 try:
                     conn.send(json.dumps(request))
                     res = conn.recv()
                     return json.loads(res)
                 finally:
                     conn.close()
+
             return await loop.run_in_executor(None, _send)

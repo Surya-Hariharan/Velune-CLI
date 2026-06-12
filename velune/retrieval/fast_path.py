@@ -106,7 +106,9 @@ class FastPathRetriever:
         logger.debug(f"Fast path complete: {len(chunks)} chunks in {elapsed_ms:.0f}ms")
 
         if elapsed_ms > self.TARGET_LATENCY_MS:
-            logger.warning(f"Fast path exceeded target latency: {elapsed_ms:.0f}ms > {self.TARGET_LATENCY_MS}ms")
+            logger.warning(
+                f"Fast path exceeded target latency: {elapsed_ms:.0f}ms > {self.TARGET_LATENCY_MS}ms"
+            )
 
         return chunks
 

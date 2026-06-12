@@ -16,12 +16,12 @@ COUNCIL_ROLES: list[str] = [
 ]
 
 ROLE_DESCRIPTIONS: dict[str, str] = {
-    "planner":     "Decomposes tasks, retrieves context, plans execution steps",
-    "coder":       "Writes code, generates patches, implements solutions",
-    "reviewer":    "Audits code quality, catches regressions, checks correctness",
-    "challenger":  "Argues against proposals, finds edge cases, stress-tests logic",
+    "planner": "Decomposes tasks, retrieves context, plans execution steps",
+    "coder": "Writes code, generates patches, implements solutions",
+    "reviewer": "Audits code quality, catches regressions, checks correctness",
+    "challenger": "Argues against proposals, finds edge cases, stress-tests logic",
     "synthesizer": "Combines agent outputs into a final coherent response",
-    "embedding":   "Generates vector embeddings for semantic memory and retrieval",
+    "embedding": "Generates vector embeddings for semantic memory and retrieval",
 }
 
 

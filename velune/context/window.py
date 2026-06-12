@@ -9,6 +9,7 @@ logger = logging.getLogger("velune.context.window")
 # Attempt to load tiktoken, fallback to heuristic if unavailable
 try:
     import tiktoken
+
     _encoding = tiktoken.get_encoding("cl100k_base")
     HAS_TIKTOKEN = True
 except ImportError:

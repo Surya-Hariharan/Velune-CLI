@@ -14,6 +14,7 @@ from velune.daemon.transport import DAEMON_PID_FILE
 daemon_cmd = typer.Typer(help="Velune daemon management")
 console = Console()
 
+
 @daemon_cmd.command("start")
 def daemon_start(workspace: Path = typer.Option(Path.cwd(), help="Workspace root")):
     """Start Velune daemon in background."""
@@ -48,6 +49,7 @@ def daemon_start(workspace: Path = typer.Option(Path.cwd(), help="Workspace root
 
     console.print("[red]Failed to start daemon.[/red]")
 
+
 @daemon_cmd.command("stop")
 def daemon_stop():
     """Stop background Velune daemon process."""
@@ -69,6 +71,7 @@ def daemon_stop():
                 pass
     else:
         console.print("[yellow]Daemon running but PID file missing.[/yellow]")
+
 
 @daemon_cmd.command("status")
 def daemon_status():

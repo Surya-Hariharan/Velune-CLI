@@ -29,9 +29,7 @@ def _open_repo(path: Path):  # type: ignore[return]
 def _validate_ref_name(name: str, label: str = "name") -> None:
     """Reject ref names that look like git option flags."""
     if name.startswith("-"):
-        raise ValueError(
-            f"Invalid git {label} '{name}': names must not start with '-'."
-        )
+        raise ValueError(f"Invalid git {label} '{name}': names must not start with '-'.")
 
 
 class GitCommit(BaseTool):

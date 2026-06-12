@@ -20,11 +20,7 @@ class RepositoryGrapher:
         # Normalize paths relative to workspace
         rel_path = self._to_rel_path(file_path)
         self.graph.add_node(
-            rel_path,
-            kind="file",
-            language=language,
-            size_bytes=size_bytes,
-            type="file"
+            rel_path, kind="file", language=language, size_bytes=size_bytes, type="file"
         )
 
     def add_symbol(self, symbol: RepositorySymbol) -> None:
@@ -41,7 +37,7 @@ class RepositoryGrapher:
             file_path=file_rel,
             line_start=symbol.line_start,
             line_end=symbol.line_end,
-            type="symbol"
+            type="symbol",
         )
 
         # Draw containing relationship
@@ -51,14 +47,11 @@ class RepositoryGrapher:
         """Adds a relationship edge between files or symbols."""
         source_rel = self._to_rel_path(edge.source)
         target_rel = self._to_rel_path(edge.target)
-        self.graph.add_edge(
-            source_rel,
-            target_rel,
-            edge_type=edge.edge_type,
-            weight=edge.weight
-        )
+        self.graph.add_edge(source_rel, target_rel, edge_type=edge.edge_type, weight=edge.weight)
 
-    def resolve_import_dependencies(self, files: list[str], symbols: list[RepositorySymbol]) -> None:
+    def resolve_import_dependencies(
+        self, files: list[str], symbols: list[RepositorySymbol]
+    ) -> None:
         """Resolves module imports to concrete files and draws file-to-file import edges."""
         # Map module names and symbol names to files
         file_by_module: dict[str, str] = {}
@@ -95,9 +88,11 @@ class RepositoryGrapher:
                     dots = len(import_name) - len(import_name.lstrip("."))
                     parts = source_dir.split(os.sep) if source_dir else []
                     if len(parts) >= dots - 1:
-                        target_dir_parts = parts[:len(parts) - (dots - 1)]
+                        target_dir_parts = parts[: len(parts) - (dots - 1)]
                         sub_mod = import_name.lstrip(".")
-                        target_mod = ".".join(target_dir_parts + [sub_mod]) if target_dir_parts else sub_mod
+                        target_mod = (
+                            ".".join(target_dir_parts + [sub_mod]) if target_dir_parts else sub_mod
+                        )
                         matched_file = file_by_module.get(target_mod)
 
                 if matched_file and source_file != matched_file:
@@ -170,7 +165,9 @@ class RepositoryGrapher:
 
     def _to_rel_path(self, path_str: str) -> str:
         """Helper to ensure paths are represented as uniform, workspace-relative strings."""
-        if not path_str or not (path_str.startswith("/") or path_str.startswith("\\") or ":" in path_str):
+        if not path_str or not (
+            path_str.startswith("/") or path_str.startswith("\\") or ":" in path_str
+        ):
             # Already relative or a symbol name
             return path_str.replace("\\", "/")
 

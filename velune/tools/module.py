@@ -35,21 +35,30 @@ def _create_tool_registry(env: RuntimeEnvironment):
 
     tool_registry = ToolRegistry()
     execute_cmd_tool = ExecuteCommand(
-        sandbox=execution_executor.sandbox,
-        workspace_path=str(env.workspace)
+        sandbox=execution_executor.sandbox, workspace_path=str(env.workspace)
     )
     ws = env.workspace
     default_tools = [
-        ReadFile(workspace=ws), ReadDirectory(workspace=ws),
-        WriteFile(workspace=ws), CreateFile(workspace=ws),
+        ReadFile(workspace=ws),
+        ReadDirectory(workspace=ws),
+        WriteFile(workspace=ws),
+        CreateFile(workspace=ws),
         DeleteFile(workspace=ws),
-        GrepFiles(workspace=ws), FindFiles(workspace=ws),
-        GitLog(workspace=ws), GitDiff(workspace=ws), GitBlame(workspace=ws),
-        GitStatus(workspace=ws), GitBranch(workspace=ws),
-        GitCommit(workspace=ws), GitCheckout(workspace=ws),
-        execute_cmd_tool, TerminalHistory(),
-        SemanticCodeSearch(workspace=ws), SymbolSearch(workspace=ws),
-        GoToDefinition(workspace=ws), FindReferences(workspace=ws),
+        GrepFiles(workspace=ws),
+        FindFiles(workspace=ws),
+        GitLog(workspace=ws),
+        GitDiff(workspace=ws),
+        GitBlame(workspace=ws),
+        GitStatus(workspace=ws),
+        GitBranch(workspace=ws),
+        GitCommit(workspace=ws),
+        GitCheckout(workspace=ws),
+        execute_cmd_tool,
+        TerminalHistory(),
+        SemanticCodeSearch(workspace=ws),
+        SymbolSearch(workspace=ws),
+        GoToDefinition(workspace=ws),
+        FindReferences(workspace=ws),
         WebFetch(),
     ]
     for tool in default_tools:
@@ -60,6 +69,7 @@ def _create_tool_registry(env: RuntimeEnvironment):
         logger.warning("Tools failed validation: %s", broken)
 
     return tool_registry
+
 
 TOOL_MODULES = [
     SubsystemModule(

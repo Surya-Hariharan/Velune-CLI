@@ -45,11 +45,15 @@ def workspace_init(
     veluneignore_path = path / ".veluneignore"
     if not veluneignore_path.exists():
         from velune.repository.scanner import DEFAULT_VELUNEIGNORE
+
         veluneignore_path.write_text(DEFAULT_VELUNEIGNORE, encoding="utf-8")
         if not cli_context.json_mode:
-            console.print("[green]✓[/green] Created default .veluneignore (edit to customise index exclusions).")
+            console.print(
+                "[green]✓[/green] Created default .veluneignore (edit to customise index exclusions)."
+            )
 
     from velune.core.event_loop import submit
+
     submit(_workspace_init_async(cli_context, path, velune_dir, force))
 
 
@@ -67,8 +71,12 @@ async def _workspace_init_async(
     await lifecycle.startup()
 
     if not cli_context.json_mode:
-        console.print("[bold cyan]⠋[/bold cyan] Building Tree-sitter compiler AST indices and scanning imports...")
-        with console.status("[bold magenta]⚡ Parsing symbols, dependencies, and git Authorship...[/bold magenta]"):
+        console.print(
+            "[bold cyan]⠋[/bold cyan] Building Tree-sitter compiler AST indices and scanning imports..."
+        )
+        with console.status(
+            "[bold magenta]⚡ Parsing symbols, dependencies, and git Authorship...[/bold magenta]"
+        ):
             snapshot = repo_cognition.index(force=force)
     else:
         snapshot = repo_cognition.index(force=force)
@@ -89,17 +97,22 @@ async def _workspace_init_async(
     # 4. Render gorgeous Success Summary Panel
     if cli_context.json_mode:
         import json
-        print(json.dumps({
-            "success": True,
-            "workspace_path": str(path),
-            "caches_directory": str(velune_dir),
-            "indexed_files": num_files,
-            "languages": languages,
-            "parsed_ast_symbols": num_symbols,
-            "dependency_edges": num_edges,
-            "active_branch": git_branch,
-            "skipped_secrets": skipped_secrets,
-        }))
+
+        print(
+            json.dumps(
+                {
+                    "success": True,
+                    "workspace_path": str(path),
+                    "caches_directory": str(velune_dir),
+                    "indexed_files": num_files,
+                    "languages": languages,
+                    "parsed_ast_symbols": num_symbols,
+                    "dependency_edges": num_edges,
+                    "active_branch": git_branch,
+                    "skipped_secrets": skipped_secrets,
+                }
+            )
+        )
     else:
         console.print()
         console.print(
@@ -108,15 +121,19 @@ async def _workspace_init_async(
                     ("[bold green]✓ VELUNE WORKSPACE SUCCESSFULLY INDEXED[/bold green]\n\n"),
                     (f"[bold]Workspace path:[/bold] {path}\n"),
                     (f"[bold]Caches directory:[/bold] {velune_dir}\n"),
-                    (f"[bold]Indexed files:[/bold] {num_files} ({lang_summary or 'no code files found'})\n"),
+                    (
+                        f"[bold]Indexed files:[/bold] {num_files} ({lang_summary or 'no code files found'})\n"
+                    ),
                     (f"[bold]Parsed AST symbols:[/bold] {num_symbols} classes/functions/imports\n"),
                     (f"[bold]Dependency edges:[/bold] {num_edges} import link(s)\n"),
                     (f"[bold]Active branch:[/bold] [magenta]{git_branch}[/magenta]\n\n"),
-                    ("[dim]Velune repository cognitive engine is primed. Use 'velune run' to start autonomous edits.[/dim]")
+                    (
+                        "[dim]Velune repository cognitive engine is primed. Use 'velune run' to start autonomous edits.[/dim]"
+                    ),
                 ),
                 border_style="green",
                 box=ROUNDED,
-                title="[bold green]Cognitive Priming Success[/bold green]"
+                title="[bold green]Cognitive Priming Success[/bold green]",
             )
         )
 
@@ -156,16 +173,23 @@ def workspace_status(
     if not velune_dir.exists():
         if cli_context.json_mode:
             import json
+
             print(json.dumps({"error": "Not a Velune workspace (no .velune directory detected)"}))
         else:
             from velune.cli.rendering.error_panel import render_error
             from velune.core.errors.catalog import WorkspaceNotInitializedError
-            console.print(render_error(WorkspaceNotInitializedError(
-                cause_override=f"No .velune directory found in {path}."
-            )))
+
+            console.print(
+                render_error(
+                    WorkspaceNotInitializedError(
+                        cause_override=f"No .velune directory found in {path}."
+                    )
+                )
+            )
         return
 
     from velune.core.event_loop import submit
+
     submit(_workspace_status_async(cli_context, path, velune_dir))
 
 
@@ -192,14 +216,19 @@ async def _workspace_status_async(
 
     if cli_context.json_mode:
         import json
-        print(json.dumps({
-            "workspace_root": str(path),
-            "velune_cache": str(velune_dir),
-            "indexed_files_count": num_files,
-            "indexed_symbols_count": num_symbols,
-            "git_branch": git_branch,
-            "status": "Active & Fully Primed"
-        }))
+
+        print(
+            json.dumps(
+                {
+                    "workspace_root": str(path),
+                    "velune_cache": str(velune_dir),
+                    "indexed_files_count": num_files,
+                    "indexed_symbols_count": num_symbols,
+                    "git_branch": git_branch,
+                    "status": "Active & Fully Primed",
+                }
+            )
+        )
     else:
         console.print(
             Panel(
@@ -209,11 +238,11 @@ async def _workspace_status_async(
                     (f"[bold]Indexed files count:[/bold] {num_files}\n"),
                     (f"[bold]Indexed symbols count:[/bold] {num_symbols}\n"),
                     (f"[bold]Git branch:[/bold] [magenta]{git_branch}[/magenta]\n"),
-                    ("[bold]Status:[/bold] [bold green]Active & Fully Primed[/bold green]")
+                    ("[bold]Status:[/bold] [bold green]Active & Fully Primed[/bold green]"),
                 ),
                 border_style="cyan",
                 box=ROUNDED,
-                title="[bold cyan]Workspace Status[/bold cyan]"
+                title="[bold cyan]Workspace Status[/bold cyan]",
             )
         )
 

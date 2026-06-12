@@ -28,23 +28,50 @@ from velune.repository.index_state import IndexedFile, IndexState
 logger = logging.getLogger("velune.repository.incremental_indexer")
 
 # Directories always excluded from the walk (on top of .veluneignore)
-_ALWAYS_SKIP = frozenset({
-    ".git", "__pycache__", "node_modules", ".venv", "venv",
-    "dist", "build", ".velune", ".mypy_cache", ".ruff_cache",
-    ".pytest_cache", "*.egg-info",
-})
+_ALWAYS_SKIP = frozenset(
+    {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".velune",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+        "*.egg-info",
+    }
+)
 
-_CODE_EXTENSIONS = frozenset({
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs",
-    ".java", ".c", ".cpp", ".h", ".cs", ".php", ".rb", ".swift", ".kt",
-})
+_CODE_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".cs",
+        ".php",
+        ".rb",
+        ".swift",
+        ".kt",
+    }
+)
 
 
 @dataclass
 class IndexDelta:
     """Describes which files need to be added, re-parsed, or removed."""
 
-    to_add: list[str] = field(default_factory=list)     # new files not in stored state
+    to_add: list[str] = field(default_factory=list)  # new files not in stored state
     to_update: list[str] = field(default_factory=list)  # files whose hash changed
     to_remove: list[str] = field(default_factory=list)  # files deleted from disk
 
@@ -98,9 +125,7 @@ class IncrementalIndexer:
         Files in ``delta.to_remove`` are dropped from the state.
         Files in ``delta.to_add`` and ``delta.to_update`` are hashed and parsed.
         """
-        state = IndexState.load(self.state_path) or IndexState.empty(
-            str(self.workspace_root)
-        )
+        state = IndexState.load(self.state_path) or IndexState.empty(str(self.workspace_root))
 
         # Remove deleted files
         for rel_path in delta.to_remove:
@@ -116,9 +141,7 @@ class IncrementalIndexer:
             try:
                 content = full_path.read_text(encoding="utf-8", errors="ignore")
                 sha = self._hash_content(content.encode())
-                symbols, language = await asyncio.to_thread(
-                    self._parse_file, full_path, content
-                )
+                symbols, language = await asyncio.to_thread(self._parse_file, full_path, content)
                 state.update_file(
                     IndexedFile(
                         path=rel_path,
@@ -183,6 +206,7 @@ class IncrementalIndexer:
         # Discover current source files (reuse scanner for .veluneignore support)
         try:
             from velune.repository.scanner import FilesystemScanner
+
             scanner = FilesystemScanner(self.workspace_root)
             current_paths = scanner.scan_code_files()
         except Exception:
@@ -225,12 +249,11 @@ class IncrementalIndexer:
                 results.append(path)
         return results
 
-    def _parse_file(
-        self, full_path: Path, content: str
-    ) -> tuple[list, str]:
+    def _parse_file(self, full_path: Path, content: str) -> tuple[list, str]:
         """Parse *full_path* and return (symbols, language_str)."""
         try:
             from velune.repository.parser import ASTParser
+
             parser = ASTParser()
             symbols, _ = parser.parse(full_path, content)
             lang = parser._detect_language(full_path)

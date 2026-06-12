@@ -20,11 +20,14 @@ def init_command(
         help="Path to project root (defaults to current directory)",
     ),
     provider: str = typer.Option(
-        None, "--provider", "-p",
+        None,
+        "--provider",
+        "-p",
         help="Default provider: ollama | groq | openai | anthropic",
     ),
     skip_hardware: bool = typer.Option(
-        False, "--skip-hardware-check",
+        False,
+        "--skip-hardware-check",
         help="Skip hardware detection",
     ),
 ) -> None:
@@ -35,11 +38,13 @@ def init_command(
     """
     workspace = (path or Path.cwd()).resolve()
 
-    console.print(Panel(
-        "[bold cyan]Velune Init[/bold cyan]\n"
-        f"[dim]Setting up workspace: {workspace}[/dim]",
-        border_style="cyan", padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            f"[bold cyan]Velune Init[/bold cyan]\n[dim]Setting up workspace: {workspace}[/dim]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
 
     if not skip_hardware:
         _run_hardware_check()
@@ -56,24 +61,27 @@ def init_command(
         import json as _json
 
         from velune.repository.project_type import ProjectTypeDetector
+
         _profile = ProjectTypeDetector().detect(workspace)
-        (velune_dir / "project_profile.json").write_text(_json.dumps({
-            "project_type": _profile.project_type.value,
-            "display_name": _profile.display_name,
-            "primary_language": _profile.primary_language,
-            "detected_frameworks": _profile.detected_frameworks,
-            "entry_points": _profile.entry_points,
-            "test_directories": _profile.test_directories,
-            "config_files": _profile.config_files,
-        }, indent=2))
+        (velune_dir / "project_profile.json").write_text(
+            _json.dumps(
+                {
+                    "project_type": _profile.project_type.value,
+                    "display_name": _profile.display_name,
+                    "primary_language": _profile.primary_language,
+                    "detected_frameworks": _profile.detected_frameworks,
+                    "entry_points": _profile.entry_points,
+                    "test_directories": _profile.test_directories,
+                    "config_files": _profile.config_files,
+                },
+                indent=2,
+            )
+        )
         console.print(
-            f"[green]✓[/green] Detected project type: "
-            f"[cyan]{_profile.display_name}[/cyan]"
+            f"[green]✓[/green] Detected project type: [cyan]{_profile.display_name}[/cyan]"
         )
         if _profile.detected_frameworks:
-            console.print(
-                f"  [dim]Frameworks: {', '.join(_profile.detected_frameworks)}[/dim]"
-            )
+            console.print(f"  [dim]Frameworks: {', '.join(_profile.detected_frameworks)}[/dim]")
     except Exception:
         pass
 
@@ -81,6 +89,7 @@ def init_command(
     ignore_file = workspace / ".veluneignore"
     if not ignore_file.exists():
         from velune.repository.scanner import DEFAULT_VELUNEIGNORE
+
         ignore_file.write_text(DEFAULT_VELUNEIGNORE)
         console.print("[green]✓[/green] Created .veluneignore")
 
@@ -104,8 +113,7 @@ enabled = true
 """
         config_path.write_text(config_content)
         console.print(
-            f"[green]✓[/green] Created .velune/config.toml "
-            f"(provider: {default_provider})"
+            f"[green]✓[/green] Created .velune/config.toml (provider: {default_provider})"
         )
 
     # .gitignore
@@ -126,6 +134,7 @@ enabled = true
 
 def _run_hardware_check() -> None:
     from velune.hardware.detector import HardwareDetector
+
     profile = HardwareDetector().detect()
 
     table = Table(border_style="dim", padding=(0, 1), show_header=False)
@@ -152,6 +161,7 @@ def _run_hardware_check() -> None:
 def _suggest_provider() -> str:
     try:
         import httpx
+
         r = httpx.get("http://localhost:11434/api/tags", timeout=2)
         if r.status_code == 200:
             return "ollama"

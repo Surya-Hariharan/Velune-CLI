@@ -26,12 +26,8 @@ class MultiDiffPreview:
         if not file_writes:
             return {}
 
-        self.console.print(
-            f"\n[bold cyan]Review {len(file_writes)} file change(s)[/bold cyan]"
-        )
-        self.console.print(
-            "[dim]Each diff requires your approval before writing.[/dim]\n"
-        )
+        self.console.print(f"\n[bold cyan]Review {len(file_writes)} file change(s)[/bold cyan]")
+        self.console.print("[dim]Each diff requires your approval before writing.[/dim]\n")
 
         decisions: dict[Path, DiffDecision] = {}
         auto_accept_all = auto_accept
@@ -47,6 +43,7 @@ class MultiDiffPreview:
                 continue
 
             from rich.prompt import Prompt
+
             action = Prompt.ask(
                 "  [dim][a]ccept / [r]eject / [A]ccept all remaining[/dim]",
                 choices=["a", "r", "A"],

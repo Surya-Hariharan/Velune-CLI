@@ -55,9 +55,9 @@ class CrossEncoderReranker:
         trust = self._calculate_trust_score(chunk)
 
         combined = (
-            (semantic * self.SEMANTIC_WEIGHT) +
-            (recency * self.RECENCY_WEIGHT) +
-            (trust * self.TRUST_WEIGHT)
+            (semantic * self.SEMANTIC_WEIGHT)
+            + (recency * self.RECENCY_WEIGHT)
+            + (trust * self.TRUST_WEIGHT)
         )
 
         return min(1.0, max(0.0, combined))

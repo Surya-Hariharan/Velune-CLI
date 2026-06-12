@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class FileNode(BaseModel):
     """A file node in the repository."""
+
     path: str
     language: str | None = None
     size_bytes: int
@@ -17,6 +18,7 @@ class FileNode(BaseModel):
 
 class SymbolNode(BaseModel):
     """A symbol node (function, class, variable) in the repository."""
+
     name: str
     kind: str  # function, class, variable, etc.
     file_path: str
@@ -29,6 +31,7 @@ class SymbolNode(BaseModel):
 
 class DependencyEdge(BaseModel):
     """A dependency edge between nodes."""
+
     source: str
     target: str
     edge_type: str  # import, call, inheritance, etc.

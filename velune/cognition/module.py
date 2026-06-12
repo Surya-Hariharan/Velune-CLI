@@ -3,7 +3,9 @@ from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 def _create_cognitive_firewall(env: RuntimeEnvironment):
     from velune.cognition.firewall import CognitiveFirewall
+
     return CognitiveFirewall()
+
 
 def _create_council_orchestrator(env: RuntimeEnvironment):
     from velune.cognition.orchestrator import CouncilOrchestrator
@@ -23,6 +25,7 @@ def _create_council_orchestrator(env: RuntimeEnvironment):
         lineage_memory=lineage_memory,
     )
 
+
 COGNITION_MODULES = [
     SubsystemModule(
         name="cognitive_firewall",
@@ -33,6 +36,11 @@ COGNITION_MODULES = [
         name="council_orchestrator",
         factory=_create_council_orchestrator,
         container_key="runtime.council_orchestrator",
-        dependencies=["runtime.provider_registry", "runtime.model_registry", "runtime.sqlite_manager", "runtime.lineage_memory"],
-    )
+        dependencies=[
+            "runtime.provider_registry",
+            "runtime.model_registry",
+            "runtime.sqlite_manager",
+            "runtime.lineage_memory",
+        ],
+    ),
 ]

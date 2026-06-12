@@ -24,8 +24,13 @@ class RollbackManager:
     def save_state(self, checkpoint_id: str, files_to_track: list[Path]) -> dict[str, Any]:
         """Save the workspace state for files before a command execution."""
         from velune.execution.path_guard import validate_workspace_path
+
         for file in files_to_track:
-            abs_file = Path(file).resolve() if Path(file).is_absolute() else (self.workspace_path / file).resolve()
+            abs_file = (
+                Path(file).resolve()
+                if Path(file).is_absolute()
+                else (self.workspace_path / file).resolve()
+            )
             validate_workspace_path(abs_file, self.workspace_path, "tracked file")
 
         # 1. Gather file snapshots
@@ -57,7 +62,9 @@ class RollbackManager:
         # 1. Perform git-level cleanup first if git is active (extremely fast and safe)
         if checkpoint_data.get("git_active"):
             try:
-                logger.info("Executing Git rollback: resetting tracked files and cleaning untracked artifacts...")
+                logger.info(
+                    "Executing Git rollback: resetting tracked files and cleaning untracked artifacts..."
+                )
                 self.git_tracker._run_git(["reset", "--hard", "HEAD"])
                 self.git_tracker._run_git(["clean", "-fd"])
                 if checkpoint_data.get("git_stash_success"):
@@ -65,7 +72,9 @@ class RollbackManager:
                     self.git_tracker.pop_stash()
                 logger.info("Git rollback and workspace cleaning successfully completed.")
             except Exception as e:
-                logger.warning("Git reset/clean rollback failed, attempting file-based copy recovery: %s", e)
+                logger.warning(
+                    "Git reset/clean rollback failed, attempting file-based copy recovery: %s", e
+                )
 
         # 2. Restore file snapshots (acts as primary recovery for non-git or fallback for git failures)
         file_snapshot = checkpoint_data.get("file_snapshot")

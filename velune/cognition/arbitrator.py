@@ -49,10 +49,10 @@ class CouncilArbitrator:
     ) -> float:
         """Calculate calibrated confidence score to minimize overstatement bias."""
         calibrated_confidence = (
-            self_reported * 0.20 +   # models overstate — low weight
-            agreement_rate * 0.40 +  # cross-agent agreement is strong signal
-            self.historical_accuracy * 0.25 +  # historical calibration
-            logic_score * 0.15       # logical consistency score
+            self_reported * 0.20  # models overstate — low weight
+            + agreement_rate * 0.40  # cross-agent agreement is strong signal
+            + self.historical_accuracy * 0.25  # historical calibration
+            + logic_score * 0.15  # logical consistency score
         )
         return round(calibrated_confidence, 3)
 
@@ -143,10 +143,12 @@ class CouncilArbitrator:
             logic_score = 0.9
             winning_claims.append("Coder solution is syntactically sound and logical.")
             if critic_reports:
-                winning_claims.append("All specialized critics approved the proposed implementation.")
+                winning_claims.append(
+                    "All specialized critics approved the proposed implementation."
+                )
         elif not all_passed and challenger_severity > 0.6:
             agreement_rate = 0.9  # General agreement that there are bugs/objections
-            logic_score = 0.4     # High issues means poor internal logical consistency
+            logic_score = 0.4  # High issues means poor internal logical consistency
             flags.append("CRITICAL_BUGS_DETECTED")
             winning_claims.append("Coder proposal contains bugs and architectural violations.")
         else:
@@ -170,12 +172,12 @@ class CouncilArbitrator:
             sum_weighted_critic_scores += c_score * w_critic
             sum_critic_weights += w_critic
 
-        self_reported = (sum_weighted_critic_scores + reviewer_confidence + (1.0 - challenger_severity)) / (sum_critic_weights + 2.0)
+        self_reported = (
+            sum_weighted_critic_scores + reviewer_confidence + (1.0 - challenger_severity)
+        ) / (sum_critic_weights + 2.0)
 
         overall_confidence = self.calculate_calibrated_confidence(
-            self_reported=self_reported,
-            agreement_rate=agreement_rate,
-            logic_score=logic_score
+            self_reported=self_reported, agreement_rate=agreement_rate, logic_score=logic_score
         )
 
         # Calculate variable passing thresholds scaled by subsystem risk (SHI)
@@ -199,7 +201,9 @@ class CouncilArbitrator:
             synthesis_instructions += f"- Resolve Critic issue: {issue}\n"
 
         if not reviewer_issues and not challenger_issues and not critic_issues:
-            synthesis_instructions += "- The solution was fully approved. Prepare clean summary of accomplishments."
+            synthesis_instructions += (
+                "- The solution was fully approved. Prepare clean summary of accomplishments."
+            )
 
         logger.info(
             "Arbitration completed. Confidence: %.2f. Requires human review: %s",

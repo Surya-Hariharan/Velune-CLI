@@ -19,7 +19,9 @@ class CognitivePerformanceAnalytics:
     Routes all reads and writes through SQLiteManager to guarantee thread safety and eliminate lock contention.
     """
 
-    def __init__(self, sqlite_manager: SQLiteManager | None = None, db_path: str | Path | None = None) -> None:
+    def __init__(
+        self, sqlite_manager: SQLiteManager | None = None, db_path: str | Path | None = None
+    ) -> None:
         if sqlite_manager is not None:
             self.sqlite_manager = sqlite_manager
             self.db_path = sqlite_manager.db_path
@@ -32,6 +34,7 @@ class CognitivePerformanceAnalytics:
 
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             from velune.memory.storage.sqlite_manager import SQLiteManager
+
             self.sqlite_manager = SQLiteManager(self.db_path)
 
         self._init_db()
@@ -257,4 +260,8 @@ class CognitivePerformanceAnalytics:
             pattern,
         )
         self.sqlite_manager.execute_write(query, params)
-        logger.warning("Recorded prompt injection attempt from source '%s' matching pattern: %s", source, pattern)
+        logger.warning(
+            "Recorded prompt injection attempt from source '%s' matching pattern: %s",
+            source,
+            pattern,
+        )

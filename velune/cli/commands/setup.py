@@ -79,12 +79,15 @@ PROVIDER_METADATA: dict[str, dict] = {
 
 def run_setup_wizard() -> None:
     """Run the interactive API key setup wizard."""
-    console.print(Panel(
-        "[bold cyan]Velune Provider Setup[/bold cyan]\n"
-        "[dim]Configure which AI providers you want to use.[/dim]\n"
-        "[dim]Keys are stored securely in your OS keychain.[/dim]",
-        border_style="cyan", padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            "[bold cyan]Velune Provider Setup[/bold cyan]\n"
+            "[dim]Configure which AI providers you want to use.[/dim]\n"
+            "[dim]Keys are stored securely in your OS keychain.[/dim]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
     console.print()
 
     chosen = _select_providers()
@@ -129,9 +132,7 @@ def run_setup_wizard() -> None:
 
     console.print()
     if configured:
-        console.print(
-            f"[bold green]✓ Configured providers:[/bold green] {', '.join(configured)}"
-        )
+        console.print(f"[bold green]✓ Configured providers:[/bold green] {', '.join(configured)}")
         console.print("[dim]Run `velune doctor` to verify connectivity.[/dim]")
 
 

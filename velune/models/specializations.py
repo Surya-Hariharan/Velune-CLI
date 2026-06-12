@@ -24,10 +24,10 @@ class CouncilRole(StrEnum):
 
 
 ROLE_CONTEXT_REQUIREMENTS = {
-    CouncilRole.PLANNER: 16384,      # Needs full repo context
-    CouncilRole.CODER: 32768,        # Needs code + context + plan
-    CouncilRole.REVIEWER: 32768,     # Needs to see full code
-    CouncilRole.CHALLENGER: 16384,   # Needs code summary
+    CouncilRole.PLANNER: 16384,  # Needs full repo context
+    CouncilRole.CODER: 32768,  # Needs code + context + plan
+    CouncilRole.REVIEWER: 32768,  # Needs to see full code
+    CouncilRole.CHALLENGER: 16384,  # Needs code summary
     CouncilRole.SYNTHESIZER: 65536,  # Needs all outputs
 }
 
@@ -63,7 +63,9 @@ class ModelSpecializationMapper:
         """
         models = self.registry.list_all()
         if not models:
-            logger.warning("No models found in the capability registry. Council mappings will be empty.")
+            logger.warning(
+                "No models found in the capability registry. Council mappings will be empty."
+            )
             return {}
 
         assignments: dict[CouncilRole, ModelDescriptor] = {}
@@ -138,7 +140,11 @@ class ModelSpecializationMapper:
             default_model = models[0]
             for role in CouncilRole:
                 if role not in assignments:
-                    logger.info("Falling back role %s to default model %s", role.value, default_model.model_id)
+                    logger.info(
+                        "Falling back role %s to default model %s",
+                        role.value,
+                        default_model.model_id,
+                    )
                     assignments[role] = default_model
 
         # Apply explicitly assigned overrides
@@ -160,6 +166,7 @@ class ModelSpecializationMapper:
         """Helper to score all models and select the highest scoring candidate."""
         try:
             from velune.kernel.registry import get_container
+
             gpu_info = get_container().get("runtime.gpu_info")
             available_vram_gb = gpu_info.get("vram_free_gb")
         except Exception:
@@ -175,7 +182,9 @@ class ModelSpecializationMapper:
                 if required_vram and required_vram > available_vram_gb:
                     logger.info(
                         "Skipping %s: requires %.1fGB VRAM, only %.1fGB available",
-                        model.model_id, required_vram, available_vram_gb
+                        model.model_id,
+                        required_vram,
+                        available_vram_gb,
                     )
                     continue  # Skip models that won't fit in VRAM
 

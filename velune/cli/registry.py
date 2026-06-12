@@ -72,7 +72,6 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     app.add_typer(doctor_cmd, name="doctor")
     app.add_typer(mcp_cmd, name="mcp")
 
-
     for entry_point in discover_plugin_entry_points():
         loaded = entry_point.load()
         if hasattr(loaded, "register"):

@@ -50,6 +50,7 @@ _SCHEMA_SQL = """
 
 class EpisodicTurn(BaseModel):
     """An episodic conversation turn stored in SQLite."""
+
     id: int | None = None
     session_id: str
     role: str
@@ -60,6 +61,7 @@ class EpisodicTurn(BaseModel):
 
 class EpisodicStep(BaseModel):
     """An episodic execution step stored in SQLite."""
+
     id: int | None = None
     session_id: str
     step_name: str
@@ -174,14 +176,16 @@ class EpisodicMemoryTier:
                 )
                 rows = await cursor.fetchall()
             for row in rows:
-                turns.append(EpisodicTurn(
-                    id=row["id"],
-                    session_id=row["session_id"],
-                    role=row["role"],
-                    content=row["content"],
-                    timestamp=row["timestamp"],
-                    metadata=json.loads(row["metadata"]),
-                ))
+                turns.append(
+                    EpisodicTurn(
+                        id=row["id"],
+                        session_id=row["session_id"],
+                        role=row["role"],
+                        content=row["content"],
+                        timestamp=row["timestamp"],
+                        metadata=json.loads(row["metadata"]),
+                    )
+                )
         except Exception as exc:
             logger.error("Failed to query episodic turns: %s", exc)
         return turns
@@ -200,14 +204,16 @@ class EpisodicMemoryTier:
                 )
                 rows = await cursor.fetchall()
             for row in rows:
-                steps.append(EpisodicStep(
-                    id=row["id"],
-                    session_id=row["session_id"],
-                    step_name=row["step_name"],
-                    status=row["status"],
-                    payload=json.loads(row["payload"]),
-                    timestamp=row["timestamp"],
-                ))
+                steps.append(
+                    EpisodicStep(
+                        id=row["id"],
+                        session_id=row["session_id"],
+                        step_name=row["step_name"],
+                        status=row["status"],
+                        payload=json.loads(row["payload"]),
+                        timestamp=row["timestamp"],
+                    )
+                )
         except Exception as exc:
             logger.error("Failed to query episodic execution steps: %s", exc)
         return steps
@@ -348,9 +354,7 @@ class EpisodicMemory:
 
     # ── Session management ───────────────────────────────────────────────────
 
-    async def start_session(
-        self, workspace_root: str, model: str, mode: str
-    ) -> str:
+    async def start_session(self, workspace_root: str, model: str, mode: str) -> str:
         """Create a new session row and return its ID."""
         session_id = f"ses-{uuid.uuid4().hex[:12]}"
         try:
@@ -477,9 +481,7 @@ class EpisodicMemory:
             logger.error("Failed to search turns by content: %s", exc)
         return turns
 
-    async def list_recent_sessions(
-        self, workspace_root: str, limit: int = 20
-    ) -> list[Session]:
+    async def list_recent_sessions(self, workspace_root: str, limit: int = 20) -> list[Session]:
         """Return the *limit* most recent sessions for *workspace_root*."""
         sessions: list[Session] = []
         try:
@@ -497,17 +499,19 @@ class EpisodicMemory:
                 )
                 rows = await cursor.fetchall()
             for row in rows:
-                sessions.append(Session(
-                    id=row["id"],
-                    workspace_root=row["workspace_root"],
-                    started_at=row["started_at"],
-                    ended_at=row["ended_at"],
-                    model_used=row["model_used"],
-                    mode=row["mode"],
-                    total_tokens=row["total_tokens"] or 0,
-                    summary=row["summary"],
-                    first_prompt=row["first_prompt"],
-                ))
+                sessions.append(
+                    Session(
+                        id=row["id"],
+                        workspace_root=row["workspace_root"],
+                        started_at=row["started_at"],
+                        ended_at=row["ended_at"],
+                        model_used=row["model_used"],
+                        mode=row["mode"],
+                        total_tokens=row["total_tokens"] or 0,
+                        summary=row["summary"],
+                        first_prompt=row["first_prompt"],
+                    )
+                )
         except Exception as exc:
             logger.error("Failed to list recent sessions: %s", exc)
         return sessions
@@ -568,6 +572,7 @@ class EpisodicMemory:
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
+
 
 def _row_to_turn(row: Any) -> Turn:
     return Turn(

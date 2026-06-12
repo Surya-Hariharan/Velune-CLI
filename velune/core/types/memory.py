@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class MemoryType(StrEnum):
     """Types of memory records."""
+
     WORKING = "working"
     EPISODIC = "episodic"
     SEMANTIC = "semantic"
@@ -18,6 +19,7 @@ class MemoryType(StrEnum):
 
 class MemoryRecord(BaseModel):
     """A memory record."""
+
     id: str
     memory_type: MemoryType
     content: str
@@ -32,6 +34,7 @@ class MemoryRecord(BaseModel):
 
 class MemoryQuery(BaseModel):
     """Query for memory retrieval."""
+
     query_text: str
     memory_types: list[MemoryType] = Field(default_factory=list)
     limit: int = Field(default=10, ge=1, le=100)

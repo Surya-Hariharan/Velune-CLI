@@ -11,21 +11,45 @@ from typing import Any
 
 from velune.core.errors.execution import SandboxError
 
-ALLOWED_EXECUTABLES = frozenset({
-    "python", "python3", "pytest", "ruff", "mypy",
-    "git", "node", "npm", "cargo", "go",
-    "make", "cmake", "gcc", "clang",
-    "echo", "cat", "ls", "find", "grep",
-})
+ALLOWED_EXECUTABLES = frozenset(
+    {
+        "python",
+        "python3",
+        "pytest",
+        "ruff",
+        "mypy",
+        "git",
+        "node",
+        "npm",
+        "cargo",
+        "go",
+        "make",
+        "cmake",
+        "gcc",
+        "clang",
+        "echo",
+        "cat",
+        "ls",
+        "find",
+        "grep",
+    }
+)
 
 
-TRUSTED_PATH_PREFIXES: frozenset[str] = frozenset({
-    "/usr/bin/", "/usr/local/bin/", "/bin/", "/usr/sbin/",
-    # macOS
-    "/opt/homebrew/bin/", "/usr/local/opt/",
-    # Common Python virtual env locations (relative)
-    ".venv/bin/", "venv/bin/",
-})
+TRUSTED_PATH_PREFIXES: frozenset[str] = frozenset(
+    {
+        "/usr/bin/",
+        "/usr/local/bin/",
+        "/bin/",
+        "/usr/sbin/",
+        # macOS
+        "/opt/homebrew/bin/",
+        "/usr/local/opt/",
+        # Common Python virtual env locations (relative)
+        ".venv/bin/",
+        "venv/bin/",
+    }
+)
 
 
 def _is_trusted_path(resolved_path: Path) -> bool:
@@ -48,8 +72,8 @@ def _is_trusted_path(resolved_path: Path) -> bool:
 class CommandSpec:
     """Strongly-typed process execution specification ensuring shell=False safety."""
 
-    executable: str          # basename only, e.g. "pytest"
-    args: tuple[str, ...]    # individual arguments
+    executable: str  # basename only, e.g. "pytest"
+    args: tuple[str, ...]  # individual arguments
     cwd: Path
     timeout: float = 60.0
     env_additions: dict[str, str] = field(default_factory=dict)
@@ -59,6 +83,7 @@ class CommandSpec:
         if allowed_executables is None:
             try:
                 from velune.kernel.config import ConfigLoader
+
                 config = ConfigLoader().load()
                 allowed = frozenset(config.execution.allowed_executables)
             except Exception:

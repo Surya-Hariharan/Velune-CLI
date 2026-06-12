@@ -13,6 +13,7 @@ class GitTracker:
         # Lazy import breaks the circular dependency:
         # repository.tracker → execution (via __init__) → rollback → repository.tracker
         from velune.execution.path_guard import PathGuard
+
         self._guard = PathGuard(self.root_path)
 
     def get_active_branch(self) -> str:
@@ -46,17 +47,21 @@ class GitTracker:
             return []
         try:
             # Format: hash | author | date | subject
-            res = self._run_git(["log", "-n", str(limit), "--pretty=format:%H|%an|%ad|%s", "--date=short"])
+            res = self._run_git(
+                ["log", "-n", str(limit), "--pretty=format:%H|%an|%ad|%s", "--date=short"]
+            )
             commits = []
             for line in res.splitlines():
                 parts = line.split("|")
                 if len(parts) >= 4:
-                    commits.append({
-                        "hash": parts[0],
-                        "author": parts[1],
-                        "date": parts[2],
-                        "subject": parts[3]
-                    })
+                    commits.append(
+                        {
+                            "hash": parts[0],
+                            "author": parts[1],
+                            "date": parts[2],
+                            "subject": parts[3],
+                        }
+                    )
             return commits
         except Exception:
             return []
@@ -114,12 +119,14 @@ class GitTracker:
                     j += 1
                 if j < len(lines) and lines[j].startswith("\t"):
                     content = lines[j][1:]
-                    blames.append({
-                        "commit": sha,
-                        "author": commit_data[sha]["author"],
-                        "date": commit_data[sha]["date"],
-                        "content": content
-                    })
+                    blames.append(
+                        {
+                            "commit": sha,
+                            "author": commit_data[sha]["author"],
+                            "date": commit_data[sha]["date"],
+                            "content": content,
+                        }
+                    )
                 i = j + 1
             return blames
         except Exception:
@@ -175,7 +182,7 @@ class GitTracker:
             text=True,
             check=True,
             encoding="utf-8",
-            errors="ignore"
+            errors="ignore",
         )
         return res.stdout
 
@@ -183,6 +190,7 @@ class GitTracker:
         """Async version of _run_git using asyncio.to_thread."""
         import asyncio
         import functools
+
         cmd = ["git"] + args
         try:
             result = await asyncio.to_thread(
@@ -211,12 +219,14 @@ class GitTracker:
         if not self.is_git:
             return {}
         try:
-            result = self._run_git([
-                "log",
-                f"--since={days} days ago",
-                "--pretty=format:",
-                "--name-only",
-            ])
+            result = self._run_git(
+                [
+                    "log",
+                    f"--since={days} days ago",
+                    "--pretty=format:",
+                    "--name-only",
+                ]
+            )
 
             counts: dict[str, int] = {}
             for line in result.splitlines():
@@ -228,12 +238,14 @@ class GitTracker:
             return counts
         except subprocess.CalledProcessError as e:
             import logging
+
             logging.getLogger("velune.repository.tracker").warning(
                 "Git log batch volatility failed with process error: %s", e
             )
             return {}
         except Exception as e:
             import logging
+
             logging.getLogger("velune.repository.tracker").error(
                 "Unexpected error in get_all_file_volatility: %s", e
             )

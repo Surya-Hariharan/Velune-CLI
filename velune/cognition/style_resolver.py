@@ -49,6 +49,7 @@ class StyleResolver:
                     )
             except Exception as e:
                 import logging
+
                 logging.getLogger("velune.cognition.style_resolver").error(
                     "Failed to run RepositoryPersonalityAgent in background: %s", e
                 )

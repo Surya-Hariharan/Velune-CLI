@@ -13,14 +13,15 @@ from velune.providers.benchmarker import ModelBenchmarkMetrics, ProviderBenchmar
 
 class ModelProfile(BaseModel):
     """Profile representing capability, speed, and real-time execution statistics."""
+
     model_id: str
     provider_id: str
     avg_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
     sample_count: int = 0
-    tps: float = 0.0               # Tokens per second
-    ttft_ms: float = 0.0           # Time to first token
-    json_validity: float = 1.0     # Percentage structured compliance
+    tps: float = 0.0  # Tokens per second
+    ttft_ms: float = 0.0  # Time to first token
+    json_validity: float = 1.0  # Percentage structured compliance
     last_updated: float = Field(default_factory=time.time)
 
 
@@ -65,7 +66,9 @@ class ModelProfiler:
                 sample_count=n,
             )
 
-    async def profile_model(self, provider: ModelProvider, descriptor: ModelDescriptor) -> ModelProfile:
+    async def profile_model(
+        self, provider: ModelProvider, descriptor: ModelDescriptor
+    ) -> ModelProfile:
         """Actively benchmark an operational provider model for performance and structure."""
         key = f"{descriptor.provider_id}/{descriptor.model_id}"
 

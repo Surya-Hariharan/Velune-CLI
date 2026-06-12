@@ -61,6 +61,7 @@ class ExecutionExecutor:
         # 2. Run steps sequentially
         for step in ordered_steps:
             from velune.core.trace import TraceContext
+
             with TraceContext(run_id=plan.task_id, step_id=step.id):
                 logger.info("Executing step %s: %s", step.id, step.description)
                 step.status = TaskStatus.IN_PROGRESS
@@ -103,6 +104,7 @@ class ExecutionExecutor:
                 # Execute command inside sandbox (offloaded to prevent event loop blocking)
                 try:
                     import asyncio
+
                     sandbox_res = await asyncio.to_thread(self.sandbox.execute, spec)
                     logger.info(
                         "Command completed with exit code %d in %.2fms",
@@ -137,7 +139,9 @@ class ExecutionExecutor:
                     )
 
                     if not validation_res.success:
-                        logger.error("Step postconditions validation failed: %s", validation_res.errors)
+                        logger.error(
+                            "Step postconditions validation failed: %s", validation_res.errors
+                        )
                         self.rollback_manager.rollback(checkpoint_state)
                         step.status = TaskStatus.FAILED
                         break
@@ -153,7 +157,9 @@ class ExecutionExecutor:
                     try:
                         self.rollback_manager.git_tracker.drop_stash()
                     except Exception as e:
-                        logger.warning("Could not drop stash after successful step execution: %s", e)
+                        logger.warning(
+                            "Could not drop stash after successful step execution: %s", e
+                        )
 
                 # Success! Mark completed
                 step.status = TaskStatus.COMPLETED
@@ -165,7 +171,9 @@ class ExecutionExecutor:
         return TaskResult(
             task_id=plan.task_id,
             success=success,
-            error=None if success else f"Execution failed during step: {[s.id for s in ordered_steps if s.status == TaskStatus.FAILED]}",
+            error=None
+            if success
+            else f"Execution failed during step: {[s.id for s in ordered_steps if s.status == TaskStatus.FAILED]}",
             steps_completed=steps_completed,
             steps_total=total_steps,
             execution_time_ms=duration_ms,

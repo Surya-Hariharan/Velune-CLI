@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class ComponentStatus(StrEnum):
     """Execution status of registered kernel components."""
+
     UNINITIALIZED = "uninitialized"
     INITIALIZING = "initializing"
     HEALTHY = "healthy"
@@ -18,10 +19,9 @@ class ComponentStatus(StrEnum):
     SHUTDOWN = "shutdown"
 
 
-
-
 class HealthReport(BaseModel):
     """A report for individual subsystem health."""
+
     status: ComponentStatus
     latency_ms: float = 0.0
     details: dict[str, Any] = Field(default_factory=dict)
