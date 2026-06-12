@@ -13,10 +13,10 @@ import pytest
 
 from velune.cli.repl import VeluneREPL
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_runtime(mock_config, temp_workspace):
@@ -60,6 +60,7 @@ def repl(mock_runtime):
 # Core command handlers
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_help_command_renders(repl):
     await repl._cmd_help("")
@@ -91,6 +92,7 @@ async def test_unknown_slash_command_prints_hint(repl):
 # /model
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_model_command_no_models_shows_warning(repl):
     # model_registry.list_all() returns [] — expect a yellow warning
@@ -103,16 +105,19 @@ async def test_model_command_no_models_shows_warning(repl):
 @pytest.mark.asyncio
 async def test_model_command_direct_switch_unknown(repl):
     from rich.panel import Panel
+
     await repl._cmd_model("nonexistent-model-xyz")
     # The model-not-found case now renders a structured error Panel.
     calls = repl.console.print.call_args_list
-    assert any(isinstance(c.args[0], Panel) for c in calls), \
+    assert any(isinstance(c.args[0], Panel) for c in calls), (
         "Expected a rich Panel for unknown model"
+    )
 
 
 # ---------------------------------------------------------------------------
 # /memory
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_memory_stats_renders_table(repl):
@@ -139,9 +144,11 @@ async def test_memory_clear_calls_clear(repl):
 # /session
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_session_save_creates_file(repl, tmp_path, monkeypatch):
     from velune.cli import session_manager
+
     sessions_dir = tmp_path / "sessions"
     monkeypatch.setattr(session_manager, "SESSIONS_DIR", sessions_dir)
 
@@ -154,6 +161,7 @@ async def test_session_save_creates_file(repl, tmp_path, monkeypatch):
     saved = list(sessions_dir.glob("*.json"))
     assert len(saved) == 1
     import json
+
     data = json.loads(saved[0].read_text(encoding="utf-8"))
     assert data["turn_count"] == 2
     assert data["conversation"][0]["content"] == "hello"
@@ -162,6 +170,7 @@ async def test_session_save_creates_file(repl, tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_session_list_shows_table(repl, tmp_path, monkeypatch):
     from velune.cli import session_manager
+
     sessions_dir = tmp_path / "sessions"
     monkeypatch.setattr(session_manager, "SESSIONS_DIR", sessions_dir)
 
@@ -177,6 +186,7 @@ async def test_session_list_shows_table(repl, tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_session_resume_restores_conversation(repl, tmp_path, monkeypatch):
     from velune.cli import session_manager
+
     sessions_dir = tmp_path / "sessions"
     monkeypatch.setattr(session_manager, "SESSIONS_DIR", sessions_dir)
 
@@ -195,6 +205,7 @@ async def test_session_resume_restores_conversation(repl, tmp_path, monkeypatch)
 @pytest.mark.asyncio
 async def test_session_resume_missing_id(repl, tmp_path, monkeypatch):
     from velune.cli import session_manager
+
     monkeypatch.setattr(session_manager, "SESSIONS_DIR", tmp_path / "sessions")
     await repl._cmd_session("resume 00000000")
     printed = " ".join(str(c) for c in repl.console.print.call_args_list)
@@ -204,6 +215,7 @@ async def test_session_resume_missing_id(repl, tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_session_export_creates_markdown(repl, tmp_path, monkeypatch):
     from velune.cli import session_manager
+
     sessions_dir = tmp_path / "sessions"
     monkeypatch.setattr(session_manager, "SESSIONS_DIR", sessions_dir)
 
@@ -227,6 +239,7 @@ async def test_session_export_creates_markdown(repl, tmp_path, monkeypatch):
 # /context
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_context_indicator_empty_conversation(repl):
     repl._conversation = []
@@ -248,6 +261,7 @@ async def test_context_indicator_with_conversation(repl, mock_model_descriptor):
 # ---------------------------------------------------------------------------
 # Prompt token generation
 # ---------------------------------------------------------------------------
+
 
 def test_prompt_tokens_no_model(repl):
     repl.active_model = None

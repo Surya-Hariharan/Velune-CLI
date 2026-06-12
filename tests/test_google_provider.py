@@ -1,11 +1,12 @@
 """Tests for the Google Gemini provider adapter."""
 
-import pytest
 from unittest.mock import patch
 
-from velune.providers.adapters.google import GoogleProvider, _MODELS
+import pytest
+
 from velune.core.types.inference import InferenceRequest
 from velune.core.types.provider import ProviderHealth
+from velune.providers.adapters.google import _MODELS, GoogleProvider
 
 
 def test_gemini_models_not_empty():
@@ -91,8 +92,10 @@ async def test_health_check_unhealthy_without_key():
 @pytest.mark.asyncio
 async def test_discovery_skips_without_key(monkeypatch):
     import velune.providers.discovery.google as gdiscovery
+
     monkeypatch.setattr(gdiscovery, "get_key", lambda x: None)
     from velune.providers.discovery.google import GoogleDiscovery
+
     result = await GoogleDiscovery().discover()
     assert result == []
 
@@ -100,8 +103,10 @@ async def test_discovery_skips_without_key(monkeypatch):
 @pytest.mark.asyncio
 async def test_discovery_returns_models_with_key(monkeypatch):
     import velune.providers.discovery.google as gdiscovery
+
     monkeypatch.setattr(gdiscovery, "get_key", lambda x: "fake-key")
     from velune.providers.discovery.google import GoogleDiscovery
+
     result = await GoogleDiscovery().discover()
     assert len(result) >= 4
     model_ids = [m.model_id for m in result]

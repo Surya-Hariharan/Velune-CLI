@@ -2,14 +2,12 @@
 
 import tempfile
 from pathlib import Path
-import pytest
 
 from velune.kernel.registry import get_container
 from velune.repository.cognition import RepositoryCognitionService
 from velune.repository.grapher import RepositoryGrapher
-from velune.repository.parser import ASTParser
+from velune.repository.parser import RepositorySnapshotParser
 from velune.repository.schemas import (
-    RepositoryEdge,
     RepositorySymbol,
     RepositorySymbolKind,
     build_qualified_name,
@@ -59,24 +57,25 @@ def test_qualified_naming_and_stable_ids() -> None:
 
 
 def test_parser_caching_efficiency() -> None:
-    """Verify that ASTParser caches tree-sitter Parser instances per language."""
-    parser = ASTParser()
-    
+    """Verify that RepositorySnapshotParser caches tree-sitter Parser instances per language."""
+    parser = RepositorySnapshotParser()
+
     # Run a parse once
     code = "class TestClass:\n    pass\n"
     parser.parse(Path("test.py"), code)
 
     # If tree-sitter is available, the parser cache must have 'python' initialized
     from velune.repository.parser import HAS_TREE_SITTER
+
     if HAS_TREE_SITTER:
         assert "python" in parser._parsers
         # Grab first instance
         first_instance = parser._parsers["python"]
-        
+
         # Run parse again
         parser.parse(Path("test2.py"), code)
         second_instance = parser._parsers["python"]
-        
+
         # Must be the exact same cached object reference
         assert first_instance is second_instance
 
@@ -89,7 +88,7 @@ def test_symbol_collision_avoidance() -> None:
         kind=RepositorySymbolKind.CLASS,
         file_path="velune/cognition/orchestrator.py",
     )
-    
+
     sym2 = RepositorySymbol(
         name="OrchestrationState",
         kind=RepositorySymbolKind.CLASS,
@@ -104,24 +103,24 @@ def test_symbol_collision_avoidance() -> None:
     # Add both to RepositoryGrapher
     with tempfile.TemporaryDirectory() as temp_dir:
         grapher = RepositoryGrapher(Path(temp_dir))
-        
+
         grapher.add_file("velune/cognition/orchestrator.py", "python", 100)
         grapher.add_file("velune/execution/executor.py", "python", 100)
-        
+
         grapher.add_symbol(sym1)
         grapher.add_symbol(sym2)
 
         # The graph must contain separate nodes for both symbol IDs (no collision)
         assert sym1.symbol_id in grapher.graph
         assert sym2.symbol_id in grapher.graph
-        
+
         # The raw name 'OrchestrationState' must NOT be in the graph as a node
         assert "OrchestrationState" not in grapher.graph
 
         # Verify contains edges are isolated
         successors1 = list(grapher.graph.successors("velune/cognition/orchestrator.py"))
         successors2 = list(grapher.graph.successors("velune/execution/executor.py"))
-        
+
         assert sym1.symbol_id in successors1
         assert sym2.symbol_id in successors2
         assert sym1.symbol_id not in successors2

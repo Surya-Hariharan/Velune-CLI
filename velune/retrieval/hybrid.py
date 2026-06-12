@@ -124,7 +124,7 @@ class HybridRetriever:
         all_hits = list(merged_hits_map.values())
 
         # 5. Rerank final combined candidates
-        reranked_hits = self.reranker.rerank(query.text, all_hits)
+        reranked_hits = self.reranker.rerank(all_hits, query.text)
 
         return RetrievalResult(
             query=query, hits=reranked_hits[: query.top_k], strategy="hybrid-fusion-reranked"

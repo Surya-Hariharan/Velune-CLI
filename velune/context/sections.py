@@ -47,7 +47,7 @@ class ContextChunk:
         """Validate chunk integrity."""
         if not (0.0 <= self.trust_score <= 1.0):
             raise ValueError(f"trust_score must be 0.0-1.0, got {self.trust_score}")
-        if not content or not isinstance(self.content, str):
+        if not self.content or not isinstance(self.content, str):
             raise ValueError("content must be a non-empty string")
         if self.token_count < 0:
             raise ValueError(f"token_count must be non-negative, got {self.token_count}")
@@ -87,7 +87,7 @@ class ContextAssemblyReport:
     def __str__(self) -> str:
         """Human-readable assembly report."""
         lines = [
-            f"ContextAssemblyReport:",
+            "ContextAssemblyReport:",
             f"  Chunks: {self.total_chunks_received} received, {self.chunks_dropped} dropped",
             f"  Tokens: {self.total_tokens_assembled}/{self.total_tokens_requested}",
             f"  Sections: {len(self.sections_present)} present",
@@ -95,5 +95,5 @@ class ContextAssemblyReport:
         if self.sections_trimmed:
             lines.append(f"  Trimmed: {self.sections_trimmed}")
         if self.budget_exceeded:
-            lines.append(f"  WARNING: Budget exceeded even after trimming")
+            lines.append("  WARNING: Budget exceeded even after trimming")
         return "\n".join(lines)

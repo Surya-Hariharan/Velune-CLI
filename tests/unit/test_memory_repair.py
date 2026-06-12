@@ -11,10 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
-import sqlite3
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -22,10 +19,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # 1. GraphRetriever — uses get_snapshot(), not index()
 # ---------------------------------------------------------------------------
+
 
 class TestGraphRetrieverUsesSnapshot:
     """GraphRetriever must call get_snapshot() and never call index()."""
@@ -50,7 +47,9 @@ class TestGraphRetrieverUsesSnapshot:
 
         mock_svc = self._make_mock_service(snapshot=None)
 
-        with patch("velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)):
+        with patch(
+            "velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)
+        ):
             gr = GraphRetriever()
             hits = gr.retrieve("some/file.py")
 
@@ -64,7 +63,9 @@ class TestGraphRetrieverUsesSnapshot:
 
         mock_svc = self._make_mock_service(snapshot=None)
 
-        with patch("velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)):
+        with patch(
+            "velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)
+        ):
             gr = GraphRetriever()
             hits = gr.retrieve("velune/core/something.py")
 
@@ -72,12 +73,12 @@ class TestGraphRetrieverUsesSnapshot:
 
     def test_snapshot_used_for_file_lookup(self):
         """When a valid snapshot exists, file metadata is returned in hits."""
-        from velune.retrieval.graph import GraphRetriever
         from velune.repository.schemas import (
             RepositoryFile,
             RepositoryLanguage,
             RepositorySnapshot,
         )
+        from velune.retrieval.graph import GraphRetriever
 
         # Build a minimal snapshot with one file
         snap = RepositorySnapshot(
@@ -98,7 +99,9 @@ class TestGraphRetrieverUsesSnapshot:
         mock_svc = self._make_mock_service(snapshot=snap)
         mock_svc.traverse.return_value = ["velune/core/engine.py"]
 
-        with patch("velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)):
+        with patch(
+            "velune.kernel.registry.get_container", return_value=self._make_mock_container(mock_svc)
+        ):
             gr = GraphRetriever()
             hits = gr.retrieve("velune/core/caller.py", depth=1)
 
@@ -110,6 +113,7 @@ class TestGraphRetrieverUsesSnapshot:
 # ---------------------------------------------------------------------------
 # 2. WorkingMemory — TTL eviction
 # ---------------------------------------------------------------------------
+
 
 class TestWorkingMemoryTTLEviction:
     """Turns older than the TTL must be removed by evict_expired()."""
@@ -126,7 +130,7 @@ class TestWorkingMemoryTTLEviction:
         assert len(wm.get_turns()) == 2
 
     def test_expired_turns_are_removed(self):
-        from velune.memory.tiers.working import WorkingMemoryTier, MemoryTurn
+        from velune.memory.tiers.working import MemoryTurn, WorkingMemoryTier
 
         wm = WorkingMemoryTier(session_id="s1", ttl_seconds=60.0)
 
@@ -142,11 +146,13 @@ class TestWorkingMemoryTTLEviction:
         assert turns[0].content == "fresh"
 
     def test_is_expired_all_old_turns(self):
-        from velune.memory.tiers.working import WorkingMemoryTier, MemoryTurn
+        from velune.memory.tiers.working import MemoryTurn, WorkingMemoryTier
 
         wm = WorkingMemoryTier(session_id="s2", ttl_seconds=60.0)
         old_ts = time.time() - 120.0
-        wm._turns.append(MemoryTurn(role="user", content="stale", timestamp=old_ts, session_id="s2"))
+        wm._turns.append(
+            MemoryTurn(role="user", content="stale", timestamp=old_ts, session_id="s2")
+        )
 
         assert wm.is_expired() is True
 
@@ -169,6 +175,7 @@ class TestWorkingMemoryTTLEviction:
 # 3. WorkingMemory — session isolation
 # ---------------------------------------------------------------------------
 
+
 class TestWorkingMemorySessionIsolation:
     """Two WorkingMemoryTier instances must never share turns."""
 
@@ -190,7 +197,7 @@ class TestWorkingMemorySessionIsolation:
         assert len(turns_b) == 1
 
     def test_get_recent_turns_scoped_to_session(self):
-        from velune.memory.tiers.working import WorkingMemoryTier, MemoryTurn
+        from velune.memory.tiers.working import MemoryTurn, WorkingMemoryTier
 
         wm = WorkingMemoryTier(session_id="mine", ttl_seconds=3600)
 
@@ -216,11 +223,13 @@ class TestWorkingMemorySessionIsolation:
 # 4. SQLiteManager — close() releases handle
 # ---------------------------------------------------------------------------
 
+
 class TestSQLiteManagerCloseNoLeak:
     """close() must release the thread-local read connection without error."""
 
     def _make_manager(self, tmp_path: Path):
         from velune.memory.storage.sqlite_manager import SQLiteManager
+
         return SQLiteManager(tmp_path / "test.db")
 
     def test_close_is_idempotent(self, tmp_path):
@@ -251,6 +260,7 @@ class TestSQLiteManagerCloseNoLeak:
 
         # Shut down the write thread too
         import asyncio
+
         asyncio.run(mgr.shutdown())
 
         # On Windows, this will PermissionError if handles are still open
@@ -284,15 +294,16 @@ class TestSQLiteManagerCloseNoLeak:
 # 5. MemoryLifecycleCoordinator — flushes working to episodic on shutdown
 # ---------------------------------------------------------------------------
 
+
 class TestMemoryLifecycleFlush:
     """shutdown() must persist live working turns to episodic SQLite."""
 
     @pytest.mark.asyncio
     async def test_shutdown_flushes_turns_to_episodic(self, tmp_path):
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
-        from velune.memory.tiers.working import WorkingMemoryTier
-        from velune.memory.tiers.episodic import EpisodicMemoryTier
         from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
+        from velune.memory.tiers.episodic import EpisodicMemoryTier
+        from velune.memory.tiers.working import WorkingMemoryTier
 
         db = tmp_path / "test.db"
         pool = SQLiteConnectionPool(db)
@@ -320,9 +331,9 @@ class TestMemoryLifecycleFlush:
     async def test_shutdown_evicts_expired_before_flush(self, tmp_path):
         """Expired turns must NOT be flushed to episodic."""
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
-        from velune.memory.tiers.working import WorkingMemoryTier, MemoryTurn
-        from velune.memory.tiers.episodic import EpisodicMemoryTier
         from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
+        from velune.memory.tiers.episodic import EpisodicMemoryTier
+        from velune.memory.tiers.working import MemoryTurn, WorkingMemoryTier
 
         db = tmp_path / "test2.db"
         pool = SQLiteConnectionPool(db)
@@ -336,7 +347,9 @@ class TestMemoryLifecycleFlush:
 
         # Add a stale (expired) turn
         old_ts = time.time() - 120.0
-        working._turns.append(MemoryTurn(role="user", content="old-stale", timestamp=old_ts, session_id="evict-test"))
+        working._turns.append(
+            MemoryTurn(role="user", content="old-stale", timestamp=old_ts, session_id="evict-test")
+        )
         working.add_turn("user", "live-turn")
 
         await coordinator.shutdown()
@@ -352,9 +365,9 @@ class TestMemoryLifecycleFlush:
     async def test_get_recent_context_reads_episodic(self, tmp_path):
         """get_recent_context() returns real episodic records, not fakes."""
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
-        from velune.memory.tiers.working import WorkingMemoryTier
-        from velune.memory.tiers.episodic import EpisodicMemoryTier
         from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
+        from velune.memory.tiers.episodic import EpisodicMemoryTier
+        from velune.memory.tiers.working import WorkingMemoryTier
 
         db = tmp_path / "test3.db"
         pool = SQLiteConnectionPool(db)
@@ -380,9 +393,9 @@ class TestMemoryLifecycleFlush:
     async def test_get_recent_context_empty_on_no_data(self, tmp_path):
         """get_recent_context() returns [] when no records exist for session."""
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
-        from velune.memory.tiers.working import WorkingMemoryTier
-        from velune.memory.tiers.episodic import EpisodicMemoryTier
         from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
+        from velune.memory.tiers.episodic import EpisodicMemoryTier
+        from velune.memory.tiers.working import WorkingMemoryTier
 
         db = tmp_path / "test4.db"
         pool = SQLiteConnectionPool(db)
@@ -402,13 +415,14 @@ class TestMemoryLifecycleFlush:
 # 6. Memory CLI inspect — no hardcoded fakes
 # ---------------------------------------------------------------------------
 
+
 class TestMemoryCLIInspectIsHonest:
     """The inspect command must not return fabricated placeholder records."""
 
     def test_inspect_json_output_has_no_hardcoded_ids(self):
         """Hardcoded fake IDs from the old implementation must be absent."""
         # These are the specific fake IDs that were hardcoded before the refactor
-        FORBIDDEN_FAKE_IDS = {
+        forbidden_fake_ids = {
             "wrk-active-session",
             "eps-run-0522",
             "sem-symbol-ast",
@@ -438,16 +452,17 @@ class TestMemoryCLIInspectIsHonest:
 
         # Verify none of the old fake IDs would appear
         result_ids = {r["id"] for r in records}
-        assert result_ids.isdisjoint(FORBIDDEN_FAKE_IDS), (
-            f"Forbidden hardcoded IDs found: {result_ids & FORBIDDEN_FAKE_IDS}"
+        assert result_ids.isdisjoint(forbidden_fake_ids), (
+            f"Forbidden hardcoded IDs found: {result_ids & forbidden_fake_ids}"
         )
 
     def test_inspect_returns_empty_on_no_data(self, tmp_path):
         """Cold start: inspect returns an empty record set, not fakes."""
         import asyncio
-        from velune.memory.tiers.working import WorkingMemoryTier
-        from velune.memory.tiers.episodic import EpisodicMemoryTier
+
         from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
+        from velune.memory.tiers.episodic import EpisodicMemoryTier
+        from velune.memory.tiers.working import WorkingMemoryTier
 
         db = tmp_path / "empty.db"
 
@@ -476,8 +491,11 @@ class TestMemoryCLIInspectIsHonest:
         #   console.print("✓ Ingested 10 episodic logs into semantic facts.")
         #   console.print("✓ Consolidated 4 AST dependencies to Graphiti entities.")
         # We verify the new CLI code does NOT contain those strings.
-        import importlib, inspect
+        import importlib
+        import inspect
+
         import velune.cli.commands.memory as mem_module
+
         # Reload to ensure we have the latest version
         importlib.reload(mem_module)
         source = inspect.getsource(mem_module)
@@ -488,6 +506,7 @@ class TestMemoryCLIInspectIsHonest:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _noop_coro():
     """Coroutine that does nothing, for mock use."""

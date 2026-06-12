@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -26,7 +24,7 @@ def mock_provider():
 
     async def mock_infer(request):
         response = MagicMock()
-        response.content = "• Key decision: Use async/await\n• Bug fixed: Connection timeout\n• Files affected: auth.py, utils.py"
+        response.content = "• Key decision: Use async/await\n• Bug fixed: Connection timeout\n• Files affected: auth.py, utils.py. Expanded summary text to pass quality checks."
         return response
 
     provider.infer = AsyncMock(side_effect=mock_infer)
@@ -109,7 +107,7 @@ async def test_compaction_with_35_turns(compactor, working_tier):
     """Test: 35 turns triggers compaction (keeps last 10, compacts 25)."""
     # Add 35 turns to working memory
     for i in range(35):
-        working_tier.add_turn("user" if i % 2 == 0 else "assistant", f"Turn {i} content")
+        working_tier.add_turn("user" if i % 2 == 0 else "assistant", f"Turn {i} content " * 10)
 
     # Verify we have 35 turns
     assert len(working_tier.get_turns()) == 35
@@ -183,10 +181,10 @@ async def test_compacted_summary_stored_in_episodic(compactor, mock_episodic_mem
     """Test: Compacted summary is stored in episodic memory with correct tag."""
     # Add turns to working memory
     for i in range(35):
-        working_tier.add_turn("user" if i % 2 == 0 else "assistant", f"Turn {i} content")
+        working_tier.add_turn("user" if i % 2 == 0 else "assistant", f"Turn {i} content " * 10)
 
     # Perform compaction
-    stats = await compactor.compact(session_id="test-session")
+    await compactor.compact(session_id="test-session")
 
     # Verify episodic memory was called
     assert mock_episodic_memory.record_turn.called
@@ -204,7 +202,7 @@ async def test_working_memory_after_compaction(compactor, working_tier):
     """Test: Working memory after compaction has <= 15 entries (10 recent + 1 summary)."""
     # Add 35 turns
     for i in range(35):
-        working_tier.add_turn("user" if i % 2 == 0 else "assistant", f"Turn {i} content")
+        working_tier.add_turn("user" if i % 2 == 0 else "assistant", f"Turn {i} content " * 10)
 
     initial_count = len(working_tier.get_turns())
     assert initial_count == 35
@@ -222,8 +220,8 @@ async def test_working_memory_after_compaction(compactor, working_tier):
 async def test_compression_ratio_calculation(compactor, working_tier):
     """Test: Compression ratio is calculated correctly."""
     # Add turns with known size
-    for i in range(35):
-        working_tier.add_turn("user", "x" * 100)  # ~25 chars per turn
+    for _i in range(35):
+        working_tier.add_turn("user", "content " * 100)
 
     # Perform compaction
     stats = await compactor.compact(session_id="test-session")
@@ -310,7 +308,7 @@ async def test_compaction_with_mixed_roles(compactor, working_tier):
     # Add turns with mixed roles
     for i in range(35):
         role = ["user", "assistant", "system"][i % 3]
-        working_tier.add_turn(role, f"Turn {i} content")
+        working_tier.add_turn(role, f"Turn {i} content " * 10)
 
     # Perform compaction
     stats = await compactor.compact(session_id="test-session")
@@ -325,16 +323,16 @@ async def test_multiple_compaction_cycles(compactor, working_tier):
     """Test: Multiple compaction cycles work correctly."""
     # First cycle: add 35 turns
     for i in range(35):
-        working_tier.add_turn("user", f"Batch1-Turn{i}")
+        working_tier.add_turn("user", f"Batch1-Turn{i} " * 10)
 
     # First compaction
     stats1 = await compactor.compact(session_id="test-session")
     assert stats1 is not None
-    remaining_after_first = len(working_tier.get_turns())
+    len(working_tier.get_turns())
 
     # Add more turns (second batch)
-    for i in range(20):
-        working_tier.add_turn("assistant", f"Batch2-Turn{i}")
+    for i in range(19):
+        working_tier.add_turn("assistant", f"Batch2-Turn{i} " * 10)
 
     # Should not trigger compaction (under 30 total)
     total_before_second = len(working_tier.get_turns())

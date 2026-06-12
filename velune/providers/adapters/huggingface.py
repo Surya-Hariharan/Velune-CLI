@@ -163,7 +163,7 @@ class HuggingFaceProvider(ModelProvider):
                         # Simple average pooling for token embeddings
                         pooled = []
                         for seq in embeddings:
-                            avg = [sum(col) / len(seq) for col in zip(*seq)]
+                            avg = [sum(col) / len(seq) for col in zip(*seq, strict=False)]
                             pooled.append(avg)
                         return pooled
                     return embeddings

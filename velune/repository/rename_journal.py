@@ -101,23 +101,24 @@ class RenameJournal:
         """
         records: list[RenameRecord] = []
         async with aiosqlite.connect(str(self.db_path)) as db:
-            async for row in db.execute(
+            async with db.execute(
                 """
                 SELECT symbol_id, old_name, new_name, file_path, old_line, new_line, timestamp
                 FROM renames WHERE symbol_id = ? ORDER BY timestamp ASC
                 """,
                 (symbol_id,),
-            ):
-                record = RenameRecord(
-                    symbol_id=row[0],
-                    old_name=row[1],
-                    new_name=row[2],
-                    file_path=row[3],
-                    old_line=row[4],
-                    new_line=row[5],
-                    timestamp=datetime.fromisoformat(row[6]),
-                )
-                records.append(record)
+            ) as cursor:
+                async for row in cursor:
+                    record = RenameRecord(
+                        symbol_id=row[0],
+                        old_name=row[1],
+                        new_name=row[2],
+                        file_path=row[3],
+                        old_line=row[4],
+                        new_line=row[5],
+                        timestamp=datetime.fromisoformat(row[6]),
+                    )
+                    records.append(record)
 
         return records
 
@@ -134,14 +135,15 @@ class RenameJournal:
             Current name if rename exists, None otherwise
         """
         async with aiosqlite.connect(str(self.db_path)) as db:
-            row = await db.execute_fetchone(
+            async with db.execute(
                 """
                 SELECT new_name FROM renames
                 WHERE old_name = ? AND file_path = ?
                 ORDER BY timestamp DESC LIMIT 1
                 """,
                 (old_name, file_path),
-            )
+            ) as cursor:
+                row = await cursor.fetchone()
 
         if row:
             return row[0]
@@ -172,23 +174,24 @@ class RenameJournal:
         """
         records: list[RenameRecord] = []
         async with aiosqlite.connect(str(self.db_path)) as db:
-            async for row in db.execute(
+            async with db.execute(
                 """
                 SELECT symbol_id, old_name, new_name, file_path, old_line, new_line, timestamp
                 FROM renames WHERE file_path = ? ORDER BY timestamp ASC
                 """,
                 (file_path,),
-            ):
-                record = RenameRecord(
-                    symbol_id=row[0],
-                    old_name=row[1],
-                    new_name=row[2],
-                    file_path=row[3],
-                    old_line=row[4],
-                    new_line=row[5],
-                    timestamp=datetime.fromisoformat(row[6]),
-                )
-                records.append(record)
+            ) as cursor:
+                async for row in cursor:
+                    record = RenameRecord(
+                        symbol_id=row[0],
+                        old_name=row[1],
+                        new_name=row[2],
+                        file_path=row[3],
+                        old_line=row[4],
+                        new_line=row[5],
+                        timestamp=datetime.fromisoformat(row[6]),
+                    )
+                    records.append(record)
 
         return records
 
@@ -253,22 +256,23 @@ class RenameJournal:
         """
         records: list[RenameRecord] = []
         async with aiosqlite.connect(str(self.db_path)) as db:
-            async for row in db.execute(
+            async with db.execute(
                 """
                 SELECT symbol_id, old_name, new_name, file_path, old_line, new_line, timestamp
                 FROM renames ORDER BY timestamp ASC
                 """
-            ):
-                record = RenameRecord(
-                    symbol_id=row[0],
-                    old_name=row[1],
-                    new_name=row[2],
-                    file_path=row[3],
-                    old_line=row[4],
-                    new_line=row[5],
-                    timestamp=datetime.fromisoformat(row[6]),
-                )
-                records.append(record)
+            ) as cursor:
+                async for row in cursor:
+                    record = RenameRecord(
+                        symbol_id=row[0],
+                        old_name=row[1],
+                        new_name=row[2],
+                        file_path=row[3],
+                        old_line=row[4],
+                        new_line=row[5],
+                        timestamp=datetime.fromisoformat(row[6]),
+                    )
+                    records.append(record)
 
         return records
 

@@ -266,8 +266,9 @@ class RepositoryCognitionService:
 
     def _persist_index_state(self, inc: object, snapshot: RepositorySnapshot) -> None:
         """Update IndexState on disk after a full index run."""
-        from velune.repository.index_state import IndexedFile, IndexState
         import time
+
+        from velune.repository.index_state import IndexedFile, IndexState
 
         try:
             git_sha = inc._get_git_sha()  # type: ignore[attr-defined]

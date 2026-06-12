@@ -2,10 +2,10 @@
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fix 1 — VeluneMemoryError must NOT shadow Python's built-in MemoryError
 # ---------------------------------------------------------------------------
+
 
 class TestMemoryErrorRename:
     def test_memory_error_does_not_shadow_builtin(self):
@@ -43,6 +43,7 @@ class TestMemoryErrorRename:
             VeluneMemoryRetrievalError,
             VeluneMemoryStoreError,
         )
+
         assert issubclass(VeluneMemoryStoreError, VeluneMemoryError)
         assert issubclass(VeluneMemoryRetrievalError, VeluneMemoryError)
         assert issubclass(VeluneMemoryConsolidationError, VeluneMemoryError)
@@ -53,6 +54,7 @@ class TestMemoryErrorRename:
 # ---------------------------------------------------------------------------
 # Fix 4 — CapabilityLevel must have exactly 5 members, no alias duplicates
 # ---------------------------------------------------------------------------
+
 
 class TestCapabilityLevelNoAliases:
     def test_capability_level_no_aliases(self):
@@ -80,24 +82,31 @@ class TestCapabilityLevelNoAliases:
         """CAPABLE alias must not exist on CapabilityLevel."""
         from velune.core.types.model import CapabilityLevel
 
-        assert not hasattr(CapabilityLevel, "CAPABLE"), "CapabilityLevel.CAPABLE alias must be removed"
+        assert not hasattr(CapabilityLevel, "CAPABLE"), (
+            "CapabilityLevel.CAPABLE alias must be removed"
+        )
 
     def test_no_strong_attribute(self):
         """STRONG alias must not exist on CapabilityLevel."""
         from velune.core.types.model import CapabilityLevel
 
-        assert not hasattr(CapabilityLevel, "STRONG"), "CapabilityLevel.STRONG alias must be removed"
+        assert not hasattr(CapabilityLevel, "STRONG"), (
+            "CapabilityLevel.STRONG alias must be removed"
+        )
 
     def test_no_exceptional_attribute(self):
         """EXCEPTIONAL alias must not exist on CapabilityLevel."""
         from velune.core.types.model import CapabilityLevel
 
-        assert not hasattr(CapabilityLevel, "EXCEPTIONAL"), "CapabilityLevel.EXCEPTIONAL alias must be removed"
+        assert not hasattr(CapabilityLevel, "EXCEPTIONAL"), (
+            "CapabilityLevel.EXCEPTIONAL alias must be removed"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Fix 4 — Comparison ordering must be correct after alias removal
 # ---------------------------------------------------------------------------
+
 
 class TestCapabilityComparisons:
     def test_capability_comparisons_correct(self):
@@ -129,6 +138,7 @@ class TestCapabilityComparisons:
 # ---------------------------------------------------------------------------
 # Fix 3 — BaseTool.validate_input must be a no-op that returns None safely
 # ---------------------------------------------------------------------------
+
 
 class TestValidateInputNoOp:
     def test_validate_input_no_op_is_safe(self):
@@ -175,6 +185,7 @@ class TestValidateInputNoOp:
 # ---------------------------------------------------------------------------
 # Fix 8 — ServiceContainer hot-swap for lazy singleton factories
 # ---------------------------------------------------------------------------
+
 
 class TestServiceContainerHotSwap:
     def test_hot_swap_singleton_factory_clears_cache(self):
@@ -225,10 +236,11 @@ class TestServiceContainerHotSwap:
 # Fix 10 — Council Tier Ceiling Configuration and MINIMAL Routing Tier
 # ---------------------------------------------------------------------------
 
+
 class TestCouncilTierRouting:
     def test_minimal_tier_classification(self):
         """classify_task_tier must classify simple tweak/typo tasks as MINIMAL."""
-        from velune.cognition.council.tiers import classify_task_tier, CouncilTier
+        from velune.cognition.council.tiers import CouncilTier, classify_task_tier
 
         tier = classify_task_tier("fix typo in main.py", "context")
         assert tier == CouncilTier.MINIMAL
@@ -239,29 +251,35 @@ class TestCouncilTierRouting:
 
     def test_max_tier_ceiling(self):
         """classify_task_tier must respect max_council_tier ceiling option."""
-        from velune.cognition.council.tiers import classify_task_tier, CouncilTier
+        from velune.cognition.council.tiers import CouncilTier, classify_task_tier
 
         # Complex prompt typically classified as FULL
-        tier = classify_task_tier("refactor concurrent database async", "context", max_council_tier="standard")
+        tier = classify_task_tier(
+            "refactor concurrent database async", "context", max_council_tier="standard"
+        )
         assert tier == CouncilTier.STANDARD
 
         # When max is instant
-        tier = classify_task_tier("refactor concurrent database async", "context", max_council_tier="instant")
+        tier = classify_task_tier(
+            "refactor concurrent database async", "context", max_council_tier="instant"
+        )
         assert tier == CouncilTier.INSTANT
 
     def test_default_tier_override(self):
         """classify_task_tier must respect default_tier_override option if not auto."""
-        from velune.cognition.council.tiers import classify_task_tier, CouncilTier
+        from velune.cognition.council.tiers import CouncilTier, classify_task_tier
 
         tier = classify_task_tier("tweak some comment", "context", default_tier_override="standard")
         assert tier == CouncilTier.STANDARD
 
-        tier = classify_task_tier("refactor concurrent database async", "context", default_tier_override="minimal")
+        tier = classify_task_tier(
+            "refactor concurrent database async", "context", default_tier_override="minimal"
+        )
         assert tier == CouncilTier.MINIMAL
 
     def test_queue_depth_downgrade(self):
         """classify_task_tier must downgrade task tier if queue depth is high to prevent starvation."""
-        from velune.cognition.council.tiers import classify_task_tier, CouncilTier
+        from velune.cognition.council.tiers import CouncilTier, classify_task_tier
 
         # Complex prompt classified as STANDARD when queue depth is high
         tier = classify_task_tier("refactor concurrent database async", "context", queue_depth=5)
@@ -275,10 +293,11 @@ class TestCouncilTierRouting:
     async def test_execute_minimal_tier_in_orchestrator(self):
         """Orchestrator must execute the MINIMAL tier with Planner + Coder only and no Reviewer."""
         from tests.unit.test_council_orchestrator import build_test_orchestrator
-        from velune.cognition.council.tiers import CouncilTier
 
         orchestrator = build_test_orchestrator()
-        result = await orchestrator.execute_task("fix typo in main.py", "context", council_tier="minimal")
+        result = await orchestrator.execute_task(
+            "fix typo in main.py", "context", council_tier="minimal"
+        )
 
         assert result["tier"] == "minimal"
         assert result["task_plan"] is not None

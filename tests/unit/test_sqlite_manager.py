@@ -12,7 +12,6 @@ import pytest
 
 from velune.memory.storage.sqlite_manager import SQLiteManager
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -37,7 +36,6 @@ def test_write_sync_propagates_timeout(tmp_path: Path) -> None:
     manager._write_thread.join(timeout=2.0)
 
     # Patch done.wait to expire immediately so the test doesn't take 10 s.
-    original_wait = threading.Event.wait
 
     def fast_wait(self: threading.Event, timeout: float | None = None) -> bool:
         return False  # simulate timeout
@@ -100,9 +98,11 @@ def test_fire_and_forget_does_not_raise(tmp_path: Path) -> None:
 def test_execute_read_returns_rows(tmp_path: Path) -> None:
     """Verify that execute_read queries successfully retrieve sqlite3.Row results."""
     manager = _make_manager(tmp_path)
-    manager.execute_script("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, content TEXT)")
+    manager.execute_script(
+        "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, content TEXT)"
+    )
     manager.execute_write_sync("INSERT INTO notes (content) VALUES (?)", ("Hello World",))
-    
+
     rows = manager.execute_read("SELECT * FROM notes")
     assert len(rows) == 1
     assert rows[0]["content"] == "Hello World"

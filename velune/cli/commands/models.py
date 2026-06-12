@@ -128,7 +128,7 @@ def models_scan(
     console.print(table)
 
     total = len(records)
-    providers = set(r.provider_id for r in records)
+    providers = {r.provider_id for r in records}
     console.print(f"[dim]Discovered {total} model(s) across {len(providers)} provider(s).[/dim]")
 
 
@@ -176,7 +176,7 @@ async def _models_scan_async(cli_context: CLIContext, provider_id: str | None, p
                 empirical_probe_tasks = []
                 probing_models = []
 
-                for record, is_responsive in zip(valid_records, responsiveness):
+                for record, is_responsive in zip(valid_records, responsiveness, strict=False):
                     if is_responsive is True:
                         provider = provider_registry.get(record.provider_id)
                         prober = ModelProber(provider, record.model_id)
@@ -193,7 +193,7 @@ async def _models_scan_async(cli_context: CLIContext, provider_id: str | None, p
                         )
                     results = await asyncio.gather(*empirical_probe_tasks, return_exceptions=True)
 
-                    for (record, prober), result in zip(probing_models, results):
+                    for (record, _), result in zip(probing_models, results, strict=False):
                         # gather(return_exceptions=True) can also surface BaseException
                         # subclasses (e.g. asyncio.CancelledError); treat any of them
                         # as a failed probe so they are never cached as valid results.
@@ -441,14 +441,13 @@ async def _models_benchmark_async(
     provider_registry: Any,
     models_to_probe: list[Any],
 ) -> None:
-    import asyncio
     import json
     from pathlib import Path
 
-    from velune.core.types.model import CapabilityLevel
+    from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
+
     from velune.models.probes import ModelProber
     from velune.models.profile_cache import ModelProfileCache
-    from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TaskProgressColumn
 
     profile_cache = ModelProfileCache(Path(".velune") / "model_profiles.json")
 
@@ -488,9 +487,9 @@ async def _models_benchmark_async(
 
                 # Calculate speed score as average of latencies (lower is better)
                 latencies = [
-                    l
-                    for l in [coding.latency_ms, reasoning.latency_ms, instruction.latency_ms]
-                    if l > 0
+                    lat
+                    for lat in [coding.latency_ms, reasoning.latency_ms, instruction.latency_ms]
+                    if lat > 0
                 ]
                 avg_latency = sum(latencies) / len(latencies) if latencies else 0
                 speed_score = max(0.0, 1.0 - (avg_latency / 3000.0))  # 3000ms = ~0 score
@@ -562,7 +561,6 @@ async def _models_benchmark_async(
 
 def _display_benchmark_results(cli_context: Any, benchmark_results: list[dict]) -> None:
     """Display benchmark results in a Rich table."""
-    from velune.core.types.model import CapabilityLevel
 
     table = Table(title="Benchmark Results")
     table.add_column("Model", style="cyan", width=30)
@@ -578,7 +576,7 @@ def _display_benchmark_results(cli_context: Any, benchmark_results: list[dict]) 
         reasoning = result["reasoning"]
         instruction = result["instruction"]
         speed_score = result["speed_score"]
-        avg_latency = result["avg_latency_ms"]
+        result["avg_latency_ms"]
 
         def format_score(probe_result) -> str:
             if probe_result.latency_ms < 0:
@@ -587,10 +585,10 @@ def _display_benchmark_results(cli_context: Any, benchmark_results: list[dict]) 
             level_name = _score_to_level_name(probe_result.score)
             return f"[{color}]{probe_result.score:.2f}[/{color}]\n{level_name}"
 
-        def format_speed() -> str:
-            color = "green" if speed_score > 0.7 else "yellow" if speed_score > 0.4 else "red"
-            level_name = _score_to_level_name(speed_score)
-            return f"[{color}]{speed_score:.2f}[/{color}]\n{level_name}"
+        def format_speed(score_val: float) -> str:
+            color = "green" if score_val > 0.7 else "yellow" if score_val > 0.4 else "red"
+            level_name = _score_to_level_name(score_val)
+            return f"[{color}]{score_val:.2f}[/{color}]\n{level_name}"
 
         table.add_row(
             model.model_id,
@@ -598,7 +596,7 @@ def _display_benchmark_results(cli_context: Any, benchmark_results: list[dict]) 
             format_score(coding),
             format_score(reasoning),
             format_score(instruction),
-            format_speed(),
+            format_speed(speed_score),
         )
 
     console.print(table)
@@ -662,8 +660,8 @@ def _auto_assign_models(cli_context: Any, registry: Any, benchmark_results: list
 
 def _save_model_assignments(coding_model: str, reasoning_model: str, fast_model: str) -> None:
     """Save model assignments to the project configuration."""
-    from pathlib import Path
     import json
+    from pathlib import Path
 
     config_file = Path(".velune") / "config.json"
     config_file.parent.mkdir(parents=True, exist_ok=True)

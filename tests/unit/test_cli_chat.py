@@ -1,6 +1,8 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from typer.testing import CliRunner
+
 from velune.cli.app import app
 from velune.core.runtime import RuntimeContext
 
@@ -33,15 +35,14 @@ def mock_runtime():
 
     orchestrator = MagicMock()
     model_specialization = MagicMock()
-    
+
     from velune.models.specializations import CouncilRole
+
     coder_model = MagicMock()
     coder_model.model_id = "test-coder-model"
     coder_model.provider_id = "test-provider"
-    
-    model_specialization.map_roles.return_value = {
-        CouncilRole.CODER: coder_model
-    }
+
+    model_specialization.map_roles.return_value = {CouncilRole.CODER: coder_model}
     orchestrator.mapper = model_specialization
 
     repo_cognition = MagicMock()
@@ -72,12 +73,15 @@ def mock_runtime():
 def test_cli_chat_exit_immediately(mock_runtime):
     """Verify that chat command starts up, prompts, and exits cleanly when user inputs '!exit'."""
     with patch("velune.cli.app.build_runtime", return_value=mock_runtime):
-        with patch("velune.cli.commands.preflight.run_preflight_check", return_value=AsyncMock(return_value=True)()):
+        with patch(
+            "velune.cli.commands.preflight.run_preflight_check",
+            return_value=AsyncMock(return_value=True)(),
+        ):
             # Mock console.input to return "!exit" on first call
             with patch("rich.console.Console.input", return_value="!exit"):
                 result = runner.invoke(app, ["chat"])
                 assert result.exit_code == 0
-                
+
                 # Check that lifecycle startup and shutdown were called
                 mock_runtime.container.get("runtime.lifecycle").startup.assert_called_once()
                 mock_runtime.container.get("runtime.lifecycle").shutdown.assert_called_once()
@@ -87,7 +91,7 @@ def test_cli_chat_sends_message_and_streams(mock_runtime):
     """Verify that chat command streams assistant response when user provides input and then exits."""
     # We want input to return "hello" on first call, and then "!exit" on second call
     input_values = ["hello", "!exit"]
-    
+
     def mock_input(*args, **kwargs):
         if not input_values:
             return "!exit"
@@ -95,8 +99,9 @@ def test_cli_chat_sends_message_and_streams(mock_runtime):
 
     # Mock chunk for stream
     from velune.core.types.inference import StreamChunk
+
     mock_chunk = StreamChunk(content="Hello! I am your AI assistant.")
-    
+
     async def mock_stream(*args, **kwargs):
         yield mock_chunk
 
@@ -104,10 +109,13 @@ def test_cli_chat_sends_message_and_streams(mock_runtime):
     provider.stream.side_effect = mock_stream
 
     with patch("velune.cli.app.build_runtime", return_value=mock_runtime):
-        with patch("velune.cli.commands.preflight.run_preflight_check", return_value=AsyncMock(return_value=True)()):
+        with patch(
+            "velune.cli.commands.preflight.run_preflight_check",
+            return_value=AsyncMock(return_value=True)(),
+        ):
             with patch("rich.console.Console.input", side_effect=mock_input):
                 result = runner.invoke(app, ["chat"])
                 assert result.exit_code == 0
-                
+
                 # Verify that provider stream was called once for "hello"
                 provider.stream.assert_called_once()

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import aiosqlite
 
@@ -64,45 +63,99 @@ class SymbolRegistry:
         import json
 
         async with aiosqlite.connect(str(self.db_path)) as db:
+            db.row_factory = aiosqlite.Row
             for symbol in symbols:
                 params = json.dumps(symbol.parameters) if symbol.parameters else None
 
-                await db.execute(
-                    """
-                    INSERT INTO symbols (id, name, kind, file_path, line_start, line_end,
-                                        docstring, parameters, return_type, is_exported)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(file_path, name, line_start) DO UPDATE SET
-                        id = CASE WHEN id IS NULL THEN ? ELSE id END,
-                        kind = ?,
-                        line_end = ?,
-                        docstring = ?,
-                        parameters = ?,
-                        return_type = ?,
-                        is_exported = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    (
-                        symbol.id,
-                        symbol.name,
-                        symbol.kind.value,
-                        file_path,
-                        symbol.line_start,
-                        symbol.line_end,
-                        symbol.docstring,
-                        params,
-                        symbol.return_type,
-                        1 if symbol.is_exported else 0,
-                        # ON CONFLICT values
-                        symbol.id,
-                        symbol.kind.value,
-                        symbol.line_end,
-                        symbol.docstring,
-                        params,
-                        symbol.return_type,
-                        1 if symbol.is_exported else 0,
-                    ),
-                )
+                # 1. Check if ID exists
+                async with db.execute("SELECT 1 FROM symbols WHERE id = ?", (symbol.id,)) as cursor:
+                    exists_by_id = await cursor.fetchone()
+
+                if exists_by_id:
+                    # Update by ID (rename or modification)
+                    await db.execute(
+                        """
+                        UPDATE symbols SET
+                            name = ?,
+                            kind = ?,
+                            file_path = ?,
+                            line_start = ?,
+                            line_end = ?,
+                            docstring = ?,
+                            parameters = ?,
+                            return_type = ?,
+                            is_exported = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (
+                            symbol.name,
+                            symbol.kind.value,
+                            file_path,
+                            symbol.line_start,
+                            symbol.line_end,
+                            symbol.docstring,
+                            params,
+                            symbol.return_type,
+                            1 if symbol.is_exported else 0,
+                            symbol.id,
+                        ),
+                    )
+                else:
+                    # 2. Check if file_path, name, line_start exists
+                    async with db.execute(
+                        "SELECT id FROM symbols WHERE file_path = ? AND name = ? AND line_start = ?",
+                        (file_path, symbol.name, symbol.line_start),
+                    ) as cursor:
+                        existing_row = await cursor.fetchone()
+
+                    if existing_row:
+                        # Update by file_path/name/line_start, preserving existing ID
+                        existing_id = existing_row[0]
+                        await db.execute(
+                            """
+                            UPDATE symbols SET
+                                kind = ?,
+                                line_end = ?,
+                                docstring = ?,
+                                parameters = ?,
+                                return_type = ?,
+                                is_exported = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """,
+                            (
+                                symbol.kind.value,
+                                symbol.line_end,
+                                symbol.docstring,
+                                params,
+                                symbol.return_type,
+                                1 if symbol.is_exported else 0,
+                                existing_id,
+                            ),
+                        )
+                    else:
+                        # 3. Insert new row
+                        await db.execute(
+                            """
+                            INSERT INTO symbols (
+                                id, name, kind, file_path, line_start, line_end,
+                                docstring, parameters, return_type, is_exported
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                symbol.id,
+                                symbol.name,
+                                symbol.kind.value,
+                                file_path,
+                                symbol.line_start,
+                                symbol.line_end,
+                                symbol.docstring,
+                                params,
+                                symbol.return_type,
+                                1 if symbol.is_exported else 0,
+                            ),
+                        )
 
             await db.commit()
 
@@ -119,26 +172,27 @@ class SymbolRegistry:
 
         symbols: list[Symbol] = []
         async with aiosqlite.connect(str(self.db_path)) as db:
-            async for row in db.execute(
+            async with db.execute(
                 "SELECT id, name, kind, file_path, line_start, line_end, "
                 "docstring, parameters, return_type, is_exported FROM symbols "
                 "WHERE file_path = ? ORDER BY line_start",
                 (file_path,),
-            ):
-                params = json.loads(row[7]) if row[7] else []
-                symbol = Symbol(
-                    id=row[0],
-                    name=row[1],
-                    kind=SymbolKind(row[2]),
-                    file_path=row[3],
-                    line_start=row[4],
-                    line_end=row[5],
-                    docstring=row[6],
-                    parameters=params,
-                    return_type=row[8],
-                    is_exported=bool(row[9]),
-                )
-                symbols.append(symbol)
+            ) as cursor:
+                async for row in cursor:
+                    params = json.loads(row[7]) if row[7] else []
+                    symbol = Symbol(
+                        id=row[0],
+                        name=row[1],
+                        kind=SymbolKind(row[2]),
+                        file_path=row[3],
+                        line_start=row[4],
+                        line_end=row[5],
+                        docstring=row[6],
+                        parameters=params,
+                        return_type=row[8],
+                        is_exported=bool(row[9]),
+                    )
+                    symbols.append(symbol)
 
         return symbols
 
@@ -155,26 +209,27 @@ class SymbolRegistry:
 
         symbols: list[Symbol] = []
         async with aiosqlite.connect(str(self.db_path)) as db:
-            async for row in db.execute(
+            async with db.execute(
                 "SELECT id, name, kind, file_path, line_start, line_end, "
                 "docstring, parameters, return_type, is_exported FROM symbols "
                 "WHERE name LIKE ? ORDER BY file_path, line_start",
                 (name_pattern,),
-            ):
-                params = json.loads(row[7]) if row[7] else []
-                symbol = Symbol(
-                    id=row[0],
-                    name=row[1],
-                    kind=SymbolKind(row[2]),
-                    file_path=row[3],
-                    line_start=row[4],
-                    line_end=row[5],
-                    docstring=row[6],
-                    parameters=params,
-                    return_type=row[8],
-                    is_exported=bool(row[9]),
-                )
-                symbols.append(symbol)
+            ) as cursor:
+                async for row in cursor:
+                    params = json.loads(row[7]) if row[7] else []
+                    symbol = Symbol(
+                        id=row[0],
+                        name=row[1],
+                        kind=SymbolKind(row[2]),
+                        file_path=row[3],
+                        line_start=row[4],
+                        line_end=row[5],
+                        docstring=row[6],
+                        parameters=params,
+                        return_type=row[8],
+                        is_exported=bool(row[9]),
+                    )
+                    symbols.append(symbol)
 
         return symbols
 
@@ -190,12 +245,13 @@ class SymbolRegistry:
         import json
 
         async with aiosqlite.connect(str(self.db_path)) as db:
-            row = await db.execute_fetchone(
+            async with db.execute(
                 "SELECT id, name, kind, file_path, line_start, line_end, "
                 "docstring, parameters, return_type, is_exported FROM symbols "
                 "WHERE id = ?",
                 (symbol_id,),
-            )
+            ) as cursor:
+                row = await cursor.fetchone()
 
         if not row:
             return None
@@ -236,25 +292,26 @@ class SymbolRegistry:
 
         symbols: list[Symbol] = []
         async with aiosqlite.connect(str(self.db_path)) as db:
-            async for row in db.execute(
+            async with db.execute(
                 "SELECT id, name, kind, file_path, line_start, line_end, "
                 "docstring, parameters, return_type, is_exported FROM symbols "
                 "ORDER BY file_path, line_start"
-            ):
-                params = json.loads(row[7]) if row[7] else []
-                symbol = Symbol(
-                    id=row[0],
-                    name=row[1],
-                    kind=SymbolKind(row[2]),
-                    file_path=row[3],
-                    line_start=row[4],
-                    line_end=row[5],
-                    docstring=row[6],
-                    parameters=params,
-                    return_type=row[8],
-                    is_exported=bool(row[9]),
-                )
-                symbols.append(symbol)
+            ) as cursor:
+                async for row in cursor:
+                    params = json.loads(row[7]) if row[7] else []
+                    symbol = Symbol(
+                        id=row[0],
+                        name=row[1],
+                        kind=SymbolKind(row[2]),
+                        file_path=row[3],
+                        line_start=row[4],
+                        line_end=row[5],
+                        docstring=row[6],
+                        parameters=params,
+                        return_type=row[8],
+                        is_exported=bool(row[9]),
+                    )
+                    symbols.append(symbol)
 
         return symbols
 
@@ -271,26 +328,27 @@ class SymbolRegistry:
 
         symbols: list[Symbol] = []
         async with aiosqlite.connect(str(self.db_path)) as db:
-            async for row in db.execute(
+            async with db.execute(
                 "SELECT id, name, kind, file_path, line_start, line_end, "
                 "docstring, parameters, return_type, is_exported FROM symbols "
                 "WHERE kind = ? ORDER BY file_path, line_start",
                 (kind.value,),
-            ):
-                params = json.loads(row[7]) if row[7] else []
-                symbol = Symbol(
-                    id=row[0],
-                    name=row[1],
-                    kind=SymbolKind(row[2]),
-                    file_path=row[3],
-                    line_start=row[4],
-                    line_end=row[5],
-                    docstring=row[6],
-                    parameters=params,
-                    return_type=row[8],
-                    is_exported=bool(row[9]),
-                )
-                symbols.append(symbol)
+            ) as cursor:
+                async for row in cursor:
+                    params = json.loads(row[7]) if row[7] else []
+                    symbol = Symbol(
+                        id=row[0],
+                        name=row[1],
+                        kind=SymbolKind(row[2]),
+                        file_path=row[3],
+                        line_start=row[4],
+                        line_end=row[5],
+                        docstring=row[6],
+                        parameters=params,
+                        return_type=row[8],
+                        is_exported=bool(row[9]),
+                    )
+                    symbols.append(symbol)
 
         return symbols
 
@@ -301,6 +359,7 @@ class SymbolRegistry:
             Total number of symbols
         """
         async with aiosqlite.connect(str(self.db_path)) as db:
-            row = await db.execute_fetchone("SELECT COUNT(*) FROM symbols")
+            async with db.execute("SELECT COUNT(*) FROM symbols") as cursor:
+                row = await cursor.fetchone()
 
         return row[0] if row else 0

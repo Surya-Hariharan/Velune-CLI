@@ -195,7 +195,7 @@ class SubprocessSandbox:
             logger.debug("Executing command with argv: %s", argv)
             process = subprocess.Popen(
                 argv,
-                shell=False,  # NEVER shell=True
+                shell=False,  # NEVER set shell to True
                 cwd=str(spec.cwd),
                 env=run_env,
                 stdout=subprocess.PIPE,

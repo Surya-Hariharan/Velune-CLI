@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from velune.cognition.council.base import BaseCouncilAgent
+from velune.core.types.model import ModelDescriptor
 from velune.models.specializations import CouncilRole
 from velune.providers.base import ModelProvider
-from velune.core.types.model import ModelDescriptor
 
 if TYPE_CHECKING:
     from velune.cognition.state import CouncilState
@@ -66,7 +65,7 @@ class CoderAgent(BaseCouncilAgent):
             ValueError: If budget exhausted before execution
         """
         if state.is_budget_exhausted():
-            raise ValueError(f"Wall-clock budget exhausted before Coder could run")
+            raise ValueError("Wall-clock budget exhausted before Coder could run")
 
         remaining = state.remaining_budget_seconds()
         timeout = min(state.budget.coder_timeout_seconds, int(remaining))
@@ -136,7 +135,7 @@ class CoderAgent(BaseCouncilAgent):
             logger.info("Coder completed with %d proposed diffs", len(diffs))
             return diffs
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("Coder timed out after %ds", timeout)
             raise
 

@@ -1,12 +1,13 @@
 """Tests for the OllamaManager and pull UI data layer."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from velune.providers.ollama_manager import RECOMMENDED_MODELS, OllamaManager
 
-
 # ── Static data tests ──────────────────────────────────────────────────────
+
 
 def test_recommended_models_not_empty():
     assert len(RECOMMENDED_MODELS) >= 8
@@ -47,6 +48,7 @@ def test_all_ram_needed_are_parseable():
 
 
 # ── OllamaManager async tests ──────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_is_running_false_when_ollama_not_up():

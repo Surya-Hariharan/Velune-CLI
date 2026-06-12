@@ -6,7 +6,6 @@ from velune.orchestration.role_assignments import (
     COUNCIL_ROLES,
     ROLE_DESCRIPTIONS,
     CouncilRoleMap,
-    RoleAssignment,
 )
 
 

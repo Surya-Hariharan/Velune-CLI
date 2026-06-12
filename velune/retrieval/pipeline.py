@@ -162,7 +162,7 @@ class RetrievalPipeline:
                     ),
                     timeout=2.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("Slow path timed out (>2000ms)")
                 slow_results = []
 

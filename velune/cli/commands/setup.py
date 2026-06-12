@@ -83,7 +83,8 @@ def run_setup_wizard() -> None:
         Panel(
             "[bold cyan]Velune Provider Setup[/bold cyan]\n"
             "[dim]Configure which AI providers you want to use.[/dim]\n"
-            "[dim]Keys are stored securely in your OS keychain.[/dim]",
+            "[dim]Keys are stored securely in your OS keychain.[/dim]\n\n"
+            "🔒 [bold green]Privacy Notice:[/bold green] [dim]Your code and conversations stay on this machine unless you configure a cloud provider.[/dim]",
             border_style="cyan",
             padding=(0, 1),
         )

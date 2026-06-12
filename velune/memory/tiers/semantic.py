@@ -9,7 +9,6 @@ async embedding pipeline, background indexing queue, and REPL retrieval.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import time
@@ -156,7 +155,7 @@ class SemanticMemoryTier:
                 raise ValueError(f"Mixed embedding dimensions in batch: {dims}")
 
         points = []
-        for i, (p_id, vec, pay) in enumerate(zip(ids, vectors, payloads)):
+        for i, (p_id, vec, pay) in enumerate(zip(ids, vectors, payloads, strict=False)):
             # Ensure unique IDs are formatted correctly
             point_id = self._clean_id(p_id) if p_id is not None else i
             points.append(

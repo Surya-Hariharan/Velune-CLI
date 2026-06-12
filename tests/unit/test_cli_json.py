@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from typer.testing import CliRunner
 
@@ -14,7 +14,7 @@ runner = CliRunner()
 def mock_runtime():
     runtime = MagicMock(spec=RuntimeContext)
     runtime.console = MagicMock()
-    
+
     # Mock config
     config = MagicMock()
     config.project.name = "TestProject"
@@ -25,29 +25,29 @@ def mock_runtime():
     config.workspace.git_aware = True
     config.telemetry.enabled = False
     config.telemetry.log_level = "info"
-    
+
     config.memory.working_memory_ttl = 100
     config.memory.episodic_retention_days = 7
     config.memory.semantic_threshold = 0.8
     config.memory.graph_enabled = True
-    
+
     runtime.config = config
-    
+
     # Mock container
     container = MagicMock()
     # has/get behavior
     container.has.return_value = True
-    
+
     # Mock services
     lifecycle = MagicMock()
     lifecycle.startup = AsyncMock()
     lifecycle.shutdown = AsyncMock()
-    
+
     container.get.side_effect = lambda key: {
         "runtime.lifecycle": lifecycle,
         "runtime.config": config,
     }.get(key, MagicMock())
-    
+
     runtime.container = container
     return runtime
 
@@ -91,7 +91,7 @@ def test_cli_config_set_json(mock_runtime, tmp_path):
     # Setup a mock config path
     mock_runtime.config_path = tmp_path / "velune.toml"
     with patch("velune.cli.app.build_runtime", return_value=mock_runtime):
-        with patch("toml.dump") as mock_dump:
+        with patch("toml.dump"):
             result = runner.invoke(app, ["--json", "config", "set", "project.name", "NewProject"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -103,7 +103,7 @@ def test_cli_config_set_json(mock_runtime, tmp_path):
 def test_cli_workspace_status_json(mock_runtime, tmp_path):
     # Mock workspace .velune index folder existence
     (tmp_path / ".velune" / "index").mkdir(parents=True)
-    
+
     # Mock repository_cognition
     repo_cognition = MagicMock()
     snapshot = MagicMock()
@@ -111,15 +111,15 @@ def test_cli_workspace_status_json(mock_runtime, tmp_path):
     snapshot.symbols = [MagicMock(), MagicMock()]
     snapshot.summary = {"git": {"active_branch": "test-branch"}}
     repo_cognition.index.return_value = snapshot
-    
+
     lifecycle = AsyncMock()
-    
+
     mock_runtime.container.get.side_effect = lambda key: {
         "runtime.repository_cognition": repo_cognition,
         "runtime.lifecycle": lifecycle,
         "runtime.config": mock_runtime.config,
     }.get(key, MagicMock())
-    
+
     with patch("velune.cli.app.build_runtime", return_value=mock_runtime):
         result = runner.invoke(app, ["--json", "workspace", "status", "--path", str(tmp_path)])
         assert result.exit_code == 0
@@ -138,8 +138,9 @@ def test_cli_models_list_json(mock_runtime):
     record.model_id = "test-model"
     record.display_name = "Test Model"
     record.provider_id = "test-provider"
-    
+
     from velune.core.types.model import CapabilityLevel
+
     caps = MagicMock()
     caps.coding = CapabilityLevel.BASIC
     caps.reasoning = CapabilityLevel.NONE
@@ -148,14 +149,14 @@ def test_cli_models_list_json(mock_runtime):
     caps.tool_use = CapabilityLevel.NONE
     caps.long_context = CapabilityLevel.NONE
     record.capabilities = caps
-    
+
     model_registry.list_all.return_value = [record]
-    
+
     mock_runtime.container.get.side_effect = lambda key: {
         "runtime.model_registry": model_registry,
         "runtime.config": mock_runtime.config,
     }.get(key, MagicMock())
-    
+
     with patch("velune.cli.app.build_runtime", return_value=mock_runtime):
         result = runner.invoke(app, ["--json", "models", "list"])
         assert result.exit_code == 0

@@ -303,7 +303,7 @@ class CognitiveFirewall:
                         extracted.append(node.value.value)
                 # String assignments (README patterns)
                 if isinstance(node, ast.Assign):
-                    for target in node.targets:
+                    for _target in node.targets:
                         if isinstance(node.value, ast.Constant) and isinstance(
                             node.value.value, str
                         ):

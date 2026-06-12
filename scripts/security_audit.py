@@ -227,6 +227,31 @@ def check_no_sync_over_async() -> None:
 
 
 # ---------------------------------------------------------------------------
+# CHECK 8 — Plugin loading is gated and disabled by default (Phase 1.2)
+# ---------------------------------------------------------------------------
+def check_plugin_loading_gated() -> None:
+    loader_file = VELUNE / "plugins" / "loader.py"
+    if not loader_file.exists():
+        _fail(f"loader.py not found: {loader_file.relative_to(ROOT)}")
+        return
+    src = loader_file.read_text(encoding="utf-8")
+
+    checks = {
+        "_experimental_enabled": "_experimental_enabled helper method",
+        "VELUNE_ENABLE_EXPERIMENTAL_PLUGINS": "VELUNE_ENABLE_EXPERIMENTAL_PLUGINS environment variable reference",
+        "discover_and_load": "discover_and_load method",
+    }
+    missing = [label for symbol, label in checks.items() if symbol not in src]
+    if missing:
+        _fail(f"Plugin loader missing security gating: {missing}")
+    else:
+        if "if not self._experimental_enabled():" not in src:
+            _fail("Plugin loader discover_and_load does not gate on _experimental_enabled")
+        else:
+            _pass("Plugin loading is gated behind experimental flag / environment variable.")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -241,13 +266,14 @@ def main() -> None:
     check_no_hardcoded_credentials()
     check_mcp_rate_limiter()
     check_no_sync_over_async()
+    check_plugin_loading_gated()
 
     print("=" * 60)
     if _failures:
         print(f"FAILED: {len(_failures)} issue(s) found.")
         sys.exit(1)
     else:
-        print("PASSED: All 7 checks passed.")
+        print("PASSED: All 8 checks passed.")
         sys.exit(0)
 
 

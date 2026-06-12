@@ -99,7 +99,7 @@ def test_full_context_workflow(model):
 
 def test_budget_allocation_breakdown():
     """Test that budget allocations follow the correct ratios."""
-    model = ModelDescriptor(
+    ModelDescriptor(
         model_id="test",
         provider_id="test",
         display_name="Test",

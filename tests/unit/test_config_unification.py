@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic_settings import BaseSettings
 
 from velune.kernel.config import (
-    ConfigValidationError,
     MemoryConfig,
     ProviderEntry,
     ProvidersConfig,
@@ -25,10 +24,10 @@ from velune.kernel.config import (
 )
 from velune.kernel.lifecycle import LifecycleCoordinator
 
-
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
 
 def _make_config(**kwargs) -> VeluneConfig:
     """Construct VeluneConfig while suppressing .env file and env-var leakage."""
@@ -41,11 +40,11 @@ def _make_config(**kwargs) -> VeluneConfig:
 # Test 1: VeluneConfig has exactly one canonical definition
 # ---------------------------------------------------------------------------
 
+
 def test_velune_config_defined_in_single_module():
     """VeluneConfig.__module__ must point to velune.kernel.config and nowhere else."""
     assert VeluneConfig.__module__ == "velune.kernel.config", (
-        f"VeluneConfig is defined in '{VeluneConfig.__module__}', "
-        "expected 'velune.kernel.config'."
+        f"VeluneConfig is defined in '{VeluneConfig.__module__}', expected 'velune.kernel.config'."
     )
 
 
@@ -53,20 +52,21 @@ def test_velune_config_defined_in_single_module():
 # Test 2: All re-export paths resolve to the identical class object
 # ---------------------------------------------------------------------------
 
+
 def test_all_import_paths_resolve_to_same_class():
     """Every public re-export of VeluneConfig must be the same object."""
-    from velune.kernel.config import VeluneConfig as from_config
-    from velune.kernel import VeluneConfig as from_kernel
-    from velune.core.config import VeluneConfig as from_core_config
-    from velune.core import VeluneConfig as from_core
+    from velune.core import VeluneConfig as FromCore
+    from velune.core.config import VeluneConfig as FromCoreConfig
+    from velune.kernel import VeluneConfig as FromKernel
+    from velune.kernel.config import VeluneConfig as FromConfig
 
-    assert from_config is from_kernel, (
+    assert FromConfig is FromKernel, (
         "velune.kernel.VeluneConfig is not the same object as velune.kernel.config.VeluneConfig"
     )
-    assert from_config is from_core_config, (
+    assert FromConfig is FromCoreConfig, (
         "velune.core.config.VeluneConfig is not the same object as velune.kernel.config.VeluneConfig"
     )
-    assert from_config is from_core, (
+    assert FromConfig is FromCore, (
         "velune.core.VeluneConfig is not the same object as velune.kernel.config.VeluneConfig"
     )
 
@@ -74,6 +74,7 @@ def test_all_import_paths_resolve_to_same_class():
 # ---------------------------------------------------------------------------
 # Test 3: VeluneConfig is a pydantic-settings BaseSettings subclass
 # ---------------------------------------------------------------------------
+
 
 def test_velune_config_is_base_settings():
     """VeluneConfig must inherit from pydantic_settings.BaseSettings."""
@@ -87,8 +88,7 @@ def test_velune_config_has_env_prefix():
     """model_config must declare env_prefix='VELUNE_'."""
     prefix = VeluneConfig.model_config.get("env_prefix", "")
     assert prefix == "VELUNE_", (
-        f"Expected env_prefix='VELUNE_', got '{prefix}'. "
-        "Update SettingsConfigDict in VeluneConfig."
+        f"Expected env_prefix='VELUNE_', got '{prefix}'. Update SettingsConfigDict in VeluneConfig."
     )
 
 
@@ -96,18 +96,18 @@ def test_velune_config_has_env_prefix():
 # Test 4: validate() — happy path (local provider, no API key required)
 # ---------------------------------------------------------------------------
 
+
 def test_validate_returns_empty_for_local_provider():
     """A config pointing at a local provider (ollama) with no api_key_env must pass cleanly."""
     config = _make_config(providers=ProvidersConfig(default_provider="ollama"))
     errors = config.validate()
-    assert errors == [], (
-        f"Expected no validation errors for ollama (local) provider, got: {errors}"
-    )
+    assert errors == [], f"Expected no validation errors for ollama (local) provider, got: {errors}"
 
 
 # ---------------------------------------------------------------------------
 # Test 5: validate() — CRITICAL error when API key env var is missing
 # ---------------------------------------------------------------------------
+
 
 def test_validate_critical_when_api_key_env_missing():
     """validate() must return a CRITICAL error when the default provider needs an API key
@@ -138,6 +138,7 @@ def test_validate_critical_when_api_key_env_missing():
 # Test 6: validate() — no error when API key env var IS set
 # ---------------------------------------------------------------------------
 
+
 def test_validate_ok_when_api_key_env_is_set():
     """validate() must return no errors when the required env var is present."""
     config = _make_config(
@@ -160,6 +161,7 @@ def test_validate_ok_when_api_key_env_is_set():
 # Test 7: validate() — CRITICAL error for non-existent workspace root
 # ---------------------------------------------------------------------------
 
+
 def test_validate_critical_for_missing_workspace_root(tmp_path: Path):
     """validate() must flag a CRITICAL error when workspace.root is set but absent."""
     phantom = tmp_path / "does_not_exist"
@@ -178,6 +180,7 @@ def test_validate_critical_for_missing_workspace_root(tmp_path: Path):
 # Test 8: validate() — WARNING (not CRITICAL) for missing storage_dir
 # ---------------------------------------------------------------------------
 
+
 def test_validate_warning_for_missing_storage_dir(tmp_path: Path):
     """validate() must emit a WARNING (not CRITICAL) when memory.storage_dir does not exist."""
     phantom = tmp_path / "missing_storage"
@@ -187,14 +190,13 @@ def test_validate_warning_for_missing_storage_dir(tmp_path: Path):
     )
     errors = config.validate()
     warnings = [e for e in errors if e.severity == "WARNING" and e.field == "memory.storage_dir"]
-    assert len(warnings) == 1, (
-        f"Expected exactly one WARNING for memory.storage_dir, got: {errors}"
-    )
+    assert len(warnings) == 1, f"Expected exactly one WARNING for memory.storage_dir, got: {errors}"
 
 
 # ---------------------------------------------------------------------------
 # Test 9: LifecycleCoordinator.startup() raises on CRITICAL config errors
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_lifecycle_startup_raises_on_critical_config_error():
@@ -219,6 +221,7 @@ async def test_lifecycle_startup_raises_on_critical_config_error():
 # ---------------------------------------------------------------------------
 # Test 10: LifecycleCoordinator.startup() proceeds normally for valid config
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_lifecycle_startup_proceeds_for_valid_config():

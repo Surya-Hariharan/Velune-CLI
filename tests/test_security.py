@@ -5,14 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).parent.parent
 VELUNE = ROOT / "velune"
 
 # ---------------------------------------------------------------------------
 # Test 1 — No shell=True in subprocess calls
 # ---------------------------------------------------------------------------
+
 
 def test_no_shell_true_in_source():
     """No production code may pass shell=True to a subprocess call."""
@@ -62,6 +61,7 @@ def test_no_bare_getenv_for_api_keys():
 # Test 3 — SSRF validator blocks private IP ranges
 # ---------------------------------------------------------------------------
 
+
 def test_ssrf_blocks_private_ips():
     from velune.tools.web.validator import validate_url
 
@@ -104,6 +104,7 @@ def test_veluneignore_covers_secret_patterns():
 # ---------------------------------------------------------------------------
 # Test 5 — MCP RateLimiter throttles excess requests
 # ---------------------------------------------------------------------------
+
 
 def test_rate_limiter_allows_and_throttles():
     from velune.mcp.server import RateLimiter

@@ -1,4 +1,4 @@
-from velune.cli.modes import ModeManager, SessionMode, MODE_CONFIGS
+from velune.cli.modes import MODE_CONFIGS, ModeManager, SessionMode
 
 
 def test_default_mode_is_normal():

@@ -1,6 +1,6 @@
 """Shared test fixtures for Velune test suite."""
+
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -79,7 +79,9 @@ def temp_workspace(tmp_path: Path):
     (workspace / "main.py").write_text("def hello(): return 'world'\n")
 
     subprocess.run(["git", "init", str(workspace)], capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=workspace, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=workspace, capture_output=True
+    )
     subprocess.run(["git", "config", "user.name", "Test"], cwd=workspace, capture_output=True)
     subprocess.run(["git", "add", "."], cwd=workspace, capture_output=True)
     subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=workspace, capture_output=True)

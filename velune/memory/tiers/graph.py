@@ -223,6 +223,47 @@ class GraphMemoryTier:
     # Read operations
     # ------------------------------------------------------------------
 
+    async def get_all_nodes(self) -> list[GraphNode]:
+        """Retrieve all nodes from the knowledge graph."""
+        nodes = []
+        try:
+            async with self._pool.read() as conn:
+                cursor = await conn.execute("SELECT id, node_type, properties FROM graph_nodes")
+                rows = await cursor.fetchall()
+                for row in rows:
+                    nodes.append(
+                        GraphNode(
+                            id=row["id"],
+                            node_type=row["node_type"],
+                            properties=json.loads(row["properties"]),
+                        )
+                    )
+        except Exception as exc:
+            logger.error("Failed to retrieve all graph nodes: %s", exc)
+        return nodes
+
+    async def get_all_edges(self) -> list[GraphEdge]:
+        """Retrieve all edges from the knowledge graph."""
+        edges = []
+        try:
+            async with self._pool.read() as conn:
+                cursor = await conn.execute(
+                    "SELECT source, target, relation_type, properties FROM graph_edges"
+                )
+                rows = await cursor.fetchall()
+                for row in rows:
+                    edges.append(
+                        GraphEdge(
+                            source=row["source"],
+                            target=row["target"],
+                            relation_type=row["relation_type"],
+                            properties=json.loads(row["properties"]),
+                        )
+                    )
+        except Exception as exc:
+            logger.error("Failed to retrieve all graph edges: %s", exc)
+        return edges
+
     async def get_node(self, node_id: str) -> GraphNode | None:
         """Fetch a specific node by its identifier."""
         try:

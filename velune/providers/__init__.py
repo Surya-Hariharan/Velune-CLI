@@ -7,7 +7,7 @@ from velune.providers.base import EmbeddingProvider, InferenceEngine, ModelProvi
 from velune.providers.benchmarker import ProviderBenchmarker
 from velune.providers.registry import ProviderRegistry
 from velune.providers.router import ProviderRouter
-from velune.providers.task_classifier import TaskClassifier, TaskProfile, TaskType, ComplexityLevel
+from velune.providers.task_classifier import ComplexityLevel, TaskClassifier, TaskProfile, TaskType
 
 __all__ = [
     "ModelProvider",

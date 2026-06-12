@@ -1,4 +1,10 @@
-"""Production-grade Council Orchestrator with strict budget enforcement and role-gated state."""
+"""Production-grade Bounded Council Orchestrator with strict budget enforcement and role-gated state.
+
+This is the simpler, 3-agent (Planner → Coder → Reviewer) implementation
+with explicit wall-clock and per-agent timeout budgets.  It is distinct from
+``velune.cognition.orchestrator.CouncilOrchestrator``, which is the full
+LangGraph-style multi-tier orchestrator.
+"""
 
 from __future__ import annotations
 
@@ -17,8 +23,8 @@ from velune.providers.base import ModelProvider
 logger = logging.getLogger("velune.cognition.council_orchestrator")
 
 
-class CouncilOrchestrator:
-    """Production council orchestrator managing Planner, Coder, and Reviewer with strict budget enforcement.
+class BoundedCouncilOrchestrator:
+    """Bounded council orchestrator managing Planner, Coder, and Reviewer with strict budget enforcement.
 
     Enforces:
     - Wall-clock timeout at top level with per-agent timeout guards
@@ -26,6 +32,10 @@ class CouncilOrchestrator:
     - Max review cycles with explicit cycle counting in state
     - Role-gated state writes (Coder cannot modify Planner output, etc.)
     - Clean error handling and budget exhaustion detection
+
+    See :class:`velune.cognition.orchestrator.CouncilOrchestrator` for the
+    full LangGraph-style multi-tier orchestrator with tier classification,
+    challenger/synthesizer agents, and analytics.
     """
 
     def __init__(

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from velune.cognition.council.base import BaseCouncilAgent
 from velune.cognition.council.messages import ReviewerMessage
+from velune.cognition.state import ReviewDecision
 from velune.core.types.model import ModelDescriptor
 from velune.models.specializations import CouncilRole
 from velune.providers.base import ModelProvider
-from velune.cognition.state import ReviewDecision
 
 if TYPE_CHECKING:
     from velune.cognition.state import CouncilState
@@ -75,7 +75,7 @@ class ReviewerAgent(BaseCouncilAgent):
             ValueError: If budget exhausted before execution
         """
         if state.is_budget_exhausted():
-            raise ValueError(f"Wall-clock budget exhausted before Reviewer could run")
+            raise ValueError("Wall-clock budget exhausted before Reviewer could run")
 
         remaining = state.remaining_budget_seconds()
         timeout = min(state.budget.reviewer_timeout_seconds, int(remaining))
@@ -124,7 +124,7 @@ class ReviewerAgent(BaseCouncilAgent):
 
             return decision, notes
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("Reviewer timed out after %ds", timeout)
             raise
 

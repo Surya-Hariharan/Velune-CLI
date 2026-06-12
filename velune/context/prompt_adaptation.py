@@ -8,8 +8,8 @@ distinct prompt structure and system prompt handling.
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
-from typing import Any, Protocol
+from abc import ABC
+from typing import Protocol
 
 from velune.context.window import estimate_tokens
 from velune.core.types.model import ModelDescriptor
@@ -434,8 +434,8 @@ class PromptAdaptationEngine:
         """
         family = detect_family(model.model_id)
 
-        # Cloud APIs use standard message format; return as-is
-        if family in (ModelFamily.CLAUDE, ModelFamily.GPT, ModelFamily.GEMINI):
+        # Cloud APIs and unknown models use standard message format; return as-is
+        if family in (ModelFamily.CLAUDE, ModelFamily.GPT, ModelFamily.GEMINI, ModelFamily.UNKNOWN):
             return messages
 
         # For specialized formats, wrap in a single "text" message

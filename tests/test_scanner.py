@@ -1,7 +1,6 @@
 """Tests for FilesystemScanner and SecretFileDetector."""
-from pathlib import Path
 
-import pytest
+from pathlib import Path
 
 from velune.repository.indexer import SecretFileDetector
 from velune.repository.scanner import FilesystemScanner

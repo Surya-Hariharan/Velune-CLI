@@ -2,6 +2,7 @@
 
 from velune.repository.ast_parser import ASTParser, Symbol, SymbolKind
 from velune.repository.cognition import RepositoryCognitionService
+from velune.repository.parser import RepositorySnapshotParser
 from velune.repository.rename_journal import RenameJournal
 from velune.repository.schemas import (
     RepositoryEdge,
@@ -21,10 +22,12 @@ __all__ = [
     "RepositoryFile",
     "RepositoryEdge",
     "RepositorySnapshot",
-    # AST parsing and symbol tracking
+    # Async AST parser (canonical for SymbolRegistry / RenameJournal)
     "ASTParser",
     "Symbol",
     "SymbolKind",
     "SymbolRegistry",
     "RenameJournal",
+    # Sync snapshot parser (used by indexer / incremental indexer / tools)
+    "RepositorySnapshotParser",
 ]

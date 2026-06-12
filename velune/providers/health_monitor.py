@@ -116,7 +116,7 @@ class ProviderHealthMonitor:
             health = await asyncio.wait_for(
                 provider.health_check(), timeout=self._health_check_timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             health = ProviderHealth.DEGRADED
             logger.debug(f"Provider {provider_id} health check timed out")
         except Exception as e:
@@ -128,7 +128,7 @@ class ProviderHealthMonitor:
             available_models = await asyncio.wait_for(
                 provider.list_models(), timeout=self._health_check_timeout
             )
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             available_models = []
 
         # Get provider capabilities

@@ -1,4 +1,22 @@
-"""Tree-sitter and AST multi-language parser with regex fallbacks."""
+"""Tree-sitter and AST multi-language parser with regex fallbacks.
+
+This module provides :class:`RepositorySnapshotParser` — the synchronous
+parser that returns :class:`~velune.repository.schemas.RepositorySymbol` /
+:class:`~velune.repository.schemas.RepositoryEdge` objects for use by the
+indexer, incremental indexer, and tools.  It is intentionally distinct from
+:class:`~velune.repository.ast_parser.ASTParser`, which is the async parser
+used by :class:`~velune.repository.symbol_registry.SymbolRegistry` and
+:class:`~velune.repository.rename_journal.RenameJournal`.
+
+The lazy tree-sitter import pattern is preserved here: tree-sitter DLLs are
+not loaded until the first actual ``parse()`` call, avoiding Windows Defender
+real-time-scan startup costs.
+
+.. deprecated alias:
+   ``ASTParser`` is kept as a backwards-compatible alias for
+   ``RepositorySnapshotParser`` so existing callers continue to work while
+   they are updated to use the canonical name.
+"""
 
 import ast
 import re
@@ -56,8 +74,17 @@ def _ensure_tree_sitter() -> bool:
     return HAS_TREE_SITTER
 
 
-class ASTParser:
-    """Multi-language AST and symbol parser with comprehensive fallbacks."""
+class RepositorySnapshotParser:
+    """Multi-language AST and symbol parser with comprehensive fallbacks.
+
+    Returns :class:`~velune.repository.schemas.RepositorySymbol` /
+    :class:`~velune.repository.schemas.RepositoryEdge` pairs suitable for
+    building a :class:`~velune.repository.schemas.RepositorySnapshot`.
+
+    Uses tree-sitter when available (loaded lazily to avoid DLL startup cost),
+    falls back to Python's built-in ``ast`` module for Python files, and
+    finally falls back to regex for other languages.
+    """
 
     def __init__(self) -> None:
         # Languages are populated lazily on first parse — see _ensure_loaded.
@@ -145,7 +172,6 @@ class ASTParser:
                             else RepositorySymbolKind.FUNCTION
                         )
                 elif node_type in ("import_statement", "import_from_statement"):
-                    # Quick extraction for python imports
                     text = code[node.start_byte : node.end_byte]
                     for match in re.finditer(r"(?:import|from)\s+([\w.]+)", text):
                         target = match.group(1)
@@ -200,7 +226,6 @@ class ASTParser:
             # Go types
             elif lang == RepositoryLanguage.GO:
                 if node_type == "type_declaration":
-                    # type StructName struct
                     text = code[node.start_byte : node.end_byte]
                     match = re.search(r"type\s+(\w+)\s+(?:struct|interface)", text)
                     if match:
@@ -420,7 +445,6 @@ class ASTParser:
         for pattern, kind in patterns.get(lang, []):
             for match in re.finditer(pattern, code):
                 value = match.group(1).strip()
-                # Determine lines
                 start_char = match.start()
                 line_no = code[:start_char].count("\n") + 1
 
@@ -440,3 +464,11 @@ class ASTParser:
                 )
 
         return symbols, edges
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatibility alias
+# Callers that import ``from velune.repository.parser import ASTParser`` will
+# continue to work while they migrate to ``RepositorySnapshotParser``.
+# ---------------------------------------------------------------------------
+ASTParser = RepositorySnapshotParser

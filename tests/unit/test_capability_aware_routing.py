@@ -9,7 +9,7 @@ import pytest
 
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 from velune.providers.router import ProviderRouter
-from velune.providers.task_classifier import TaskClassifier, TaskType, ComplexityLevel
+from velune.providers.task_classifier import ComplexityLevel, TaskClassifier, TaskType
 
 
 def _make_model(
@@ -61,7 +61,9 @@ def test_router_local_preference_with_score_threshold():
     # Cloud model with EXPERT score (1.0)
     # Local model with ADVANCED score (0.75) - about 75% of 1.0
     cloud_model = _make_model("cloud-expert", provider_id="openai", coding=CapabilityLevel.EXPERT)
-    local_model = _make_model("local-ok", provider_id="ollama", coding=CapabilityLevel.ADVANCED, is_local=True)
+    local_model = _make_model(
+        "local-ok", provider_id="ollama", coding=CapabilityLevel.ADVANCED, is_local=True
+    )
 
     models = [cloud_model, local_model]
 
@@ -88,7 +90,9 @@ def test_task_classifier_identifies_reasoning_tasks():
     """Classifier should recognize reasoning keywords."""
     classifier = TaskClassifier()
 
-    profile = classifier.classify("Explain why quantum computers are faster than classical computers")
+    profile = classifier.classify(
+        "Explain why quantum computers are faster than classical computers"
+    )
     assert profile.task_type == TaskType.REASONING
 
 

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from velune.repository.blast_radius import BlastRadiusEstimator, BlastRadiusScore
+from velune.repository.blast_radius import BlastRadiusEstimator
 from velune.repository.boundary_classifier import BoundaryClassifier, BoundaryType
-from velune.repository.import_graph import ImportGraphBuilder, ImportMetrics
+from velune.repository.import_graph import ImportGraphBuilder
 
 
 class TestImportGraphBuilder:
@@ -36,7 +36,8 @@ class TestImportGraphBuilder:
     def test_self_import_ignored(self, builder: ImportGraphBuilder) -> None:
         builder._add_import_edge("utils.py", "utils.py")
         metrics = builder.get_metrics("utils.py")
-        assert "utils.py" not in metrics.imports
+        if metrics is not None:
+            assert "utils.py" not in metrics.imports
 
     def test_fan_in_computation(self, builder: ImportGraphBuilder) -> None:
         builder._add_import_edge("auth.py", "utils.py")

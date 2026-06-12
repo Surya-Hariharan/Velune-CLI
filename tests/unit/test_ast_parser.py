@@ -11,7 +11,6 @@ from velune.repository.ast_parser import ASTParser, Symbol, SymbolKind
 from velune.repository.rename_journal import RenameJournal
 from velune.repository.symbol_registry import SymbolRegistry
 
-
 PYTHON_SAMPLE = '''"""Sample Python module."""
 
 def validate_token(token: str) -> bool:

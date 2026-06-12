@@ -25,7 +25,7 @@ from structlog.processors import (
     add_log_level,
     format_exc_info,
 )
-from structlog.stdlib import BoundLogger, ProcessorFormatter, add_logger_name
+from structlog.stdlib import ProcessorFormatter, add_logger_name
 from structlog.typing import Processor
 
 if TYPE_CHECKING:
@@ -279,16 +279,6 @@ def context_scope(**kwargs) -> Any:
             # All logs here have span_id
             logger.info("Processing")
     """
-    structlog.contextvars.bind_contextvars(**kwargs)
-    try:
-        yield
-    finally:
-        structlog.contextvars.unbind_contextvars(*kwargs.keys())
-
-
-@contextmanager
-def context_scope(**kwargs) -> Any:
-    """Context manager for temporarily binding context variables."""
     structlog.contextvars.bind_contextvars(**kwargs)
     try:
         yield

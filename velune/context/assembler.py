@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import Sequence
+from collections.abc import Sequence
 
 from velune.context.budget import ContextBudget
 from velune.context.sections import (
@@ -74,6 +74,7 @@ class ContextAssembler:
 
         # Phase 2: Process each section in canonical order
         assembled_sections: dict[ContextSection, str] = {}
+        kept_sections_chunks: dict[ContextSection, list[ContextChunk]] = {}
         total_tokens = 0
         sections_trimmed: dict[ContextSection, int] = {}
 
@@ -109,6 +110,7 @@ class ContextAssembler:
             if processed_chunks:
                 section_content = self._render_section(section, processed_chunks)
                 assembled_sections[section] = section_content
+                kept_sections_chunks[section] = list(processed_chunks)
                 total_tokens += sum(c.token_count for c in processed_chunks)
 
         # Phase 3: Render final context with separators
@@ -131,6 +133,8 @@ class ContextAssembler:
             # Emergency truncation of RETRIEVED_CONTEXT
             if ContextSection.RETRIEVED_CONTEXT in assembled_sections:
                 del assembled_sections[ContextSection.RETRIEVED_CONTEXT]
+                if ContextSection.RETRIEVED_CONTEXT in kept_sections_chunks:
+                    del kept_sections_chunks[ContextSection.RETRIEVED_CONTEXT]
                 final_context = self._render_assembled_context(assembled_sections)
 
         report = ContextAssemblyReport(
@@ -140,7 +144,7 @@ class ContextAssembler:
             sections_present=list(assembled_sections.keys()),
             sections_trimmed=sections_trimmed,
             chunks_dropped=len(chunks)
-            - sum(len(assembled_sections.get(s, [])) for s in ContextSection),
+            - sum(len(kept_sections_chunks.get(s, [])) for s in ContextSection),
             budget_exceeded=budget_exceeded,
         )
 

@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import contextvars
 import uuid
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Iterator, Optional
+from typing import Any
 
 import structlog
 
@@ -33,13 +34,13 @@ class SpanContext:
 
     run_id: str
     span_id: str
-    parent_span_id: Optional[str] = None
+    parent_span_id: str | None = None
     operation_name: str = ""
     start_time: float = field(default_factory=lambda: __import__("time").time())
-    end_time: Optional[float] = None
-    duration_ms: Optional[float] = None
+    end_time: float | None = None
+    duration_ms: float | None = None
     status: str = "running"  # running, completed, failed
-    error: Optional[str] = None
+    error: str | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

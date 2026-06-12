@@ -23,7 +23,7 @@ class ProviderRegistry:
             and not isinstance(config, ProvidersConfig)
             and hasattr(config, "providers")
         ):
-            self._config = getattr(config, "providers")
+            self._config = config.providers
 
         self._register_default_providers()
 

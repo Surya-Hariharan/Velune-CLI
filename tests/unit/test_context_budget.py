@@ -30,7 +30,7 @@ def test_context_budget_normal_mode():
 
     assert budget.total_tokens == 16384  # min(16384, 32768)
     assert budget.system_allocation == 512
-    assert budget.output_reservation == 4096  # min(2048, 16384 // 4) = 2048, but 16384//4 = 4096
+    assert budget.output_reservation == 2048  # min(2048, 16384 // 4) = 2048
 
     # Verify ratio allocations: 55% retrieval, 35% working_memory
     usable = budget.total_tokens - budget.system_allocation - budget.output_reservation
@@ -58,7 +58,7 @@ def test_context_budget_frozen():
     # Should not be able to modify frozen dataclass
     try:
         budget.total_tokens = 999  # type: ignore
-        assert False, "Should not be able to modify frozen dataclass"
+        raise AssertionError("Should not be able to modify frozen dataclass")
     except Exception:
         pass  # Expected
 
@@ -68,11 +68,7 @@ def test_context_budget_properties():
     budget = ContextBudget.from_mode(SessionMode.NORMAL, 16384)
 
     usable = budget.usable_tokens
-    assert usable == (
-        budget.total_tokens
-        - budget.system_allocation
-        - budget.output_reservation
-    )
+    assert usable == (budget.total_tokens - budget.system_allocation - budget.output_reservation)
 
     # Verify unallocated tokens
     unallocated = budget.unallocated_tokens

@@ -57,7 +57,7 @@ class ModelCapabilityRegistry:
             # Execute fast probes concurrently
             if probing_tasks:
                 results = await asyncio.gather(*probing_tasks, return_exceptions=True)
-                for model, responsive in zip(models_to_probe, results):
+                for model, responsive in zip(models_to_probe, results, strict=False):
                     if isinstance(responsive, Exception):
                         responsive = False
 

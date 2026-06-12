@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 import warnings
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,20 +21,13 @@ from velune.retrieval.schemas import RetrievalQuery, RetrievalResult
 async def test_cognitive_bus_emit_and_wait_uses_running_loop():
     """Verify that emit_and_wait() does not raise DeprecationWarning for event loop selection."""
     bus = CognitiveBus()
-    event = KernelEvent(
-        event_type="test_event",
-        source="test",
-        data={}
-    )
+    event = KernelEvent(event_type="test_event", source="test", data={})
 
     async def trigger_response():
         # Let the emit_and_wait call start and register the future
         await asyncio.sleep(0.02)
         response_event = KernelEvent(
-            event_type="response_event",
-            source="test",
-            correlation_id=event.event_id,
-            data={}
+            event_type="response_event", source="test", correlation_id=event.event_id, data={}
         )
         await bus.emit(response_event)
 
@@ -43,17 +35,17 @@ async def test_cognitive_bus_emit_and_wait_uses_running_loop():
 
     with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always")
-        
+
         response = await bus.emit_and_wait(event, timeout=1.0)
-        
+
         # Verify response is returned correctly
         assert response.correlation_id == event.event_id
 
         # Verify no asyncio deprecation warnings regarding get_event_loop are raised
         asyncio_warnings = [
-            w for w in recorded
-            if issubclass(w.category, DeprecationWarning)
-            and "get_event_loop" in str(w.message)
+            w
+            for w in recorded
+            if issubclass(w.category, DeprecationWarning) and "get_event_loop" in str(w.message)
         ]
         assert len(asyncio_warnings) == 0, f"Found asyncio deprecation warnings: {asyncio_warnings}"
 
@@ -75,11 +67,7 @@ def test_search_sync_works_from_sync_context():
     retriever = HybridRetriever()
     query = RetrievalQuery(text="test query")
 
-    expected_result = RetrievalResult(
-        query=query,
-        hits=[],
-        strategy="mocked"
-    )
+    expected_result = RetrievalResult(query=query, hits=[], strategy="mocked")
     retriever.retrieve = AsyncMock(return_value=expected_result)
 
     with pytest.warns(DeprecationWarning) as record:

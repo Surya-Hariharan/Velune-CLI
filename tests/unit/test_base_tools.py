@@ -11,7 +11,7 @@ from velune.tools.base.tool import BaseTool, ToolPermission
 
 class DummyAddTool(BaseTool):
     """Dummy tool for mathematical addition to test tool base framework."""
-    
+
     def __init__(self, requires_perms: set[ToolPermission] | None = None) -> None:
         self.requires_perms = requires_perms or set()
         self.input_validated = False
@@ -25,11 +25,8 @@ class DummyAddTool(BaseTool):
     def get_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
-            "properties": {
-                "a": {"type": "integer"},
-                "b": {"type": "integer"}
-            },
-            "required": ["a", "b"]
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"],
         }
 
     def get_required_permissions(self) -> set[ToolPermission]:
@@ -49,7 +46,7 @@ class DummyAddTool(BaseTool):
 
 class BrokenTool(BaseTool):
     """Tool that fails validation during registration."""
-    
+
     def get_name(self) -> str:
         raise RuntimeError("Broken name lookup")
 
@@ -64,33 +61,30 @@ def test_tool_registry_registration_and_validation() -> None:
     """Verify that ToolRegistry registers valid tools and rejects invalid tools."""
     registry = ToolRegistry()
     tool = DummyAddTool()
-    
+
     # 1. Validation and registration
     assert registry.validate_tool(tool) is True
     registry.register(tool)
     assert registry.has("add_tool") is True
     assert registry.get("add_tool") == tool
-    
+
     # 2. Re-registering with replace=False raises ValueError
     with pytest.raises(ValueError, match="Tool already registered"):
         registry.register(tool, replace=False)
-        
+
     # 3. Listing and schemas
     assert "add_tool" in registry.list_tools()
     schemas = registry.list_tool_schemas()
     assert len(schemas) == 1
     assert schemas[0]["name"] == "add_tool"
     assert schemas[0]["description"] == "Adds two integers."
-    
+
     # 4. Broken tool handling
     broken = BrokenTool()
     assert registry.validate_tool(broken) is False
     registry.register(broken)
     assert "BrokenTool" in registry.list_broken_tools()
-    
+
     # 5. Unregister
     registry.unregister("add_tool")
     assert registry.has("add_tool") is False
-
-
-

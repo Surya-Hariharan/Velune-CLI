@@ -57,7 +57,7 @@ def detect_family(model_id: str) -> ModelFamily:
         return ModelFamily.QWEN
     if "deepseek" in model_id_lower or "deepseek-r1" in model_id_lower:
         return ModelFamily.DEEPSEEK
-    if "llama3" in model_id_lower or "llama-3" in model_id_lower:
+    if "llama" in model_id_lower:
         return ModelFamily.LLAMA3
     if "phi" in model_id_lower:
         return ModelFamily.PHI

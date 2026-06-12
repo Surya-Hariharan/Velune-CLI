@@ -10,8 +10,9 @@ When --debug flag is used:
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator, Optional
+from typing import Any
 
 import structlog
 
@@ -30,8 +31,8 @@ class DebugTimer:
         """
         self.operation_name = operation_name
         self.context = context
-        self.start_time: Optional[float] = None
-        self.elapsed_ms: Optional[float] = None
+        self.start_time: float | None = None
+        self.elapsed_ms: float | None = None
 
     def __enter__(self) -> DebugTimer:
         """Enter timing context."""
@@ -134,8 +135,8 @@ class RoutingDecision:
         """
         self.task_description = task_description
         self.candidates: list[dict[str, Any]] = []
-        self.selected: Optional[str] = None
-        self.selected_score: Optional[float] = None
+        self.selected: str | None = None
+        self.selected_score: float | None = None
 
     def add_candidate(
         self,

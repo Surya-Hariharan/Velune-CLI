@@ -1,8 +1,9 @@
 """Tests for the diff preview system."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from velune.execution.diff_preview import DiffDecision, DiffPreview, FileDiff
 
@@ -60,6 +61,7 @@ async def test_auto_accept_skips_prompt(preview):
 @pytest.mark.asyncio
 async def test_module_level_auto_accept(preview, tmp_path):
     import velune.execution.diff_preview as dp
+
     dp.configure(auto_accept=True)
     try:
         p, _ = preview
@@ -67,7 +69,7 @@ async def test_module_level_auto_accept(preview, tmp_path):
         decision = await p.preview_and_confirm(f, "content", auto_accept=False)
         assert decision == DiffDecision.ACCEPT
     finally:
-        dp.configure(auto_accept=False)   # reset so other tests are unaffected
+        dp.configure(auto_accept=False)  # reset so other tests are unaffected
 
 
 @pytest.mark.asyncio

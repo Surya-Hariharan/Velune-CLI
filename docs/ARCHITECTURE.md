@@ -175,8 +175,8 @@ Five-tier memory architecture in `velune/memory/`:
 
 1. **Working Memory** - Session state (fast, volatile)
 2. **Episodic Memory** - Conversation history (SQLite, persistent)
-3. **Semantic Memory** - Embeddings (Qdrant, searchable)
-4. **Graph Memory** - Relationships (Neo4j-like SQLite, queryable)
+3. **Semantic Memory** - Embeddings (LanceDB, searchable)
+4. **Graph Memory** - Relationships (SQLite-backed GraphMemoryTier, queryable)
 5. **Lineage Memory** - Decision history (SQLite, auditable)
 
 ### Health Monitoring

@@ -1,4 +1,5 @@
 """Tests for provider registry, discovery, and mock inference."""
+
 import pytest
 
 from velune.core.types.inference import InferenceRequest, InferenceResponse
@@ -27,6 +28,7 @@ async def test_anthropic_model_ids_are_current(monkeypatch):
 
 def test_groq_models_are_free():
     from velune.providers.adapters.groq import GROQ_MODELS
+
     assert len(GROQ_MODELS) > 0
     for m in GROQ_MODELS:
         assert m.free_tier is True, f"{m.model_id} missing free_tier=True"
@@ -38,6 +40,7 @@ def test_groq_models_are_free():
 async def test_groq_discovery_skips_without_key(monkeypatch):
     monkeypatch.setattr("velune.providers.keystore.has_key", lambda x: False)
     from velune.providers.discovery.groq import GroqDiscovery
+
     result = await GroqDiscovery().discover()
     assert result == []
 

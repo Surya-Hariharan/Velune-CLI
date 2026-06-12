@@ -45,47 +45,16 @@ _startup_mark("cli.app imported (typer/rich/runtime ready)")
 
 
 def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
-    banner = """
-██╗   ██╗███████╗██╗     ██╗   ██╗███╗   ██╗███████╗
-██║   ██║██╔════╝██║     ██║   ██║████╗  ██║██╔════╝
-██║   ██║█████╗  ██║     ██║   ██║██╔██╗ ██║█████╗
-╚██╗ ██╔╝██╔══╝  ██║     ██║   ██║██║╚██╗██║██╔══╝
- ╚████╔╝ ███████╗███████╗╚██████╔╝██║ ╚████║███████╗
-  ╚═══╝  ╚══════╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
-""".strip("\n")
-
-    frames: list[Panel] = []
-    lines = banner.splitlines()
-    for index in range(1, len(lines) + 1):
-        body = "\n".join(lines[:index])
-        if index == len(lines):
-            body += (
-                "\n\n[bold cyan]Welcome to Velune CLI![/bold cyan]\n[dim]v"
-                + __version__
-                + "[/dim]\n\n[bold]What would you like to build today?[/bold]"
-            )
-        frames.append(
-            Panel(
-                Text.from_markup(body),
-                title="Velune",
-                border_style="cyan",
-                padding=(1, 2),
-            )
-        )
-
-    frames.append(
-        Panel(
-            Text.from_markup(
-                "[bold cyan]Welcome to Velune CLI![/bold cyan]\n"
-                f"[dim]v{__version__}[/dim]\n\n"
-                "[bold]What would you like to build today?[/bold]"
-            ),
-            title="Velune",
-            border_style="cyan",
-            padding=(1, 2),
-        )
+    body = (
+        f"[bold cyan]Velune[/bold cyan] [dim]v{__version__}[/dim] · "
+        "[green]Local-first AI Orchestrator[/green]"
     )
-    return frames
+    frame = Panel(
+        Text.from_markup(body),
+        border_style="cyan",
+        padding=(0, 2),
+    )
+    return [frame]
 
 
 def _show_startup_banner(console: Console, workspace: Path, config_path: Path | None) -> None:
@@ -139,7 +108,9 @@ def create_app() -> typer.Typer:
 
                 print(json.dumps({"version": __version__}))
             else:
-                Console().print(f"Velune v{__version__}")
+                Console().print(
+                    f"[bold cyan]velune[/bold cyan] version [green]{__version__}[/green]"
+                )
             raise typer.Exit()
 
         # Developers can opt into full internal logs with --verbose/-v.

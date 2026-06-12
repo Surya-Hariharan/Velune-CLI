@@ -224,7 +224,7 @@ class RepositoryPersonalityAgent:
             docstring_style = "Google"
 
         # Filter external packages/preferred constructs (exclude standard short names or project local parts if wanted)
-        preferred = sorted(list(visitor.imports))[:8]
+        preferred = sorted(visitor.imports)[:8]
 
         return {
             "naming_conventions": {

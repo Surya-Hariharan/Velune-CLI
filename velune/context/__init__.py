@@ -7,6 +7,7 @@ from velune.context.assembler import ContextAssembler
 from velune.context.budget import ContextBudget
 from velune.context.sections import ContextAssemblyReport, ContextChunk, ContextSection
 from velune.context.token_counter import TokenCounter
+from velune.context.utilization import ContextUtilizationTracker
 from velune.context.window import ContextWindowTracker, estimate_tokens
 
 __all__ = [
@@ -22,4 +23,6 @@ __all__ = [
     # Legacy window tracking
     "ContextWindowTracker",
     "estimate_tokens",
+    # Context utilization
+    "ContextUtilizationTracker",
 ]

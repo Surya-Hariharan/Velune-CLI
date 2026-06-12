@@ -15,7 +15,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import mcp.server.stdio
 from mcp.server import Server
@@ -137,8 +137,8 @@ class VeluneMCPServer:
         if self._council_orchestrator is None:
             try:
                 from velune.cognition.council_orchestrator import CouncilOrchestrator
-                from velune.providers.registry import ProviderRegistry
                 from velune.models.specializations import ModelSpecializationMapper
+                from velune.providers.registry import ProviderRegistry
 
                 registry = ProviderRegistry()
                 mapper = ModelSpecializationMapper()
@@ -335,7 +335,7 @@ class VeluneMCPServer:
     ) -> dict[str, Any]:
         """Search memory for relevant interactions."""
         try:
-            workspace = self._validator.validate(workspace_path or str(self.workspace_path))
+            self._validator.validate(workspace_path or str(self.workspace_path))
         except ValueError as e:
             return {"error": str(e), "results": []}
 
@@ -349,7 +349,7 @@ class VeluneMCPServer:
     ) -> dict[str, Any]:
         """Get code symbols from repository."""
         try:
-            workspace = self._validator.validate(workspace_path or str(self.workspace_path))
+            self._validator.validate(workspace_path or str(self.workspace_path))
         except ValueError as e:
             return {"error": str(e), "symbols": []}
 
@@ -399,7 +399,7 @@ class VeluneMCPServer:
     ) -> dict[str, Any]:
         """Estimate impact of changing a file."""
         try:
-            workspace = self._validator.validate(workspace_path or str(self.workspace_path))
+            self._validator.validate(workspace_path or str(self.workspace_path))
         except ValueError as e:
             return {"error": str(e)}
 
@@ -433,6 +433,138 @@ class VeluneMCPServer:
             logger.error("velune_estimate_blast_radius failed: %s", e)
             return {"error": str(e)}
 
+    def get_tools_list(self) -> list[dict[str, Any]]:
+        """Return a list of all registered tools with their schemas (for testing/APIs)."""
+        tools = [
+            {
+                "name": "velune_ask",
+                "description": "Ask Velune about your repository",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Question about the repository",
+                        },
+                        "workspace_path": {
+                            "type": "string",
+                            "description": "Path to repository (optional)",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            },
+            {
+                "name": "velune_search_memory",
+                "description": "Search Velune's memory for relevant past interactions",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "workspace_path": {"type": "string"},
+                        "limit": {"type": "integer", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "velune_get_symbols",
+                "description": "Get code symbols (functions, classes) from the repository",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_path": {"type": "string"},
+                        "name_pattern": {"type": "string", "description": "Optional regex"},
+                    },
+                },
+            },
+            {
+                "name": "velune_estimate_blast_radius",
+                "description": "Estimate impact of changing a file on the codebase",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_path": {"type": "string"},
+                        "file_path": {"type": "string"},
+                    },
+                    "required": ["file_path"],
+                },
+            },
+        ]
+        if self.tool_registry:
+            for schema in self.tool_registry.list_tool_schemas():
+                tools.append({
+                    "name": schema["name"],
+                    "description": schema["description"],
+                    "inputSchema": schema["schema"],
+                })
+        return tools
+
+    async def handle_json_rpc_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Process a JSON-RPC request (for testing/APIs)."""
+        method = request.get("method")
+        req_id = request.get("id")
+        params = request.get("params", {})
+
+        if not self._rate_limiter.is_allowed():
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32000,
+                    "message": "Rate limit exceeded — too many tool calls per minute.",
+                }
+            }
+
+        if method == "velune_ask":
+            res = await self._velune_ask(
+                params.get("prompt", ""),
+                params.get("workspace_path"),
+            )
+            return {"jsonrpc": "2.0", "id": req_id, "result": res}
+        elif method == "velune_search_memory":
+            res = await self._velune_search_memory(
+                params.get("query", ""),
+                params.get("workspace_path"),
+                params.get("limit", 5),
+            )
+            return {"jsonrpc": "2.0", "id": req_id, "result": res}
+        elif method == "velune_get_symbols":
+            res = await self._velune_get_symbols(
+                params.get("workspace_path"),
+                params.get("name_pattern"),
+            )
+            return {"jsonrpc": "2.0", "id": req_id, "result": res}
+        elif method == "velune_estimate_blast_radius":
+            res = await self._velune_estimate_blast_radius(
+                params.get("workspace_path"),
+                params.get("file_path"),
+            )
+            return {"jsonrpc": "2.0", "id": req_id, "result": res}
+        elif self.tool_registry and self.tool_registry.get(method):
+            tool = self.tool_registry.get(method)
+            try:
+                res = await tool.execute(**params)
+                return {"jsonrpc": "2.0", "id": req_id, "result": res}
+            except Exception as e:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -32603,
+                        "message": str(e),
+                    }
+                }
+        else:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32601,
+                    "message": f"Method not found: {method}",
+                }
+            }
+
     async def run_stdio(self) -> None:
         """Run MCP server over stdio (for Claude Desktop)."""
         logger.info("Starting Velune MCP server (stdio)")
@@ -450,7 +582,6 @@ class VeluneMCPServer:
         logger.info(f"Starting Velune MCP server (HTTP on {host}:{port})")
         try:
             from aiohttp import web
-            from mcp.server.models import InitializationOptions
 
             async def handle_sse(request):
                 """Handle SSE transport."""

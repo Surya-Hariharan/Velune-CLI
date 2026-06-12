@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from unittest.mock import AsyncMock
 
 import pytest
 
+from velune.retrieval.cache import RetrievalCache
 from velune.retrieval.pipeline import (
     ContextBudget,
     ContextChunk,
@@ -15,7 +15,6 @@ from velune.retrieval.pipeline import (
     TaskProfile,
 )
 from velune.retrieval.reranker import CrossEncoderReranker
-from velune.retrieval.cache import RetrievalCache
 
 
 @pytest.fixture
@@ -85,7 +84,8 @@ def budget():
     return ContextBudget(
         total_tokens=100000,
         retrieval_allocation=10000,
-        max_per_chunk=500,
+        working_memory_allocation=20000,
+        output_reservation=1000,
     )
 
 
@@ -178,7 +178,9 @@ async def test_reranking(pipeline, budget):
 @pytest.mark.asyncio
 async def test_token_budget_fitting(pipeline, budget):
     """Test: Results fit within token budget."""
-    budget.retrieval_allocation = 200
+    import dataclasses
+
+    budget = dataclasses.replace(budget, retrieval_allocation=200)
 
     task = TaskProfile(task_type="GENERAL", complexity="LOW")
 
@@ -191,13 +193,14 @@ async def test_token_budget_fitting(pipeline, budget):
     assert result.total_tokens <= budget.retrieval_allocation
 
 
-def test_cache_lru_eviction():
+@pytest.mark.asyncio
+async def test_cache_lru_eviction():
     """Test: Cache evicts LRU entries when full."""
     cache = RetrievalCache()
     cache.MAX_ENTRIES = 3
 
     for i in range(4):
-        cache._cache[f"key{i}"] = (f"result{i}", time.time())
+        await cache.set(f"key{i}", f"result{i}")
 
     assert len(cache._cache) == 3
     assert "key0" not in cache._cache

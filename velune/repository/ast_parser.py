@@ -1,4 +1,15 @@
-"""Tree-sitter-based AST parsing for symbol extraction."""
+"""Tree-sitter-based AST parsing for symbol extraction.
+
+Tree-sitter ships compiled C extensions (.pyd/.so).  Importing them at module
+load time forces Windows to load several DLLs synchronously — each triggering
+a Defender real-time scan — adding seconds to *every* startup, even when no
+parsing is requested.  We therefore defer all tree-sitter imports until the
+first actual parse via ``_ensure_tree_sitter()``.
+
+``HAS_TREE_SITTER`` starts ``None`` (unknown) and becomes ``True``/``False``
+after the first lazy load attempt.  It remains importable for callers/tests
+that reference it, but no import cost is paid until parsing happens.
+"""
 
 from __future__ import annotations
 
@@ -8,11 +19,54 @@ import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from tree_sitter import Language, Parser, Tree
+if TYPE_CHECKING:
+    from tree_sitter import Tree
 
 logger = logging.getLogger("velune.repository.ast_parser")
+
+# ---------------------------------------------------------------------------
+# Lazy tree-sitter loader — no DLL cost until first parse
+# ---------------------------------------------------------------------------
+
+#: ``None`` = not yet probed; ``True`` = available; ``False`` = unavailable.
+HAS_TREE_SITTER: bool | None = None
+_TS_LANGUAGES: dict[str, Any] = {}
+# We do NOT cache a singleton Parser — each parse invocation creates a fresh
+# Parser (cheap object) and sets its language, which is safe in a thread pool.
+_TS_PARSER_CLS: Any = None  # tree_sitter.Parser class, set after lazy load
+
+
+def _ensure_tree_sitter() -> bool:
+    """Lazily import tree-sitter grammars on first use.  Returns availability."""
+    global HAS_TREE_SITTER, _TS_PARSER_CLS
+    if HAS_TREE_SITTER is not None:
+        return HAS_TREE_SITTER
+    try:
+        import tree_sitter_go
+        import tree_sitter_python
+        import tree_sitter_rust
+        import tree_sitter_typescript
+        from tree_sitter import Language, Parser
+
+        _TS_PARSER_CLS = Parser
+        for lang_name, factory in (
+            ("python", tree_sitter_python.language),
+            ("typescript", tree_sitter_typescript.language_typescript),
+            ("javascript", tree_sitter_typescript.language_typescript),
+            ("go", tree_sitter_go.language),
+            ("rust", tree_sitter_rust.language),
+        ):
+            try:
+                lang_obj = Language(factory())
+                _TS_LANGUAGES[lang_name] = lang_obj
+            except Exception as exc:
+                logger.debug("Failed to load %s grammar: %s", lang_name, exc)
+        HAS_TREE_SITTER = True
+    except ImportError:
+        HAS_TREE_SITTER = False
+    return HAS_TREE_SITTER
 
 
 class SymbolKind(StrEnum):
@@ -70,39 +124,52 @@ class ASTParser:
     def __init__(self, languages: list[str] | None = None) -> None:
         """Initialize parser with language grammars.
 
+        Grammars are loaded lazily on first call to :meth:`parse_file` via
+        :func:`_ensure_tree_sitter`.  This avoids Windows Defender DLL scans
+        at startup when no parsing will be performed.
+
         Args:
-            languages: List of language names (python, javascript, typescript, rust, go)
-                      If None, defaults to all supported languages.
+            languages: List of language names (python, javascript, typescript,
+                       rust, go).  If None, defaults to all supported languages.
         """
-        if languages is None:
-            languages = list(self.LANGUAGE_MAP.keys())
+        self._requested_languages: list[str] = (
+            list(self.LANGUAGE_MAP.keys()) if languages is None else languages
+        )
+        # languages and parser are populated lazily by _ensure_loaded()
+        self.languages: dict[str, Any] = {}
+        self.parser: Any = None
+        self._loaded: bool = False
 
-        self.parser = Parser()
-        self.languages: dict[str, Language] = {}
+    def _ensure_loaded(self) -> bool:
+        """Populate ``self.languages`` from the lazy cache.
 
-        for lang in languages:
-            try:
+        Returns True if at least one grammar is available.
+        """
+        if self._loaded:
+            return bool(self.languages)
+        self._loaded = True
+        if _ensure_tree_sitter():
+            # Restrict to languages the caller requested
+            for lang in self._requested_languages:
                 lang_lower = lang.lower()
-                if lang_lower not in self.LANGUAGE_MAP:
-                    logger.warning(f"Language {lang} not supported, skipping")
-                    continue
-
-                module_name = self.LANGUAGE_MAP[lang_lower]
-                lang_obj = Language(module_name)
-                self.languages[lang_lower] = lang_obj
-                logger.debug(f"Loaded grammar for {lang}")
-            except Exception as e:
-                logger.error(f"Failed to load grammar for {lang}: {e}")
+                if lang_lower in _TS_LANGUAGES:
+                    self.languages[lang_lower] = _TS_LANGUAGES[lang_lower]
+        return bool(self.languages)
 
     async def parse_file(self, path: Path) -> ParsedFile | None:
         """Parse a file asynchronously without blocking event loop.
 
-        Runs the parse operation in a thread pool.
+        Grammars are loaded on first call (lazy).  Runs the actual parse in a
+        thread pool to avoid blocking the event loop.
         """
         try:
             # Detect language from file extension
             language = self._detect_language(path)
-            if not language or language not in self.languages:
+            if not language:
+                return None
+
+            # Trigger lazy grammar load on first call
+            if not self._ensure_loaded() or language not in self.languages:
                 return None
 
             # Read file content
@@ -120,6 +187,11 @@ class ASTParser:
             if not tree:
                 return ParsedFile(path, language, [], error="Parse failed")
 
+            try:
+                rel_path = str(path.relative_to(Path.cwd()))
+            except ValueError:
+                rel_path = path.name
+
             # Extract symbols in thread
             symbols = await loop.run_in_executor(
                 None,
@@ -127,7 +199,7 @@ class ASTParser:
                 tree,
                 source,
                 language,
-                str(path.relative_to(Path.cwd())),
+                rel_path,
             )
 
             return ParsedFile(path, language, symbols)
@@ -136,14 +208,19 @@ class ASTParser:
             logger.error(f"Error parsing {path}: {e}")
             return None
 
-    def _parse_sync(self, source: str, language: str) -> Tree | None:
-        """Synchronous parse operation (run in executor)."""
-        if language not in self.languages:
+    def _parse_sync(self, source: str, language: str) -> Any:
+        """Synchronous parse operation (run in executor).
+
+        Creates a fresh tree_sitter.Parser per call to avoid language-switching
+        races when multiple files are parsed concurrently in the thread pool.
+        """
+        if not _TS_PARSER_CLS or language not in self.languages:
             return None
 
         try:
-            self.parser.set_language(self.languages[language])
-            tree = self.parser.parse(source.encode("utf-8"))
+            p = _TS_PARSER_CLS()
+            p.language = self.languages[language]
+            tree = p.parse(source.encode("utf-8"))
             return tree
         except Exception as e:
             logger.debug(f"Parse error: {e}")
@@ -356,7 +433,7 @@ class ASTParser:
                 # Extract what's being exported
                 for child in node.children:
                     if child.type in ("function_declaration", "class_declaration"):
-                        sym_inner = visit(child)
+                        visit(child)
 
             for child in node.children:
                 visit(child)

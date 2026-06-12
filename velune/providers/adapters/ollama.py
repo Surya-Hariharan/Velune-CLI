@@ -40,8 +40,46 @@ class OllamaProvider(ModelProvider):
         if not self.client:
             self.client = httpx.AsyncClient(base_url=self._base_url, timeout=300.0)
 
+    async def _get_model_context_length(self, model_name: str) -> int:
+        """Query /api/show for the model's actual context window size.
+
+        Ollama's ``/api/show`` returns a ``parameters`` string that may contain
+        a line like ``num_ctx                        131072``.  We parse that to
+        get the real context length instead of hard-coding 8192.
+
+        Falls back to 8 192 if the endpoint is unreachable, the model is not
+        loaded, or the field is absent.
+        """
+        assert self.client is not None
+        try:
+            resp = await self.client.post("/api/show", json={"name": model_name})
+            if resp.status_code != 200:
+                return 8192
+            data = resp.json()
+            # ``parameters`` is a newline-delimited string of key-value pairs
+            params_str: str = data.get("parameters", "")
+            for line in params_str.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[0].lower() == "num_ctx":
+                    try:
+                        return int(parts[1])
+                    except ValueError:
+                        pass
+            # Fallback: check model_info dict returned by newer Ollama builds
+            model_info: dict = data.get("model_info", {})
+            for key, value in model_info.items():
+                if "context" in key.lower() and isinstance(value, int) and value > 0:
+                    return value
+        except Exception as exc:
+            logger.debug("Could not fetch context length for %s: %s", model_name, exc)
+        return 8192
+
     async def list_models(self) -> list[ModelDescriptor]:
-        """Fetch models from active Ollama endpoint."""
+        """Fetch models from active Ollama endpoint with accurate context lengths.
+
+        Queries ``/api/show`` for each model to populate the real ``num_ctx``
+        value instead of defaulting every model to 8 192 tokens.
+        """
         await self.initialize()
         assert self.client is not None
         try:
@@ -51,12 +89,14 @@ class OllamaProvider(ModelProvider):
 
             descriptors: list[ModelDescriptor] = []
             for item in data.get("models", []):
+                model_name = item["name"]
+                ctx_len = await self._get_model_context_length(model_name)
                 descriptors.append(
                     ModelDescriptor(
-                        model_id=item["name"],
-                        display_name=item["name"],
+                        model_id=model_name,
+                        display_name=model_name,
                         provider_id="ollama",
-                        context_length=8192,
+                        context_length=ctx_len,
                         capabilities={
                             "coding": CapabilityLevel.INTERMEDIATE,
                             "reasoning": CapabilityLevel.INTERMEDIATE,
@@ -66,7 +106,11 @@ class OllamaProvider(ModelProvider):
                             "instruction_following": CapabilityLevel.INTERMEDIATE,
                             "multimodal": CapabilityLevel.NONE,
                             "tool_use": CapabilityLevel.NONE,
-                            "long_context": CapabilityLevel.NONE,
+                            "long_context": (
+                                CapabilityLevel.INTERMEDIATE
+                                if ctx_len > 32768
+                                else CapabilityLevel.NONE
+                            ),
                         },
                         is_local=True,
                     )

@@ -30,6 +30,10 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("delete", "Delete a locally installed Ollama model"),
     ("remove", "Delete a locally installed Ollama model"),
     ("rm", "Delete a locally installed Ollama model"),
+    ("graph", "Render a hierarchical tree of knowledge graph entities"),
+    ("bench", "View or run empirical model capability benchmarks"),
+    ("config", "Show current system configuration settings"),
+    ("history", "Show REPL command execution history"),
 ]
 
 _MODEL_PREFIX = "/model "

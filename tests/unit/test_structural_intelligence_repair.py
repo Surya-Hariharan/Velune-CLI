@@ -1,15 +1,15 @@
 """Unit tests for Velune Blast Radius & Structural Intelligence Phase 1."""
 
-import asyncio
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
+
 import pytest
 
-from velune.kernel.registry import get_container
 from velune.cognition.arbitrator import CouncilArbitrator
 from velune.cognition.council.tiers import CouncilTier, TierClassifier
 from velune.cognition.orchestrator import CouncilOrchestrator
+from velune.kernel.registry import get_container
 from velune.models.specializations import ModelSpecializationMapper
 from velune.providers.registry import ProviderRegistry
 
@@ -17,7 +17,7 @@ from velune.providers.registry import ProviderRegistry
 def test_shi_arbitration_thresholds() -> None:
     """Verify that low SHI values scale up required confidence thresholds dynamically."""
     arbitrator = CouncilArbitrator()
-    
+
     # 1. Without SHI (default threshold 0.55)
     # Deliberation details that passed reviews and have decent logic/confidence scores
     reviewer_report_pass = MagicMock()
@@ -56,7 +56,7 @@ def test_shi_arbitration_thresholds() -> None:
         coder_proposal="print('hello')",
         reviewer_report=reviewer_report_fail,
         challenger_report=challenger_report_fail,
-        shi=0.70, # elevates threshold to 0.65
+        shi=0.70,  # elevates threshold to 0.65
     )
     assert res_mod_shi.overall_confidence < 0.65
     assert res_mod_shi.requires_human_review is True
@@ -66,7 +66,7 @@ def test_fan_in_tier_escalation() -> None:
     """Verify that high fan-in files escalate the council tier floor safely."""
     # Build a simulated repository graph and registry
     container = get_container()
-    
+
     # Backup original registration
     has_cognition = container.has("runtime.repository_cognition")
     original_cognition = container.get("runtime.repository_cognition") if has_cognition else None
@@ -75,7 +75,7 @@ def test_fan_in_tier_escalation() -> None:
         repo_service = MagicMock()
         grapher = MagicMock()
         repo_service.grapher = grapher
-        
+
         container.register_instance("runtime.repository_cognition", repo_service)
 
         # Mock dependents
@@ -138,7 +138,7 @@ def test_lightweight_blast_radius_computation() -> None:
     """Verify estimate_blast_radius executes attenuation-weighted estimations correctly."""
     # Build a simulated repository graph and registry
     container = get_container()
-    
+
     # Backup original registration
     has_cognition = container.has("runtime.repository_cognition")
     original_cognition = container.get("runtime.repository_cognition") if has_cognition else None
@@ -147,16 +147,16 @@ def test_lightweight_blast_radius_computation() -> None:
         repo_service = MagicMock()
         grapher = MagicMock()
         repo_service.grapher = grapher
-        
+
         container.register_instance("runtime.repository_cognition", repo_service)
 
         # Mock relative path converter
         grapher._to_rel_path.side_effect = lambda x: x
-        
+
         # Create mock orchestrator
         providers = MagicMock(spec=ProviderRegistry)
         mapper = MagicMock(spec=ModelSpecializationMapper)
-        
+
         with tempfile.TemporaryDirectory() as temp_dir:
             orchestrator = CouncilOrchestrator(
                 provider_registry=providers,
@@ -204,7 +204,7 @@ def test_advanced_structural_change_detection() -> None:
     """Verify that core files and high fan-in targets are detected as structural changes."""
     # Build a simulated repository graph and registry
     container = get_container()
-    
+
     # Backup original registration
     has_cognition = container.has("runtime.repository_cognition")
     original_cognition = container.get("runtime.repository_cognition") if has_cognition else None
@@ -213,13 +213,13 @@ def test_advanced_structural_change_detection() -> None:
         repo_service = MagicMock()
         grapher = MagicMock()
         repo_service.grapher = grapher
-        
+
         container.register_instance("runtime.repository_cognition", repo_service)
 
         # Create mock orchestrator
         providers = MagicMock(spec=ProviderRegistry)
         mapper = MagicMock(spec=ModelSpecializationMapper)
-        
+
         with tempfile.TemporaryDirectory() as temp_dir:
             orchestrator = CouncilOrchestrator(
                 provider_registry=providers,
@@ -239,14 +239,20 @@ def test_advanced_structural_change_detection() -> None:
             assert orchestrator._is_structural_change("Fix typo in helper.py", "context") is False
 
             # 2. Target Core match must be structural (True)
-            assert orchestrator._is_structural_change("Update velune/core/main.py", "context") is True
-            assert orchestrator._is_structural_change("Tweak velune/kernel/bus.py", "context") is True
+            assert (
+                orchestrator._is_structural_change("Update velune/core/main.py", "context") is True
+            )
+            assert (
+                orchestrator._is_structural_change("Tweak velune/kernel/bus.py", "context") is True
+            )
 
             # 3. High fan-in file match must be structural (True)
             assert orchestrator._is_structural_change("Edit high_coupled.py", "context") is True
 
             # 4. Keyword structural indicators fallback (True)
-            assert orchestrator._is_structural_change("Redesign the state routing", "context") is True
+            assert (
+                orchestrator._is_structural_change("Redesign the state routing", "context") is True
+            )
 
     finally:
         # Restore container registration

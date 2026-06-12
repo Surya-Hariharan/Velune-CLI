@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_python_file(path: Path, index: int) -> None:
     """Write a synthetic Python file with a unique function."""
@@ -73,6 +73,7 @@ def _run(coro) -> object:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def workspace(tmp_path: Path) -> Path:
     """Create a workspace with 100 Python files and an initial git commit."""
@@ -92,6 +93,7 @@ def workspace(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_first_pass_completes_within_10_seconds(workspace: Path) -> None:
     """First indexing of 100 files must finish in under 10 seconds."""

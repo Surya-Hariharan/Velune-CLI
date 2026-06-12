@@ -6,7 +6,6 @@ preserving key facts while dramatically reducing token count.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -156,7 +155,7 @@ class ContextCompactor:
 
         # Validate summary quality
         if not self._validate_summary(summary, original_token_count):
-            logger.warning(f"Summary failed quality check")
+            logger.warning("Summary failed quality check")
             return None
 
         # Store summary in episodic memory

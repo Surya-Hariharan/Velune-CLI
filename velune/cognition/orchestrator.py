@@ -440,16 +440,14 @@ class CouncilOrchestrator:
 
         try:
             from velune.telemetry.cost_estimator import CostEstimator
-            from velune.providers.registry import ProviderRegistry
 
             # Resolve the registry to find which cloud model will be used
-            registry: ProviderRegistry | None = None
             try:
                 from velune.kernel.registry import get_container
 
                 container = get_container()
                 if container.has("runtime.provider_registry"):
-                    registry = container.get("runtime.provider_registry")
+                    container.get("runtime.provider_registry")
             except Exception:
                 pass
 
@@ -960,7 +958,7 @@ class CouncilOrchestrator:
                         if re_tasks:
                             raw_re_results = await asyncio.gather(*re_tasks, return_exceptions=True)
                             re_results = []
-                            for name, res in zip(re_critics, raw_re_results):
+                            for name, res in zip(re_critics, raw_re_results, strict=False):
                                 if isinstance(res, Exception):
                                     if name == "reviewer":
                                         res = ReviewerMessage(
@@ -979,7 +977,7 @@ class CouncilOrchestrator:
                                         )
                                 re_results.append(res)
 
-                            for name, res in zip(re_critics, re_results):
+                            for name, res in zip(re_critics, re_results, strict=False):
                                 if name == "reviewer":
                                     reviewer_report = res
                                 elif name == "scalability":
@@ -992,7 +990,7 @@ class CouncilOrchestrator:
                                     maintainability_report = res
 
                             all_passed_with_high_score = True
-                            for name, res in zip(re_critics, re_results):
+                            for name, res in zip(re_critics, re_results, strict=False):
                                 score = (
                                     res.confidence_rating
                                     if name == "reviewer"
@@ -1009,7 +1007,7 @@ class CouncilOrchestrator:
                                 break
 
                             new_objections = []
-                            for name, res in zip(re_critics, re_results):
+                            for name, res in zip(re_critics, re_results, strict=False):
                                 if not res.passed:
                                     if name == "reviewer":
                                         new_objections.append(f"Reviewer: {res.critical_issues}")

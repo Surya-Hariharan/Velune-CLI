@@ -175,7 +175,7 @@ class ProviderRouter:
             for m in qualified
             if getattr(m, "is_local", False) or m.provider_id in _LOCAL_PROVIDER_IDS
         ]
-        cloud_models = [m for m in qualified if m not in local_models]
+        [m for m in qualified if m not in local_models]
 
         # Get best score from all models
         best_score = self._get_task_score(qualified[0], task_category)

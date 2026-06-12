@@ -7,8 +7,10 @@ budget across retrieval, working memory, and system overhead.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from velune.cli.modes import SessionMode
+if TYPE_CHECKING:
+    from velune.cli.modes import SessionMode
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,8 @@ class ContextBudget:
         Returns:
             ContextBudget with allocations tuned to the mode's constraints
         """
+        from velune.cli.modes import SessionMode
+
         # Phase 1: Determine total usable tokens based on mode
         if mode == SessionMode.OPTIMUS:
             total = min(4096, model_context_window)

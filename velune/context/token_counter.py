@@ -45,10 +45,10 @@ class TokenCounter:
             return 0
 
         # Detect model family if not specified
-        family = detect_family(model.model_id, model.family)
+        family = detect_family(model.model_id)
 
         # OpenAI-family models: use tiktoken for accuracy
-        if family in (ModelFamily.CLAUDE, ModelFamily.OPENAI, ModelFamily.GPT):
+        if family in (ModelFamily.CLAUDE, ModelFamily.GPT):
             return TokenCounter._count_openai_family(text, model.model_id)
 
         # Other families: conservative heuristic

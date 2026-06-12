@@ -1,6 +1,5 @@
-import pytest
-import time
 import threading
+import time
 
 from velune.retrieval.keyword import BM25Retriever
 from velune.retrieval.schemas import RetrievalDocument
@@ -17,13 +16,13 @@ def test_add_documents_does_not_rebuild_immediately():
     start = time.time()
     for doc in docs:
         retriever.add_documents([doc])
-    elapsed_add = time.time() - start
+    time.time() - start
 
     assert retriever.bm25 is None  # Not built yet
     assert retriever._dirty
 
     # Retrieve triggers build
-    results = retriever.retrieve("document 50")
+    retriever.retrieve("document 50")
     assert retriever.bm25 is not None  # Now built
     assert not retriever._dirty
 
@@ -40,16 +39,16 @@ def test_add_1000_docs_fast(benchmark):
         for doc in docs:
             retriever.add_documents([doc])
 
-    result = benchmark(add_all)
+    benchmark(add_all)
     # Pytest-benchmark will report time
 
 
 def test_concurrent_retrieve_no_multiple_rebuilds():
     """Concurrent retrieve() calls must trigger only one rebuild."""
     retriever = BM25Retriever()
-    retriever.add_documents([
-        RetrievalDocument(id="d1", content="test document", namespace="default")
-    ])
+    retriever.add_documents(
+        [RetrievalDocument(id="d1", content="test document", namespace="default")]
+    )
 
     rebuild_count = [0]
     original_rebuild = retriever._ensure_index
@@ -60,10 +59,7 @@ def test_concurrent_retrieve_no_multiple_rebuilds():
 
     retriever._ensure_index = counted_rebuild
 
-    threads = [
-        threading.Thread(target=lambda: retriever.retrieve("test"))
-        for _ in range(10)
-    ]
+    threads = [threading.Thread(target=lambda: retriever.retrieve("test")) for _ in range(10)]
     for t in threads:
         t.start()
     for t in threads:

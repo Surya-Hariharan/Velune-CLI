@@ -94,7 +94,7 @@ class ModelProfiler:
         capabilities = getattr(descriptor, "capabilities", None)
         if capabilities and hasattr(capabilities, "tool_use") and metrics.json_validity < 0.5:
             # Degrade tool use if model repeatedly fails structure test
-            setattr(capabilities, "tool_use", CapabilityLevel.NONE)
+            capabilities.tool_use = CapabilityLevel.NONE
 
         return profile
 

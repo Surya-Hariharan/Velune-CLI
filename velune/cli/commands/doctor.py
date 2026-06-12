@@ -18,6 +18,34 @@ console = Console()
 doctor_cmd = typer.Typer(help="Environment health diagnostics")
 
 
+@doctor_cmd.callback(invoke_without_command=True)
+def doctor_main(
+    ctx: typer.Context,
+    perf: bool = typer.Option(False, "--perf", help="Check startup performance"),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
+) -> None:
+    """Callback for doctor command group to enable startup performance diagnostics."""
+    if ctx.invoked_subcommand is None:
+        if perf:
+            import time
+            from velune.core.startup_profiler import _PROCESS_START
+            startup_time_ms = (time.perf_counter() - _PROCESS_START) * 1000.0
+            
+            if json_output:
+                import json
+                print(json.dumps({
+                    "startup_time_ms": round(startup_time_ms, 2),
+                    "status": "ok" if startup_time_ms < 3000 else "fail"
+                }))
+            else:
+                status = "OK" if startup_time_ms < 3000 else "FAIL"
+                console.print(f"Startup performance: {startup_time_ms:.2f}ms [{status}]")
+            raise typer.Exit()
+        else:
+            console.print(ctx.get_help())
+            raise typer.Exit()
+
+
 @doctor_cmd.command(name="providers")
 def show_providers() -> None:
     """Show provider health and capability status."""
@@ -586,8 +614,9 @@ def _check_session_cost() -> dict:
 
 
 def _check_memory_health() -> dict:
-    from velune.core.paths import cognitive_db_path, lancedb_store_path
     import os
+
+    from velune.core.paths import cognitive_db_path, lancedb_store_path
 
     workspace = Path.cwd()
 
@@ -619,22 +648,67 @@ def _check_memory_health() -> dict:
 
 
 def _render_results(results: list) -> None:
-    table = Table(title="Velune Environment Check", show_header=True)
-    table.add_column("Check", style="bold")
-    table.add_column("Status")
-    table.add_column("Details")
+    from velune.cli import theme
+
+    table = Table(title="Velune Environment Diagnostics", show_header=True, expand=True)
+    table.add_column("Category", style=f"bold {theme.ACCENT}", width=15)
+    table.add_column("Check", style="bold white", width=30)
+    table.add_column("Status", width=12)
+    table.add_column("Details", style=theme.DIM)
 
     status_styles = {
-        "ok": "[green]✓ OK[/green]",
-        "warn": "[yellow]⚠ WARN[/yellow]",
-        "fail": "[red]✗ FAIL[/red]",
-        "error": "[red]✗ ERROR[/red]",
+        "ok": f"[{theme.SUCCESS}]✓ OK[/{theme.SUCCESS}]",
+        "warn": f"[{theme.WARNING}]⚠ WARN[/{theme.WARNING}]",
+        "fail": f"[{theme.ERROR}]✗ FAIL[/{theme.ERROR}]",
+        "error": f"[{theme.ERROR}]✗ ERROR[/{theme.ERROR}]",
     }
 
-    for result in results:
-        table.add_row(
-            result["name"],
-            status_styles.get(result["status"], result["status"]),
-            result.get("message", ""),
-        )
+    categories_map = {
+        "Internet Connectivity": "Providers",
+        "Ollama Connectivity": "Providers",
+        "Ollama Model Availability": "Providers",
+        "LM Studio Connectivity": "Providers",
+        ".velune Directory Writable": "Storage",
+        "SQLite DB Initializable": "Storage",
+        "Qdrant In-Process Initializable": "Storage",
+        "velune.toml Config File": "Storage",
+        "Memory Subsystem": "Storage",
+        "OpenAI API Key": "Security",
+        "Anthropic API Key": "Security",
+        "Groq": "Security",
+        "Google Gemini": "Security",
+        "Python Version": "Performance",
+        "Core Dependencies": "Performance",
+        "Git in PATH": "Performance",
+        "Tree-sitter Grammars": "Performance",
+        "GPU Detection": "Performance",
+        "Available VRAM": "Performance",
+        "Empirical Model Benchmarks": "Performance",
+        "Session Cost Tracking": "Performance",
+    }
+
+    categories = ["Providers", "Storage", "Security", "Performance"]
+    grouped = {cat: [] for cat in categories}
+
+    for r in results:
+        cat = categories_map.get(r["name"], "Performance")
+        grouped[cat].append(r)
+
+    for cat in categories:
+        cat_results = grouped[cat]
+        if not cat_results:
+            continue
+
+        first = True
+        for result in cat_results:
+            cat_cell = cat if first else ""
+            first = False
+
+            table.add_row(
+                cat_cell,
+                result["name"],
+                status_styles.get(result["status"], result["status"]),
+                result.get("message", ""),
+            )
+
     console.print(table)

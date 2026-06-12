@@ -1,8 +1,9 @@
 """Tests for the inference cancellation primitives."""
 
 import asyncio
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from velune.execution.cancellation import CancellationToken, InferenceGuard
 

@@ -15,12 +15,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from velune.cognition.budget import CouncilExecutionBudget
-from velune.events import CognitiveBus, Event, _HISTORY_MAXLEN
-
+from velune.events import _HISTORY_MAXLEN, CognitiveBus, Event
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_orchestrator():
     """Build a CouncilOrchestrator with all heavy dependencies stubbed."""
@@ -35,6 +35,7 @@ def _make_orchestrator():
     # Tier classifier always returns FULL so debate logic runs
     tier_classifier = MagicMock()
     from velune.cognition.council.tiers import CouncilTier
+
     tier_classifier.classify.return_value = CouncilTier.FULL
     tier_classifier.default_tier_override = None
     orch.tier_classifier = tier_classifier
@@ -83,6 +84,7 @@ def _make_agent_factory(coder_proposal: str = "def foo(): pass"):
     # Reviewer — always rejects
     reviewer = MagicMock()
     from velune.cognition.council.messages import ReviewerMessage
+
     reviewer.review = AsyncMock(
         return_value=ReviewerMessage(
             passed=False,
@@ -143,6 +145,7 @@ def _make_agent_factory(coder_proposal: str = "def foo(): pass"):
 # Test 1: Wall-time timeout → is_timeout=True
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 @pytest.mark.critical
 async def test_execute_task_returns_is_timeout_on_wall_time_exceeded():
@@ -193,14 +196,13 @@ async def test_execute_task_returns_is_timeout_on_wall_time_exceeded():
             budget=budget,
         )
 
-    assert result.get("is_timeout") is True, (
-        f"Expected is_timeout=True, got: {result}"
-    )
+    assert result.get("is_timeout") is True, f"Expected is_timeout=True, got: {result}"
 
 
 # ---------------------------------------------------------------------------
 # Test 2: Debate cycle cap — budget.max_review_cycles=2 wins over calculate_max_debate_turns
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.critical
@@ -225,7 +227,7 @@ async def test_debate_stops_at_budget_max_review_cycles():
     ):
         _fw.return_value.scan_file_for_injection.return_value = {"is_safe": True}
         _fw.return_value.wrap_workspace_content.side_effect = lambda _tag, text: text
-        result = await orch.execute_task(
+        await orch.execute_task(
             prompt="refactor the auth module",
             repo_context="# repo context",
             council_tier="full",
@@ -248,6 +250,7 @@ async def test_debate_stops_at_budget_max_review_cycles():
 # ---------------------------------------------------------------------------
 # Test 3: Event history capped at _HISTORY_MAXLEN after excess emits
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 @pytest.mark.critical

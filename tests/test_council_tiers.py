@@ -1,5 +1,4 @@
 """Tests for council tier classification heuristics."""
-import pytest
 
 from velune.cognition.council.tiers import CouncilTier, classify_task_tier
 

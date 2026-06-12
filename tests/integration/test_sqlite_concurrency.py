@@ -16,10 +16,10 @@ import pytest
 
 from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _make_pool(db_path: Path) -> SQLiteConnectionPool:
     pool = SQLiteConnectionPool(db_path)
@@ -44,6 +44,7 @@ async def _write_one(pool: SQLiteConnectionPool, row_id: int) -> None:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_20_concurrent_writes_no_contention(tmp_path: Path) -> None:
@@ -65,9 +66,8 @@ async def test_20_concurrent_writes_no_contention(tmp_path: Path) -> None:
 
     await pool.shutdown()
 
-    assert errors == [], (
-        f"Expected zero write errors; got {len(errors)}: "
-        + "; ".join(str(e) for e in errors[:3])
+    assert errors == [], f"Expected zero write errors; got {len(errors)}: " + "; ".join(
+        str(e) for e in errors[:3]
     )
     assert elapsed < 2.0, (
         f"20 concurrent writes took {elapsed:.3f}s — expected < 2s. "

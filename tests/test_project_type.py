@@ -1,13 +1,12 @@
 """Tests for the project type detection system."""
 
 import json
+
 import pytest
-from pathlib import Path
 
 from velune.repository.project_type import (
     ProjectType,
     ProjectTypeDetector,
-    PROJECT_SYSTEM_PROMPTS,
 )
 
 
@@ -174,11 +173,13 @@ def test_react_with_typescript(workspace):
 
 def test_all_project_types_have_display_name():
     from velune.repository.project_type import _DISPLAY_NAMES
+
     for pt in ProjectType:
         assert pt in _DISPLAY_NAMES, f"Missing display name for {pt}"
 
 
 def test_all_project_types_have_language():
     from velune.repository.project_type import _LANGUAGE_MAP
+
     for pt in ProjectType:
         assert pt in _LANGUAGE_MAP, f"Missing language for {pt}"

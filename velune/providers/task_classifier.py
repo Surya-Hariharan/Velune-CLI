@@ -122,7 +122,6 @@ class TaskClassifier:
         "main",
         "point",
         "synopsis",
-        "summary",
         "gist",
     }
 
@@ -221,7 +220,7 @@ class TaskClassifier:
         context: dict[str, Any],
     ) -> ComplexityLevel:
         """Estimate task complexity based on prompt and context."""
-        lower = prompt.lower()
+        prompt.lower()
 
         # Short prompts with no code/context => LOW
         if len(prompt) < 50 and total_tokens < 500:

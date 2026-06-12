@@ -36,6 +36,5 @@ def test_asyncio_run_only_in_entrypoint() -> None:
 
     assert not violations, (
         "asyncio.run() found outside the designated entrypoint "
-        f"(velune/kernel/entrypoint.py):\n"
-        + "\n".join(f"  {v}" for v in violations)
+        "(velune/kernel/entrypoint.py):\n" + "\n".join(f"  {v}" for v in violations)
     )

@@ -23,8 +23,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -217,7 +215,7 @@ class EmbeddingPipeline:
             # Wait up to 1 second for an item; loop to check _running flag.
             try:
                 item = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break

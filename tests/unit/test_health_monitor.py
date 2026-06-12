@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from velune.core.types.provider import CapabilityManifest, ProviderHealth
 from velune.providers.health_monitor import ProviderHealthMonitor
@@ -28,7 +29,9 @@ def mock_provider():
 def mock_registry(mock_provider):
     """Create a mock registry."""
     registry = MagicMock(spec=ProviderRegistry)
-    registry.get = MagicMock(side_effect=lambda name: mock_provider if name == "mock_provider" else None)
+    registry.get = MagicMock(
+        side_effect=lambda name: mock_provider if name == "mock_provider" else None
+    )
     return registry
 
 
@@ -85,23 +88,17 @@ def test_latency_recording(mock_registry):
 def test_capability_manifest_is_available(mock_registry):
     """Test CapabilityManifest.is_available property."""
     manifest_healthy = CapabilityManifest(
-        provider_id="test",
-        health=ProviderHealth.HEALTHY,
-        available_models=[]
+        provider_id="test", health=ProviderHealth.HEALTHY, available_models=[]
     )
     assert manifest_healthy.is_available is True
 
     manifest_degraded = CapabilityManifest(
-        provider_id="test",
-        health=ProviderHealth.DEGRADED,
-        available_models=[]
+        provider_id="test", health=ProviderHealth.DEGRADED, available_models=[]
     )
     assert manifest_degraded.is_available is True
 
     manifest_unavailable = CapabilityManifest(
-        provider_id="test",
-        health=ProviderHealth.UNAVAILABLE,
-        available_models=[]
+        provider_id="test", health=ProviderHealth.UNAVAILABLE, available_models=[]
     )
     assert manifest_unavailable.is_available is False
 
@@ -111,14 +108,10 @@ def test_get_all_manifests(mock_registry):
     monitor = ProviderHealthMonitor(mock_registry)
 
     manifest1 = CapabilityManifest(
-        provider_id="provider1",
-        health=ProviderHealth.HEALTHY,
-        available_models=[]
+        provider_id="provider1", health=ProviderHealth.HEALTHY, available_models=[]
     )
     manifest2 = CapabilityManifest(
-        provider_id="provider2",
-        health=ProviderHealth.DEGRADED,
-        available_models=[]
+        provider_id="provider2", health=ProviderHealth.DEGRADED, available_models=[]
     )
 
     monitor._manifests["provider1"] = manifest1

@@ -283,15 +283,21 @@ class TestPromptAdaptationEngine:
             capabilities={},
         )
 
-    def test_get_template_qwen(self, engine: PromptAdaptationEngine, qwen_model: ModelDescriptor) -> None:
+    def test_get_template_qwen(
+        self, engine: PromptAdaptationEngine, qwen_model: ModelDescriptor
+    ) -> None:
         template = engine.get_template(qwen_model)
         assert template == QwenTemplate
 
-    def test_get_template_phi(self, engine: PromptAdaptationEngine, phi_model: ModelDescriptor) -> None:
+    def test_get_template_phi(
+        self, engine: PromptAdaptationEngine, phi_model: ModelDescriptor
+    ) -> None:
         template = engine.get_template(phi_model)
         assert template == PhiTemplate
 
-    def test_get_template_claude(self, engine: PromptAdaptationEngine, claude_model: ModelDescriptor) -> None:
+    def test_get_template_claude(
+        self, engine: PromptAdaptationEngine, claude_model: ModelDescriptor
+    ) -> None:
         template = engine.get_template(claude_model)
         assert template == StandardAPITemplate
 

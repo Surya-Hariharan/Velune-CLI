@@ -606,8 +606,6 @@ class MemoryLifecycleManager:
             return decisions, failures
 
         try:
-            from velune.memory.tiers.lineage import Decision as LineageDecision
-
             # This is a stub; full implementation requires searching lineage by query
             # For now, return empty lists and log the intention.
             logger.debug("Lineage warnings requested for query: %s", query)

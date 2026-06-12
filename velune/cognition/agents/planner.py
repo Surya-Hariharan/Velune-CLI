@@ -76,7 +76,7 @@ class PlannerAgent(BaseCouncilAgent):
             ValueError: If budget exhausted before execution
         """
         if state.is_budget_exhausted():
-            raise ValueError(f"Wall-clock budget exhausted before Planner could run")
+            raise ValueError("Wall-clock budget exhausted before Planner could run")
 
         remaining = state.remaining_budget_seconds()
         timeout = min(state.budget.planner_timeout_seconds, int(remaining))
@@ -132,7 +132,7 @@ class PlannerAgent(BaseCouncilAgent):
             logger.info("Planner completed plan with %d steps", len(task_plan.steps))
             return task_plan
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("Planner timed out after %ds", timeout)
             task_plan = self._create_fallback_plan(task)
             state.set_planner_output(task_plan, retrieved_context)

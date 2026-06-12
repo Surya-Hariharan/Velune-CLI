@@ -1,7 +1,7 @@
 """Tests for configuration loading and override behaviour."""
+
 from pathlib import Path
 
-import pytest
 import toml
 
 from velune.kernel.config import ConfigLoader, VeluneConfig

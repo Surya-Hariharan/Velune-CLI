@@ -42,6 +42,9 @@ class VeluneREPL:
         self._registry = self._build_registry()
         self._apply_role_overrides_to_orchestrator()
         self._episodic_session_id: str | None = None
+        from velune.context.utilization import ContextUtilizationTracker
+
+        self._context_tracker = ContextUtilizationTracker()
 
     # ------------------------------------------------------------------
     # prompt_toolkit session
@@ -60,9 +63,11 @@ class VeluneREPL:
                 "prompt.model": "#606060",  # Subtle gray
                 "prompt.mode": "#d4af37",  # Accent gold
                 "prompt.arrow": "#0087ff",  # Match prefix
-                "ctx.ok": "#606060",  # Subtle
-                "ctx.warn": "#d4af37",  # Warm accent
-                "ctx.danger": "#ff6b6b bold",  # Clear danger
+                "ctx.ok": "#00ff87 bold",  # Green
+                "ctx.warn": "#ffaf00 bold",  # Yellow
+                "ctx.danger": "#ff5f5f bold",  # Red
+                "mode.godly": "#ff00ff bold",  # Magenta
+                "mode.optimus": "#ffaf00 bold",  # Yellow
             }
         )
 
@@ -86,37 +91,37 @@ class VeluneREPL:
         )
 
     def _get_prompt_tokens(self) -> FormattedText:
-
-        from velune.context.window import estimate_tokens
+        from velune.cli.modes import SessionMode
 
         tokens: list[tuple[str, str]] = [("class:prompt.prefix", "velune")]
 
         # Show mode if not default
         if not self._mode_manager.is_normal():
-            label = self._mode_manager.current.value
-            tokens.append(("class:prompt.mode", f"/{label}"))
+            label = self._mode_manager.current.value.upper()
+            if self._mode_manager.current == SessionMode.GODLY:
+                tokens.append(("class:mode.godly", f" [{label}]"))
+            elif self._mode_manager.current == SessionMode.OPTIMUS:
+                tokens.append(("class:mode.optimus", f" [{label}]"))
+            else:
+                tokens.append(("class:prompt.mode", f" [{label}]"))
 
         # Show active model if selected
         if self.active_model:
             tokens.append(("class:prompt.model", f" ({self.active_model.model_id})"))
 
-            # Show context usage only if significant
-            if self._conversation:
-                used = estimate_tokens(" ".join(m["content"] for m in self._conversation))
-                limit = self.active_model.context_length
-                pct = min(used / limit, 1.0) if limit > 0 else 0.0
+            self._context_tracker.max_tokens = self.active_model.context_length
+            self._context_tracker.update(self._conversation)
 
-                # Only show bar if >40% to reduce visual clutter
-                if pct > 0.4:
-                    filled = int(pct * 8)
-                    bar = "█" * filled + "░" * (8 - filled)
-                    if pct < 0.7:
-                        bar_style = "class:ctx.ok"
-                    elif pct < 0.9:
-                        bar_style = "class:ctx.warn"
-                    else:
-                        bar_style = "class:ctx.danger"
-                    tokens.append((bar_style, f" {bar}"))
+            pct = self._context_tracker.percentage
+            badge = self._context_tracker.formatted_badge
+
+            if pct < 70.0:
+                bar_style = "class:ctx.ok"
+            elif pct < 90.0:
+                bar_style = "class:ctx.warn"
+            else:
+                bar_style = "class:ctx.danger"
+            tokens.append((bar_style, f" {badge}"))
 
         tokens.append(("class:prompt.arrow", " › "))
         return FormattedText(tokens)
@@ -394,6 +399,42 @@ class VeluneREPL:
                 description="Delete a locally installed Ollama model",
                 usage="/delete <model-id>",
                 handler=self._cmd_delete,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="graph",
+                aliases=["g"],
+                description="Render a hierarchical tree of knowledge graph entities",
+                usage="/graph",
+                handler=self._cmd_graph,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="bench",
+                aliases=["b"],
+                description="View or run empirical model capability benchmarks",
+                usage="/bench [run]",
+                handler=self._cmd_bench,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="config",
+                aliases=["cfg"],
+                description="Show current system configuration settings",
+                usage="/config",
+                handler=self._cmd_config,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="history",
+                aliases=["h"],
+                description="Show REPL command execution history",
+                usage="/history",
+                handler=self._cmd_history,
             )
         )
         return registry
@@ -694,6 +735,7 @@ class VeluneREPL:
 
         self.console.print()
 
+        from rich.live import Live
         from rich.panel import Panel
 
         _phase_colors: dict[str, str] = {
@@ -705,26 +747,64 @@ class VeluneREPL:
             "synthesis": "cyan",
             "context reconstruction": "dim",
             "debate": "orange1",
+            "council": "dim",
         }
 
         last_run_id: str | None = None
+        current_phase: str | None = None
+        phase_messages: list[str] = []
+        active_live: Live | None = None
+
+        def make_panel(phase_name: str, messages: list[str]) -> Panel:
+            color = _phase_colors.get(phase_name.lower(), "dim")
+            label = phase_name.capitalize()
+            body = "\n".join(f"  [bold {color}]•[/bold {color}] {msg}" for msg in messages)
+            return Panel(
+                body,
+                title=f"[bold {color}]{label} Phase[/bold {color}]",
+                border_style=color,
+                padding=(0, 2),
+                expand=True,
+            )
 
         try:
             async for milestone in orchestrator.stream(task):
                 last_run_id = milestone.run_id
-                phase = milestone.phase
+                phase = milestone.phase or "council"
                 message = milestone.message
-                color = _phase_colors.get(phase.lower(), "dim") if phase else "dim"
-                label = phase.capitalize() if phase else "Council"
-                self.console.print(
-                    f"  [bold {color}]●[/bold {color}] "
-                    f"[{color}]{label}[/{color}]"
-                    f"  [dim]{message}[/dim]"
-                )
+
+                if phase != current_phase:
+                    if active_live:
+                        active_live.stop()
+                        self.console.print(make_panel(current_phase, phase_messages))
+
+                    current_phase = phase
+                    phase_messages = []
+
+                    active_live = Live(
+                        make_panel(current_phase, phase_messages),
+                        console=self.console,
+                        refresh_per_second=4,
+                        transient=True,
+                    )
+                    active_live.start()
+
+                phase_messages.append(message)
+                if active_live:
+                    active_live.update(make_panel(current_phase, phase_messages))
+
+            if active_live:
+                active_live.stop()
+                self.console.print(make_panel(current_phase, phase_messages))
+
         except KeyboardInterrupt:
+            if active_live:
+                active_live.stop()
             self.console.print("\n[yellow]Council run interrupted.[/yellow]")
             return
         except Exception as e:
+            if active_live:
+                active_live.stop()
             from velune.cli.rendering.error_panel import render_error, render_unexpected_error
             from velune.core.errors.catalog import VeluneError
 
@@ -1209,6 +1289,226 @@ class VeluneREPL:
         else:
             self.console.print(f"[red]Failed to delete {model_id}[/red]")
 
+    async def _cmd_graph(self, args: str) -> None:
+        """Render a hierarchical tree of knowledge graph entities."""
+        graph_memory = self.container.get("runtime.graph_memory")
+        if not graph_memory:
+            self.console.print("[red]Graph memory tier is not initialized.[/red]")
+            return
+
+        entities = await graph_memory.get_all_nodes()
+        relations = await graph_memory.get_all_edges()
+
+        entities_dicts = [
+            {
+                "id": n.id,
+                "type": n.node_type,
+                "importance": n.properties.get("importance", 1.0),
+                "name": n.properties.get("name", n.id),
+            }
+            for n in entities
+        ]
+        relations_dicts = [
+            {
+                "source": r.source,
+                "target": r.target,
+                "relation": r.relation_type,
+            }
+            for r in relations
+        ]
+
+        from velune.cli.display.memory_view import MemoryDisplayView
+
+        view = MemoryDisplayView(self.console)
+        view.render_knowledge_graph(entities_dicts, relations_dicts)
+
+    async def _cmd_bench(self, args: str) -> None:
+        """View or run empirical model capability benchmarks."""
+        profile_path = Path.cwd() / ".velune" / "model_profiles.json"
+
+        # Check if user requested a run, or if the profile file does not exist
+        if args.strip() == "run" or not profile_path.exists():
+            self.console.print("[yellow]Running model capability scan & benchmarks...[/yellow]")
+            model_registry = self.container.get("runtime.model_registry")
+            provider_registry = self.container.get("runtime.provider_registry")
+
+            if not model_registry or not provider_registry:
+                self.console.print("[red]Model/Provider registry is not available.[/red]")
+                return
+
+            models = model_registry.list_all()
+            models_to_probe = [
+                m for m in models if provider_registry.get(m.provider_id) is not None
+            ]
+
+            if not models_to_probe:
+                self.console.print("[yellow]No models found/active to benchmark.[/yellow]")
+                return
+
+            from velune.cli.commands.models import _models_benchmark_async
+            from velune.cli.context import CLIContext
+
+            cli_ctx = CLIContext(
+                workspace=Path.cwd(),
+                config_path=None,
+                verbose=False,
+                runtime=self.runtime,
+            )
+
+            await _models_benchmark_async(
+                cli_ctx, model_registry, provider_registry, models_to_probe
+            )
+        else:
+            try:
+                import json
+                from collections import namedtuple
+
+                from velune.cli.commands.models import _display_benchmark_results
+                from velune.core.types.model import ModelDescriptor
+
+                ProbeResultMock = namedtuple("ProbeResultMock", ["score", "passed", "latency_ms"])
+
+                data = json.loads(profile_path.read_text(encoding="utf-8"))
+                if not data:
+                    self.console.print(
+                        "[yellow]No cached benchmark results found. Run /bench run to scan.[/yellow]"
+                    )
+                    return
+
+                from velune.cli.context import CLIContext
+
+                cli_ctx = CLIContext(
+                    workspace=Path.cwd(),
+                    config_path=None,
+                    verbose=False,
+                    runtime=self.runtime,
+                )
+
+                benchmark_results = []
+                for key, val in data.items():
+                    parts = key.split("/", 1)
+                    if len(parts) == 2:
+                        prov_id, mod_id = parts
+                    else:
+                        prov_id = "unknown"
+                        mod_id = key
+
+                    probes = val.get("probes", {})
+                    if not probes:
+                        continue
+
+                    model_desc = ModelDescriptor(
+                        model_id=mod_id,
+                        provider_id=prov_id,
+                        context_length=8192,
+                    )
+
+                    coding_raw = probes.get("coding", {})
+                    reasoning_raw = probes.get("reasoning", {})
+                    instruction_raw = probes.get("instruction", {})
+
+                    coding = ProbeResultMock(
+                        score=coding_raw.get("score", 0.0),
+                        passed=coding_raw.get("passed", False),
+                        latency_ms=coding_raw.get("latency_ms", -1.0),
+                    )
+                    reasoning = ProbeResultMock(
+                        score=reasoning_raw.get("score", 0.0),
+                        passed=reasoning_raw.get("passed", False),
+                        latency_ms=reasoning_raw.get("latency_ms", -1.0),
+                    )
+                    instruction = ProbeResultMock(
+                        score=instruction_raw.get("score", 0.0),
+                        passed=instruction_raw.get("passed", False),
+                        latency_ms=instruction_raw.get("latency_ms", -1.0),
+                    )
+
+                    latencies = [
+                        lat
+                        for lat in [coding.latency_ms, reasoning.latency_ms, instruction.latency_ms]
+                        if lat > 0
+                    ]
+                    avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+                    speed_score = max(0.0, 1.0 - (avg_latency / 3000.0))
+
+                    benchmark_results.append(
+                        {
+                            "model": model_desc,
+                            "coding": coding,
+                            "reasoning": reasoning,
+                            "instruction": instruction,
+                            "speed_score": speed_score,
+                            "avg_latency_ms": avg_latency,
+                        }
+                    )
+
+                _display_benchmark_results(cli_ctx, benchmark_results)
+            except Exception as e:
+                self.console.print(f"[red]Failed to display benchmarks: {e}[/red]")
+
+    async def _cmd_config(self, args: str) -> None:
+        """Show current system configuration settings."""
+        from rich.panel import Panel
+        from rich.table import Table
+
+        config = self.runtime.config
+
+        table = Table(show_header=True, border_style="cyan")
+        table.add_column("Setting", style="bold yellow")
+        table.add_column("Value", style="green")
+
+        table.add_row("Config Path", str(self.runtime.config_path or "default (memory)"))
+        table.add_row("Workspace Root", str(self.runtime.workspace or Path.cwd()))
+        table.add_row("Log Level", "DEBUG" if self.runtime.verbose else "INFO")
+
+        if hasattr(config, "model_dump"):
+            dump = config.model_dump()
+        elif hasattr(config, "dict"):
+            dump = config.dict()
+        else:
+            dump = {}
+
+        def flatten_dict(d: dict, prefix: str = "") -> None:
+            for k, v in d.items():
+                name = f"{prefix}{k}"
+                if isinstance(v, dict):
+                    flatten_dict(v, prefix=f"{name}.")
+                else:
+                    table.add_row(name, str(v))
+
+        flatten_dict(dump)
+
+        self.console.print(
+            Panel(
+                table,
+                title="[bold white]Velune System Configuration[/bold white]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    async def _cmd_history(self, args: str) -> None:
+        """Show REPL command execution history."""
+        if not self._history_file.exists():
+            self.console.print("[dim]No command history found.[/dim]")
+            return
+
+        try:
+            lines = self._history_file.read_text(encoding="utf-8").splitlines()
+            cmds = [line[1:] for line in lines if line.startswith("+")]
+
+            if not cmds:
+                self.console.print("[dim]No command history found.[/dim]")
+                return
+
+            last_n = cmds[-25:]
+            self.console.print("\n[bold cyan]REPL Command History (last 25):[/bold cyan]")
+            for i, cmd in enumerate(last_n, len(cmds) - len(last_n) + 1):
+                self.console.print(f"  [dim]{i:3d}[/dim]  {cmd}")
+            self.console.print()
+        except Exception as e:
+            self.console.print(f"[red]Failed to read history: {e}[/red]")
+
     async def _refresh_model_registry(self) -> None:
         model_registry = self.container.get("runtime.model_registry")
         if not model_registry:
@@ -1358,8 +1658,8 @@ class VeluneREPL:
 
     async def _handle_prompt(self, text: str) -> None:
         from rich.live import Live
-        from rich.markdown import Markdown
 
+        from velune.cli.rendering import CustomMarkdown, MarkdownStreamBuffer
         from velune.core.types.inference import InferenceRequest
 
         model, provider = await self._resolve_active_model_and_provider()
@@ -1438,21 +1738,21 @@ class VeluneREPL:
             supports_stream = getattr(capabilities, "supports_streaming", False)
 
             if supports_stream:
-                buffer = ""
+                stream_buffer = MarkdownStreamBuffer()
                 with Live(
                     "", console=self.console, refresh_per_second=12, vertical_overflow="visible"
                 ) as live:
                     async for chunk in provider.stream(request):
                         if chunk.content:
-                            buffer += chunk.content
+                            stream_buffer.append(chunk.content)
                             full_content.append(chunk.content)
-                            live.update(Markdown(buffer))
+                            live.update(stream_buffer.get_renderable())
             else:
                 with self.console.status("[cyan]Thinking...[/cyan]"):
                     response = await provider.infer(request)
                 full_content.append(response.content)
                 tokens_used = response.tokens_used
-                self.console.print(Markdown(response.content))
+                self.console.print(CustomMarkdown(response.content))
 
         except KeyboardInterrupt:
             self.console.print("\n[dim]Generation stopped.[/dim]")

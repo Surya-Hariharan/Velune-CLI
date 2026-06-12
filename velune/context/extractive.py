@@ -39,7 +39,7 @@ def extractive_compress(text: str, target_tokens: int) -> str:
     char_count = 0
     selected_indices = set()
 
-    for score, idx, sentence in scored:
+    for _, idx, sentence in scored:
         if char_count + len(sentence) <= target_chars:
             selected.append((idx, sentence))
             selected_indices.add(idx)

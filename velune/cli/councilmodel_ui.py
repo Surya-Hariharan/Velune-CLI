@@ -37,7 +37,9 @@ async def run_councilmodel_ui(
     """
 
     # ── Stage 1: Role selection ────────────────────────────────────────
-    selected_role_idx = [0]
+    disabled_roles = {"architect", "security", "challenger", "synthesizer"}
+    active_indices = [i for i, r in enumerate(COUNCIL_ROLES) if r not in disabled_roles]
+    selected_role_idx = [active_indices[0] if active_indices else 0]
     role_result: list[str | None] = [None]
 
     def render_role_list() -> FormattedText:
@@ -47,25 +49,43 @@ async def run_councilmodel_ui(
         for i, role in enumerate(COUNCIL_ROLES):
             is_active = i == selected_role_idx[0]
             prefix = "❯ " if is_active else "  "
-            row_style = "bold fg:cyan" if is_active else ""
-            desc = ROLE_DESCRIPTIONS.get(role, "")
-            lines.append((row_style, f"  {prefix}{role:<14} {desc}\n"))
-            current = role_map.get(role)
-            if current:
-                lines.append(
-                    ("fg:ansibrightblack", f"               currently: {current.model_id}\n")
-                )
+
+            if role in disabled_roles:
+                row_style = "fg:ansibrightblack"
+                tag = " [disabled]"
+                prefix = "  "
+                desc = ROLE_DESCRIPTIONS.get(role, "")
+                lines.append((row_style, f"  {prefix}{role:<14} {desc}{tag}\n"))
+            else:
+                row_style = "bold fg:cyan" if is_active else ""
+                desc = ROLE_DESCRIPTIONS.get(role, "")
+                lines.append((row_style, f"  {prefix}{role:<14} {desc}\n"))
+                current = role_map.get(role)
+                if current:
+                    lines.append(
+                        ("fg:ansibrightblack", f"               currently: {current.model_id}\n")
+                    )
         return FormattedText(lines)
 
     kb1 = KeyBindings()
 
     @kb1.add("up")
     def _up(event) -> None:
-        selected_role_idx[0] = (selected_role_idx[0] - 1) % len(COUNCIL_ROLES)
+        curr = selected_role_idx[0]
+        while True:
+            curr = (curr - 1) % len(COUNCIL_ROLES)
+            if curr in active_indices:
+                selected_role_idx[0] = curr
+                break
 
     @kb1.add("down")
     def _down(event) -> None:
-        selected_role_idx[0] = (selected_role_idx[0] + 1) % len(COUNCIL_ROLES)
+        curr = selected_role_idx[0]
+        while True:
+            curr = (curr + 1) % len(COUNCIL_ROLES)
+            if curr in active_indices:
+                selected_role_idx[0] = curr
+                break
 
     @kb1.add("enter")
     def _select_role(event) -> None:

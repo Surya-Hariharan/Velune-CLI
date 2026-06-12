@@ -1,4 +1,5 @@
 from prompt_toolkit.document import Document
+
 from velune.cli.autocomplete import SlashCompleter
 
 

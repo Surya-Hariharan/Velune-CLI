@@ -13,8 +13,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger("velune.repository.boundary_classifier")
 
@@ -237,8 +235,13 @@ class BoundaryClassifier:
         tokens = _tokenize(text)
 
         for pattern in patterns:
-            if pattern in tokens:
-                return True
+            for token in tokens:
+                if (
+                    token == pattern
+                    or token == pattern + "s"
+                    or (pattern.endswith("s") and token == pattern[:-1])
+                ):
+                    return True
 
         return False
 

@@ -119,7 +119,7 @@ def test_assembler_trim_retrieved_context(budget, model):
         ContextChunk(
             section=ContextSection.RETRIEVED_CONTEXT,
             content="High trust content",
-            token_count=5000,  # Large to trigger trimming
+            token_count=1000,  # Fits within retrieval allocation
             source="semantic",
             trust_score=0.95,
         ),
@@ -166,7 +166,7 @@ def test_assembler_trim_working_memory(budget, model):
         ContextChunk(
             section=ContextSection.WORKING_MEMORY,
             content="Turn 3",
-            token_count=3000,
+            token_count=500,  # Fits within working memory allocation
             source="conversation",
             metadata={"turn": 3},
         ),

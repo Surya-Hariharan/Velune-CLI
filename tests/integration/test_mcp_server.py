@@ -10,14 +10,9 @@ Tests:
 
 from __future__ import annotations
 
-import asyncio
-import json
-import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -134,8 +129,7 @@ class TestMCPTools:
 
             # Create a Python file with symbols
             (workspace / "module.py").write_text(
-                "class MyClass:\n    def method(self): pass\n"
-                "def my_function(): pass\n"
+                "class MyClass:\n    def method(self): pass\ndef my_function(): pass\n"
             )
 
             server = VeluneMCPServer(workspace_path=workspace)
@@ -156,9 +150,7 @@ class TestMCPTools:
 
             # Create Python file with multiple classes
             (workspace / "models.py").write_text(
-                "class User: pass\n"
-                "class UserManager: pass\n"
-                "class Document: pass\n"
+                "class User: pass\nclass UserManager: pass\nclass Document: pass\n"
             )
 
             server = VeluneMCPServer(workspace_path=workspace)
@@ -347,16 +339,16 @@ class TestMCPRateLimiting:
 
     def test_rate_limiter_refills_tokens(self):
         """Rate limiter refills tokens over time."""
-        import time
 
         from velune.mcp.server import RateLimiter
 
-        limiter = RateLimiter(calls_per_minute=1)  # 1 call per minute
+        limiter = RateLimiter(calls_per_minute=60)  # 60 calls per minute (1 per second)
 
-        # First call should succeed
-        assert limiter.is_allowed("client2")
+        # First 60 calls should succeed (exhausting the bucket)
+        for _ in range(60):
+            assert limiter.is_allowed("client2")
 
-        # Immediate second call should fail
+        # Immediate 61st call should fail
         assert not limiter.is_allowed("client2")
 
         # Wait for token refill (1 second = 1/60 minute)
@@ -384,6 +376,7 @@ class TestMCPRateLimiting:
 # Integration: Full MCP Server Simulation
 # =========================================================================
 
+
 @pytest.mark.asyncio
 async def test_full_mcp_workflow():
     """Integration test: complete MCP workflow."""
@@ -393,10 +386,7 @@ async def test_full_mcp_workflow():
         workspace = Path(tmpdir)
 
         # Create sample Python project
-        (workspace / "main.py").write_text(
-            "class Application:\n"
-            "    def run(self): pass\n"
-        )
+        (workspace / "main.py").write_text("class Application:\n    def run(self): pass\n")
 
         # Create server
         server = VeluneMCPServer(workspace_path=workspace)

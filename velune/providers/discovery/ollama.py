@@ -60,7 +60,7 @@ class OllamaDiscovery:
                 tasks = [self._get_model_details(model["name"]) for model in data.get("models", [])]
                 details_list = await asyncio.gather(*tasks, return_exceptions=True)
 
-                for model, details in zip(data.get("models", []), details_list):
+                for model, details in zip(data.get("models", []), details_list, strict=False):
                     if isinstance(details, dict) and "num_ctx" in details:
                         if "details" not in model or not isinstance(model["details"], dict):
                             model["details"] = {}

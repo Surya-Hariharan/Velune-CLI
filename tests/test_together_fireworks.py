@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from velune.providers.adapters.together import TogetherProvider
 from velune.providers.adapters.fireworks import FireworksProvider
-from velune.providers.discovery.together import TogetherDiscovery
+from velune.providers.adapters.together import TogetherProvider
 from velune.providers.discovery.fireworks import FireworksDiscovery
-
+from velune.providers.discovery.together import TogetherDiscovery
 
 # ── TogetherProvider unit tests ───────────────────────────────────────────────
+
 
 def test_together_provider_id():
     p = TogetherProvider(api_key="test-key")
@@ -76,10 +77,12 @@ async def test_together_health_check_unhealthy_no_client():
     p = TogetherProvider(api_key=None)
     health = await p.health_check()
     from velune.core.types.provider import ProviderHealth
+
     assert health == ProviderHealth.UNHEALTHY
 
 
 # ── FireworksProvider unit tests ──────────────────────────────────────────────
+
 
 def test_fireworks_provider_id():
     p = FireworksProvider(api_key="test-key")
@@ -138,10 +141,12 @@ async def test_fireworks_health_check_unhealthy_no_client():
     p = FireworksProvider(api_key=None)
     health = await p.health_check()
     from velune.core.types.provider import ProviderHealth
+
     assert health == ProviderHealth.UNHEALTHY
 
 
 # ── TogetherDiscovery tests ────────────────────────────────────────────────────
+
 
 def test_together_discovery_provider_id():
     d = TogetherDiscovery()
@@ -177,6 +182,7 @@ async def test_together_discovery_speed_tiers_valid():
 
 # ── FireworksDiscovery tests ──────────────────────────────────────────────────
 
+
 def test_fireworks_discovery_provider_id():
     d = FireworksDiscovery()
     assert d.provider_id == "fireworks"
@@ -211,67 +217,81 @@ async def test_fireworks_discovery_speed_tiers_valid():
 
 # ── Token tracker coverage ────────────────────────────────────────────────────
 
+
 def test_together_costs_registered():
     from velune.telemetry.token_tracker import PROVIDER_COSTS
+
     assert "together" in PROVIDER_COSTS
     assert len(PROVIDER_COSTS["together"]) == 5
 
 
 def test_fireworks_costs_registered():
     from velune.telemetry.token_tracker import PROVIDER_COSTS
+
     assert "fireworks" in PROVIDER_COSTS
     assert len(PROVIDER_COSTS["fireworks"]) == 4
 
 
 def test_together_llama_cost():
     from velune.telemetry.token_tracker import PROVIDER_COSTS
+
     cost = PROVIDER_COSTS["together"]["meta-llama/Llama-3.3-70B-Instruct-Turbo"]
     assert cost > 0
 
 
 def test_fireworks_deepseek_cost():
     from velune.telemetry.token_tracker import PROVIDER_COSTS
+
     cost = PROVIDER_COSTS["fireworks"]["accounts/fireworks/models/deepseek-r1"]
     assert cost > 0
 
 
 # ── Setup wizard coverage ─────────────────────────────────────────────────────
 
+
 def test_together_in_provider_metadata():
     from velune.cli.commands.setup import PROVIDER_METADATA
+
     assert "together" in PROVIDER_METADATA
     assert PROVIDER_METADATA["together"]["requires_key"] is True
 
 
 def test_fireworks_in_provider_metadata():
     from velune.cli.commands.setup import PROVIDER_METADATA
+
     assert "fireworks" in PROVIDER_METADATA
     assert PROVIDER_METADATA["fireworks"]["requires_key"] is True
 
 
 # ── Keystore env-var coverage ─────────────────────────────────────────────────
 
+
 def test_together_env_var_registered():
     from velune.providers.keystore import _ENV_VARS
+
     assert "together" in _ENV_VARS
     assert _ENV_VARS["together"] == "TOGETHER_API_KEY"
 
 
 def test_fireworks_env_var_registered():
     from velune.providers.keystore import _ENV_VARS
+
     assert "fireworks" in _ENV_VARS
     assert _ENV_VARS["fireworks"] == "FIREWORKS_API_KEY"
 
 
 # ── Registry coverage ─────────────────────────────────────────────────────────
 
+
 def test_together_in_registry():
     from velune.providers.registry import ProviderRegistry
+
     reg = ProviderRegistry()
     assert "together" in reg.list_providers()
 
 
 def test_fireworks_in_registry():
     from velune.providers.registry import ProviderRegistry
+
     reg = ProviderRegistry()
     assert "fireworks" in reg.list_providers()
