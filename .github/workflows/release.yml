@@ -116,23 +116,25 @@ jobs:
         id: changelog
         run: |
           VERSION=${{ steps.get_version.outputs.version }}
+          CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
           {
             echo "body<<CHANGELOG_EOF"
-            python -c "
-            import re, sys
-            from pathlib import Path
-            changelog = Path('CHANGELOG.md')
-            if not changelog.exists():
-                print('Release ' + sys.argv[1])
-                sys.exit(0)
-            text = changelog.read_text(encoding='utf-8')
-            pattern = rf'## \[{re.escape(sys.argv[1])}\].*?\n(.*?)(?=\n## \[|\Z)'
-            match = re.search(pattern, text, re.DOTALL)
-            if match:
-                print(match.group(1).strip())
-            else:
-                print('Release ' + sys.argv[1] + ' — see CHANGELOG.md for details.')
-            " "$VERSION"
+            python -c '
+import re, sys
+from pathlib import Path
+version = sys.argv[1]
+changelog = Path("CHANGELOG.md")
+if not changelog.exists():
+    print("Release " + version)
+    sys.exit(0)
+text = changelog.read_text(encoding="utf-8")
+pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
+match = re.search(pattern, text, re.DOTALL)
+if match:
+    print(match.group(1).strip())
+else:
+    print("Release " + version + " — see CHANGELOG.md for details.")
+' "$CLEAN_VERSION"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
