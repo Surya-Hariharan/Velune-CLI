@@ -1,10 +1,20 @@
-"""Dynamic plugin loader discovering, parsing, and instantiating directory plugins."""
+"""Dynamic plugin loader discovering, parsing, and instantiating directory plugins.
+
+SECURITY: Plugin sandboxing is **designed but not yet implemented** (see
+VELUNE_ARCHITECTURE_BIBLE.md §9.6). Plugins are loaded in-process via importlib
+and run with FULL process privileges — unrestricted filesystem, network, and
+credential access — exactly as if their source were executed directly. Because
+no isolation exists yet, discovery is gated behind an explicit experimental
+opt-in (``VELUNE_ENABLE_EXPERIMENTAL_PLUGINS=1`` or ``experimental=True``) and
+is unreachable from any shipped CLI command.
+"""
 
 from __future__ import annotations
 
 import importlib.util
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,16 +24,58 @@ from velune.plugins.schemas import PluginManifest
 
 logger = logging.getLogger("velune.plugins.loader")
 
+#: Environment variable that opts in to experimental, unsandboxed plugin loading.
+EXPERIMENTAL_PLUGINS_ENV = "VELUNE_ENABLE_EXPERIMENTAL_PLUGINS"
+
 
 class PluginLoader:
-    """Discovers, parses, and dynamically imports plugins from specified directories."""
+    """Discovers, parses, and dynamically imports plugins from specified directories.
 
-    def __init__(self, registry: PluginRegistry, search_paths: list[Path] | None = None) -> None:
+    Loading is **disabled by default**. Because plugins run with full process
+    privileges (no sandbox is implemented yet), :meth:`discover_and_load` is a
+    no-op unless the caller explicitly opts in via the ``experimental`` flag or
+    the ``VELUNE_ENABLE_EXPERIMENTAL_PLUGINS=1`` environment variable.
+    """
+
+    def __init__(
+        self,
+        registry: PluginRegistry,
+        search_paths: list[Path] | None = None,
+        *,
+        experimental: bool = False,
+    ) -> None:
         self.registry = registry
         self.search_paths = search_paths or []
+        self.experimental = experimental
+
+    def _experimental_enabled(self) -> bool:
+        """Return True only when unsandboxed plugin loading has been opted into."""
+        return self.experimental or os.environ.get(EXPERIMENTAL_PLUGINS_ENV) == "1"
 
     def discover_and_load(self) -> None:
-        """Scan all search paths for subdirectories containing a valid manifest.json."""
+        """Scan all search paths for subdirectories containing a valid manifest.json.
+
+        Hard guard: does nothing unless experimental plugin loading is enabled,
+        because loaded plugins are NOT sandboxed and run with full process
+        privileges.
+        """
+        if not self._experimental_enabled():
+            logger.warning(
+                "Plugin discovery is DISABLED. Velune plugin sandboxing is not yet "
+                "implemented: loaded plugins run IN-PROCESS with FULL process "
+                "privileges (filesystem, network, credentials). To enable plugin "
+                "loading anyway, set %s=1 or construct PluginLoader(experimental=True). "
+                "Only load plugins you trust as you would arbitrary Python code.",
+                EXPERIMENTAL_PLUGINS_ENV,
+            )
+            return
+
+        logger.warning(
+            "⚠ EXPERIMENTAL plugin loading is ENABLED. Plugins run with FULL "
+            "process privileges; sandboxing is NOT yet implemented. Only load "
+            "plugins you trust as you would arbitrary Python code."
+        )
+
         for path in self.search_paths:
             logger.info("Scanning search path for plugins: %s", path)
             if not path.exists() or not path.is_dir():
@@ -73,12 +125,20 @@ class PluginLoader:
         plugin_class = getattr(module, plugin_class_name)
         plugin_instance = plugin_class()
 
-        # Wrap all hooks using inline sandbox wrappers
+        # Wrap all hooks in a try/except boundary. NOTE: this only prevents a
+        # crashing plugin from taking down the process — it provides NO security
+        # isolation. The plugin still runs with full process privileges.
         wrapped_instance = self._wrap_instance_hooks(plugin_instance, manifest)
 
         # Register instance to catalog
         self.registry.register_plugin(manifest, wrapped_instance)
-        logger.info("Successfully loaded and registered plugin: %s", manifest.name)
+        logger.warning(
+            "⚠ Plugin '%s' loaded with FULL PROCESS PRIVILEGES — sandboxing is "
+            "not yet implemented. It can read/write any file, open any network "
+            "connection, and access credentials. Only load plugins you trust as "
+            "you would arbitrary Python code.",
+            manifest.name,
+        )
 
     def _wrap_instance_hooks(self, instance: Any, manifest: PluginManifest) -> Any:
         """Proxies active callbacks on instance to run inside a try-except safety boundary."""

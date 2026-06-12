@@ -161,7 +161,7 @@ velune/
 ├── models/           Model registry, capability scoring, specializations
 ├── context/          Context window tracking, extractive compression
 ├── kernel/           Bootstrap, lifecycle coordinator, service container
-└── plugins/          Plugin API, sandbox, hook registry
+└── plugins/          Plugin loader & hook registry (experimental; unsandboxed, off by default)
 ```
 
 ---
