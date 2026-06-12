@@ -28,6 +28,7 @@ class ExecuteCommand(BaseTool):
         timeout: int = 30,
     ) -> dict:
         """Execute a command."""
+        import asyncio
         from pathlib import Path
 
         from velune.core.errors.execution import SandboxError
@@ -43,7 +44,9 @@ class ExecuteCommand(BaseTool):
             sandbox.emit_rejection(command, str(e))
             raise e
 
-        result = sandbox.execute(spec)
+        # Sandbox execution polls the subprocess with time.sleep — offload to a
+        # worker thread so it never blocks the event loop.
+        result = await asyncio.to_thread(sandbox.execute, spec)
         return {
             "exit_code": result.exit_code,
             "stdout": result.stdout,

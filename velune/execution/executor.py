@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
@@ -103,8 +104,6 @@ class ExecutionExecutor:
 
                 # Execute command inside sandbox (offloaded to prevent event loop blocking)
                 try:
-                    import asyncio
-
                     sandbox_res = await asyncio.to_thread(self.sandbox.execute, spec)
                     logger.info(
                         "Command completed with exit code %d in %.2fms",
@@ -130,9 +129,11 @@ class ExecutionExecutor:
                     step.status = TaskStatus.FAILED
                     break
 
-                # Validate postconditions
+                # Validate postconditions (validator may run subprocesses with a
+                # blocking poll loop — offload like the sandbox execution above)
                 try:
-                    validation_res = self.validator.validate(
+                    validation_res = await asyncio.to_thread(
+                        self.validator.validate,
                         expected_files=expected_files,
                         syntax_check_files=syntax_files,
                         test_command=test_cmd,

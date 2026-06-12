@@ -45,26 +45,52 @@ TRUSTED_PATH_PREFIXES: frozenset[str] = frozenset(
         # macOS
         "/opt/homebrew/bin/",
         "/usr/local/opt/",
-        # Common Python virtual env locations (relative)
-        ".venv/bin/",
-        "venv/bin/",
     }
 )
 
+#: Virtual-environment directory names trusted when rooted in the workspace.
+_WORKSPACE_VENV_NAMES = (".venv", "venv")
 
-def _is_trusted_path(resolved_path: Path) -> bool:
-    """Verify executable is in a trusted system directory."""
+
+def _is_trusted_path(
+    resolved_path: Path,
+    workspace: Path | None = None,
+    platform: str | None = None,
+) -> bool:
+    """Verify executable lives in a trusted system directory or a known venv.
+
+    A venv binary is trusted only when it belongs to the interpreter's own
+    environment (``sys.prefix``/``sys.base_prefix``) or to a ``.venv``/``venv``
+    directory rooted directly in *workspace* (defaults to the process CWD).
+    A bare substring match on ".venv" is NOT sufficient — that would let any
+    attacker-writable path like ``/tmp/.venv/evil`` defeat the check.
+    """
+    if (platform or sys.platform) == "win32":
+        return True  # Windows PATH hijacking is different threat model
+
     path_str = str(resolved_path)
-    # Allow paths in trusted system directories
     for prefix in TRUSTED_PATH_PREFIXES:
         if path_str.startswith(prefix):
             return True
-    # Allow paths containing .venv (virtual environments)
-    if ".venv" in path_str or "venv/bin" in path_str:
-        return True
-    # Allow Windows paths
-    if sys.platform == "win32":
-        return True  # Windows PATH hijacking is different threat model
+
+    # The running interpreter's environment (covers the active venv)
+    for env_root in (sys.prefix, sys.base_prefix):
+        try:
+            if resolved_path.is_relative_to(Path(env_root).resolve()):
+                return True
+        except (OSError, ValueError):
+            continue
+
+    # Venvs rooted directly in the workspace
+    root = (workspace or Path.cwd()).resolve()
+    for venv_name in _WORKSPACE_VENV_NAMES:
+        candidate = root / venv_name
+        try:
+            if candidate.is_dir() and resolved_path.is_relative_to(candidate.resolve()):
+                return True
+        except (OSError, ValueError):
+            continue
+
     return False
 
 
@@ -107,14 +133,26 @@ class CommandSpec:
             raise SandboxError(f"Executable resolves to non-absolute path: {resolved}")
 
         # Verify trusted path
-        if not _is_trusted_path(resolved):
+        if not _is_trusted_path(resolved, workspace=self.cwd):
             raise SandboxError(
                 f"Executable '{self.executable}' resolved to untrusted path: {resolved}. "
                 f"Possible PATH hijacking. Expected path in: {TRUSTED_PATH_PREFIXES}"
             )
 
+        # Pin the path that passed validation so to_argv() executes exactly this
+        # binary, closing the TOCTOU window between validate() and execution.
+        # (frozen dataclass — bypass immutability for this internal cache only)
+        object.__setattr__(self, "_validated_exe", str(resolved))
+
     def to_argv(self) -> list[str]:
-        """Convert specification into ready-to-run argv list with resolved executable path."""
+        """Convert specification into ready-to-run argv list with resolved executable path.
+
+        Prefers the path pinned by a prior ``validate()`` call so the binary
+        that was security-checked is the one actually executed.
+        """
+        validated = getattr(self, "_validated_exe", None)
+        if validated is not None:
+            return [validated, *self.args]
         exe_path = shutil.which(self.executable)
         resolved_exe = exe_path if exe_path is not None else self.executable
         return [resolved_exe, *self.args]

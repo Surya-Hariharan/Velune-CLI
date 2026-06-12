@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from velune.execution.path_guard import validate_workspace_path
+from velune.execution.path_guard import resolve_in_workspace
 from velune.tools.base.tool import BaseTool
 
 
@@ -20,8 +20,7 @@ class ReadFile(BaseTool):
 
     async def execute(self, file_path: str) -> str:
         """Read file contents."""
-        path = Path(file_path)
-        validate_workspace_path(path, self.workspace, label="ReadFile")
+        path = resolve_in_workspace(file_path, self.workspace, label="ReadFile")
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
@@ -55,8 +54,7 @@ class ReadDirectory(BaseTool):
 
     async def execute(self, directory_path: str) -> list[str]:
         """List directory contents."""
-        path = Path(directory_path)
-        validate_workspace_path(path, self.workspace, label="ReadDirectory")
+        path = resolve_in_workspace(directory_path, self.workspace, label="ReadDirectory")
         if not path.exists() or not path.is_dir():
             raise NotADirectoryError(f"Directory not found: {directory_path}")
 

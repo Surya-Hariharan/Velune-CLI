@@ -47,6 +47,25 @@ class PathGuard:
         return resolved
 
 
+def resolve_in_workspace(path: Path | str, workspace: Path, label: str = "path") -> Path:
+    """Anchor *path* to *workspace* and return its validated, canonical form.
+
+    Relative paths are resolved against the workspace root — not the process
+    CWD, which may differ and would silently redirect the operation elsewhere.
+    Raises ``PathTraversalError`` if the result escapes the workspace.
+
+    All filesystem tools must perform I/O on the path returned here, never on
+    the raw input path.
+    """
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = Path(workspace) / candidate
+    try:
+        return PathGuard(workspace).validate(candidate)
+    except PathTraversalError as exc:
+        raise PathTraversalError(f"{label}: {exc}") from exc
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Legacy functional API (kept for backward compatibility with read.py / write.py)
 # ─────────────────────────────────────────────────────────────────────────────

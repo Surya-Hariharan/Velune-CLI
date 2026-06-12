@@ -7,7 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from velune.execution.path_guard import validate_workspace_path
+from velune.execution.path_guard import resolve_in_workspace
 from velune.tools.base.tool import BaseTool
 
 
@@ -29,8 +29,7 @@ class WriteFile(BaseTool):
         return "Write content to a file (shows diff preview before writing)"
 
     async def execute(self, file_path: str, content: str) -> str:
-        path = Path(file_path)
-        validate_workspace_path(path, self.workspace, label="WriteFile")
+        path = resolve_in_workspace(file_path, self.workspace, label="WriteFile")
         return await self._write_file_with_preview(path, content)
 
     async def _write_file_with_preview(
@@ -86,8 +85,7 @@ class CreateFile(BaseTool):
         return "Create an empty file (shows preview before creating)"
 
     async def execute(self, file_path: str) -> str:
-        path = Path(file_path)
-        validate_workspace_path(path, self.workspace, label="CreateFile")
+        path = resolve_in_workspace(file_path, self.workspace, label="CreateFile")
 
         from velune.execution.diff_preview import DiffDecision, DiffPreview
 
@@ -133,8 +131,7 @@ class DeleteFile(BaseTool):
         return "Delete a file (shows preview before deleting)"
 
     async def execute(self, file_path: str) -> str:
-        path = Path(file_path)
-        validate_workspace_path(path, self.workspace, label="DeleteFile")
+        path = resolve_in_workspace(file_path, self.workspace, label="DeleteFile")
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 

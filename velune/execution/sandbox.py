@@ -18,6 +18,29 @@ from velune.execution.path_guard import is_within_workspace
 logger = logging.getLogger("velune.execution.sandbox")
 
 
+def _kill_process_tree(pid: int) -> None:
+    """Terminate a process and all of its descendants.
+
+    ``Popen.kill()`` only signals the direct child; anything it spawned
+    (test runners, build tools, watchers) would survive a timeout or
+    memory-limit kill and keep running unsupervised. psutil lets us walk
+    and kill the whole tree portably on Windows and POSIX.
+    """
+    try:
+        parent = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return
+    children = parent.children(recursive=True)
+    for proc in (*children, parent):
+        try:
+            proc.kill()
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.Error as e:
+            logger.warning("Failed to kill process %s in sandbox tree: %s", proc.pid, e)
+    psutil.wait_procs([*children, parent], timeout=3)
+
+
 class SandboxResult:
     """The result of executing a command in the sandbox."""
 
@@ -233,7 +256,7 @@ class SubprocessSandbox:
                             peak_cpu = cpu_pct
 
                         if mem_mb > self.max_memory_mb:
-                            process.terminate()
+                            _kill_process_tree(process.pid)
                             raise SandboxError(
                                 f"Memory threshold exceeded: {mem_mb:.2f}MB > {self.max_memory_mb}MB"
                             )
@@ -244,11 +267,11 @@ class SubprocessSandbox:
                 time.sleep(0.05)  # OK: runs in thread via asyncio.to_thread(), not event loop
         except Exception as e:
             if process.poll() is None:
-                process.kill()
+                _kill_process_tree(process.pid)
             raise e
 
         if timeout_occurred:
-            process.kill()
+            _kill_process_tree(process.pid)
             stdout, stderr = process.communicate()
             duration_ms = (time.perf_counter() - start_time) * 1000
             raise SandboxError(
