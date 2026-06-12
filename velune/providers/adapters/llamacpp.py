@@ -192,7 +192,7 @@ class LlamaCppProvider(ModelProvider):
             await self.initialize()
             return ProviderHealth.HEALTHY
         except Exception:
-            return ProviderHealth.UNHEALTHY
+            return ProviderHealth.UNAVAILABLE
 
     def get_capabilities(self) -> ProviderCapabilities:
         return self._capabilities

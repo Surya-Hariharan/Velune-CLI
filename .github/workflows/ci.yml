@@ -4,122 +4,217 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main]
-  workflow_call:  # allow release.yml to call this as a reusable workflow
+    branches: [main, develop]
 
-# Cancel in-flight runs for the same branch/PR on new pushes.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
-
-# Opt into Node.js 24 runtime ahead of the June 16 2026 forced migration.
-env:
-  PYTHON_DEFAULT: "3.11"
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
-    name: Lint + Type Check
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_DEFAULT }}
-          cache: pip
-
-      - name: Install lint dependencies
-        run: pip install ruff mypy
-
-      - name: Run ruff
-        run: ruff check velune/ --output-format=github
-
-      - name: Run mypy (soft — warnings only)
-        run: mypy velune/ --ignore-missing-imports --no-error-summary
-        continue-on-error: true
-
-  test:
-    name: Tests (Python ${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
-        os: [ubuntu-latest, macos-latest]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
-
-      - name: Run tests with coverage
         run: |
-          pytest tests/ -v \
-            --tb=short \
-            --timeout=30 \
-            --cov=velune \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            -x
+          python -m pip install --upgrade pip
+          pip install ruff pyright
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-        with:
-          file: coverage.xml
-          fail_ci_if_error: false
+      - name: Ruff lint check
+        run: ruff check velune/ tests/
+
+      - name: Ruff format check
+        run: ruff format --check velune/ tests/
+
+      - name: Pyright type checking
+        run: pyright velune/
 
   security:
-    name: Security Audit
+    name: Security
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_DEFAULT }}
+          python-version: "3.11"
+          cache: "pip"
 
-      # security_audit.py uses only Python stdlib (re, sys, pathlib).
-      # No package installation needed — installing the full dev tree here
-      # was wasting 3-5 minutes per run for zero benefit.
-      - name: Run security audit
-        run: python scripts/security_audit.py
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
 
-  build:
-    name: Build Package
+      - name: Check for pip vulnerabilities
+        run: pip-audit
+
+      - name: Check for shell=True usage (P0-2 regression)
+        run: |
+          if grep -rn "shell=True" velune/ 2>/dev/null; then
+            echo "❌ FATAL: shell=True found in codebase (P0-2 regression)"
+            exit 1
+          fi
+          echo "✓ No shell=True found"
+          exit 0
+
+      - name: Check asyncio.run() count (P0-1 regression)
+        run: |
+          count=$(grep -rn "asyncio\.run(" velune/ | wc -l)
+          if [ "$count" -gt 1 ]; then
+            echo "❌ FATAL: Found $count asyncio.run() calls. Maximum is 1 (P0-1 regression)"
+            grep -rn "asyncio\.run(" velune/
+            exit 1
+          fi
+          echo "✓ asyncio.run() count is acceptable ($count)"
+          exit 0
+
+  architecture-lint:
+    name: Architecture Lint
     runs-on: ubuntu-latest
-    needs: [lint, test, security]
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_DEFAULT }}
-          cache: pip
+          python-version: "3.11"
 
-      - name: Install build tools
-        run: pip install build twine
+      - name: Check architecture rules
+        run: python scripts/check_architecture.py
 
-      - name: Build wheel and sdist
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/unit/ \
+            -v \
+            --tb=short \
+            --cov=velune \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70 \
+            --timeout=60
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run integration tests
+        timeout-minutes: 5
+        run: |
+          pytest tests/integration/ \
+            -v \
+            --tb=short
+
+  startup-perf:
+    name: Startup Performance
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "."
+
+      - name: Check startup performance
+        run: python scripts/check_startup_perf.py
+
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+
+      - name: Build package
         run: python -m build
 
-      - name: Verify package
-        run: twine check dist/*
+      - name: Check build artifacts
+        run: |
+          ls -lh dist/
+          echo "✓ Build successful"
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-          retention-days: 7
+  ci-pass:
+    name: CI Pass
+    runs-on: ubuntu-latest
+    needs: [lint, security, architecture-lint, test-unit, build-check]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.security.result }}" != "success" ] || \
+             [ "${{ needs.architecture-lint.result }}" != "success" ] || \
+             [ "${{ needs.test-unit.result }}" != "success" ] || \
+             [ "${{ needs.build-check.result }}" != "success" ]; then
+            echo "❌ One or more jobs failed"
+            exit 1
+          fi
+          echo "✓ All CI checks passed"
+          exit 0

@@ -217,11 +217,12 @@ class AnthropicProvider(ModelProvider):
     def _record_latency_to_monitor(self, latency_ms: float) -> None:
         """Record latency to health monitor if available."""
         try:
-            from velune.kernel.context import get_health_monitor
-            monitor = get_health_monitor()
-            if monitor:
+            from velune.kernel.registry import get_container
+            container = get_container()
+            if container.has("runtime.provider_health_monitor"):
+                monitor = container.get("runtime.provider_health_monitor")
                 monitor.record_latency(self.provider_id, int(latency_ms))
-        except (ImportError, AttributeError):
+        except (ImportError, AttributeError, KeyError):
             pass  # Health monitor not available, skip
 
     async def health_check(self) -> ProviderHealth:
@@ -240,7 +241,7 @@ class AnthropicProvider(ModelProvider):
                 return ProviderHealth.HEALTHY
             return ProviderHealth.DEGRADED
         except Exception:
-            return ProviderHealth.UNHEALTHY
+            return ProviderHealth.UNAVAILABLE
 
     def get_capabilities(self) -> ProviderCapabilities:
         return self._capabilities

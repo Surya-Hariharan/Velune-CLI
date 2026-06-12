@@ -88,13 +88,17 @@ dev = [
     "pytest-mock>=3.12.0",
     "pytest-benchmark>=4.0.0",
     "pytest-timeout>=2.2.0",
+    "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
+    "pyright>=1.1.350",
     "mypy>=1.8.0",
     "coverage>=7.0.0",
     "black>=23.12.0",
     "pre-commit>=3.6.0",
-    "pytest-cov>=4.1.0",
+    "pip-audit>=2.6.0",
     "types-toml>=0.10.0",
+    "build>=1.0.0",
+    "twine>=4.0.0",
 ]
 
 [project.scripts]
@@ -130,15 +134,32 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]
 ignore = [
-    "E501",
-    "E402",
-    "E701",
-    "F403",
-    "F405",
-    "N818",
+    "E501",    # Line too long (handled by formatter)
+    "E402",    # Module level import not at top of file
+    "E701",    # Multiple statements on one line
+    "F403",    # Unable to detect undefined names from star imports
+    "F405",    # Name may be undefined from star imports
+    "N818",    # Exception name should be named with an Error suffix
+    "B008",    # Function call in default argument
+    "C901",    # Function is too complex
 ]
+
+[tool.ruff.lint.isort]
+known-first-party = ["velune"]
+known-third-party = ["pydantic", "typer", "rich"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+include = ["velune"]
+exclude = ["tests", "**/__pycache__"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportUnusedImport = true
+reportUnusedVariable = true
+reportUnusedFunction = true
 
 [tool.mypy]
 python_version = "3.11"
@@ -166,7 +187,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--tb=short --strict-markers"
+addopts = "--tb=short --strict-markers -ra"
+timeout = 300
+timeout_method = "thread"
 markers = [
     "integration: marks tests requiring real filesystem or subprocess",
     "slow: marks tests taking > 1 second",
@@ -175,4 +198,16 @@ markers = [
 
 [tool.coverage.run]
 source = ["velune"]
-omit = ["velune/cli/*", "velune/__main__.py"]
+omit = ["velune/cli/*", "velune/__main__.py", "**/__pycache__/*"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

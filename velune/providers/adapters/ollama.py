@@ -174,7 +174,7 @@ class OllamaProvider(ModelProvider):
                 return ProviderHealth.HEALTHY
             return ProviderHealth.DEGRADED
         except Exception:
-            return ProviderHealth.UNHEALTHY
+            return ProviderHealth.UNAVAILABLE
 
     def get_capabilities(self) -> ProviderCapabilities:
         return self._capabilities

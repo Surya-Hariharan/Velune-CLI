@@ -138,7 +138,7 @@ class GroqProvider(OpenAIProvider):
 
     async def health_check(self) -> ProviderHealth:
         if not has_key("groq"):
-            return ProviderHealth.UNHEALTHY
+            return ProviderHealth.UNAVAILABLE
         return await super().health_check()
 
     def get_provider_info(self) -> dict:

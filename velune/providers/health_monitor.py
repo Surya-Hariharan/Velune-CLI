@@ -65,12 +65,17 @@ class ProviderHealthMonitor:
 
     async def _polling_loop(self) -> None:
         """Background task that polls all providers every 30 seconds."""
+        # Standard provider IDs that may be registered
+        standard_providers = [
+            "ollama", "openai", "anthropic", "google", "groq", "xai",
+            "openrouter", "together", "fireworks", "huggingface", "lmstudio", "llamacpp"
+        ]
+
         while self._running:
             try:
                 # Get all registered provider IDs
                 providers_to_check = []
-                for provider_id in ["ollama", "openai", "anthropic", "google", "groq", "xai",
-                                   "openrouter", "together", "fireworks", "huggingface", "lmstudio", "llamacpp"]:
+                for provider_id in standard_providers:
                     if provider := self._registry.get(provider_id):
                         providers_to_check.append((provider_id, provider))
 

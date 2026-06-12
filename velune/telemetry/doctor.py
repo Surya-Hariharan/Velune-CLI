@@ -25,11 +25,12 @@ def print_provider_health_report(console: Console | None = None) -> dict[str, An
         console = Console()
 
     try:
-        from velune.kernel.context import get_health_monitor
-        monitor = get_health_monitor()
-        if not monitor:
+        from velune.kernel.registry import get_container
+        container = get_container()
+        if not container.has("runtime.provider_health_monitor"):
             return {"providers": []}
-    except (ImportError, AttributeError):
+        monitor = container.get("runtime.provider_health_monitor")
+    except (ImportError, AttributeError, KeyError):
         return {"providers": []}
 
     manifests = monitor.get_all_manifests()

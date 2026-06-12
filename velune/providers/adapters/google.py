@@ -223,7 +223,7 @@ class GoogleProvider(ModelProvider):
             resp = await self.client.get("/models", params={"key": self._api_key})
             return ProviderHealth.HEALTHY if resp.status_code == 200 else ProviderHealth.DEGRADED
         except Exception:
-            return ProviderHealth.UNHEALTHY
+            return ProviderHealth.UNAVAILABLE
 
     def get_capabilities(self) -> ProviderCapabilities:
         return self._capabilities

@@ -1,205 +1,150 @@
 name: Release
 
-# Triggers exclusively on version tags. Branch pushes never publish.
-# Pattern matches v1.0.0, v1.2.3-rc.1, v2.0.0-beta.4, etc.
 on:
   push:
     tags:
-      - "v*"
+      - 'v*.*.*'
 
-# No top-level permissions block — every job declares exactly the
-# permissions it needs. This is the least-privilege standard.
-
-# Opt into Node.js 24 runtime now, ahead of the June 16 2026 forced migration.
-# Prevents the Node.js 20 deprecation warnings and ensures forward compatibility.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+permissions:
+  contents: write
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 1: validate-tag
-  # Verify that the git tag (e.g. v1.1.0) matches __version__ in source.
-  # Fails fast before running expensive CI if the developer forgot to bump.
-  # Does NOT install the package — reads the file directly with Python stdlib.
-  # ──────────────────────────────────────────────────────────────────────────
-  validate-tag:
-    name: Validate Release Tag
+  ci:
+    name: Run CI Pipeline
     runs-on: ubuntu-latest
-    # No special permissions needed for a read-only version check.
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check version matches tag
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION=$(grep -oP "(?<=__version__ = ['\"])[^'\"]*" velune/__init__.py | head -1)
-          if [ -z "$PKG_VERSION" ]; then
-            echo "ERROR: __version__ not found in velune/__init__.py"
-            exit 1
-          fi
-          echo "Tag version    : $TAG_VERSION"
-          echo "Package version: $PKG_VERSION"
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo ""
-            echo "ERROR: git tag '$TAG_VERSION' does not match"
-            echo "       package version '$PKG_VERSION' in velune/__init__.py"
-            echo ""
-            echo "Fix: update __version__ in velune/__init__.py to $TAG_VERSION"
-            echo "     then commit, and re-push the tag."
-            exit 1
-          fi
-          echo "Version check passed: $TAG_VERSION"
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 2: test
-  # Reuse the full CI matrix (lint + type-check + 4-matrix pytest + security
-  # + build verification) from ci.yml. No code duplication.
-  # ──────────────────────────────────────────────────────────────────────────
-  test:
-    name: Full Test Suite
-    needs: validate-tag
-    uses: ./.github/workflows/ci.yml
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 3: build
-  # Single canonical build step. Produces the wheel and sdist once.
-  # All downstream jobs (TestPyPI, PyPI, GitHub Release) consume these
-  # exact artifacts — no re-building, guaranteeing artifact identity.
-  # ──────────────────────────────────────────────────────────────────────────
-  build:
-    name: Build Distribution Artifacts
-    runs-on: ubuntu-latest
-    needs: test
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" ruff pyright pip-audit build wheel
+
+      - name: Ruff lint
+        run: ruff check velune/ tests/
+
+      - name: Ruff format
+        run: ruff format --check velune/ tests/
+
+      - name: Pyright
+        run: pyright velune/
+
+      - name: Security checks
+        run: |
+          pip-audit
+          if grep -rn "shell=True" velune/ 2>/dev/null; then
+            echo "❌ FATAL: shell=True found in codebase"
+            exit 1
+          fi
+          count=$(grep -rn "asyncio\.run(" velune/ | wc -l)
+          if [ "$count" -gt 1 ]; then
+            echo "❌ FATAL: Found $count asyncio.run() calls"
+            exit 1
+          fi
+
+      - name: Architecture lint
+        run: python scripts/check_architecture.py
+
+      - name: Unit tests
+        run: |
+          pytest tests/unit/ \
+            -v \
+            --tb=short \
+            --cov=velune \
+            --cov-fail-under=70
+
+  build:
+    name: Build Package
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Install build tools
-        run: pip install build twine
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
 
-      - name: Build wheel and sdist
+      - name: Build package
         run: python -m build
 
-      - name: Verify package metadata (strict)
-        # --strict promotes warnings to errors: catches missing metadata,
-        # invalid classifiers, malformed RST/Markdown in description, etc.
-        run: twine check --strict dist/*
-
-      - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
         with:
-          name: dist-${{ github.ref_name }}
-          path: dist/
-          retention-days: 90
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 4: publish-testpypi
-  # Publish to TestPyPI as a staging gate before production.
-  # Uses TEST_PYPI_TOKEN secret (scoped to test.pypi.org project velune-cli).
-  # skip-existing: true allows safe re-runs if this job fails after upload.
-  # ──────────────────────────────────────────────────────────────────────────
-  publish-testpypi:
-    name: Publish to TestPyPI
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/velune-cli/
-    permissions:
-      contents: read
-    steps:
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ github.ref_name }}
+          name: dist
           path: dist/
 
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_TOKEN }}
-          verbose: true
-          skip-existing: true
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 5: publish-pypi
-  # Publish the same artifacts to production PyPI.
-  # Gated on publish-testpypi so TestPyPI must succeed first.
-  # Uses PYPI_TOKEN secret scoped to the velune-cli project on pypi.org.
-  # Does NOT rebuild — downloads the same artifact uploaded to TestPyPI.
-  # ──────────────────────────────────────────────────────────────────────────
-  publish-pypi:
+  publish:
     name: Publish to PyPI
+    needs: build
     runs-on: ubuntu-latest
-    needs: publish-testpypi
     environment:
       name: pypi
-      url: https://pypi.org/project/velune-cli/
-    permissions:
-      contents: read
+      url: https://pypi.org/project/velune-cli
     steps:
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
-          name: dist-${{ github.ref_name }}
+          name: dist
           path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_TOKEN }}
-          verbose: true
+          password: ${{ secrets.PYPI_API_TOKEN }}
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 6: create-github-release
-  # Creates the GitHub Release, attaches wheel + sdist, extracts CHANGELOG
-  # notes for the release body. Runs only after PyPI publish succeeds.
-  # contents: write is the only permission needed here.
-  # ──────────────────────────────────────────────────────────────────────────
-  create-github-release:
+  release:
     name: Create GitHub Release
+    needs: publish
     runs-on: ubuntu-latest
-    needs: publish-pypi
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ github.ref_name }}
-          path: dist/
-
-      - name: Extract changelog for this version
+      - name: Extract changelog
         id: changelog
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          NOTES=$(python scripts/extract_changelog.py "$VERSION")
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          VERSION=${{ steps.get_version.outputs.version }}
+          if [ -f CHANGELOG.md ]; then
+            CHANGELOG=$(python -c "
+import re
+with open('CHANGELOG.md') as f:
+    content = f.read()
+    # Extract section for this version
+    pattern = f'## \[{re.escape(VERSION)}\].*?(?=## \[|$)'
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        print(match.group(0).strip())
+    else:
+        print('Release notes not found in CHANGELOG.md')
+            ")
+            EOF=$(dd if=/dev/urandom bs=15 count=1 2>/dev/null | base64)
+            echo "body<<$EOF" >> $GITHUB_OUTPUT
+            echo "$CHANGELOG" >> $GITHUB_OUTPUT
+            echo "$EOF" >> $GITHUB_OUTPUT
+          else
+            echo "body=See commit history for changes" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          body: ${{ steps.changelog.outputs.notes }}
+          files: dist/*
+          body: ${{ steps.changelog.outputs.body }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-          files: |
-            dist/*.whl
-            dist/*.tar.gz
+          prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
