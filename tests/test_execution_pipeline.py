@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from velune.core.errors.execution import ExecutionError
-from velune.core.types.task import TaskPlan, TaskStep, TaskStatus
+from velune.core.types.task import TaskPlan, TaskStatus, TaskStep
 from velune.execution.executor import ExecutionExecutor
 from velune.execution.planner import ExecutionPlanner
 from velune.execution.sandbox import SubprocessSandbox

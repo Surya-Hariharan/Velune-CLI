@@ -132,9 +132,7 @@ class TestTermination:
         sandbox = make_sandbox(workspace)
         start = time.perf_counter()
         with pytest.raises(SandboxError, match="timed out"):
-            sandbox.execute(
-                script_spec(workspace, "import time\ntime.sleep(60)", timeout=1.5)
-            )
+            sandbox.execute(script_spec(workspace, "import time\ntime.sleep(60)", timeout=1.5))
         # Must abort near the timeout, not run to completion
         assert time.perf_counter() - start < 30
 
