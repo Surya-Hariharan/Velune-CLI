@@ -57,6 +57,9 @@ jobs:
       - name: Check for pip vulnerabilities
         run: pip-audit
 
+      - name: Run security audit suite
+        run: python scripts/security_audit.py
+
       - name: Check for shell=True usage (P0-2 regression)
         run: |
           if grep -rn "shell=True" velune/ 2>/dev/null; then

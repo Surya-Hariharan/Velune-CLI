@@ -188,6 +188,45 @@ def check_mcp_rate_limiter() -> None:
 
 
 # ---------------------------------------------------------------------------
+# CHECK 7 — No sync-over-async event-loop management
+# ---------------------------------------------------------------------------
+# Manual event-loop juggling (loop.run_until_complete(...) or
+# asyncio.get_event_loop()) called from a synchronous context crashes with
+# "event loop already running" the moment it is reached from within an async
+# call stack. The codebase bridges sync->async exclusively through
+# velune.core.event_loop.submit() / velune.kernel.entrypoint.run_async(), and
+# stays inside the running loop via asyncio.get_running_loop(). This check
+# bans the two dangerous primitives outside an explicit allowlist.
+_SYNC_OVER_ASYNC = re.compile(r"\brun_until_complete\s*\(|\basyncio\.get_event_loop\s*\(\s*\)")
+
+# Paths permitted to use the banned primitives, each with a documented reason.
+# Empty by design: no current source file needs them.
+_ALLOWED_SYNC_OVER_ASYNC_PATHS: set[str] = set()
+
+
+def check_no_sync_over_async() -> None:
+    hits: list[str] = []
+    for py in VELUNE.rglob("*.py"):
+        rel = py.relative_to(ROOT).as_posix()
+        if rel in _ALLOWED_SYNC_OVER_ASYNC_PATHS:
+            continue
+        for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+            if re.match(r"^\s*#", line):
+                continue
+            # Strip inline comments before matching.
+            code_part = line.split("#")[0]
+            if _SYNC_OVER_ASYNC.search(code_part):
+                hits.append(f"{rel}:{i}")
+    if hits:
+        _fail(
+            "sync-over-async event-loop management found (use async/await or "
+            f"velune.core.event_loop.submit instead): {hits}"
+        )
+    else:
+        _pass("No run_until_complete()/asyncio.get_event_loop() outside allowlist.")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -201,13 +240,14 @@ def main() -> None:
     check_veluneignore_covers_secrets()
     check_no_hardcoded_credentials()
     check_mcp_rate_limiter()
+    check_no_sync_over_async()
 
     print("=" * 60)
     if _failures:
         print(f"FAILED: {len(_failures)} issue(s) found.")
         sys.exit(1)
     else:
-        print(f"PASSED: All 6 checks passed.")
+        print("PASSED: All 7 checks passed.")
         sys.exit(0)
 
 
