@@ -416,9 +416,27 @@ class VeluneREPL:
             SlashCommand(
                 name="clear",
                 aliases=["cls"],
-                description="Clear the terminal screen and conversation context",
+                description="Clear the terminal screen (conversation context is preserved)",
                 usage="/clear",
                 handler=self._cmd_clear,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="new",
+                aliases=["fresh"],
+                description="Start a new conversation session (project memory persists)",
+                usage="/new [title]",
+                handler=self._cmd_new,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="project",
+                aliases=["proj", "workspace"],
+                description="Switch or manage project workspaces",
+                usage="/project [name|path] | add <path> | list",
+                handler=self._cmd_project,
             )
         )
         registry.register(
@@ -488,7 +506,7 @@ class VeluneREPL:
             SlashCommand(
                 name="session",
                 aliases=["s"],
-                description="Manage persistent sessions: list, resume, summary, save, export",
+                description="Pick, resume, save, or export sessions (no args = interactive picker)",
                 usage="/session [list|resume <id>|summary <id>|save|export]",
                 handler=self._cmd_session,
             )
@@ -1018,35 +1036,46 @@ class VeluneREPL:
             )
 
         try:
-            async for milestone in orchestrator.stream(task):
-                last_run_id = milestone.run_id
-                phase = milestone.phase or "council"
-                message = milestone.message
+            async with self._interrupts.foreground():
+                async for milestone in orchestrator.stream(task):
+                    last_run_id = milestone.run_id
+                    phase = milestone.phase or "council"
+                    message = milestone.message
 
-                if phase != current_phase:
+                    if phase != current_phase:
+                        if active_live:
+                            active_live.stop()
+                            self.console.print(make_panel(current_phase, phase_messages))
+
+                        current_phase = phase
+                        phase_messages = []
+
+                        active_live = Live(
+                            make_panel(current_phase, phase_messages),
+                            console=self.console,
+                            refresh_per_second=4,
+                            transient=True,
+                        )
+                        active_live.start()
+
+                    phase_messages.append(message)
                     if active_live:
-                        active_live.stop()
-                        self.console.print(make_panel(current_phase, phase_messages))
+                        active_live.update(make_panel(current_phase, phase_messages))
 
-                    current_phase = phase
-                    phase_messages = []
-
-                    active_live = Live(
-                        make_panel(current_phase, phase_messages),
-                        console=self.console,
-                        refresh_per_second=4,
-                        transient=True,
-                    )
-                    active_live.start()
-
-                phase_messages.append(message)
                 if active_live:
-                    active_live.update(make_panel(current_phase, phase_messages))
+                    active_live.stop()
+                    self.console.print(make_panel(current_phase, phase_messages))
 
+        except asyncio.CancelledError:
+            if not self._interrupts.consume_user_cancelled():
+                raise
+            task_obj = asyncio.current_task()
+            if task_obj is not None:
+                task_obj.uncancel()
             if active_live:
                 active_live.stop()
-                self.console.print(make_panel(current_phase, phase_messages))
-
+            self.console.print("\n[yellow]Council run interrupted.[/yellow]")
+            return
         except KeyboardInterrupt:
             if active_live:
                 active_live.stop()
@@ -1379,6 +1408,159 @@ class VeluneREPL:
                 border_style="cyan",
             )
         )
+
+    # ------------------------------------------------------------------
+    # Project workspace manager
+    # ------------------------------------------------------------------
+
+    async def _cmd_project(self, args: str) -> None:
+        """Manage project workspaces: switch, add, list — without restarting."""
+        parts = args.strip().split(None, 1)
+        sub = parts[0].lower() if parts else ""
+        sub_args = parts[1] if len(parts) > 1 else ""
+
+        if sub == "add":
+            target = Path(sub_args.strip() or ".").expanduser()
+            if not target.is_dir():
+                self.console.print(f"[red]Not a directory: {target}[/red]")
+                return
+            info = self._workspace_registry.register(target)
+            kind = info.project_type or ("git repo" if info.is_git else "folder")
+            self.console.print(
+                f"[green]✓ Registered workspace:[/green] [cyan]{info.name}[/cyan] [dim]({kind})[/dim]"
+            )
+            return
+
+        if sub == "list":
+            await self._project_list()
+            return
+
+        if sub and sub not in ("switch",):
+            # "/project velune-cli" or "/project C:\path" → direct switch
+            await self._project_switch_target(args.strip())
+            return
+
+        if sub == "switch" and sub_args:
+            await self._project_switch_target(sub_args.strip())
+            return
+
+        await self._project_picker()
+
+    async def _project_list(self) -> None:
+        from rich.table import Table
+
+        workspaces = self._workspace_registry.list()
+        if not workspaces:
+            self.console.print("[dim]No workspaces registered. Use /project add <path>.[/dim]")
+            return
+        current = str(Path(self.container.get("runtime.workspace")).resolve())
+        table = Table(border_style="dim", padding=(0, 1))
+        table.add_column("Project", style="cyan")
+        table.add_column("Type", style="dim")
+        table.add_column("Last Opened", style="dim")
+        table.add_column("Path", style="dim")
+        for w in workspaces:
+            name = f"{w.name} [green]✓[/green]" if w.path == current else w.name
+            table.add_row(
+                name,
+                w.project_type or ("git" if w.is_git else "—"),
+                w.last_opened[:16].replace("T", " "),
+                w.path,
+            )
+        self.console.print(table)
+
+    async def _project_picker(self) -> None:
+        from velune.cli.picker import PickItem, pick
+
+        workspaces = self._workspace_registry.list()
+        if not workspaces:
+            self.console.print(
+                "[dim]No workspaces registered yet. Use /project add <path> "
+                "to register one.[/dim]"
+            )
+            return
+        current = str(Path(self.container.get("runtime.workspace")).resolve())
+        items = [
+            PickItem(
+                id=w.path,
+                label=w.name,
+                meta=w.project_type or ("git" if w.is_git else ""),
+                group="Projects",
+                is_current=(w.path == current),
+            )
+            for w in workspaces
+        ]
+        chosen = await pick("Project workspaces", items)
+        if chosen is None or chosen.is_current:
+            return
+        await self._switch_workspace(Path(chosen.id))
+
+    async def _project_switch_target(self, target: str) -> None:
+        """Resolve *target* as a registered name or a filesystem path, then switch."""
+        info = self._workspace_registry.find_by_name(target)
+        if info is not None:
+            await self._switch_workspace(Path(info.path))
+            return
+        path = Path(target).expanduser()
+        if path.is_dir():
+            await self._switch_workspace(path)
+            return
+        self.console.print(
+            f"[red]Unknown project: {target!r}[/red]  "
+            "[dim]Use /project list or /project add <path>.[/dim]"
+        )
+
+    async def _switch_workspace(self, new_path: Path) -> None:
+        """Swap the active project workspace inside the running session.
+
+        Conversation context is archived and reset (it belongs to the old
+        workspace); memory, embeddings, and repository cognition are rebound
+        to the new workspace's own isolated stores.
+        """
+        from velune.cli.workspaces import switch_workspace
+
+        new_path = new_path.resolve()
+        old_path = Path(self.container.get("runtime.workspace")).resolve()
+        if new_path == old_path:
+            self.console.print("[dim]Already in this workspace.[/dim]")
+            return
+
+        self.console.print(f"[dim]Switching workspace → {new_path.name}...[/dim]")
+
+        # Close out the old workspace's session state.
+        try:
+            self._archive_current_session()
+        except Exception as exc:
+            _log.warning("Could not archive session before switch: %s", exc)
+        await self._end_episodic_session()
+        try:
+            self.container.get("runtime.working_memory").clear()
+        except Exception:
+            pass
+
+        notes = await switch_workspace(self.container, new_path)
+
+        # Fresh conversational state inside the new workspace.
+        self._conversation = []
+        self.session_tokens = 0
+        self.session_cost = 0.0
+        self._project_profile = self._load_project_profile()
+        self._workspace_registry.touch(new_path)
+        await self._start_episodic_session()
+
+        kind = None
+        if self._project_profile:
+            if isinstance(self._project_profile, dict):
+                kind = self._project_profile.get("display_name")
+            else:
+                kind = getattr(self._project_profile, "display_name", None)
+        detail = f" [dim]({kind})[/dim]" if kind else ""
+        self.console.print(
+            f"[green]✓ Workspace:[/green] [cyan]{new_path.name}[/cyan]{detail}  "
+            f"[dim]{notes[0] if notes else ''}[/dim]"
+        )
+        for note in notes[1:]:
+            self.console.print(f"  [yellow]{note}[/yellow]")
 
     async def _cmd_context(self, args: str) -> None:
         from velune.context.window import estimate_tokens
@@ -1775,7 +1957,8 @@ class VeluneREPL:
 
         table.add_row("Config Path", str(self.runtime.config_path or "default (memory)"))
         table.add_row("Workspace Root", str(self.runtime.workspace or Path.cwd()))
-        table.add_row("Log Level", "DEBUG" if self.runtime.verbose else "INFO")
+        verbose = logging.getLogger("velune").getEffectiveLevel() <= logging.DEBUG
+        table.add_row("Log Level", "DEBUG" if verbose else "INFO")
 
         if hasattr(config, "model_dump"):
             dump = config.model_dump()
@@ -2054,46 +2237,71 @@ class VeluneREPL:
 
         full_content: list[str] = []
         tokens_used = 0
+        interrupted = False
 
         try:
-            capabilities = provider.get_capabilities()
-            supports_stream = getattr(capabilities, "supports_streaming", False)
+            # While generating, Ctrl+C cancels only this block (via the
+            # interrupt controller's SIGINT handler) — never the event loop.
+            async with self._interrupts.foreground():
+                capabilities = provider.get_capabilities()
+                supports_stream = getattr(capabilities, "supports_streaming", False)
 
-            if supports_stream:
-                stream_buffer = MarkdownStreamBuffer()
-                stats = StreamStats()
-                # Re-parsing markdown on every chunk dominates streaming cost at
-                # high token rates. Push a fresh renderable to Live at most
-                # every ~80ms; intermediate chunks only append to the buffer.
-                min_update_interval = 0.08
-                last_update = 0.0
-                with Live(
-                    "", console=self.console, refresh_per_second=12, vertical_overflow="visible"
-                ) as live:
-                    async for chunk in provider.stream(request):
-                        if chunk.content:
-                            stream_buffer.append(chunk.content)
-                            full_content.append(chunk.content)
-                            stats.record_chunk(chunk.content)
-                            now = time.perf_counter()
-                            if now - last_update >= min_update_interval:
-                                live.update(stream_buffer.get_renderable())
-                                last_update = now
-                    live.update(stream_buffer.get_renderable())
-                self._status_state.last_latency_ms = stats.time_to_first_token_ms
-                self._status_state.last_tokens_per_sec = stats.tokens_per_second
-            else:
-                start = time.perf_counter()
-                with self.console.status("[cyan]Thinking...[/cyan]"):
-                    response = await provider.infer(request)
-                self._status_state.last_latency_ms = (time.perf_counter() - start) * 1000.0
-                self._status_state.last_tokens_per_sec = None
-                full_content.append(response.content)
-                tokens_used = response.tokens_used
-                self.console.print(CustomMarkdown(response.content))
+                if supports_stream:
+                    stream_buffer = MarkdownStreamBuffer()
+                    stats = StreamStats()
+                    # Re-parsing markdown on every chunk dominates streaming cost at
+                    # high token rates. Push a fresh renderable to Live at most
+                    # every ~80ms; intermediate chunks only append to the buffer.
+                    min_update_interval = 0.08
+                    last_update = 0.0
+                    with Live(
+                        "", console=self.console, refresh_per_second=12, vertical_overflow="visible"
+                    ) as live:
+                        async for chunk in provider.stream(request):
+                            if chunk.content:
+                                stream_buffer.append(chunk.content)
+                                full_content.append(chunk.content)
+                                stats.record_chunk(chunk.content)
+                                now = time.perf_counter()
+                                if now - last_update >= min_update_interval:
+                                    live.update(stream_buffer.get_renderable())
+                                    last_update = now
+                        live.update(stream_buffer.get_renderable())
+                    self._status_state.last_latency_ms = stats.time_to_first_token_ms
+                    self._status_state.last_tokens_per_sec = stats.tokens_per_second
+                else:
+                    start = time.perf_counter()
+                    with self.console.status("[cyan]Thinking...[/cyan]"):
+                        response = await provider.infer(request)
+                    self._status_state.last_latency_ms = (time.perf_counter() - start) * 1000.0
+                    self._status_state.last_tokens_per_sec = None
+                    full_content.append(response.content)
+                    tokens_used = response.tokens_used
+                    self.console.print(CustomMarkdown(response.content))
 
+        except asyncio.CancelledError:
+            if not self._interrupts.consume_user_cancelled():
+                raise  # genuine shutdown cancellation — propagate
+            task = asyncio.current_task()
+            if task is not None:
+                task.uncancel()
+            interrupted = True
         except KeyboardInterrupt:
-            self.console.print("\n[dim]Generation stopped.[/dim]")
+            interrupted = True
+
+        if interrupted:
+            self.console.print()
+            self._print_interrupted_frame()
+            partial = "".join(full_content)
+            if partial.strip():
+                # Keep the partial answer so the conversation stays coherent.
+                self._conversation.append(
+                    {"role": "assistant", "content": partial + "\n\n[response interrupted]"}
+                )
+            else:
+                # Nothing generated — drop the dangling user turn.
+                if self._conversation and self._conversation[-1].get("role") == "user":
+                    self._conversation.pop()
             return
 
         assistant_text = "".join(full_content)
