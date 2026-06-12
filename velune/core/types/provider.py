@@ -1,5 +1,8 @@
 """Core provider type definitions."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -10,7 +13,7 @@ class ProviderHealth(StrEnum):
     """Provider health status."""
     HEALTHY = "healthy"
     DEGRADED = "degraded"
-    UNHEALTHY = "unhealthy"
+    UNAVAILABLE = "unavailable"
     UNKNOWN = "unknown"
 
 
@@ -33,3 +36,23 @@ class ProviderCapabilities(BaseModel):
     max_context_window: int | None = None
     rate_limit_rpm: int | None = None
     rate_limit_tpm: int | None = None
+
+
+@dataclass
+class CapabilityManifest:
+    """Real-time capability and health manifest for a provider."""
+    provider_id: str
+    health: ProviderHealth
+    available_models: list[Any]
+    rate_limit_remaining: int | None = None
+    rate_limit_reset_at: float | None = None
+    estimated_latency_ms: int = 0
+    supports_streaming: bool = False
+    supports_tools: bool = False
+    is_online: bool = True
+    refreshed_at: float = field(default_factory=lambda: __import__('time').time())
+
+    @property
+    def is_available(self) -> bool:
+        """True if provider is not unavailable."""
+        return self.health != ProviderHealth.UNAVAILABLE

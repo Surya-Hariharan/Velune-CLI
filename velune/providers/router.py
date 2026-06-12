@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
+from velune.core.types.provider import ProviderHealth
 from velune.providers.health import get_checker
 from velune.providers.registry import ProviderRegistry
 
@@ -23,10 +24,43 @@ class ProviderRouter:
         self._provider_registry = provider_registry
         self._fallback_chain: list[str] = ["openai", "anthropic", "ollama"]
         self._connectivity = get_checker()
+        self._health_monitor = None
 
     def set_fallback_chain(self, fallback_chain: list[str]) -> None:
         """Set the provider routing fallback sequence."""
         self._fallback_chain = fallback_chain
+
+    def set_health_monitor(self, monitor) -> None:
+        """Set the health monitor for real-time provider status checking."""
+        self._health_monitor = monitor
+
+    def _filter_by_health(self, models: list[ModelDescriptor]) -> list[ModelDescriptor]:
+        """Filter models by provider health status.
+
+        Only considers models from available providers. Prefers HEALTHY providers over DEGRADED.
+        """
+        if not self._health_monitor:
+            return models
+
+        # Separate into healthy, degraded, and unavailable
+        healthy: list[ModelDescriptor] = []
+        degraded: list[ModelDescriptor] = []
+
+        for model in models:
+            manifest = self._health_monitor.get_manifest(model.provider_id)
+            if not manifest:
+                # No manifest yet, assume healthy
+                healthy.append(model)
+                continue
+
+            if manifest.health == ProviderHealth.HEALTHY:
+                healthy.append(model)
+            elif manifest.health == ProviderHealth.DEGRADED:
+                degraded.append(model)
+            # Skip unavailable providers
+
+        # Return healthy first, then degraded
+        return healthy if healthy else degraded
 
     def route_task(
         self,
@@ -39,10 +73,11 @@ class ProviderRouter:
         """Selects the best available model using empirical probe scores.
 
         Strategy:
-        1. Filter to models meeting min_level capability requirement
-        2. Sort by relevant probe score (descending)
-        3. Apply local preference: if local model >= 0.85 × best_score, prefer local
-        4. Apply latency preference: for latency_sensitive tasks, weight speed score
+        1. Filter by provider health (unavailable providers excluded)
+        2. Filter to models meeting min_level capability requirement
+        3. Sort by relevant probe score (descending)
+        4. Apply local preference: if local model >= 0.85 × best_score, prefer local
+        5. Apply latency preference: for latency_sensitive tasks, weight speed score
 
         When internet is unavailable, cloud providers are bypassed and local models
         are preferred. A one-time warning is emitted to stderr the first time this
@@ -50,7 +85,11 @@ class ProviderRouter:
         """
         global _offline_warned
 
-        candidates = models_list
+        # Filter by health status first
+        candidates = self._filter_by_health(models_list)
+        if not candidates:
+            logger.warning("No providers available after health filtering; falling back to all models")
+            candidates = models_list
 
         # Filter candidates by capability tier
         qualified: list[ModelDescriptor] = []
@@ -166,11 +205,24 @@ class ProviderRouter:
         def score_fn(model: ModelDescriptor) -> tuple:
             task_score = self._get_task_score(model, task_category)
 
-            # If latency sensitive, also weight speed tier
-            if latency_sensitive:
-                speed_weight = 1.0 if getattr(model, "speed_tier", "medium") == "fast" else 0.5
-                return (task_score, speed_weight)
-            return (task_score, 0.0)
+            # For latency-sensitive tasks, prefer low latency
+            latency_score = 0.0
+            if latency_sensitive and self._health_monitor:
+                manifest = self._health_monitor.get_manifest(model.provider_id)
+                if manifest:
+                    # Normalize latency: prefer <100ms (score 1.0), 100-500ms (0.5-1.0), >500ms (0.0-0.5)
+                    latency_ms = manifest.estimated_latency_ms
+                    if latency_ms < 100:
+                        latency_score = 1.0
+                    elif latency_ms < 500:
+                        latency_score = 0.5 + (500 - latency_ms) / (400 * 2)
+                    else:
+                        latency_score = max(0.0, 0.5 - (latency_ms - 500) / 1000)
+                else:
+                    latency_score = 0.5  # Unknown latency
+
+            # Return tuple for multi-key sort
+            return (task_score, latency_score) if latency_sensitive else (task_score, 0.0)
 
         sorted_opts = sorted(options, key=score_fn, reverse=True)
         return sorted_opts[0]

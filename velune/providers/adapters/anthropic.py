@@ -143,6 +143,9 @@ class AnthropicProvider(ModelProvider):
             if data.get("content"):
                 content = data["content"][0].get("text", "")
 
+            # Record latency in health monitor if available
+            self._record_latency_to_monitor(latency)
+
             return InferenceResponse(
                 content=content,
                 model_id=request.model_id,
@@ -157,6 +160,8 @@ class AnthropicProvider(ModelProvider):
         """Perform streaming completion."""
         await self.initialize()
         assert self.client is not None
+        start = time.perf_counter()
+        first_token = True
         try:
             system_prompt = ""
             anth_messages = []
@@ -188,6 +193,11 @@ class AnthropicProvider(ModelProvider):
                             data = json.loads(data_str)
                             d_type = data.get("type")
                             if d_type == "content_block_delta":
+                                # Record latency at first token
+                                if first_token:
+                                    latency = (time.perf_counter() - start) * 1000.0
+                                    self._record_latency_to_monitor(latency)
+                                    first_token = False
                                 yield StreamChunk(
                                     content=data["delta"].get("text", ""),
                                 )
@@ -203,6 +213,16 @@ class AnthropicProvider(ModelProvider):
 
     async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         raise NotImplementedError("Anthropic provider does not support embeddings.")
+
+    def _record_latency_to_monitor(self, latency_ms: float) -> None:
+        """Record latency to health monitor if available."""
+        try:
+            from velune.kernel.context import get_health_monitor
+            monitor = get_health_monitor()
+            if monitor:
+                monitor.record_latency(self.provider_id, int(latency_ms))
+        except (ImportError, AttributeError):
+            pass  # Health monitor not available, skip
 
     async def health_check(self) -> ProviderHealth:
         """Simple validation verification."""

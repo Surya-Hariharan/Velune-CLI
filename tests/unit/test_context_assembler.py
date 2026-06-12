@@ -1,5 +1,7 @@
 """Tests for ContextAssembler."""
 
+import pytest
+
 from velune.cli.modes import SessionMode
 from velune.context.assembler import ContextAssembler
 from velune.context.budget import ContextBudget
@@ -226,7 +228,3 @@ def test_assembler_report_accuracy(budget, model):
     assert len(report.sections_present) == 2
     assert ContextSection.SYSTEM_PROMPT in report.sections_present
     assert ContextSection.RETRIEVED_CONTEXT in report.sections_present
-
-
-# Import pytest for fixtures
-import pytest

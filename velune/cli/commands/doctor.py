@@ -12,9 +12,15 @@ from rich.console import Console
 from rich.table import Table
 
 from velune.providers.keystore import get_key
+from velune.telemetry import print_provider_health_report
 
 console = Console()
 doctor_cmd = typer.Typer(help="Environment health diagnostics")
+
+@doctor_cmd.command(name="providers")
+def show_providers() -> None:
+    """Show provider health and capability status."""
+    print_provider_health_report(console)
 
 @doctor_cmd.command(name="check")
 def check(
