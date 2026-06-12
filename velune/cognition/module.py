@@ -14,7 +14,11 @@ def _create_council_orchestrator(env: RuntimeEnvironment):
     provider_registry = env.container.get("runtime.provider_registry")
     model_registry = env.container.get("runtime.model_registry")
     model_specialization = ModelSpecializationMapper(model_registry)
-    sqlite_manager = env.container.get("runtime.sqlite_manager")
+    sqlite_manager = (
+        env.container.get("runtime.sqlite_manager")
+        if env.container.has("runtime.sqlite_manager")
+        else None
+    )
     lineage_memory = env.container.get("runtime.lineage_memory")
 
     return CouncilOrchestrator(
@@ -39,7 +43,6 @@ COGNITION_MODULES = [
         dependencies=[
             "runtime.provider_registry",
             "runtime.model_registry",
-            "runtime.sqlite_manager",
             "runtime.lineage_memory",
         ],
     ),
