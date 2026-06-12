@@ -60,12 +60,18 @@ class TestSlashCompleter:
 
     def test_recent_use_boosts_ranking(self):
         completer = SlashCompleter(commands=ENTRIES)
-        # "memory" scores below "model"/"models" for prefix "m"
-        before = _completions(completer, "/m")
-        assert before.index("memory") > before.index("model")
+        # "models" ranks below "model" for prefix "mod" (longer name)
+        before = _completions(completer, "/mod")
+        assert before.index("models") > before.index("model")
+        completer.record_use("models")
+        after = _completions(completer, "/mod")
+        assert after.index("models") < after.index("model")
+
+    def test_exact_alias_match_outranks_recency(self):
+        completer = SlashCompleter(commands=ENTRIES)
         completer.record_use("memory")
-        after = _completions(completer, "/m")
-        assert after.index("memory") < after.index("model")
+        # "/m" is an exact alias of /model — it must stay on top
+        assert _completions(completer, "/m")[0] == "model"
 
     def test_no_completions_without_slash(self):
         completer = SlashCompleter(commands=ENTRIES)
