@@ -158,8 +158,11 @@ def workspace_status(
             import json
             print(json.dumps({"error": "Not a Velune workspace (no .velune directory detected)"}))
         else:
-            console.print("[bold red]✗ Not a Velune workspace (no .velune directory detected).[/bold red]")
-            console.print("[dim]Use 'velune workspace init' to initialize.[/dim]")
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import WorkspaceNotInitializedError
+            console.print(render_error(WorkspaceNotInitializedError(
+                cause_override=f"No .velune directory found in {path}."
+            )))
         return
 
     from velune.core.event_loop import submit

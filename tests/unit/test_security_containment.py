@@ -130,24 +130,27 @@ async def test_orchestrator_scans_repository_context():
         "quarantined": True,
         "neutralized_content": "Sanitized Context"
     })
-    
+
     # Mock execute_task so it doesn't do real work
     orchestrator.execute_task = AsyncMock(return_value={})
-    
+
     # Need to mock repository cognition injection
     mock_container = MagicMock()
     mock_repo = MagicMock()
     mock_repo.index.return_value = MagicMock(root_path="/tmp", files=[MagicMock(path="test.py", language=MagicMock(value="python"))])
     mock_container.has.return_value = True
     mock_container.get.return_value = mock_repo
-    
+
     with patch("velune.kernel.registry.get_container", return_value=mock_container):
         async for chunk in orchestrator.stream("prompt"):
             pass
-        
+
     orchestrator.firewall.scan_file_for_injection.assert_called_once()
     args = orchestrator.firewall.scan_file_for_injection.call_args[0]
     assert args[0] == "repo_context"
-    # Execute task should receive the sanitized context
+    # Execute task should receive the sanitized context wrapped in untrusted-content markers
     orchestrator.execute_task.assert_called_once()
-    assert orchestrator.execute_task.call_args[1]["repo_context"] == "Sanitized Context"
+    passed_context = orchestrator.execute_task.call_args[1]["repo_context"]
+    assert "---BEGIN UNTRUSTED WORKSPACE CONTENT: repository_context---" in passed_context
+    assert "Sanitized Context" in passed_context
+    assert "---END UNTRUSTED WORKSPACE CONTENT: repository_context---" in passed_context

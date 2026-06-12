@@ -147,10 +147,14 @@ def create_app() -> typer.Typer:
                 import json
                 print(json.dumps({"error": f"Velune failed to start: {e}"}))
             else:
-                Console().print(
-                    f"[bold red]Velune failed to start:[/bold red] {e}\n"
-                    "Run [bold cyan]`velune doctor check`[/bold cyan] to diagnose the issue."
-                )
+                from velune.cli.rendering.error_panel import render_error, render_unexpected_error
+                from velune.core.errors.catalog import VeluneError, WorkspaceNotInitializedError
+                if isinstance(e, VeluneError):
+                    Console().print(render_error(e))
+                elif "velune.toml" in str(e).lower() or "workspace" in str(e).lower():
+                    Console().print(render_error(WorkspaceNotInitializedError(str(e))))
+                else:
+                    Console().print(render_unexpected_error(e))
             raise typer.Exit(1)
 
         runtime.container.register_instance("runtime.auto_accept", yes)

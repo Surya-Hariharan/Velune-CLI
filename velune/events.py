@@ -6,6 +6,7 @@ import asyncio
 import fnmatch
 import logging
 import uuid
+from collections import deque
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +14,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("velune.events")
+
+_HISTORY_MAXLEN = 1000
 
 
 class Event(BaseModel):
@@ -52,11 +55,17 @@ class CognitiveBus:
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._running: bool = False
         self._dispatch_task: asyncio.Task | None = None
-        self._history: list[Event] = []
+        self._history: deque[Event] = deque(maxlen=_HISTORY_MAXLEN)
         self._pending_responses: dict[str, asyncio.Future[Event]] = {}
 
     async def emit(self, event: Event) -> None:
         """Enqueue/Publish a kernel event to the bus."""
+        if len(self._history) >= _HISTORY_MAXLEN:
+            oldest = self._history[0]
+            logger.debug(
+                "Event history at capacity (%d); dropping oldest: %s [%s]",
+                _HISTORY_MAXLEN, oldest.event_type, oldest.event_id,
+            )
         self._history.append(event)
 
         if event.correlation_id and event.correlation_id in self._pending_responses:

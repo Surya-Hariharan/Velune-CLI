@@ -28,7 +28,11 @@ def config_set(
             import json
             print(json.dumps({"error": "CLI context is uninitialized"}))
         else:
-            console.print("[red]CLI context is uninitialized.[/red]")
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import WorkspaceNotInitializedError
+            console.print(render_error(WorkspaceNotInitializedError(
+                cause_override="CLI context was not properly initialized before this command."
+            )))
         raise typer.Exit(1)
 
     config_path = cli_context.config_path or (cli_context.workspace / "velune.toml")
@@ -45,7 +49,8 @@ def config_set(
             import json
             print(json.dumps({"error": f"Failed to load existing config: {e}"}))
         else:
-            console.print(f"[red]Failed to load existing config: {e}[/red]")
+            from velune.cli.rendering.error_panel import render_unexpected_error
+            console.print(render_unexpected_error(e))
         data = {}
 
     # Set the nested key
@@ -88,7 +93,8 @@ def config_set(
             import json
             print(json.dumps({"error": f"Failed to save config: {e}"}))
         else:
-            console.print(f"[red]Failed to save config: {e}[/red]")
+            from velune.cli.rendering.error_panel import render_unexpected_error
+            console.print(render_unexpected_error(e))
         raise typer.Exit(1)
 
 
@@ -104,7 +110,11 @@ def config_get(
             import json
             print(json.dumps({"error": "CLI context is uninitialized"}))
         else:
-            console.print("[red]CLI context is uninitialized.[/red]")
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import WorkspaceNotInitializedError
+            console.print(render_error(WorkspaceNotInitializedError(
+                cause_override="CLI context was not properly initialized before this command."
+            )))
         raise typer.Exit(1)
 
     # Fetch from the active loaded config object which is resolved and typed

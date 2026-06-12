@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 from velune.cognition.arbitrator import CouncilArbitrator
 from velune.cognition.architecture import ArchitectureCognitionAgent
+from velune.cognition.budget import CouncilExecutionBudget
 from velune.cognition.council.debate import calculate_max_debate_turns
 from velune.cognition.council.factory import CouncilAgentFactory
 from velune.cognition.council.tiers import CouncilTier, TierClassifier
@@ -58,8 +59,8 @@ class CouncilOrchestrator:
         if lineage_memory is not None:
             self.lineage_memory: LineageMemoryTier | None = lineage_memory
         elif pool is not None:
-            from velune.memory.tiers.lineage import LineageMemoryTier as _LMT
-            self.lineage_memory = _LMT(pool)
+            from velune.memory.tiers.lineage import LineageMemoryTier as _LineageMemoryTier
+            self.lineage_memory = _LineageMemoryTier(pool)
         else:
             self.lineage_memory = None
         self.analytics = analytics or CognitivePerformanceAnalytics(sqlite_manager=sqlite_manager)
@@ -158,6 +159,9 @@ class CouncilOrchestrator:
                     if scan_res.get("quarantined"):
                         repo_context = scan_res.get("neutralized_content", "")
                         logger.warning("Repository context neutralized by firewall before prompt injection.")
+                    # Always wrap in untrusted-content boundary markers so agents treat
+                    # this as data, even when the content passed the injection scan.
+                    repo_context = self.firewall.wrap_workspace_content("repository_context", repo_context)
         except Exception as e:
             logger.warning("Could not gather repository snapshot: %s", e)
 
@@ -364,8 +368,10 @@ class CouncilOrchestrator:
         repo_context: str,
         council_tier: str | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        budget: CouncilExecutionBudget | None = None,
     ) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt with wall-time limit."""
+        budget = budget or CouncilExecutionBudget(max_wall_time_seconds=int(self.max_wall_time_seconds))
         tier = self._resolve_tier(prompt, repo_context, council_tier)
         tier_str = tier.value
 
@@ -376,14 +382,15 @@ class CouncilOrchestrator:
                     repo_context=repo_context,
                     tier=tier,
                     progress_callback=progress_callback,
+                    budget=budget,
                 ),
-                timeout=self.max_wall_time_seconds
+                timeout=budget.max_wall_time_seconds,
             )
         except TimeoutError:
             logger.error(
-                "Council wall-time limit reached (%.0fs). "
+                "Council wall-time limit reached (%ds). "
                 "Returning partial result.",
-                self.max_wall_time_seconds
+                budget.max_wall_time_seconds,
             )
             return self._build_timeout_result(prompt, tier_str)
 
@@ -407,6 +414,7 @@ class CouncilOrchestrator:
                 "synthesis_instructions": "",
             },
             "final_summary": "Council execution timed out. Partial analysis: (None)",
+            "is_timeout": True,
         }
 
     @staticmethod
@@ -424,6 +432,7 @@ class CouncilOrchestrator:
         tier: CouncilTier,
         progress_callback: Callable[[str], None] | None = None,
         run_id: str = "default",
+        budget: CouncilExecutionBudget | None = None,
     ) -> dict[str, Any]:
         """Consolidated orchestrator execution path for all tiers."""
         import uuid
@@ -440,6 +449,7 @@ class CouncilOrchestrator:
             run_id = f"council-{uuid.uuid4().hex[:8]}"
 
         tier_level = {"instant": 1, "minimal": 2, "standard": 3, "full": 4}[tier.value]
+        budget = budget or CouncilExecutionBudget()
 
         with TraceContext(run_id=run_id):
             logger.info("Reasoning Council starting execution in %s tier for goal: %s", tier.value.upper(), prompt[:50])
@@ -526,18 +536,35 @@ class CouncilOrchestrator:
             if planner:
                 logger.info("Council Phase: Planner")
                 if progress_callback: progress_callback("[Planner] Decomposing task...")
-                task_plan = await planner.generate_plan(prompt, enriched_repo_context)
-                plan_desc = "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
+                try:
+                    task_plan = await asyncio.wait_for(
+                        planner.generate_plan(prompt, enriched_repo_context),
+                        timeout=budget.planner_timeout_seconds,
+                    )
+                except TimeoutError:
+                    logger.error("Planner timed out after %ds", budget.planner_timeout_seconds)
+                    task_plan = None
+                plan_desc = (
+                    "\n".join([f"- {s.id}: {s.description}" for s in task_plan.steps])
+                    if task_plan else "Direct implementation (Planner timed out)."
+                )
 
             # 2. Coder Phase
             logger.info("Council Phase: Coder")
             if progress_callback: progress_callback("[Coder] Designing code implementation...")
-            coder_proposal = await coder.write_code(
-                prompt=prompt,
-                current_code=enriched_repo_context,
-                plan_context=plan_desc,
-                style_profile=style_profile,
-            )
+            try:
+                coder_proposal = await asyncio.wait_for(
+                    coder.write_code(
+                        prompt=prompt,
+                        current_code=enriched_repo_context,
+                        plan_context=plan_desc,
+                        style_profile=style_profile,
+                    ),
+                    timeout=budget.coder_timeout_seconds,
+                )
+            except TimeoutError:
+                logger.error("Coder timed out after %ds", budget.coder_timeout_seconds)
+                return self._build_timeout_result(tier, start_time)
 
             # Early Return for Instant/Minimal
             if tier_level < 3:
@@ -624,7 +651,7 @@ class CouncilOrchestrator:
 
             max_debate_turns = 0
             if tier_level == 3 and objections and not low_resource:
-                max_debate_turns = 1
+                max_debate_turns = min(1, budget.max_review_cycles)
             elif tier_level == 4:
                 all_critic_reports = {
                     "security": security_report,
@@ -636,7 +663,7 @@ class CouncilOrchestrator:
                     critic_reports=all_critic_reports,
                     task_complexity="structural",
                 )
-                max_debate_turns = min(3, max_debate_turns)
+                max_debate_turns = min(budget.max_review_cycles, max_debate_turns)
 
             refined_proposal = coder_proposal
             initial_objection_count = len(objections)
@@ -654,6 +681,14 @@ class CouncilOrchestrator:
                     refined_proposal = coder_proposal
 
                     while debate_turn <= max_debate_turns:
+                        elapsed = time.time() - start_time
+                        if elapsed >= budget.max_wall_time_seconds:
+                            logger.warning(
+                                "[COUNCIL - DEBATE] Wall-time budget exhausted (%.1fs >= %ds); stopping debate.",
+                                elapsed, budget.max_wall_time_seconds,
+                            )
+                            break
+
                         logger.info("[COUNCIL - DEBATE] Debate Loop Turn %d/%d", debate_turn, max_debate_turns)
                         if progress_callback: progress_callback(f"[Debate] Running debate turn {debate_turn}...")
                         turns_required = debate_turn
@@ -665,12 +700,22 @@ class CouncilOrchestrator:
                             f"Please rewrite and refine the proposed code to resolve ALL of these objections completely while satisfying the original task."
                         )
 
-                        refined_proposal = await coder.write_code(
-                            prompt=prompt,
-                            current_code=enriched_repo_context,
-                            plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
-                            style_profile=style_profile,
-                        )
+                        try:
+                            refined_proposal = await asyncio.wait_for(
+                                coder.write_code(
+                                    prompt=prompt,
+                                    current_code=enriched_repo_context,
+                                    plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
+                                    style_profile=style_profile,
+                                ),
+                                timeout=budget.coder_timeout_seconds,
+                            )
+                        except TimeoutError:
+                            logger.error(
+                                "[COUNCIL - DEBATE] Coder timed out on turn %d after %ds; stopping debate.",
+                                debate_turn, budget.coder_timeout_seconds,
+                            )
+                            break
 
                         re_tasks = []
                         re_critics = []
@@ -746,8 +791,9 @@ class CouncilOrchestrator:
                         coder_proposal = refined_proposal
                         converged = False
 
+                remaining = max(1.0, budget.max_wall_time_seconds - (time.time() - start_time))
                 try:
-                    await asyncio.wait_for(_run_debate_loop(), timeout=300.0)
+                    await asyncio.wait_for(_run_debate_loop(), timeout=remaining)
                 except TimeoutError:
                     logger.warning("Debate loop hit wall time limit, proceeding with best proposal")
                     converged = False

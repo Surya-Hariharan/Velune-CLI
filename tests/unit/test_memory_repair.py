@@ -292,12 +292,14 @@ class TestMemoryLifecycleFlush:
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
         from velune.memory.tiers.working import WorkingMemoryTier
         from velune.memory.tiers.episodic import EpisodicMemoryTier
-        from velune.memory.storage.sqlite_manager import SQLiteManager
+        from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
 
         db = tmp_path / "test.db"
-        mgr = SQLiteManager(db)
+        pool = SQLiteConnectionPool(db)
+        await pool.startup()
         working = WorkingMemoryTier(session_id="flush-test", ttl_seconds=3600)
-        episodic = EpisodicMemoryTier(db_path=db, sqlite_manager=mgr)
+        episodic = EpisodicMemoryTier(pool)
+        await episodic.initialize()
 
         coordinator = MemoryLifecycleCoordinator(working, episodic)
         await coordinator.startup()
@@ -307,15 +309,12 @@ class TestMemoryLifecycleFlush:
 
         await coordinator.shutdown()
 
-        # Give the async write thread a moment
-        time.sleep(0.2)
-
-        turns = episodic.get_turns("flush-test")
+        turns = await episodic.get_turns("flush-test")
         contents = [t.content for t in turns]
         assert "tell me about the blast radius" in contents
         assert "it depends on fan-in depth" in contents
 
-        await mgr.shutdown()
+        await pool.shutdown()
 
     @pytest.mark.asyncio
     async def test_shutdown_evicts_expired_before_flush(self, tmp_path):
@@ -323,12 +322,14 @@ class TestMemoryLifecycleFlush:
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
         from velune.memory.tiers.working import WorkingMemoryTier, MemoryTurn
         from velune.memory.tiers.episodic import EpisodicMemoryTier
-        from velune.memory.storage.sqlite_manager import SQLiteManager
+        from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
 
         db = tmp_path / "test2.db"
-        mgr = SQLiteManager(db)
+        pool = SQLiteConnectionPool(db)
+        await pool.startup()
         working = WorkingMemoryTier(session_id="evict-test", ttl_seconds=60)
-        episodic = EpisodicMemoryTier(db_path=db, sqlite_manager=mgr)
+        episodic = EpisodicMemoryTier(pool)
+        await episodic.initialize()
 
         coordinator = MemoryLifecycleCoordinator(working, episodic)
         await coordinator.startup()
@@ -339,14 +340,13 @@ class TestMemoryLifecycleFlush:
         working.add_turn("user", "live-turn")
 
         await coordinator.shutdown()
-        time.sleep(0.2)
 
-        turns = episodic.get_turns("evict-test")
+        turns = await episodic.get_turns("evict-test")
         contents = [t.content for t in turns]
         assert "live-turn" in contents
         assert "old-stale" not in contents, "Expired turns must not be flushed"
 
-        await mgr.shutdown()
+        await pool.shutdown()
 
     @pytest.mark.asyncio
     async def test_get_recent_context_reads_episodic(self, tmp_path):
@@ -354,27 +354,27 @@ class TestMemoryLifecycleFlush:
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
         from velune.memory.tiers.working import WorkingMemoryTier
         from velune.memory.tiers.episodic import EpisodicMemoryTier
-        from velune.memory.storage.sqlite_manager import SQLiteManager
+        from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
 
         db = tmp_path / "test3.db"
-        mgr = SQLiteManager(db)
+        pool = SQLiteConnectionPool(db)
+        await pool.startup()
         working = WorkingMemoryTier(session_id="ctx-test", ttl_seconds=3600)
-        episodic = EpisodicMemoryTier(db_path=db, sqlite_manager=mgr)
+        episodic = EpisodicMemoryTier(pool)
+        await episodic.initialize()
 
         # Pre-populate episodic directly
-        episodic.add_turn("ctx-test", "user", "first message")
-        time.sleep(0.1)  # let async write complete
-        episodic.add_turn("ctx-test", "assistant", "first reply")
-        time.sleep(0.1)
+        await episodic.add_turn("ctx-test", "user", "first message")
+        await episodic.add_turn("ctx-test", "assistant", "first reply")
 
         coordinator = MemoryLifecycleCoordinator(working, episodic)
-        context = coordinator.get_recent_context("ctx-test", limit=5)
+        context = await coordinator.get_recent_context("ctx-test", limit=5)
 
         assert len(context) >= 1
         roles = [c["role"] for c in context]
         assert "user" in roles
 
-        await mgr.shutdown()
+        await pool.shutdown()
 
     @pytest.mark.asyncio
     async def test_get_recent_context_empty_on_no_data(self, tmp_path):
@@ -382,18 +382,20 @@ class TestMemoryLifecycleFlush:
         from velune.memory.lifecycle import MemoryLifecycleCoordinator
         from velune.memory.tiers.working import WorkingMemoryTier
         from velune.memory.tiers.episodic import EpisodicMemoryTier
-        from velune.memory.storage.sqlite_manager import SQLiteManager
+        from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
 
         db = tmp_path / "test4.db"
-        mgr = SQLiteManager(db)
+        pool = SQLiteConnectionPool(db)
+        await pool.startup()
         working = WorkingMemoryTier(session_id="empty-test", ttl_seconds=3600)
-        episodic = EpisodicMemoryTier(db_path=db, sqlite_manager=mgr)
+        episodic = EpisodicMemoryTier(pool)
+        await episodic.initialize()
 
         coordinator = MemoryLifecycleCoordinator(working, episodic)
-        context = coordinator.get_recent_context("nonexistent-session", limit=10)
+        context = await coordinator.get_recent_context("nonexistent-session", limit=10)
 
         assert context == []
-        await mgr.shutdown()
+        await pool.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -445,23 +447,28 @@ class TestMemoryCLIInspectIsHonest:
         import asyncio
         from velune.memory.tiers.working import WorkingMemoryTier
         from velune.memory.tiers.episodic import EpisodicMemoryTier
-        from velune.memory.storage.sqlite_manager import SQLiteManager
+        from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
 
         db = tmp_path / "empty.db"
-        mgr = SQLiteManager(db)
-        working = WorkingMemoryTier(session_id="cold", ttl_seconds=3600)
-        episodic = EpisodicMemoryTier(db_path=db, sqlite_manager=mgr)
 
-        # Simulate what inspect does for "all" tier
-        records = []
-        for turn in working.get_recent_turns(limit=10):
-            records.append({"id": f"wrk-{turn.timestamp:.0f}", "content": turn.content})
-        for turn in episodic.get_turns("cold"):
-            records.append({"id": f"eps-{turn.id}", "content": turn.content})
+        async def _run():
+            pool = SQLiteConnectionPool(db)
+            await pool.startup()
+            working = WorkingMemoryTier(session_id="cold", ttl_seconds=3600)
+            episodic = EpisodicMemoryTier(pool)
+            await episodic.initialize()
 
+            records = []
+            for turn in working.get_recent_turns(limit=10):
+                records.append({"id": f"wrk-{turn.timestamp:.0f}", "content": turn.content})
+            for turn in await episodic.get_turns("cold"):
+                records.append({"id": f"eps-{turn.id}", "content": turn.content})
+
+            await pool.shutdown()
+            return records
+
+        records = asyncio.run(_run())
         assert records == [], "Cold start must yield empty records, not fakes"
-
-        asyncio.run(mgr.shutdown())
 
     def test_compact_does_not_print_fake_counters(self):
         """compact command must not claim to have processed fabricated numbers."""

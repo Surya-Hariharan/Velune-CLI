@@ -46,7 +46,11 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
     roles = model_specialization.map_roles()
     coder_model = roles.get(CouncilRole.CODER)
     if not coder_model:
-        console.print("[bold red]✗ No Coder model assigned or found. Make sure your model catalog is scanned.[/bold red]")
+        from velune.cli.rendering.error_panel import render_error
+        from velune.core.errors.catalog import NoModelsAvailableError
+        console.print(render_error(NoModelsAvailableError(
+            cause_override="No Coder model is assigned or found in the model catalog."
+        )))
         await lifecycle.shutdown()
         return
 
@@ -99,7 +103,7 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
         if user_input.startswith("!run "):
             task = user_input[5:].strip()
             if not task:
-                console.print("[bold red]Error: please specify a task to execute (e.g. !run implement feature x)[/bold red]")
+                console.print("[yellow]Usage: !run <task>  — please specify a task to execute[/yellow]")
                 continue
             console.print(f"[bold cyan]Escalating task to full Reasoning Council: '{task}'...[/bold cyan]")
 
@@ -125,11 +129,17 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
                     if success:
                         console.print(f"[bold green]✓ Execution completed successfully: {state.output or 'Done'}[/bold green]")
                     else:
-                        console.print(f"[bold red]✗ Execution failed: {state.error}[/bold red]")
+                        from velune.cli.rendering.error_panel import render_unexpected_error
+                        console.print(render_unexpected_error(RuntimeError(state.error or "Unknown execution failure")))
                 else:
-                    console.print("[bold red]✗ Escalated execution failed or did not return a state.[/bold red]")
+                    console.print("[dim]Council run completed but returned no state.[/dim]")
             except Exception as e:
-                console.print(f"[bold red]✗ Escalation error: {e}[/bold red]")
+                from velune.cli.rendering.error_panel import render_error, render_unexpected_error
+                from velune.core.errors.catalog import VeluneError
+                if isinstance(e, VeluneError):
+                    console.print(render_error(e))
+                else:
+                    console.print(render_unexpected_error(e))
             continue
 
         # 7. Low-latency, streaming conversational execution
@@ -168,7 +178,12 @@ async def _chat_command_async(cli_context: CLIContext) -> None:
 
         except Exception as e:
             print()
-            console.print(f"[bold red]Error streaming response: {e}[/bold red]")
+            from velune.cli.rendering.error_panel import render_error, render_unexpected_error
+            from velune.core.errors.catalog import VeluneError
+            if isinstance(e, VeluneError):
+                console.print(render_error(e))
+            else:
+                console.print(render_unexpected_error(e))
 
     # 8. Shutdown
     await lifecycle.shutdown()

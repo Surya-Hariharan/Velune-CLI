@@ -102,9 +102,12 @@ async def test_model_command_no_models_shows_warning(repl):
 
 @pytest.mark.asyncio
 async def test_model_command_direct_switch_unknown(repl):
+    from rich.panel import Panel
     await repl._cmd_model("nonexistent-model-xyz")
-    printed = " ".join(str(c) for c in repl.console.print.call_args_list)
-    assert "not found" in printed
+    # The model-not-found case now renders a structured error Panel.
+    calls = repl.console.print.call_args_list
+    assert any(isinstance(c.args[0], Panel) for c in calls), \
+        "Expected a rich Panel for unknown model"
 
 
 # ---------------------------------------------------------------------------

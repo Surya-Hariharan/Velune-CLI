@@ -2,7 +2,7 @@
 
 Uses gitpython's high-level API instead of raw subprocess.  This eliminates
 two classes of injection risk:
-  - Shell injection (no shell=True was ever used, but subprocess is gone).
+  - Shell injection (subprocess with a shell argument is not used; gitpython handles this).
   - Argument injection: branch names are looked up by key in the Repo heads
     dict rather than spliced into a command string, so ``--detach`` or similar
     flag-like inputs cannot influence git's option parsing.

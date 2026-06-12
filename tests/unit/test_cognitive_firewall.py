@@ -120,8 +120,9 @@ def test_wrap_workspace_content_preserves_code():
     firewall = CognitiveFirewall()
     code = "if x > 0 and y < 10: pass"
     wrapped = firewall.wrap_workspace_content("test.py", code)
-    assert "if x > 0 and y < 10" in wrapped  # Not escaped
-    assert "<workspace_file_content" in wrapped  # XML wrapper preserved
+    assert "if x > 0 and y < 10" in wrapped  # code operators not escaped
+    assert "---BEGIN UNTRUSTED WORKSPACE CONTENT: test.py---" in wrapped
+    assert "---END UNTRUSTED WORKSPACE CONTENT: test.py---" in wrapped
 
 
 def test_prose_still_escaped():

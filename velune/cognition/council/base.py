@@ -52,9 +52,10 @@ class BaseCouncilAgent(ABC):
             run_id=_run_id.get() or "unknown",
             agent_id=self.role.value,
         ):
-            messages = [{"role": "system", "content": self.system_prompt}] + context_history
+            from velune.cognition.firewall import WORKSPACE_SANDBOX_NOTICE, CognitiveFirewall
 
-            from velune.cognition.firewall import CognitiveFirewall
+            system_content = self.system_prompt + "\n\n" + WORKSPACE_SANDBOX_NOTICE
+            messages = [{"role": "system", "content": system_content}] + context_history
             firewall = CognitiveFirewall()
             if not firewall.scan_conversation(messages):
                 logger.error("Prompt injection detected in Council message history")

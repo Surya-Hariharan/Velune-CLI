@@ -3,8 +3,6 @@
 import subprocess
 from pathlib import Path
 
-from velune.execution.path_guard import PathGuard
-
 
 class GitTracker:
     """Direct Git integration for capturing branch topology, blames, and commit volatility."""
@@ -12,6 +10,9 @@ class GitTracker:
     def __init__(self, root_path: Path) -> None:
         self.root_path = root_path.resolve()
         self.is_git = (self.root_path / ".git").exists()
+        # Lazy import breaks the circular dependency:
+        # repository.tracker → execution (via __init__) → rollback → repository.tracker
+        from velune.execution.path_guard import PathGuard
         self._guard = PathGuard(self.root_path)
 
     def get_active_branch(self) -> str:

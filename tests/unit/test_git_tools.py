@@ -42,8 +42,8 @@ def git_repo(tmp_path: Path) -> Path:
 @pytest.mark.asyncio
 async def test_git_log_is_nonblocking(git_repo: Path):
     """Verify GitLog.execute() is a coroutine function and extracts history correctly."""
-    tool = GitLog()
-    
+    tool = GitLog(workspace=git_repo)
+
     import inspect
     # 1. Assert execute is a coroutine function
     assert inspect.iscoroutinefunction(tool.execute)
@@ -104,8 +104,8 @@ def test_batch_volatility_performance(git_repo: Path):
 @pytest.mark.asyncio
 async def test_git_tool_does_not_block_event_loop(git_repo: Path):
     """Verify GitStatus.execute() does not block the asyncio event loop."""
-    tool = GitStatus()
-    
+    tool = GitStatus(workspace=git_repo)
+
     # Add files to untracked space to give the status command work
     for i in range(10):
         (git_repo / f"untracked_{i}.txt").write_text("untracked", encoding="utf-8")

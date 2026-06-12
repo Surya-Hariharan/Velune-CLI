@@ -117,8 +117,8 @@ async def test_tier_classifier_policy():
 async def test_style_resolver_async_safety():
     """Verify that StyleResolver runs scans asynchronously and caches results."""
     memory = MagicMock()
-    memory.get_personality_style.return_value = None
-    
+    memory.get_personality_style = AsyncMock(return_value=None)
+
     resolver = StyleResolver(lineage_memory=memory)
     
     # We mock _scan_directory to simulate heavy scanning in a non-blocking way

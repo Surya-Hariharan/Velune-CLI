@@ -164,38 +164,34 @@ def test_lightweight_blast_radius_computation() -> None:
                 lineage_db_path=Path(temp_dir) / "test.db",
             )
 
-            try:
-                # 1. Target not in graph must return default
-                grapher.graph = {}
-                score1 = orchestrator.estimate_blast_radius("nonexistent.py")
-                assert score1 == 0.3
+            # 1. Target not in graph must return default
+            grapher.graph = {}
+            score1 = orchestrator.estimate_blast_radius("nonexistent.py")
+            assert score1 == 0.3
 
-                # 2. Mock graph structure
-                # target has direct dependents: d1_a, d1_b
-                # d1_a has dependents: d2_a
-                # d1_b has dependents: d2_b, d2_c
-                grapher.graph = {"target.py": {}}
-                
-                def mock_get_dependents(file_path: str) -> list[str]:
-                    if file_path == "target.py":
-                        return ["d1_a.py", "d1_b.py"]
-                    if file_path == "d1_a.py":
-                        return ["d2_a.py"]
-                    if file_path == "d1_b.py":
-                        return ["d2_b.py", "d2_c.py"]
-                    return []
+            # 2. Mock graph structure
+            # target has direct dependents: d1_a, d1_b
+            # d1_a has dependents: d2_a
+            # d1_b has dependents: d2_b, d2_c
+            grapher.graph = {"target.py": {}}
 
-                grapher.get_dependents.side_effect = mock_get_dependents
+            def mock_get_dependents(file_path: str) -> list[str]:
+                if file_path == "target.py":
+                    return ["d1_a.py", "d1_b.py"]
+                if file_path == "d1_a.py":
+                    return ["d2_a.py"]
+                if file_path == "d1_b.py":
+                    return ["d2_b.py", "d2_c.py"]
+                return []
 
-                # Calculate raw_score = 1.0 * len(d1) + 0.5 * len(d2)
-                # len(d1) = 2, len(d2) = 3 (d2_a, d2_b, d2_c)
-                # raw_score = 2 * 1.0 + 3 * 0.5 = 3.5
-                # normalized = 0.1 + 0.8 * (1.0 - exp(-3.5 / 5.0)) ~= 0.502
-                score2 = orchestrator.estimate_blast_radius("target.py")
-                assert 0.45 < score2 < 0.55
-            finally:
-                # Shutdown database
-                asyncio.run(orchestrator.lineage_memory.sqlite_manager.shutdown())
+            grapher.get_dependents.side_effect = mock_get_dependents
+
+            # Calculate raw_score = 1.0 * len(d1) + 0.5 * len(d2)
+            # len(d1) = 2, len(d2) = 3 (d2_a, d2_b, d2_c)
+            # raw_score = 2 * 1.0 + 3 * 0.5 = 3.5
+            # normalized = 0.1 + 0.8 * (1.0 - exp(-3.5 / 5.0)) ~= 0.502
+            score2 = orchestrator.estimate_blast_radius("target.py")
+            assert 0.45 < score2 < 0.55
 
     finally:
         # Restore container registration
@@ -231,30 +227,26 @@ def test_advanced_structural_change_detection() -> None:
                 lineage_db_path=Path(temp_dir) / "test.db",
             )
 
-            try:
-                # Define dependents rule: high_coupled has 4 dependents, low has 0.
-                def mock_get_dependents(file_path: str) -> list[str]:
-                    if "high_coupled" in file_path:
-                        return ["dep1.py", "dep2.py", "dep3.py", "dep4.py"]
-                    return []
+            # Define dependents rule: high_coupled has 4 dependents, low has 0.
+            def mock_get_dependents(file_path: str) -> list[str]:
+                if "high_coupled" in file_path:
+                    return ["dep1.py", "dep2.py", "dep3.py", "dep4.py"]
+                return []
 
-                grapher.get_dependents.side_effect = mock_get_dependents
+            grapher.get_dependents.side_effect = mock_get_dependents
 
-                # 1. Simple change on low coupling target (False)
-                assert orchestrator._is_structural_change("Fix typo in helper.py", "context") is False
+            # 1. Simple change on low coupling target (False)
+            assert orchestrator._is_structural_change("Fix typo in helper.py", "context") is False
 
-                # 2. Target Core match must be structural (True)
-                assert orchestrator._is_structural_change("Update velune/core/main.py", "context") is True
-                assert orchestrator._is_structural_change("Tweak velune/kernel/bus.py", "context") is True
+            # 2. Target Core match must be structural (True)
+            assert orchestrator._is_structural_change("Update velune/core/main.py", "context") is True
+            assert orchestrator._is_structural_change("Tweak velune/kernel/bus.py", "context") is True
 
-                # 3. High fan-in file match must be structural (True)
-                assert orchestrator._is_structural_change("Edit high_coupled.py", "context") is True
+            # 3. High fan-in file match must be structural (True)
+            assert orchestrator._is_structural_change("Edit high_coupled.py", "context") is True
 
-                # 4. Keyword structural indicators fallback (True)
-                assert orchestrator._is_structural_change("Redesign the state routing", "context") is True
-            finally:
-                # Shutdown database
-                asyncio.run(orchestrator.lineage_memory.sqlite_manager.shutdown())
+            # 4. Keyword structural indicators fallback (True)
+            assert orchestrator._is_structural_change("Redesign the state routing", "context") is True
 
     finally:
         # Restore container registration
@@ -263,38 +255,43 @@ def test_advanced_structural_change_detection() -> None:
             container.register_instance("runtime.repository_cognition", original_cognition)
 
 
-def test_orchestration_continuity_logging() -> None:
+@pytest.mark.asyncio
+async def test_orchestration_continuity_logging() -> None:
     """Verify that calculated structural impact is logged to the DLS SQLite tables."""
-    # Create mock orchestrator with standard database lineage memory
+    from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
+    from velune.memory.tiers.lineage import LineageMemoryTier
+
     providers = MagicMock(spec=ProviderRegistry)
     mapper = MagicMock(spec=ModelSpecializationMapper)
-    
+
     with tempfile.TemporaryDirectory() as temp_dir:
+        pool = SQLiteConnectionPool(Path(temp_dir) / "test_dls.db")
+        await pool.startup()
+        lineage = LineageMemoryTier(pool)
+        await lineage.initialize()
+
         orchestrator = CouncilOrchestrator(
             provider_registry=providers,
             mapper=mapper,
-            lineage_db_path=Path(temp_dir) / "test_dls.db",
+            lineage_memory=lineage,
         )
 
-        try:
-            # Mock estimate_blast_radius
-            orchestrator.estimate_blast_radius = MagicMock(return_value=0.555)
+        # Mock estimate_blast_radius
+        orchestrator.estimate_blast_radius = MagicMock(return_value=0.555)
 
-            # Log standard path decision
-            decision_id = "DEC-TEST-01"
-            orchestrator.lineage_memory.log_decision(
-                decision_id=decision_id,
-                target_subsystem="velune/core/main.py",
-                rationale="Testing dynamic DLS impact logging",
-                architectural_impact=orchestrator.estimate_blast_radius("velune/core/main.py"),
-                consequences="Impact score should be exactly 0.555",
-            )
+        # Log standard path decision
+        decision_id = "DEC-TEST-01"
+        await orchestrator.lineage_memory.log_decision(
+            decision_id=decision_id,
+            target_subsystem="velune/core/main.py",
+            rationale="Testing dynamic DLS impact logging",
+            architectural_impact=orchestrator.estimate_blast_radius("velune/core/main.py"),
+            consequences="Impact score should be exactly 0.555",
+        )
 
-            # Flush database writes
-            decisions = orchestrator.lineage_memory.get_subsystem_decisions("main.py")
-            assert len(decisions) == 1
-            assert decisions[0]["id"] == decision_id
-            assert decisions[0]["architectural_impact"] == 0.555
-        finally:
-            # Close connection cleanly to allow temp directory cleanup
-            asyncio.run(orchestrator.lineage_memory.sqlite_manager.shutdown())
+        decisions = await orchestrator.lineage_memory.get_subsystem_decisions("main.py")
+        assert len(decisions) == 1
+        assert decisions[0]["id"] == decision_id
+        assert decisions[0]["architectural_impact"] == 0.555
+
+        await pool.shutdown()

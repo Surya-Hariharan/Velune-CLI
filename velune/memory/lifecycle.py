@@ -75,7 +75,7 @@ class MemoryLifecycleCoordinator:
                 )
                 for turn in turns:
                     try:
-                        self.episodic.add_turn(
+                        await self.episodic.add_turn(
                             session_id=session_id,
                             role=turn.role,
                             content=turn.content,
@@ -88,7 +88,7 @@ class MemoryLifecycleCoordinator:
 
         self._is_active = False
 
-    def get_recent_context(self, session_id: str, limit: int = 10) -> list[dict[str, Any]]:
+    async def get_recent_context(self, session_id: str, limit: int = 10) -> list[dict[str, Any]]:
         """Return the most recent episodic turns for a session.
 
         This is the *minimal episodic read path* — it reads directly from
@@ -113,7 +113,7 @@ class MemoryLifecycleCoordinator:
             return []
 
         try:
-            turns = self.episodic.get_turns(session_id)
+            turns = await self.episodic.get_turns(session_id)
             recent = turns[-limit:]
             return [
                 {

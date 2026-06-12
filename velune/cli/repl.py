@@ -134,6 +134,13 @@ class VeluneREPL:
                 continue
             except EOFError:
                 break
+            except Exception as e:
+                from velune.cli.rendering.error_panel import render_error, render_unexpected_error
+                from velune.core.errors.catalog import VeluneError
+                if isinstance(e, VeluneError):
+                    self.console.print(render_error(e))
+                else:
+                    self.console.print(render_unexpected_error(e))
 
     def _print_startup_banner(self) -> None:
         import httpx
@@ -195,7 +202,12 @@ class VeluneREPL:
         except SystemExit:
             raise
         except Exception as e:
-            self.console.print(f"[red]/{cmd_name} failed: {e}[/red]")
+            from velune.cli.rendering.error_panel import render_error, render_unexpected_error
+            from velune.core.errors.catalog import VeluneError
+            if isinstance(e, VeluneError):
+                self.console.print(render_error(e))
+            else:
+                self.console.print(render_unexpected_error(e))
 
     def _build_registry(self) -> SlashCommandRegistry:
         registry = SlashCommandRegistry()
@@ -405,7 +417,9 @@ class VeluneREPL:
                     f"[dim]({model.provider_id})[/dim]"
                 )
             else:
-                self.console.print(f"[red]Model '{args.strip()}' not found.[/red]")
+                from velune.cli.rendering.error_panel import render_error
+                from velune.core.errors.catalog import ModelNotFoundError
+                self.console.print(render_error(ModelNotFoundError(f"'{args.strip()}'")))
             return
 
         # Interactive picker
@@ -629,7 +643,12 @@ class VeluneREPL:
             self.console.print("\n[yellow]Council run interrupted.[/yellow]")
             return
         except Exception as e:
-            self.console.print(f"[red]Council error: {e}[/red]")
+            from velune.cli.rendering.error_panel import render_error, render_unexpected_error
+            from velune.core.errors.catalog import VeluneError
+            if isinstance(e, VeluneError):
+                self.console.print(render_error(e))
+            else:
+                self.console.print(render_unexpected_error(e))
             return
 
         if last_run_id:
@@ -1042,10 +1061,11 @@ class VeluneREPL:
 
         model, provider = await self._resolve_active_model_and_provider()
         if not model or not provider:
-            self.console.print(
-                "[red]No model configured. Run /model to select one "
-                "or /doctor to diagnose.[/red]"
-            )
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import NoModelsAvailableError
+            self.console.print(render_error(NoModelsAvailableError(
+                cause_override="No model is configured for this session."
+            )))
             return
 
         # Inject project-aware system prompt on the very first turn

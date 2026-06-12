@@ -69,7 +69,11 @@ def build_test_orchestrator(slow_providers=False):
     )
     orchestrator.lineage_memory = MagicMock()
     orchestrator.lineage_memory.get_personality_style.return_value = None
-    orchestrator.lineage_memory.query_continuity_warnings.return_value = ([], [])
+    # query_continuity_warnings and log_decision/log_failed_experiment are awaited in the
+    # orchestrator, so they must be AsyncMocks.
+    orchestrator.lineage_memory.query_continuity_warnings = AsyncMock(return_value=([], []))
+    orchestrator.lineage_memory.log_decision = AsyncMock()
+    orchestrator.lineage_memory.log_failed_experiment = AsyncMock()
     
     return orchestrator
 

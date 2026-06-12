@@ -41,8 +41,8 @@ class PathGuard:
         resolved = Path(path).resolve()
         if resolved != self.workspace_root and self.workspace_root not in resolved.parents:
             raise PathTraversalError(
-                f"Path '{path}' resolves to '{resolved}', which is outside "
-                f"the workspace root '{self.workspace_root}'."
+                f"Path '{path}' resolves to '{resolved}', which is outside workspace "
+                f"root '{self.workspace_root}'."
             )
         return resolved
 
