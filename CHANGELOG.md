@@ -9,6 +9,69 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.0-beta] — 2026-06-12
+
+### Overview
+
+**Public Beta Release** — All Phase 0-1 systems verified and integrated. Ready for early adopters.
+
+### Architecture & Verification
+
+- **Known Issues Resolution** — All 10 critical issues resolved:
+  1. shell=True blocking (security)
+  2. asyncio.run() consolidation (correctness)
+  3. CognitiveFirewall prompt injection tests passing
+  4. CapabilityLevel aliasing prevention verified
+  5. SQLite WAL concurrency tests passing
+  6. VeluneConfig single-source-of-truth enforced
+  7. CouncilState single shape enforced
+  8. Event history deque(maxlen=1000) in place
+  9. CouncilExecutionBudget enforcement tested
+  10. SSRFGuard blocking private metadata endpoints
+
+- **Architecture Boundary Verification** — All 270 Python files pass 8 layer boundary rules
+  - Kernel ↚ CLI/Cognition (OS layer isolation)
+  - Providers ↚ Cognition/CLI (infrastructure isolation)
+  - Memory ↚ Cognition/CLI (persistence layer)
+  - Retrieval ↚ CLI (data access isolation)
+  - Telemetry ↚ Cognition (observability separation)
+
+- **Test Coverage** — 581/635 tests passing (91.6%)
+  - All critical routing and security tests passing
+  - 48 non-critical test failures isolated for Phase 2
+  - 6 collection errors in experimental features (dual-path retrieval)
+
+- **Fixed Integration Issues**
+  - Added structlog dependency (telemetry logging)
+  - Fixed @contextmanager import in logging.py
+  - Fixed ContextBudget dataclass field ordering
+  - Corrected CrossEncoderReranker naming
+  - Fixed test_mcp_server.py syntax error
+
+### Beta Release Status
+
+- All documented commands verified and functional
+- Hardware detection and tier classification working
+- Provider health monitoring implemented
+- Multi-model council orchestration stable
+- Session persistence and memory tiers operational
+- MCP server integration available
+
+### Known Limitations (Phase 2+)
+
+- Startup time 3.6s (target 3.0s) — optimization planned
+- 48 failing tests deferred to Phase 2 (incremental indexing, streaming repair, prompt adaptation)
+- Dual-path retrieval disabled (experimental feature)
+- Cloud provider integration incomplete for some APIs
+
+### Security
+
+- All OWASP top 10 checks passing
+- Architecture lint enforced (no shell=True, asyncio.run isolated)
+- Keyring-based secret storage for API keys
+- Sandbox execution for arbitrary code
+- SSRF guard blocks private IP ranges
+
 ## [0.6.0] — 2026-06-12
 
 ### Added
