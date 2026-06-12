@@ -492,7 +492,7 @@ class CouncilOrchestrator:
             estimate_str = estimator.format_estimate(token_count, cost, cloud_model)
             sys.stdout.write(f"\nEstimated cost: {estimate_str}. Proceed? [Y/n] ")
             sys.stdout.flush()
-            answer = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+            answer = await asyncio.get_running_loop().run_in_executor(None, sys.stdin.readline)
             if answer.strip().lower() in ("n", "no"):
                 raise asyncio.CancelledError("Aborted by user due to cost estimate.")
         except asyncio.CancelledError:

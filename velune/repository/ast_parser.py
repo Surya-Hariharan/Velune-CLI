@@ -109,7 +109,7 @@ class ASTParser:
             source = path.read_text(encoding="utf-8")
 
             # Parse in thread to avoid blocking
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             tree = await loop.run_in_executor(
                 None,
                 self._parse_sync,

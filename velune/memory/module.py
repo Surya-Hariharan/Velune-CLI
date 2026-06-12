@@ -117,17 +117,18 @@ def _create_memory_lifecycle(env: RuntimeEnvironment):
             except Exception as e:
                 return {"error": str(e)}
 
-        # Wrap async function for sync health checks
+        # Bridge the async health() coroutine onto the synchronous health-hook
+        # contract via submit(), which routes through the single run_async()
+        # entry point in velune.kernel.entrypoint. submit() raises RuntimeError
+        # when already inside a running event loop; in that case we return a
+        # placeholder rather than blocking the loop with a nested run.
         def _sync_health_check() -> dict:
-            try:
-                import asyncio
+            from velune.core.event_loop import submit
 
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If event loop is already running, return a placeholder
-                    return {"status": "async_only"}
-                health_dict = loop.run_until_complete(_memory_health_check())
-                return health_dict
+            try:
+                return submit(_memory_health_check())
+            except RuntimeError:
+                return {"status": "async_only"}
             except Exception as e:
                 return {"error": str(e)}
 

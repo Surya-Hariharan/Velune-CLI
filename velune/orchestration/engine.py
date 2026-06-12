@@ -7,7 +7,7 @@ the orchestration pipeline. Ensures final context respects token limits.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from velune.cli.modes import SessionMode
 from velune.context.assembler import ContextAssembler
@@ -17,7 +17,7 @@ from velune.context.token_counter import TokenCounter
 
 if TYPE_CHECKING:
     from velune.core.types.model import ModelDescriptor
-    from velune.retrieval.pipeline import RetrievedContext, RetrievalPipeline
+    from velune.retrieval.pipeline import RetrievalPipeline, RetrievedContext
 
 logger = logging.getLogger("velune.orchestration.engine")
 
@@ -107,7 +107,7 @@ class ContextOrchestrationEngine:
 
         return assembled_context, final_token_count
 
-    def orchestrate_context_retrieval(
+    async def orchestrate_context_retrieval(
         self,
         query: str,
         mode: SessionMode,
@@ -122,6 +122,10 @@ class ContextOrchestrationEngine:
         2. Retrieval with budget constraints
         3. Conversion of retrieval results to context chunks
         4. Assembly verification
+
+        This is a coroutine and must be awaited by its callers; it participates
+        in the single shared event loop owned by ``velune.kernel.entrypoint``
+        rather than managing an event loop of its own.
 
         Args:
             query: Retrieval query string
@@ -153,23 +157,14 @@ class ContextOrchestrationEngine:
                 latency_sensitive=mode == SessionMode.OPTIMUS,
             )
 
-        # Retrieve context asynchronously
-        # Note: This is a synchronous wrapper; in async contexts, call directly
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        retrieved = loop.run_until_complete(
-            self.retrieval_pipeline.retrieve(
-                query=query,
-                budget=budget,
-                task_profile=task_profile,
-                workspace_root=workspace_root,
-            )
+        # Retrieve context within the caller's event loop. No manual loop
+        # management: the orchestration engine is async end-to-end and the
+        # single event loop is owned by velune.kernel.entrypoint.run_async.
+        retrieved = await self.retrieval_pipeline.retrieve(
+            query=query,
+            budget=budget,
+            task_profile=task_profile,
+            workspace_root=workspace_root,
         )
 
         # Phase 3: Convert retrieval results to context chunks
