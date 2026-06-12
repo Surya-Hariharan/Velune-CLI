@@ -53,6 +53,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pip-audit
+          # Install the package so pip-audit sees velune's real runtime
+          # dependency closure, not just pip-audit's own deps.
+          pip install -e .
 
       - name: Check for pip vulnerabilities
         run: pip-audit
