@@ -121,13 +121,13 @@ Expected output: `Python 3.11.x`
 ## 6. Install Velune
 
 ```bash
-pip3 install velune
+pip3 install velune-cli
 ```
 
 If `pip3` is not found after the install above, use:
 
 ```bash
-python3 -m pip install velune
+python3 -m pip install velune-cli
 ```
 
 Initialize Velune in your project directory:

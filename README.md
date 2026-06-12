@@ -39,7 +39,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull qwen2.5-coder:7b
 
 # 3. Install Velune
-pip install velune
+pip install velune-cli
 
 # 4. Initialize in your project
 cd your-project
@@ -52,7 +52,7 @@ velune
 ### Option B — Cloud free tier (Groq, fastest, no GPU needed)
 
 ```bash
-pip install velune
+pip install velune-cli
 velune init --provider groq
 velune setup        # enter your free Groq key
 velune

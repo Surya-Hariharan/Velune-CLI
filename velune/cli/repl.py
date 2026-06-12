@@ -53,6 +53,7 @@ class VeluneREPL:
     def _build_prompt_session(self) -> PromptSession:
         from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
         from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.styles import Style
 
         from velune.cli.autocomplete import SlashCompleter
@@ -80,6 +81,17 @@ class VeluneREPL:
 
         completer = SlashCompleter(model_ids=model_ids)
 
+        kb = KeyBindings()
+
+        @kb.add("c-c")
+        def _(event):
+            buffer = event.app.current_buffer
+            if buffer.text:
+                buffer.text = ""
+                buffer.cursor_position = 0
+            else:
+                event.app.exit(exception=KeyboardInterrupt)
+
         return PromptSession(
             history=FileHistory(str(self._history_file)),
             auto_suggest=AutoSuggestFromHistory(),
@@ -89,6 +101,7 @@ class VeluneREPL:
             style=style,
             mouse_support=False,
             wrap_lines=True,
+            key_bindings=kb,
         )
 
     def _get_prompt_tokens(self) -> FormattedText:
@@ -157,14 +170,18 @@ class VeluneREPL:
                 text = raw.strip()
                 if not text:
                     continue
-                if text.startswith("/"):
+                if text.lower() in ("clear", "cls"):
+                    await self._cmd_clear("")
+                elif text.startswith("/"):
                     await self._handle_slash_command(text)
                 else:
                     await self._handle_prompt(text)
             except KeyboardInterrupt:
-                self.console.print("\n[dim]Interrupted. Type /exit to quit.[/dim]")
-                continue
+                self.console.print()
+                await self._end_episodic_session()
+                break
             except EOFError:
+                self.console.print()
                 await self._end_episodic_session()
                 break
             except Exception as e:
