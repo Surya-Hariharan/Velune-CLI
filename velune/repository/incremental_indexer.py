@@ -140,7 +140,7 @@ class IncrementalIndexer:
                 continue
             try:
                 content = full_path.read_text(encoding="utf-8", errors="ignore")
-                sha = self._hash_content(content.encode())
+                sha = self._hash_file(full_path)
                 symbols, language = await asyncio.to_thread(self._parse_file, full_path, content)
                 state.update_file(
                     IndexedFile(
