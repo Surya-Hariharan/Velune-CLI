@@ -9,6 +9,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **CLI Design Modernization** — Comprehensive frontend redesign for professional appearance
+  - Modern startup banner with clean, spacious layout
+  - Refined REPL prompt with sophisticated color palette (blue primary + gold accent)
+  - Simplified prompt display: only shows context bar when >40% full
+  - Updated error rendering with cleaner panel formatting
+  - Enhanced theme colors with semantic tokens (muted, accent)
+  - Better visual hierarchy throughout terminal interface
+
 ## [0.9.0-beta] — 2026-06-12
 
 ### Overview

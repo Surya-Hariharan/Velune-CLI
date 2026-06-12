@@ -79,6 +79,18 @@ On underpowered machines it routes tasks to cloud providers automatically.
 
 ---
 
+## Interface
+
+Velune features a modern, clean terminal interface designed for productivity:
+
+- **Startup banner** shows your hardware tier, active model, and available providers
+- **Responsive prompt** with intelligent context indicators (only displays when relevant)
+- **Sophisticated color palette** using restrained styling for clarity
+- **Intuitive command structure** with tab-completion for all slash commands
+- **Session modes** for balancing speed vs. quality (Optimus / Normal / Godly)
+
+---
+
 ## Providers
 
 | Provider              | Type  | Cost           | Models                               | Setup                            |
