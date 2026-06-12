@@ -43,6 +43,14 @@ class VeluneREPL:
         self._history_file = Path.home() / ".velune" / "repl_history"
         self._history_file.parent.mkdir(parents=True, exist_ok=True)
         self._conversation: list[dict] = []
+        from velune.cli.interrupts import InterruptController
+        from velune.cli.sessions import SessionStore
+        from velune.cli.workspaces import WorkspaceRegistry
+
+        self._interrupts = InterruptController()
+        self._session_store = SessionStore()
+        self._workspace_registry = WorkspaceRegistry()
+        self._exit_requested = False
         from velune.orchestration.role_assignments import CouncilRoleMap
 
         self._assignments_path = Path.home() / ".velune" / "council_roles.json"
@@ -66,7 +74,7 @@ class VeluneREPL:
         from prompt_toolkit.styles import Style
 
         from velune.cli.autocomplete import COMMAND_CATEGORIES, CommandEntry, SlashCompleter
-        from velune.cli.statusbar import STATUS_BAR_STYLES, render_status_bar
+        from velune.cli.statusbar import STATUS_BAR_STYLES
 
         style = Style.from_dict(
             {
@@ -109,12 +117,18 @@ class VeluneREPL:
 
         @kb.add("c-c")
         def _(event):
+            # First Ctrl+C clears typed input or arms the exit window; a
+            # second press inside the window exits gracefully. The REPL is
+            # never killed by a single accidental Ctrl+C.
             buffer = event.app.current_buffer
             if buffer.text:
                 buffer.text = ""
                 buffer.cursor_position = 0
-            else:
+                self._interrupts.reset_exit_window()
+            elif self._interrupts.note_interrupt():
                 event.app.exit(exception=KeyboardInterrupt)
+            else:
+                event.app.invalidate()  # redraw toolbar with the exit hint
 
         return PromptSession(
             history=FileHistory(str(self._history_file)),
@@ -126,8 +140,14 @@ class VeluneREPL:
             mouse_support=False,
             wrap_lines=True,
             key_bindings=kb,
-            bottom_toolbar=lambda: render_status_bar(self._status_state),
+            bottom_toolbar=self._render_toolbar,
         )
+
+    def _render_toolbar(self):
+        from velune.cli.statusbar import render_status_bar
+
+        self._status_state.exit_hint = self._interrupts.exit_hint_active
+        return render_status_bar(self._status_state)
 
     def _get_prompt_tokens(self) -> FormattedText:
         from velune.cli.modes import SessionMode
@@ -189,6 +209,7 @@ class VeluneREPL:
         self._status_state.context_pct = (
             self._context_tracker.percentage if self.active_model else 0.0
         )
+        self._status_state.workspace_name = folder_name
 
         return FormattedText(tokens)
 
@@ -200,35 +221,104 @@ class VeluneREPL:
         session = self._build_prompt_session()
         await asyncio.to_thread(self._print_startup_banner)
         await self._start_episodic_session()
+        self._interrupts.install()
+        try:
+            self._workspace_registry.touch(Path(self.container.get("runtime.workspace")))
+        except Exception:
+            pass
 
-        while True:
-            try:
-                raw = await session.prompt_async(self._get_prompt_tokens)
-                text = raw.strip()
-                if not text:
-                    continue
-                if text.lower() in ("clear", "cls"):
-                    await self._cmd_clear("")
-                elif text.startswith("/"):
-                    await self._handle_slash_command(text)
-                else:
-                    await self._handle_prompt(text)
-            except KeyboardInterrupt:
-                self.console.print()
-                await self._end_episodic_session()
-                break
-            except EOFError:
-                self.console.print()
-                await self._end_episodic_session()
-                break
-            except Exception as e:
-                from velune.cli.rendering.error_panel import render_error, render_unexpected_error
-                from velune.core.errors.catalog import VeluneError
+        try:
+            while not self._exit_requested:
+                try:
+                    raw = await session.prompt_async(self._get_prompt_tokens)
+                    text = raw.strip()
+                    if text:
+                        self._interrupts.reset_exit_window()
+                    if not text:
+                        continue
+                    if text.lower() in ("clear", "cls"):
+                        await self._cmd_clear("")
+                    elif text.startswith("/"):
+                        await self._handle_slash_command(text)
+                    else:
+                        await self._handle_prompt(text)
+                except KeyboardInterrupt:
+                    # Second Ctrl+C inside the exit window (or a stray SIGINT
+                    # between prompts) — leave gracefully.
+                    self.console.print()
+                    break
+                except EOFError:
+                    self.console.print()
+                    break
+                except SystemExit:
+                    break
+                except asyncio.CancelledError:
+                    # A user interrupt that surfaced between guard points;
+                    # absorb it and keep the REPL alive.
+                    if not self._interrupts.consume_user_cancelled():
+                        raise
+                    task = asyncio.current_task()
+                    if task is not None:
+                        task.uncancel()
+                    self._print_interrupted_frame()
+                except Exception as e:
+                    from velune.cli.rendering.error_panel import (
+                        render_error,
+                        render_unexpected_error,
+                    )
+                    from velune.core.errors.catalog import VeluneError
 
-                if isinstance(e, VeluneError):
-                    self.console.print(render_error(e))
-                else:
-                    self.console.print(render_unexpected_error(e))
+                    if isinstance(e, VeluneError):
+                        self.console.print(render_error(e))
+                    else:
+                        self.console.print(render_unexpected_error(e))
+        finally:
+            self._interrupts.uninstall()
+            await self._shutdown_repl()
+
+    def _print_interrupted_frame(self) -> None:
+        self.console.print("[dim]╭─[/dim] [yellow]Generation interrupted[/yellow]")
+        self.console.print("[dim]╰─[/dim] [dim]Ready for next command[/dim]")
+
+    async def _shutdown_repl(self) -> None:
+        """Graceful session teardown: persist state, then stop background work.
+
+        Subsystem shutdown (providers, storage pools) is owned by
+        ``velune.kernel.entrypoint._async_main`` — this only handles the
+        session-level state the REPL itself owns.
+        """
+        self.console.print("[dim]Saving session...[/dim]")
+        try:
+            self._archive_current_session()
+        except Exception as exc:
+            _log.warning("Session archive on exit failed: %s", exc)
+        await self._end_episodic_session()
+
+        self.console.print("[dim]Stopping background tasks...[/dim]")
+        try:
+            task_registry = self.container.get("runtime.task_registry")
+            await task_registry.cancel_all(timeout=5.0)
+        except Exception as exc:
+            _log.warning("Background task cancellation failed: %s", exc)
+        self.console.print("[dim]Goodbye.[/dim]")
+
+    def _archive_current_session(self) -> None:
+        """Snapshot the live conversation so it can be resumed later.
+
+        Skipped for trivial sessions (no completed user→assistant exchange).
+        """
+        has_user = any(m.get("role") == "user" for m in self._conversation)
+        has_assistant = any(m.get("role") == "assistant" for m in self._conversation)
+        if not (has_user and has_assistant):
+            return
+        workspace = str(self.container.get("runtime.workspace") or "")
+        self._session_store.save(
+            self._conversation,
+            workspace=workspace,
+            model_id=self.active_model.model_id if self.active_model else "unknown",
+            mode=self._mode_manager.current.value,
+            total_tokens=self.session_tokens,
+        )
 
     def _print_startup_banner(self) -> None:
         import httpx
@@ -535,16 +625,57 @@ class VeluneREPL:
         self.console.print(table)
 
     async def _cmd_exit(self, args: str) -> None:
-        await self._end_episodic_session()
-        self.console.print("[dim]Goodbye.[/dim]")
+        # Teardown (session archive, episodic close, task cancellation) is
+        # owned by run()'s finally block so every exit path behaves the same.
+        self._exit_requested = True
         raise SystemExit(0)
 
     async def _cmd_clear(self, args: str) -> None:
+        # Clear screen, not brain: the visible scrollback resets, but the
+        # conversation context, session, memory, and repository cognition all
+        # survive. Use /new to start a fresh conversation.
         # ESC c (RIS — Reset to Initial State) clears the terminal without
         # spawning a shell process or using os.system().
         print("\033c", end="", flush=True)
+        self.console.print(
+            "[dim]Screen cleared — conversation context preserved. "
+            "Use /new for a fresh session.[/dim]"
+        )
+
+    async def _cmd_new(self, args: str) -> None:
+        """Start an isolated conversation session inside the same workspace.
+
+        The rolling conversation context resets; project memory, embeddings,
+        and repository cognition are untouched and shared across sessions.
+        """
+        archived_note = ""
+        try:
+            has_exchange = any(m.get("role") == "assistant" for m in self._conversation)
+            if has_exchange:
+                workspace = str(self.container.get("runtime.workspace") or "")
+                from velune.cli.sessions import auto_title
+
+                meta = self._session_store.save(
+                    self._conversation,
+                    workspace=workspace,
+                    model_id=self.active_model.model_id if self.active_model else "unknown",
+                    mode=self._mode_manager.current.value,
+                    title=args.strip() or auto_title(self._conversation),
+                    total_tokens=self.session_tokens,
+                )
+                archived_note = f"  [dim]previous saved as[/dim] [cyan]{meta.title}[/cyan]"
+        except Exception as exc:
+            _log.warning("Could not archive previous session: %s", exc)
+
+        await self._end_episodic_session()
         self._conversation = []
-        self.console.print("[dim]Screen and conversation context cleared.[/dim]")
+        self.session_tokens = 0
+        self.session_cost = 0.0
+        self._context_tracker.update(self._conversation)
+        await self._start_episodic_session()
+        self.console.print(
+            f"[green]✦ New session started[/green] — project memory preserved.{archived_note}"
+        )
 
     async def _cmd_doctor(self, args: str) -> None:
         from velune.cli.commands.doctor import (
@@ -1042,10 +1173,13 @@ class VeluneREPL:
         workspace = str(self.container.get("runtime.workspace") or "")
         model_id = self.active_model.model_id if self.active_model else "unknown"
         parts = args.strip().split(None, 1)
-        sub = parts[0].lower() if parts else "save"
+        sub = parts[0].lower() if parts else ""
         sub_args = parts[1] if len(parts) > 1 else ""
 
-        if sub == "save" or not args.strip():
+        if not sub:
+            await self._session_picker(workspace)
+
+        elif sub == "save":
             session_id = save_session(self._conversation, model_id, workspace)
             self.console.print(f"[green]✓ Session saved:[/green] [cyan]{session_id}[/cyan]")
 
@@ -1082,6 +1216,56 @@ class VeluneREPL:
                 "[dim]Use list | resume <id> | summary <id> | save | export[/dim]"
             )
 
+    async def _session_picker(self, workspace: str) -> None:
+        """Interactive session picker: archived snapshots, resumable on Enter."""
+        from velune.cli.picker import PickItem, pick
+
+        metas = self._session_store.list(limit=50)
+        if not metas:
+            self.console.print(
+                "[dim]No saved sessions yet. /new archives the current "
+                "conversation; /session save snapshots it explicitly.[/dim]"
+            )
+            return
+
+        def _is_current_ws(m) -> bool:
+            try:
+                return Path(m.workspace).resolve() == Path(workspace).resolve()
+            except Exception:
+                return m.workspace == workspace
+
+        # Current project first, then other projects grouped by name.
+        metas.sort(key=lambda m: (not _is_current_ws(m), m.project_name, m.updated_at), reverse=False)
+        items = [
+            PickItem(
+                id=m.id,
+                label=m.title,
+                meta=f"{m.updated_at[:16].replace('T', ' ')} · {m.model_id} · {m.turn_count} turns",
+                group=m.project_name if _is_current_ws(m) else m.project_name,
+            )
+            for m in metas
+        ]
+        chosen = await pick("Resume a session", items)
+        if chosen is None:
+            return
+        await self._resume_snapshot(chosen.id)
+
+    async def _resume_snapshot(self, session_id: str) -> bool:
+        """Load an archived snapshot into the live conversation context."""
+        loaded = self._session_store.load(session_id)
+        if loaded is None:
+            return False
+        meta, conversation = loaded
+        await self._end_episodic_session()
+        self._conversation = conversation
+        self.session_tokens = meta.total_tokens
+        await self._start_episodic_session()
+        self.console.print(
+            f"[green]✓ Resumed[/green] [cyan]{meta.title}[/cyan] "
+            f"[dim]({meta.turn_count} turns · {meta.model_id})[/dim]"
+        )
+        return True
+
     async def _cmd_session_list(self, workspace: str) -> None:
         from datetime import datetime
 
@@ -1114,6 +1298,12 @@ class VeluneREPL:
         self.console.print(table)
 
     async def _cmd_session_resume(self, session_id: str) -> None:
+        # Archived snapshots take priority; fall back to episodic history.
+        try:
+            if await self._resume_snapshot(session_id):
+                return
+        except Exception:
+            pass
         try:
             episodic = self.container.get("runtime.episodic_session_memory")
             turns = await episodic.get_recent_turns(session_id, limit=20)

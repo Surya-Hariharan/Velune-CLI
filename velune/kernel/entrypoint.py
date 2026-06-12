@@ -57,11 +57,32 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 
 
 async def _async_main(runtime: Any) -> None:
-    """Top-level coroutine: run the interactive REPL session."""
+    """Top-level coroutine: own the subsystem lifecycle around the REPL.
+
+    Startup initializes every lifecycle-managed subsystem (schema migrations,
+    storage pools, background workers). Shutdown is guaranteed by the
+    ``finally`` block regardless of how the REPL ends — clean /exit, double
+    Ctrl+C, or an unexpected error — so no SQLite handles, embedding workers,
+    or provider connections ever outlive the session.
+    """
     from velune.cli.repl import VeluneREPL
 
-    repl = VeluneREPL(runtime)
-    await repl.run()
+    lifecycle = None
+    try:
+        lifecycle = runtime.container.get("runtime.lifecycle")
+        await lifecycle.startup()
+    except Exception as exc:
+        _logger.warning("Subsystem startup incomplete, continuing degraded: %s", exc)
+
+    try:
+        repl = VeluneREPL(runtime)
+        await repl.run()
+    finally:
+        if lifecycle is not None:
+            try:
+                await lifecycle.shutdown()
+            except Exception as exc:
+                _logger.error("Subsystem shutdown error: %s", exc)
 
 
 def launch(runtime: Any) -> None:

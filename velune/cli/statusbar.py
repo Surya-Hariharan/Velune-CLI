@@ -21,6 +21,8 @@ STATUS_BAR_STYLES: dict[str, str] = {
     "bottom-toolbar.ok": "bg:#1c1c28 #5fd787",
     "bottom-toolbar.warn": "bg:#1c1c28 #ffaf00",
     "bottom-toolbar.danger": "bg:#1c1c28 #ff5f5f",
+    "bottom-toolbar.project": "bg:#1c1c28 #5fd7ff",
+    "bottom-toolbar.hint": "bg:#1c1c28 #ffaf00 bold",
 }
 
 _SEP = ("class:bottom-toolbar.key", "  │  ")
@@ -35,10 +37,20 @@ class StatusBarState:
     last_latency_ms: float | None = None
     last_tokens_per_sec: float | None = None
     retrieval_note: str | None = None  # e.g. "3 memories" after a retrieval
+    workspace_name: str | None = None  # active project workspace
+    exit_hint: bool = False  # "press Ctrl+C again to exit" window is open
 
 
 def render_status_bar(state: StatusBarState) -> FormattedText:
     parts: list[tuple[str, str]] = []
+
+    if state.exit_hint:
+        parts.append(("class:bottom-toolbar.hint", " ^C again to exit"))
+        parts.append(_SEP)
+
+    if state.workspace_name:
+        parts.append(("class:bottom-toolbar.project", f" ⌂ {state.workspace_name}"))
+        parts.append(_SEP)
 
     model = state.model_id or "no model"
     parts.append(("class:bottom-toolbar.model", f" {model}"))
