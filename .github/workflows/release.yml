@@ -119,22 +119,22 @@ jobs:
           CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
           {
             echo "body<<CHANGELOG_EOF"
-            python -c '
-import re, sys
-from pathlib import Path
-version = sys.argv[1]
-changelog = Path("CHANGELOG.md")
-if not changelog.exists():
-    print("Release " + version)
-    sys.exit(0)
-text = changelog.read_text(encoding="utf-8")
-pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
-match = re.search(pattern, text, re.DOTALL)
-if match:
-    print(match.group(1).strip())
-else:
-    print("Release " + version + " — see CHANGELOG.md for details.")
-' "$CLEAN_VERSION"
+            python -c 'import sys, textwrap; exec(textwrap.dedent(sys.argv[2]))' "$CLEAN_VERSION" '
+            import re, sys
+            from pathlib import Path
+            version = sys.argv[1]
+            changelog = Path("CHANGELOG.md")
+            if not changelog.exists():
+                print("Release " + version)
+                sys.exit(0)
+            text = changelog.read_text(encoding="utf-8")
+            pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                print(match.group(1).strip())
+            else:
+                print("Release " + version + " — see CHANGELOG.md for details.")
+            '
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
