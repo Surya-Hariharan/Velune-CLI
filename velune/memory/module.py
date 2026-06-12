@@ -206,6 +206,13 @@ MEMORY_MODULES = [
         factory=_create_memory_lifecycle,
         container_key="runtime.memory_lifecycle",
         lifecycle_key="memory",
-        dependencies=["runtime.working_memory", "runtime.episodic_memory"],
+        dependencies=[
+            "runtime.working_memory",
+            "runtime.episodic_memory",
+            "runtime.episodic_session_memory",
+            "runtime.semantic_memory_lance",
+            "runtime.embedding_pipeline",
+            "runtime.lineage_memory",
+        ],
     ),
 ]

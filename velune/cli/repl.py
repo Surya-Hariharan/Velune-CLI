@@ -59,15 +59,16 @@ class VeluneREPL:
 
         style = Style.from_dict(
             {
-                "prompt.prefix": "#0087ff bold",  # Modern blue
-                "prompt.model": "#606060",  # Subtle gray
-                "prompt.mode": "#d4af37",  # Accent gold
-                "prompt.arrow": "#0087ff",  # Match prefix
-                "ctx.ok": "#00ff87 bold",  # Green
-                "ctx.warn": "#ffaf00 bold",  # Yellow
-                "ctx.danger": "#ff5f5f bold",  # Red
-                "mode.godly": "#ff00ff bold",  # Magenta
-                "mode.optimus": "#ffaf00 bold",  # Yellow
+                "prompt.prefix": "#c084fc bold",  # Claude purple-lavender bold
+                "prompt.branch": "#8a8a8a",       # Dim gray for Git branch
+                "prompt.model": "#606060",        # Subtle gray
+                "prompt.mode": "#d4af37",         # Accent gold
+                "prompt.arrow": "#a78bfa",        # Match accent purple
+                "ctx.ok": "#00ff87 bold",         # Green
+                "ctx.warn": "#ffaf00 bold",        # Yellow
+                "ctx.danger": "#ff5f5f bold",      # Red
+                "mode.godly": "#ff00ff bold",      # Magenta
+                "mode.optimus": "#ffaf00 bold",    # Yellow
             }
         )
 
@@ -92,8 +93,23 @@ class VeluneREPL:
 
     def _get_prompt_tokens(self) -> FormattedText:
         from velune.cli.modes import SessionMode
+        from velune.repository.tracker import GitTracker
 
-        tokens: list[tuple[str, str]] = [("class:prompt.prefix", "velune")]
+        workspace_path = self.container.get("runtime.workspace")
+        if workspace_path:
+            workspace_dir = Path(workspace_path)
+            folder_name = workspace_dir.name
+            tracker = GitTracker(workspace_dir)
+            active_branch = tracker.get_active_branch()
+        else:
+            folder_name = "velune"
+            active_branch = "non-git"
+
+        tokens: list[tuple[str, str]] = [("class:prompt.prefix", folder_name)]
+
+        # Show Git active branch if available
+        if active_branch and active_branch not in ("non-git", "unknown"):
+            tokens.append(("class:prompt.branch", f" ({active_branch})"))
 
         # Show mode if not default
         if not self._mode_manager.is_normal():
@@ -177,7 +193,7 @@ class VeluneREPL:
             ollama_live = False
 
         workspace = self.container.get("runtime.workspace")
-        workspace_name = Path(workspace).name if workspace else "unknown"
+        workspace_path = str(Path(workspace).resolve()) if workspace else "unknown"
         model_id = self.active_model.model_id if self.active_model else None
 
         pt_name = None
@@ -192,7 +208,7 @@ class VeluneREPL:
             hardware_profile=hardware,
             configured_providers=configured,
             ollama_live=ollama_live,
-            workspace_name=workspace_name,
+            workspace_path=workspace_path,
             active_model_id=model_id,
             version=__version__,
             project_type_name=pt_name,
