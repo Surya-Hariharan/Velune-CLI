@@ -13,6 +13,7 @@ measured during the run — see
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 import typer
 from rich.box import ROUNDED
@@ -23,6 +24,9 @@ from rich.text import Text
 
 from velune.cli import design
 from velune.cli.context import CLIContext
+
+if TYPE_CHECKING:
+    from velune.observability.retrieval_report import RetrievalTraceReport
 
 console = Console()
 retrieval_cmd = typer.Typer(help="Inspect and trace the retrieval pipeline")
@@ -99,7 +103,7 @@ async def _retrieval_trace_async(
         await lifecycle.shutdown()
 
 
-def _render(console: Console, report) -> None:  # noqa: ANN001 - RetrievalTraceReport
+def _render(console: Console, report: RetrievalTraceReport) -> None:
     """Render the retrieval trace as calm, infrastructure-grade panels."""
     header = Text()
     header.append("Query     ", style=design.MUTED)

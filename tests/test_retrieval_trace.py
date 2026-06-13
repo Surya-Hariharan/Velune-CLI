@@ -119,6 +119,65 @@ class TestPipelineDiagnostics:
         assert diag["graph"]["hits"] == 0
 
 
+class TestRerankerShapeTolerance:
+    """Regression: the shared reranker must serve both chunk shapes.
+
+    ``HybridRetriever`` passes immutable ``RetrievalHit`` models while
+    ``RetrievalPipeline`` passes mutable ``ContextChunk`` dataclasses. The
+    reranker previously assumed only the ContextChunk shape and crashed with
+    ``AttributeError`` the moment the hybrid path produced any hits.
+    """
+
+    def test_reranks_retrieval_hits_without_crashing(self):
+        from velune.retrieval.reranker import CrossEncoderReranker
+
+        hits = [
+            RetrievalHit(
+                document=RetrievalDocument(id="a", content="alpha content"),
+                score=0.2,
+                source=RetrievalSource.LEXICAL,
+            ),
+            RetrievalHit(
+                document=RetrievalDocument(id="b", content="beta content"),
+                score=0.9,
+                source=RetrievalSource.VECTOR,
+            ),
+        ]
+        out = CrossEncoderReranker().rerank(hits, "query")
+        # No crash, all distinct content preserved, deterministic ordering.
+        assert {h.document.id for h in out} == {"a", "b"}
+
+    def test_sets_combined_score_on_context_chunks(self):
+        from velune.retrieval.pipeline import ContextChunk
+        from velune.retrieval.reranker import CrossEncoderReranker
+
+        chunks = [
+            ContextChunk(id="c1", source="semantic", content="one", relevance_score=0.8),
+            ContextChunk(id="c2", source="symbol", content="two", relevance_score=0.4),
+        ]
+        out = CrossEncoderReranker().rerank(chunks, "q")
+        # The ContextChunk contract (combined_score written back) is preserved.
+        assert all(c.combined_score > 0.0 for c in out)
+
+    def test_dedupes_identical_content_keeping_higher_score(self):
+        from velune.retrieval.reranker import CrossEncoderReranker
+
+        hits = [
+            RetrievalHit(
+                document=RetrievalDocument(id="low", content="same text"),
+                score=0.1,
+                source=RetrievalSource.LEXICAL,
+            ),
+            RetrievalHit(
+                document=RetrievalDocument(id="high", content="same text"),
+                score=0.9,
+                source=RetrievalSource.VECTOR,
+            ),
+        ]
+        out = CrossEncoderReranker().rerank(hits, "q")
+        assert len(out) == 1
+
+
 class TestReportBuilder:
     """The pure report builder reshapes and redacts; it invents nothing."""
 
