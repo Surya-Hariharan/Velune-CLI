@@ -41,7 +41,7 @@ body:
         - Provider system (cloud or local)
         - Repository cognition / AST / search
         - Council orchestrator / agents
-        - Memory / Qdrant / BM25
+        - Memory / LanceDB / BM25
         - Security / sandbox
         - Documentation
         - CI / tooling

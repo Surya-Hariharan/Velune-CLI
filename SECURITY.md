@@ -27,7 +27,7 @@ public disclosure.
 ### Encrypted fallback
 
 If you cannot use GitHub Security Advisories, reach out to a maintainer through
-their verified contact and request a secure channel. Do not post sensitive details
+their verified contact (`suryahariharan2006@gmail.com`) and request a secure channel. Do not post sensitive details
 in public.
 
 ### What to include

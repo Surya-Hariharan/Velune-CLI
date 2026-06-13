@@ -18,8 +18,9 @@ Brief description of what this PR does and why.
 - [ ] Tests added or updated for this change
 - [ ] All existing tests pass: `pytest tests/ -v`
 - [ ] Linting passes: `ruff check velune/`
-- [ ] Security audit passes: `python scripts/security_audit.py`
-- [ ] `velune doctor` passes on a clean install
+- [ ] Type checking passes: `pyright velune/`
+- [ ] Security checks pass locally: `pip-audit` and `bandit -c pyproject.toml -r velune/`
+- [ ] `velune doctor check` passes on a clean install
 - [ ] CHANGELOG.md updated under [Unreleased]
 - [ ] README.md updated if user-facing behavior changed
 
