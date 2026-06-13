@@ -177,9 +177,7 @@ def build_retrieval_trace(result: RetrievalResult) -> RetrievalTraceReport:
 
     notes: list[str] = []
     if not diag:
-        notes.append(
-            "No diagnostics recorded — this retriever did not report per-stage timing."
-        )
+        notes.append("No diagnostics recorded — this retriever did not report per-stage timing.")
     if embedding_available is False:
         notes.append(
             "Vector search was skipped: no embedding backend is available. "

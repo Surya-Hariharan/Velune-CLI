@@ -55,9 +55,7 @@ def retrieval_trace(
 
     from velune.core.event_loop import submit
 
-    submit(
-        _retrieval_trace_async(cli_context, query, top_k, namespace, use_vector, use_graph)
-    )
+    submit(_retrieval_trace_async(cli_context, query, top_k, namespace, use_vector, use_graph))
 
 
 async def _retrieval_trace_async(
@@ -116,7 +114,10 @@ def _render(console: Console, report: RetrievalTraceReport) -> None:
     header.append(f"{report.total_ms:.1f} ms", style="bold")
     console.print(
         Panel(
-            header, border_style=design.ACCENT_SOFT, box=ROUNDED, title="[bold]Retrieval Trace[/bold]"
+            header,
+            border_style=design.ACCENT_SOFT,
+            box=ROUNDED,
+            title="[bold]Retrieval Trace[/bold]",
         )
     )
 

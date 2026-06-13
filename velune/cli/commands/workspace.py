@@ -361,7 +361,12 @@ def _render_graph(console: Console, report: DependencyGraphReport) -> None:
         header.append("\nAll edges  ", style=design.MUTED)
         header.append(bd, style=design.FAINT)
     console.print(
-        Panel(header, border_style=design.ACCENT_SOFT, box=ROUNDED, title="[bold]Dependency Graph[/bold]")
+        Panel(
+            header,
+            border_style=design.ACCENT_SOFT,
+            box=ROUNDED,
+            title="[bold]Dependency Graph[/bold]",
+        )
     )
 
     if report.node_count == 0:
@@ -376,9 +381,7 @@ def _render_graph(console: Console, report: DependencyGraphReport) -> None:
         _render_focus(console, report.focus)
         return
     if report.focus_candidates:
-        console.print(
-            f"[{design.WARN}]Ambiguous focus — multiple files match. Candidates:[/]"
-        )
+        console.print(f"[{design.WARN}]Ambiguous focus — multiple files match. Candidates:[/]")
         for cand in report.focus_candidates:
             console.print(f"  [{design.MUTED}]•[/] {cand}")
         return
@@ -393,7 +396,9 @@ def _render_graph(console: Console, report: DependencyGraphReport) -> None:
     console.print()
     if report.cycles:
         cyc = Text()
-        cyc.append(f"{len(report.cycles)} import cycle(s) detected\n\n", style=f"bold {design.WARN}")
+        cyc.append(
+            f"{len(report.cycles)} import cycle(s) detected\n\n", style=f"bold {design.WARN}"
+        )
         for i, cycle in enumerate(report.cycles, 1):
             cyc.append(f"{i}. ", style=design.MUTED)
             cyc.append(" → ".join(cycle) + " → …\n", style=design.DANGER)
@@ -405,7 +410,9 @@ def _render_graph(console: Console, report: DependencyGraphReport) -> None:
 
 
 def _hotspot_table(title: str, stats: list[GraphNodeStat], key: str) -> Table:
-    table = Table(box=ROUNDED, border_style=design.FAINT, title=f"[bold]{title}[/bold]", expand=False)
+    table = Table(
+        box=ROUNDED, border_style=design.FAINT, title=f"[bold]{title}[/bold]", expand=False
+    )
     table.add_column("File", style=design.INFO, no_wrap=False)
     table.add_column("fan-in", justify="right", style=design.MUTED)
     table.add_column("fan-out", justify="right", style=design.MUTED)
@@ -448,7 +455,12 @@ def _render_focus(console: Console, focus: FocusView) -> None:
             body.append("← ", style=design.MUTED)
             body.append(dep + "\n", style=design.INFO)
         console.print(
-            Panel(body, border_style=design.FAINT, box=ROUNDED, title="[bold]Imported by (upstream)[/bold]")
+            Panel(
+                body,
+                border_style=design.FAINT,
+                box=ROUNDED,
+                title="[bold]Imported by (upstream)[/bold]",
+            )
         )
     else:
         console.print(f"[{design.MUTED}]Nothing imports this file (entry point or leaf).[/]")
