@@ -4,7 +4,7 @@
 > persistent memory, repository cognition.
 > No cloud required. No quota. No lock-in.
 
-[![PyPI](https://img.shields.io/pypi/v/velune)](https://pypi.org/project/velune-cli/)
+[![PyPI](https://img.shields.io/pypi/v/velune-cli)](https://pypi.org/project/velune-cli/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
@@ -200,7 +200,9 @@ Velune exposes an MCP server so that Claude Desktop and VS Code can call
 Velune's local model council as a tool — giving cloud-based editors access
 to local hardware without sending your code to a third party.
 
-See [`docs/mcp.md`](docs/mcp.md) for configuration examples and the full tool reference.
+Run `velune mcp --help` for the server commands. Outbound connections to
+external MCP servers are trust-gated — see the
+[MCP trust gating](SECURITY.md#mcp-trust-gating) section of the security policy.
 
 ---
 
@@ -209,6 +211,19 @@ See [`docs/mcp.md`](docs/mcp.md) for configuration examples and the full tool re
 Velune runs on Windows via WSL2. Native Windows support is planned.
 
 See [WINDOWS.md](WINDOWS.md) for the complete WSL2 setup guide.
+
+---
+
+## Project docs
+
+| Doc | What's inside |
+| --- | --- |
+| [ARCHITECTURE_STATUS.md](ARCHITECTURE_STATUS.md) | Per-subsystem maturity (stable / experimental / planned) and known limitations |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layering and import-boundary rules |
+| [CI_CD.md](CI_CD.md) | What CI runs and how to reproduce every gate locally |
+| [RELEASE.md](RELEASE.md) | Versioning and the PyPI release pipeline |
+| [SECURITY.md](SECURITY.md) / [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Security posture, trust boundaries, reporting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup and contribution workflow |
 
 ---
 

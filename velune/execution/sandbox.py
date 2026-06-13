@@ -139,7 +139,9 @@ class SubprocessSandbox:
                     loop = None
 
                 if loop is not None:
-                    loop.create_task(self.bus.emit(event))
+                    from velune.core.task_registry import track
+
+                    track(loop.create_task(self.bus.emit(event), name="command_rejected_emit"))
                 # No running loop: emission is skipped; rejection is already
                 # recorded via logger.warning() above.
             except Exception as e:

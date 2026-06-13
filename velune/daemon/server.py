@@ -98,7 +98,9 @@ class VeluneDaemon:
             except Exception:
                 pass
 
-        asyncio.create_task(run_probe())
+        from velune.core.task_registry import track
+
+        track(asyncio.create_task(run_probe(), name=f"daemon_probe_{model_id}"))
         return {
             "status": "success",
             "message": f"Started probing for model {model_id} in daemon background.",

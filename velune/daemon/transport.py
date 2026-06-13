@@ -103,7 +103,9 @@ class _WindowsNamedPipeServer:
         while self.is_running:
             try:
                 conn = await loop.run_in_executor(None, self.listener.accept)
-                asyncio.create_task(self._handle_conn(conn))
+                from velune.core.task_registry import track
+
+                track(asyncio.create_task(self._handle_conn(conn), name="daemon_conn_handler"))
             except Exception:
                 if not self.is_running:
                     break

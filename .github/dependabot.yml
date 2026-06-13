@@ -8,9 +8,16 @@ updates:
       time: "03:00"
     open-pull-requests-limit: 10
     reviewers:
-      - "suryahariharan2006@gmail.com"
+      - "Surya-Hariharan"
     allow:
       - dependency-type: "all"
+    # Batch low-risk bumps into single PRs to cut review noise; majors stay
+    # individual so breaking changes get scrutinized one at a time.
+    groups:
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
     ignore:
       - dependency-name: "python"
       - dependency-name: "pip"
@@ -23,4 +30,9 @@ updates:
       time: "04:00"
     open-pull-requests-limit: 5
     reviewers:
-      - "suryahariharan2006@gmail.com"
+      - "Surya-Hariharan"
+    groups:
+      actions:
+        update-types:
+          - "minor"
+          - "patch"

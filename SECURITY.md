@@ -73,27 +73,89 @@ for reasonable research activity; this is not a formal safe-harbor guarantee.
 
 ## Engineering safeguards
 
+For the full attacker model, trust boundaries, and per-surface controls, see
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+
 ### Subprocess sandboxing
 
-All runtime writes and shell commands execute inside `SubprocessSandbox` envelopes with:
+All shell commands execute inside `SubprocessSandbox` (`velune/execution/sandbox.py`):
 
-- Explicit command allowlists — only whitelisted executables may be invoked.
-- Workspace write guards — file writes are restricted to the project root.
-- Time and memory limits — runaway processes are terminated automatically.
+- **No shell** — commands run via `subprocess.Popen(argv, shell=False)`; the argv is
+  parsed with `shlex` and inline shell operators (`;`, `&&`, `|`, backticks, `$(...)`)
+  are rejected even in argument position.
+- **Executable allowlist** — only basenames on the configured allowlist may run, and
+  the resolved binary must live in a trusted system/venv path (PATH-hijack guard).
+  The validated absolute path is pinned to close the TOCTOU window before execution.
+- **Environment scrubbing** — `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `PYTHONPATH`,
+  `PYTHONSTARTUP`, `BASH_ENV`, and similar injection vectors are stripped from the
+  child environment.
+- **Resource + lifetime limits** — wall-clock timeout and a memory ceiling, enforced
+  by killing the **entire process tree** (`psutil`) so descendants never outlive a
+  timeout or limit breach.
+
+### Filesystem protection
+
+- Every filesystem and git tool resolves paths through `PathGuard`
+  (`velune/execution/path_guard.py`), which canonicalizes (resolving symlinks) and
+  asserts the result stays within the workspace root — blocking `../` traversal,
+  absolute-path escapes, and symlink escapes.
+- All writes/creates/deletes go through a `DiffPreview` **approval flow**; nothing
+  touches disk until the change is confirmed.
 
 ### SSRF and network hygiene
 
-- DNS resolution filters RFC 1918 private IP blocks (`10.0.0.0/8`, `172.16.0.0/12`,
-  `192.168.0.0/16`) and loopback (`127.0.0.0/8`, `::1`) before any outbound socket
-  is created.
-- Dynamic DNS inspection mitigates DNS rebinding attacks.
+The web-fetch guard (`velune/tools/web/validator.py`) validates every outbound URL:
+
+- Blocks loopback, RFC 1918 private ranges, link-local (`169.254.0.0/16`, `fe80::/10`),
+  carrier-grade NAT (`100.64.0.0/10`), IPv6 ULA (`fc00::/7`), reserved, multicast, and
+  the `0.0.0.0/8` range.
+- Blocks cloud-instance **metadata endpoints** (AWS/Azure/GCP `169.254.169.254`, ECS
+  `169.254.170.2`, GCP `metadata.google.internal`, Alibaba `100.100.100.200`, IPv6 IMDS).
+- Resolves hostnames via `getaddrinfo` and checks **all** returned addresses, defeating
+  DNS-rebinding and CNAME tricks; rejects numeric-escape IP forms (hex/octal/decimal),
+  embedded credentials, and non-HTTP(S) schemes.
+
+### MCP trust gating
+
+External MCP servers are an outbound trust boundary. `velune/mcp/security.py`
+validates every server URL before the client connects:
+
+- Rejects embedded credentials and non-HTTP(S) schemes.
+- **Always** blocks cloud-metadata and link-local targets (DNS-resolved, so rebinding
+  cannot bypass it). Loopback/LAN remain permitted because local MCP servers are the
+  common, legitimate case.
+- Optional **host allowlist** (`[mcp] allowed_hosts` in `velune.toml`): when set, only
+  listed hosts may be connected to — deny-by-default for everything else.
+
+### Plugin trust model
+
+Plugin sandboxing is **not yet implemented**. Plugins load in-process with full
+process privileges, so discovery is **disabled by default** and unreachable from any
+shipped CLI command; it requires an explicit opt-in
+(`VELUNE_ENABLE_EXPERIMENTAL_PLUGINS=1` or `PluginLoader(experimental=True)`) and emits
+loud warnings. Treat any plugin as arbitrary code you are choosing to run. Subprocess
+isolation for plugins is tracked as future work.
 
 ### Secrets protection
 
-- The `.veluneignore` template excludes `.env`, `*.pem`, `*.key`, and other common
-  credential files from indexing by default.
-- Runtime artifacts (`*.db-wal`, `*.db-shm`, `velune.local.toml`) are excluded from
-  commits and indexing.
+- API keys live in the OS keyring (BYOK) with environment-variable fallback; they are
+  never cached process-wide and never written into the workspace.
+- **Log redaction** (`velune/core/redaction.py`): a logging filter scrubs known key
+  shapes (`sk-…`, `sk-ant-…`, `xai-…`, `gsk_…`, `hf_…`, `AIza…`, OpenRouter, Fireworks,
+  Replicate), `Authorization: Bearer/Token` headers, and the live values of configured
+  provider env vars from every emitted log record and JSON exception trace.
+- The `.veluneignore` template excludes `.env`, `*.pem`, `*.key`, and other credential
+  files from indexing; runtime artifacts (`*.db-wal`, `*.db-shm`, `velune.local.toml`)
+  are excluded from commits and indexing.
+
+### Workspace / memory isolation
+
+- Heavy per-project state (SQLite cognitive core, vector/semantic stores) is stored
+  under `<app-data>/workspaces/<name>-<hash-of-absolute-path>/` (`velune/core/paths.py`),
+  so two projects can never share a cognitive core, embeddings, retrieval index, or
+  sessions. Same-named folders at different paths are disambiguated by a path hash.
+- Live workspace switching shuts down old storage handles **before** rebinding services
+  to the new root, so connections never leak and no cross-project memory bleed occurs.
 
 ### Transactional git-backed execution
 
@@ -103,7 +165,7 @@ All runtime writes and shell commands execute inside `SubprocessSandbox` envelop
 ### Zero telemetry
 
 No analytics, crash reports, or code snippets are transmitted to external servers.
-All indexes and logs live exclusively in the local `.velune/` directory.
+All indexes and logs live exclusively in local, non-synced application storage.
 
 ---
 

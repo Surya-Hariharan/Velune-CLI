@@ -68,12 +68,18 @@ class ModelCapabilityRegistry:
 
                             if DaemonClient.is_running():
                                 # Delegate background probing to the active persistent Velune daemon!
-                                # Using create_task to fire-and-forget the IPC dispatch call
-                                asyncio.create_task(
-                                    DaemonClient.send_command(
-                                        "probe_model",
-                                        model_id=model.model_id,
-                                        provider_id=model.provider_id,
+                                # Fire-and-forget the IPC dispatch, but track it so the
+                                # detached task isn't garbage-collected before it sends.
+                                from velune.core.task_registry import track
+
+                                track(
+                                    asyncio.create_task(
+                                        DaemonClient.send_command(
+                                            "probe_model",
+                                            model_id=model.model_id,
+                                            provider_id=model.provider_id,
+                                        ),
+                                        name=f"daemon_probe_dispatch_{model.model_id}",
                                     )
                                 )
                                 logger.info(

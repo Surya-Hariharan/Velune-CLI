@@ -10,6 +10,7 @@ from rich.console import Console
 from velune.cli.context import CLIContext
 from velune.core.event_loop import submit
 from velune.core.runtime import build_runtime
+from velune.kernel.config import ConfigLoader
 from velune.mcp.client import VeluneMCPClient
 from velune.mcp.server import VeluneMCPServer
 
@@ -26,7 +27,15 @@ def mcp_connect(
     """Connect to an external MCP server and list its tools."""
     console.print(f"[cyan]Connecting to external MCP server '{name}' at {server_url}...[/cyan]")
 
-    client = VeluneMCPClient(server_url, name)
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    allowed_hosts: list[str] = []
+    try:
+        loader = ConfigLoader(cli_context.config_path if cli_context else None)
+        allowed_hosts = list(loader.load().mcp.allowed_hosts)
+    except Exception:
+        allowed_hosts = []
+
+    client = VeluneMCPClient(server_url, name, allowed_hosts=allowed_hosts or None)
 
     async def _connect_and_list():
         try:

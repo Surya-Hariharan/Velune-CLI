@@ -16,14 +16,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- CI test matrix expanded to **Ubuntu / Windows / macOS × Python 3.11 / 3.12**.
+- CI test matrix expanded to **Ubuntu / Windows / macOS × Python 3.11 / 3.12 / 3.13**.
 - Release pipeline now publishes to PyPI via **OIDC trusted publishing** (no long-lived token); removed the `continue-on-error` that silently swallowed failed publishes.
+- Release & CI builds are now **reproducible** (`SOURCE_DATE_EPOCH` pinned to the commit, `[tool.hatch.build] reproducible = true`) and validated with `twine check --strict`.
+- Release pipeline now asserts the git tag matches `velune.__version__` before building, so a mistagged release fails fast.
 - Coverage reporting made honest: shrank the `omit` list from ~70 modules to only un-unit-testable surfaces (TTY/daemon/live-network/optional-native). Full-codebase coverage is now measured (~21%) with a CI floor of 20%.
 - Migrated the event-bus `Event` model from Pydantic v1 `class Config` to `ConfigDict` (removes a deprecation warning, forward-compatible with Pydantic v3).
+- Dependabot now groups minor/patch bumps into single PRs and uses the correct GitHub reviewer handle.
 
 ### Added
 
-- `RELEASE.md` (versioning + release pipeline) and `ARCHITECTURE_STATUS.md` (subsystem maturity + known limitations).
+- `RELEASE.md` (versioning + release pipeline), `ARCHITECTURE_STATUS.md` (subsystem maturity + known limitations), and `CI_CD.md` (CI gate reference + local reproduction).
+- New CI **`build`** + **`install-smoke`** jobs: reproducible build, strict metadata validation, pure-python wheel assertion, and a cross-platform (Ubuntu/Windows/macOS × Py 3.11/3.13) wheel-install + `velune --version`/`--help` REPL smoke test.
+- Python 3.13 classifier, `Typing :: Typed` classifier, and a `Documentation` project URL in `pyproject.toml`.
 - Unit tests for `execution/validator.py` (16% → 90% coverage).
 - **CLI Design Modernization** — Comprehensive frontend redesign for professional appearance
   - Modern startup banner with clean, spacious layout

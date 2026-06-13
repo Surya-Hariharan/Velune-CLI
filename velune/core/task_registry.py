@@ -11,6 +11,42 @@ from typing import Any, TypeVar
 T = TypeVar("T")
 logger = logging.getLogger("velune.core.task_registry")
 
+# Module-level strong references to fire-and-forget tasks.
+#
+# ``loop.create_task`` only stores a *weak* reference to the task it returns.
+# If the caller does not keep a strong reference, the task can be garbage
+# collected mid-execution — the work is silently dropped and asyncio emits a
+# "Task was destroyed but it is pending!" warning. Sites that genuinely cannot
+# await a coroutine (signal handlers, daemon accept loops, post-turn telemetry)
+# must route through :func:`track` so the reference survives until completion.
+_TRACKED_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def track(task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+    """Hold a strong reference to a fire-and-forget *task* until it finishes.
+
+    Prevents premature garbage collection of detached tasks and surfaces any
+    exception they raise (which would otherwise be swallowed because nobody
+    awaits the task). Returns the same task so callers can still inspect it.
+    """
+    _TRACKED_TASKS.add(task)
+
+    def _on_done(completed: asyncio.Task[Any]) -> None:
+        _TRACKED_TASKS.discard(completed)
+        if completed.cancelled():
+            return
+        exc = completed.exception()
+        if exc is not None:
+            logger.error(
+                "Fire-and-forget task '%s' failed: %s",
+                completed.get_name(),
+                exc,
+                exc_info=exc,
+            )
+
+    task.add_done_callback(_on_done)
+    return task
+
 
 class BackgroundTaskRegistry:
     """Tracks in-flight asyncio tasks with timeout and cancellation support."""

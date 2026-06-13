@@ -2312,8 +2312,13 @@ class VeluneREPL:
         self._conversation.append({"role": "assistant", "content": assistant_text})
         effective_tokens = tokens_used or len(assistant_text) // 4
         self._display_usage(model, effective_tokens)
-        asyncio.create_task(
-            self._emit_turn_events(text, assistant_text, model.model_id, effective_tokens)
+        from velune.core.task_registry import track
+
+        track(
+            asyncio.create_task(
+                self._emit_turn_events(text, assistant_text, model.model_id, effective_tokens),
+                name="emit_turn_events",
+            )
         )
 
     # ------------------------------------------------------------------

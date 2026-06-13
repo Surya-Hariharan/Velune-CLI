@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from rich.logging import RichHandler
 
+from velune.core.redaction import SecretRedactingFilter, redact_secrets
 from velune.core.trace import TracedLogger, _agent_id, _run_id, _step_id
 
 
@@ -20,7 +21,7 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         exc_info = None
         if record.exc_info:
-            exc_info = self.formatException(record.exc_info)
+            exc_info = redact_secrets(self.formatException(record.exc_info))
 
         ts = datetime.now(UTC).isoformat().replace("+00:00", "")
 
@@ -28,7 +29,7 @@ class JsonFormatter(logging.Formatter):
             "ts": ts,
             "level": record.levelname,
             "logger": record.name,
-            "msg": record.getMessage(),
+            "msg": redact_secrets(record.getMessage()),
             "run_id": _run_id.get(),
             "agent_id": _agent_id.get(),
             "step_id": _step_id.get(),
@@ -65,6 +66,12 @@ def configure_logging(config: LoggingConfig) -> None:
                 omit_repeated_times=False,
             )
         ]
+
+    # Scrub provider credentials from every emitted record before it reaches a
+    # formatter — protects log files, JSON shippers, and terminal scrollback.
+    redactor = SecretRedactingFilter()
+    for handler in handlers:
+        handler.addFilter(redactor)
 
     logging.basicConfig(
         level=getattr(logging, config.level.upper(), logging.INFO),

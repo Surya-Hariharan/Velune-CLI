@@ -25,8 +25,10 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
   "Topic :: Terminals",
+  "Typing :: Typed",
 ]
 
 dependencies = [
@@ -109,11 +111,18 @@ velune = "velune.main:app"
 [project.urls]
 Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
 Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
+Documentation = "https://github.com/Surya-Hariharan/Velune-CLI/tree/main/docs"
 Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
 Changelog = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "velune/__init__.py"
+
+[tool.hatch.build]
+# Deterministic artifacts: Hatchling zeroes mtimes and sorts archive members.
+# When SOURCE_DATE_EPOCH is exported in CI the timestamps are pinned to the
+# commit date, so `python -m build` is byte-for-byte reproducible.
+reproducible = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["velune"]

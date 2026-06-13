@@ -49,18 +49,32 @@ class MCPToolWrapper(BaseTool):
 class VeluneMCPClient:
     """Connects to external MCP servers and exposes them as Velune tools."""
 
-    def __init__(self, server_url: str, server_name: str):
+    def __init__(
+        self,
+        server_url: str,
+        server_name: str,
+        allowed_hosts: list[str] | None = None,
+    ):
         self.server_url = server_url
         self.server_name = server_name
+        self.allowed_hosts = allowed_hosts
         self._sse_ctx = None
         self._session_ctx = None
         self.session = None
         self.raw_tools: list[Tool] = []
 
     async def connect(self) -> list[dict]:
-        """Connect and return available tools."""
+        """Connect and return available tools.
+
+        The server URL is trust-validated first (SSRF guard + optional host
+        allowlist) — see :func:`velune.mcp.security.validate_mcp_url`.
+        """
         from mcp import ClientSession
         from mcp.client.sse import sse_client
+
+        from velune.mcp.security import validate_mcp_url
+
+        validate_mcp_url(self.server_url, self.allowed_hosts)
 
         self._sse_ctx = sse_client(self.server_url)
         self._read, self._write = await self._sse_ctx.__aenter__()

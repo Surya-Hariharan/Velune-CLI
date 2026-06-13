@@ -408,8 +408,16 @@ class MemoryLifecycleManager:
             )
 
             if should_compact:
-                # Schedule compaction as background task (non-blocking)
-                asyncio.create_task(self._perform_compaction(session_id))
+                # Schedule compaction as background task (non-blocking). Tracked
+                # so the loop's weak reference can't let it be GC'd mid-compaction.
+                from velune.core.task_registry import track
+
+                track(
+                    asyncio.create_task(
+                        self._perform_compaction(session_id),
+                        name=f"memory_compaction_{session_id}",
+                    )
+                )
         except Exception as exc:
             logger.debug("Error checking compaction trigger: %s", exc)
 
