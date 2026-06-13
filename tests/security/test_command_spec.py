@@ -9,9 +9,11 @@ from pathlib import Path
 import pytest
 
 from velune.core.errors.execution import SandboxError
+from velune.execution import command_spec as cs
 from velune.execution.command_spec import (
     ALLOWED_EXECUTABLES,
     CommandSpec,
+    _find_inline_code_flag,
     _is_trusted_path,
 )
 
@@ -54,7 +56,7 @@ class TestFromString:
 
 
 class TestTrustedPath:
-    """POSIX PATH-hijack protection (Windows is documented as permissive)."""
+    """PATH-hijack protection on POSIX and Windows."""
 
     def test_venv_substring_alone_is_not_trusted(self, tmp_path: Path, workspace: Path) -> None:
         # Regression: ".venv" appearing anywhere in the path used to bypass the
@@ -74,13 +76,93 @@ class TestTrustedPath:
         own_python = Path(sys.executable).resolve()
         assert _is_trusted_path(own_python, workspace=workspace, platform="linux")
 
-    def test_windows_is_permissive_by_design(self, tmp_path: Path, workspace: Path) -> None:
-        anywhere = tmp_path / "anything.exe"
-        assert _is_trusted_path(anywhere, workspace=workspace, platform="win32")
-
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX path semantics")
     def test_system_prefixes_are_trusted(self, workspace: Path) -> None:
         assert _is_trusted_path(Path("/usr/bin/git"), workspace=workspace, platform="linux")
+
+
+class TestWindowsTrustedPath:
+    """Windows is no longer permissive: PATH hijacking must be blocked.
+
+    Roots are monkeypatched to a known directory so these run identically on
+    any host (Windows path-relativity semantics are exercised on win32 hosts
+    by the workspace-venv / interpreter-env checks above).
+    """
+
+    def test_path_under_trusted_root_is_trusted(
+        self, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        trusted_root = tmp_path / "System32"
+        trusted_root.mkdir()
+        binary = trusted_root / "git.exe"
+        binary.touch()
+        monkeypatch.setattr(cs, "_windows_trusted_roots", lambda: [trusted_root.resolve()])
+        assert _is_trusted_path(binary.resolve(), workspace=workspace, platform="win32")
+
+    def test_path_outside_trusted_root_is_rejected(
+        self, tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Classic PATH hijack: a planted git.exe in an attacker-writable dir.
+        trusted_root = tmp_path / "System32"
+        trusted_root.mkdir()
+        hijack = tmp_path / "Downloads" / "git.exe"
+        hijack.parent.mkdir(parents=True)
+        hijack.touch()
+        monkeypatch.setattr(cs, "_windows_trusted_roots", lambda: [trusted_root.resolve()])
+        assert not _is_trusted_path(hijack.resolve(), workspace=workspace, platform="win32")
+
+    def test_workspace_venv_trusted_on_windows(
+        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        binary = workspace / ".venv" / "Scripts" / "pytest.exe"
+        binary.parent.mkdir(parents=True)
+        binary.touch()
+        monkeypatch.setattr(cs, "_windows_trusted_roots", list)
+        assert _is_trusted_path(binary.resolve(), workspace=workspace, platform="win32")
+
+
+class TestInterpreterInlineCode:
+    """Allowlisted interpreters must not run arbitrary inline program text."""
+
+    @pytest.mark.parametrize(
+        ("executable", "args"),
+        [
+            ("python", ("-c", "import os; os.system('id')")),
+            ("python3", ("-c", "print(1)")),
+            ("python", ("-Ic", "print(1)")),  # short-flag cluster
+            ("python", ("-u", "-c", "print(1)")),
+            ("node", ("-e", "process.exit()")),
+            ("node", ("--eval", "1")),
+            ("node", ("-p", "1")),
+            ("node", ("--print", "1")),
+        ],
+    )
+    def test_inline_flag_detected(self, executable: str, args: tuple[str, ...]) -> None:
+        assert _find_inline_code_flag(executable, args) is not None
+
+    @pytest.mark.parametrize(
+        ("executable", "args"),
+        [
+            ("python", ("script.py",)),
+            ("python", ("-m", "pytest")),
+            ("python", ("-u", "script.py")),
+            ("node", ("server.js",)),
+            ("pytest", ("-x",)),
+            ("git", ("commit", "-m", "msg")),  # -m is not inline code for git
+        ],
+    )
+    def test_legitimate_invocation_allowed(self, executable: str, args: tuple[str, ...]) -> None:
+        assert _find_inline_code_flag(executable, args) is None
+
+    def test_validate_rejects_python_dash_c(self, workspace: Path) -> None:
+        spec = CommandSpec(executable="python", args=("-c", "import os"), cwd=workspace)
+        with pytest.raises(SandboxError, match="[Ii]nline-code"):
+            spec.validate(frozenset({"python"}))
+
+    def test_validate_rejects_node_eval(self, workspace: Path) -> None:
+        spec = CommandSpec(executable="node", args=("-e", "1"), cwd=workspace)
+        with pytest.raises(SandboxError, match="[Ii]nline-code"):
+            spec.validate(frozenset({"node"}))
 
 
 class TestValidate:

@@ -76,22 +76,39 @@ for reasonable research activity; this is not a formal safe-harbor guarantee.
 For the full attacker model, trust boundaries, and per-surface controls, see
 [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
-### Subprocess sandboxing
+### Managed command execution
 
-All shell commands execute inside `SubprocessSandbox` (`velune/execution/sandbox.py`):
+Velune runs shell commands through `SubprocessSandbox`
+(`velune/execution/sandbox.py`). To be precise about what this is: it is a **managed,
+resource-limited execution environment**, **not** an OS-level security sandbox. There
+is no namespace, seccomp, Job Object, or container isolation — commands run as the
+invoking user. The controls below constrain *what* can run and bound its resources;
+they do not isolate a process that is allowed to run. See
+[docs/THREAT_MODEL.md › B1](docs/THREAT_MODEL.md) for the full residual-risk analysis.
 
 - **No shell** — commands run via `subprocess.Popen(argv, shell=False)`; the argv is
   parsed with `shlex` and inline shell operators (`;`, `&&`, `|`, backticks, `$(...)`)
   are rejected even in argument position.
 - **Executable allowlist** — only basenames on the configured allowlist may run, and
-  the resolved binary must live in a trusted system/venv path (PATH-hijack guard).
-  The validated absolute path is pinned to close the TOCTOU window before execution.
+  the resolved binary must live in a trusted system/venv path (PATH-hijack guard,
+  enforced on **both POSIX and Windows**). The validated absolute path is pinned to
+  close the TOCTOU window before execution.
+- **Interpreter inline-code blocking** — the allowlist includes interpreters
+  (`python`, `node`, …). Inline-code flags (`python -c`, `node -e`/`--eval`/`-p`,
+  including Python short-flag clusters like `-Ic`) are rejected so an agent cannot run
+  arbitrary program text without first writing a file — and any agent-authored file
+  must pass the `DiffPreview` write-approval flow before it can be run.
 - **Environment scrubbing** — `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `PYTHONPATH`,
   `PYTHONSTARTUP`, `BASH_ENV`, and similar injection vectors are stripped from the
   child environment.
 - **Resource + lifetime limits** — wall-clock timeout and a memory ceiling, enforced
   by killing the **entire process tree** (`psutil`) so descendants never outlive a
   timeout or limit breach.
+
+> **Known limitation.** Allowlisted interpreters and build tools (`python`, `node`,
+> `go`, `make`, …) can execute files that exist in the workspace with your privileges.
+> Treat command execution as "code you have allowed to run," not as a hard isolation
+> boundary. True OS-level isolation is tracked as roadmap work in the threat model.
 
 ### Filesystem protection
 

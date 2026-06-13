@@ -121,6 +121,7 @@ def check(
         _check_config,
         _check_treesitter,
         _check_git,
+        _check_runtime_safety,
         _check_gpu,
         _check_vram,
         _check_model_benchmarks,
@@ -439,6 +440,60 @@ def _check_git() -> dict:
     }
 
 
+def _check_runtime_safety() -> dict:
+    """Surface PATH-hijack exposure for the executables Velune is allowed to run.
+
+    Mirrors the real execution guard: each allowlisted tool is resolved via the
+    same ``shutil.which`` lookup the sandbox uses, then checked against the
+    actual ``_is_trusted_path`` predicate. A tool that resolves to a location
+    outside the trusted system/venv roots is either an attacker-planted shadow
+    earlier in PATH or a legitimate non-standard install — both are worth
+    surfacing because the sandbox will refuse to execute it.
+    """
+    from pathlib import Path
+
+    from velune.execution.command_spec import (
+        ALLOWED_EXECUTABLES,
+        _is_trusted_path,
+    )
+
+    untrusted: list[str] = []
+    checked = 0
+    for exe in sorted(ALLOWED_EXECUTABLES):
+        resolved = shutil.which(exe)
+        if resolved is None:
+            continue  # not installed — not a safety concern, just absent
+        checked += 1
+        try:
+            resolved_path = Path(resolved).resolve()
+        except OSError:
+            untrusted.append(f"{exe} (unresolvable: {resolved})")
+            continue
+        if not _is_trusted_path(resolved_path):
+            untrusted.append(f"{exe} -> {resolved_path}")
+
+    if untrusted:
+        return {
+            "name": "Runtime Path Safety",
+            "status": "warn",
+            "message": (
+                "Allowlisted tools resolve to untrusted locations and will be "
+                f"refused by the sandbox (possible PATH hijack): {'; '.join(untrusted)}"
+            ),
+        }
+    if checked == 0:
+        return {
+            "name": "Runtime Path Safety",
+            "status": "warn",
+            "message": "No allowlisted executables found in PATH to validate.",
+        }
+    return {
+        "name": "Runtime Path Safety",
+        "status": "ok",
+        "message": f"All {checked} resolvable allowlisted tools live in trusted paths.",
+    }
+
+
 def _check_gpu() -> dict:
     from velune.providers.discovery.gpu import GPUDetector
 
@@ -684,6 +739,7 @@ def _render_results(results: list) -> None:
         "Anthropic API Key": "Security",
         "Groq": "Security",
         "Google Gemini": "Security",
+        "Runtime Path Safety": "Security",
         "Python Version": "Performance",
         "Core Dependencies": "Performance",
         "Git in PATH": "Performance",

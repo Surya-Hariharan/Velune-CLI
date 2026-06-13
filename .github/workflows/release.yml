@@ -14,7 +14,7 @@ jobs:
     name: Run CI Pipeline
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -55,7 +55,7 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -88,7 +88,7 @@ jobs:
         run: twine check --strict dist/*
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -105,7 +105,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/velune-cli
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -122,10 +122,10 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -161,7 +161,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           body: ${{ steps.changelog.outputs.body }}

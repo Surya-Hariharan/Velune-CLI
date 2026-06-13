@@ -6,9 +6,32 @@ reporting) with the engineering rationale.
 
 Velune is a **local-first** developer runtime. The design goal is that it behave like
 a trustworthy tool a developer runs on their own machine — **not** an unsafe autonomous
-shell wrapper. The central guarantee: untrusted inputs (LLM output, repository
-contents, web/MCP responses) cannot escalate into arbitrary code execution, credential
-theft, or cross-project data bleed without an explicit, visible user action.
+shell wrapper.
+
+What Velune's execution layer **is**: a *managed, resource-limited execution
+environment*. It is **not** an OS-level security sandbox — there is no namespace,
+seccomp, Job Object, or container isolation. Commands run as the invoking user with
+that user's privileges.
+
+Given that, the central guarantees are scoped honestly:
+
+- **No shell-injection escalation.** Untrusted command strings cannot reach a shell
+  (`shell=False`, `shlex` parsing, shell-operator rejection) — they can only invoke a
+  binary on the executable allowlist.
+- **No silent disk mutation.** Untrusted file edits cannot touch disk outside the
+  workspace, and never without passing the `DiffPreview` approval flow.
+- **No cross-project data bleed.** Per-workspace storage keying prevents one project
+  reading another's memory/embeddings/sessions.
+- **No credential leakage to logs.** Secret-shaped values are redacted from all log
+  output.
+
+What is **explicitly not** guaranteed: the allowlist contains interpreters and build
+tools (`python`, `node`, `go`, `make`, …). These can execute *files that already exist
+in the workspace*. Inline-code flags (`python -c`, `node -e/--eval/-p`) are blocked so
+an agent cannot run arbitrary program text without first writing a file (which requires
+write-approval), but an approved-and-written script, a `Makefile`, or a `go` build can
+still run arbitrary code with the user's privileges. Treat command execution as "code
+you have allowed to run," not as a hard isolation boundary. See [B1](#b1--subprocess-execution-untrusted-command--host-process).
 
 ## Assets
 
@@ -63,11 +86,22 @@ theft, or cross-project data bleed without an explicit, visible user action.
 ## Boundaries and controls
 
 ### B1 — Subprocess execution (untrusted command → host process)
-**Threats:** RCE via shell injection, PATH hijacking, fork bombs, resource exhaustion,
-orphaned descendants.
+**Threats:** RCE via shell injection, PATH hijacking, arbitrary inline-code via
+allowlisted interpreters, fork bombs, resource exhaustion, orphaned descendants.
 **Controls:** `shlex` parsing; rejection of shell operators; executable allowlist;
-trusted-path/PATH-hijack guard with TOCTOU-pinned absolute path; `shell=False`;
-environment scrubbing; wall-clock + memory limits; **process-tree** termination.
+**interpreter inline-code blocking** (`python -c`, `node -e/--eval/-p` — including
+Python short-flag clusters like `-Ic`); trusted-path/PATH-hijack guard with
+TOCTOU-pinned absolute path, enforced on **both POSIX and Windows** (Windows resolves
+the binary and requires it to live under a system/program-install root, the
+interpreter's own environment, or a workspace venv); `shell=False`; environment
+scrubbing; wall-clock + memory limits; **process-tree** termination.
+**Residual risk (not mitigated by isolation):** allowlisted interpreters and build
+tools execute *files in the workspace* with the user's privileges. There is no
+OS-level sandbox; `execute_command` itself has no per-command approval prompt — the
+controls are the allowlist + inline-code block + workspace boundary, and the fact that
+any agent-authored file must pass `DiffPreview` write-approval before it can be run.
+True process isolation (Job Objects / namespaces / seccomp / container) is roadmap work
+(see [Known limitations](#known-limitations--future-work)).
 **Code:** `velune/execution/command_spec.py`, `velune/execution/sandbox.py`.
 **Tests:** `tests/security/test_command_spec.py`, `tests/security/test_sandbox.py`.
 
@@ -120,6 +154,13 @@ before rebinding. **Rule: no cross-project contamination.**
 
 ## Known limitations / future work
 
+- **No OS-level execution isolation:** command execution is *managed and
+  resource-limited*, not isolated. Allowlisted interpreters/build tools run as the
+  invoking user and can read/write the workspace and reach the network. Roadmap
+  (in rough priority order): (1) per-command approval gating for interpreter/build-tool
+  invocations; (2) a deny-network execution mode; (3) real OS isolation — Windows Job
+  Objects + restricted tokens, Linux namespaces/seccomp (bwrap/firejail), macOS
+  `sandbox-exec` — selected per platform.
 - **Plugin isolation:** no subprocess/permission sandbox yet — disabled by default.
 - **Capability-based tool permissions:** tool access is currently gated by approval
   flows and allowlists rather than a formal per-tool capability grant model.

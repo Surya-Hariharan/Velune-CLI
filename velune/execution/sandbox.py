@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,65 @@ from velune.execution.command_spec import CommandSpec
 from velune.execution.path_guard import is_within_workspace
 
 logger = logging.getLogger("velune.execution.sandbox")
+
+#: Per-stream cap on captured subprocess output. Output beyond this is drained
+#: (so the child never blocks on a full pipe) but discarded, bounding the
+#: parent's memory regardless of how much the child writes.
+DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MiB
+
+
+class _BoundedStreamReader(threading.Thread):
+    """Drain a subprocess text pipe into a memory-bounded buffer on its own thread.
+
+    Both pipes must be read *concurrently* with the process running. The old
+    design polled for exit and only called ``communicate()`` afterwards; a child
+    that wrote more than the OS pipe capacity (~64 KiB) would block on ``write``,
+    never exit, and the parent would kill it as a false timeout with its output
+    lost. Draining on a dedicated thread removes that deadlock, and the byte cap
+    keeps a runaway producer from exhausting memory.
+    """
+
+    def __init__(self, stream: Any, limit: int) -> None:
+        super().__init__(daemon=True)
+        self._stream = stream
+        self._limit = limit
+        self._chunks: list[str] = []
+        self._size = 0
+        self.truncated = False
+
+    def run(self) -> None:
+        try:
+            while True:
+                chunk = self._stream.read(8192)
+                if not chunk:
+                    break
+                if self._size >= self._limit:
+                    # Keep draining to EOF so the writer never blocks, but
+                    # discard the overflow.
+                    self.truncated = True
+                    continue
+                allowed = self._limit - self._size
+                if len(chunk) > allowed:
+                    self._chunks.append(chunk[:allowed])
+                    self._size += allowed
+                    self.truncated = True
+                else:
+                    self._chunks.append(chunk)
+                    self._size += len(chunk)
+        except (ValueError, OSError):
+            # Stream closed underneath us (e.g. after a process-tree kill).
+            pass
+        finally:
+            try:
+                self._stream.close()
+            except Exception:
+                pass
+
+    def text(self) -> str:
+        result = "".join(self._chunks)
+        if self.truncated:
+            result += f"\n[velune: output truncated at {self._limit} bytes]"
+        return result
 
 
 def _kill_process_tree(pid: int) -> None:
@@ -86,10 +146,12 @@ class SubprocessSandbox:
         max_cpu_percent: float = 90.0,
         allowed_executables: list[str] | None = None,
         bus: Any | None = None,
+        max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
     ) -> None:
         self.workspace_path = Path(workspace_path).resolve()
         self.max_memory_mb = max_memory_mb
         self.max_cpu_percent = max_cpu_percent
+        self.max_output_bytes = max_output_bytes
         self.bus = bus
 
         if allowed_executables is not None:
@@ -230,6 +292,22 @@ class SubprocessSandbox:
         except Exception as e:
             raise SandboxError(f"Failed to spawn subprocess: {e}")
 
+        # Drain both pipes concurrently while the process runs. Reading only
+        # after exit (the old ``communicate()`` placement) deadlocks once the
+        # child fills the OS pipe buffer — see _BoundedStreamReader.
+        stdout_reader = _BoundedStreamReader(process.stdout, self.max_output_bytes)
+        stderr_reader = _BoundedStreamReader(process.stderr, self.max_output_bytes)
+        stdout_reader.start()
+        stderr_reader.start()
+
+        def _join_readers() -> tuple[str, str]:
+            # After the process exits or its tree is killed, the pipes reach EOF
+            # and the reader threads finish promptly. The join timeout is a guard
+            # against a wedged thread, not the expected path.
+            stdout_reader.join(timeout=3.0)
+            stderr_reader.join(timeout=3.0)
+            return stdout_reader.text(), stderr_reader.text()
+
         peak_memory = 0.0
         peak_cpu = 0.0
         ps_proc = None
@@ -259,6 +337,7 @@ class SubprocessSandbox:
 
                         if mem_mb > self.max_memory_mb:
                             _kill_process_tree(process.pid)
+                            _join_readers()
                             raise SandboxError(
                                 f"Memory threshold exceeded: {mem_mb:.2f}MB > {self.max_memory_mb}MB"
                             )
@@ -270,17 +349,18 @@ class SubprocessSandbox:
         except Exception as e:
             if process.poll() is None:
                 _kill_process_tree(process.pid)
+            _join_readers()
             raise e
 
         if timeout_occurred:
             _kill_process_tree(process.pid)
-            stdout, stderr = process.communicate()
+            stdout, stderr = _join_readers()
             duration_ms = (time.perf_counter() - start_time) * 1000
             raise SandboxError(
                 f"Command timed out after {spec.timeout} seconds.\nStdout: {stdout}\nStderr: {stderr}"
             )
 
-        stdout, stderr = process.communicate()
+        stdout, stderr = _join_readers()
         duration_ms = (time.perf_counter() - start_time) * 1000
 
         return SandboxResult(

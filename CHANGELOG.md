@@ -9,10 +9,53 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-14
+
+This is a **stabilization and trust-recovery** release. It cuts the runtime-hardening
+and packaging-correctness work that had accumulated on `main` since `0.9.0` into a
+properly tagged, reproducible PyPI artifact. There are no new features and no breaking
+changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
+
 ### Security
 
+- **Windows PATH-hijack guard now enforced.** `_is_trusted_path` previously returned
+  `True` unconditionally on Windows, so a malicious binary planted earlier in `PATH`
+  would be executed. The resolved binary must now live under a system/program-install
+  root, the interpreter's own environment, or a workspace venv — matching the existing
+  POSIX behavior. (`velune/execution/command_spec.py`)
+- **Interpreter inline-code execution blocked.** Allowlisted interpreters could run
+  arbitrary program text with no approval gate (`python -c …`, `node -e/--eval/-p …`,
+  including Python short-flag clusters like `-Ic`). These flags are now rejected;
+  running a *file* is still permitted, and agent-authored files must pass the
+  `DiffPreview` write-approval flow before they can be run.
+- **Execution-model documentation corrected for honesty.** SECURITY.md and
+  docs/THREAT_MODEL.md now describe the execution layer as a *managed, resource-limited
+  execution environment* — explicitly **not** an OS-level sandbox — and document the
+  residual risk (allowlisted interpreters/build tools run workspace files as the user)
+  plus the OS-isolation roadmap. README's architecture label updated accordingly.
 - Added Bandit static analysis to CI (gates on medium+ severity) and gitleaks secret scanning.
 - Resolved Bandit high/medium findings: marked the non-cryptographic workspace-slug SHA-1 with `usedforsecurity=False`, and gave the Ollama HTTP client a bounded default timeout (60s, 5s connect) so non-streaming calls cannot hang indefinitely.
+
+### Fixed
+
+- **Subprocess pipe-buffer deadlock in the execution sandbox.** `SubprocessSandbox.execute`
+  read child output via `communicate()` only *after* the poll loop saw the process exit.
+  A child that wrote more than the OS pipe capacity (~64 KiB) blocked on `write()`, never
+  exited, and was killed as a false timeout with **all output lost** — affecting any normal
+  test run, verbose build, or `pip install`. Both pipes are now drained concurrently on
+  dedicated threads while the process runs, into a per-stream memory-bounded buffer
+  (default 10 MiB, configurable via `max_output_bytes`). This removes the deadlock, bounds
+  parent memory against runaway producers, and preserves partial output on timeout.
+  (`velune/execution/sandbox.py`)
+
+### Added
+
+- **`velune doctor` runtime path-safety check.** A new Security-category diagnostic resolves
+  each allowlisted executable via the same `shutil.which` lookup the sandbox uses and
+  validates it against the real `_is_trusted_path` guard, surfacing any tool that resolves
+  to an untrusted location (PATH-hijack candidate or non-standard install the sandbox will
+  refuse to run). Makes the PATH-hijack guarantee observable rather than silent.
+  (`velune/cli/commands/doctor.py`)
 
 ### Changed
 
@@ -275,5 +318,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Security sandbox: workspace write guards, network hygiene, secret scrubbing
 - Full pytest suite: unit, integration, async, and benchmark tests
 
-[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/Surya-Hariharan/Velune-CLI/releases/tag/v0.9.0
 [0.1.0]: https://github.com/Surya-Hariharan/Velune-CLI/releases/tag/v0.1.0

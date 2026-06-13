@@ -155,7 +155,7 @@ velune/
 ├── cognition/        Council: Planner + Coder + Reviewer + Challenger + Synthesizer
 ├── memory/           5-tier: working → episodic → semantic → graph → lineage
 ├── repository/       AST indexing, dependency graph, .veluneignore
-├── execution/        Sandbox, diff preview, rollback, cancellation
+├── execution/        Managed execution (allowlist + limits), diff preview, rollback
 ├── hardware/         Hardware detection, tier classification, GPU probe
 ├── telemetry/        Token tracking, cost estimation, latency profiling
 ├── models/           Model registry, capability scoring, specializations

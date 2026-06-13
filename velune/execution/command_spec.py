@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import sys
@@ -52,28 +53,65 @@ TRUSTED_PATH_PREFIXES: frozenset[str] = frozenset(
 _WORKSPACE_VENV_NAMES = (".venv", "venv")
 
 
+def _windows_trusted_roots() -> list[Path]:
+    """Resolve the directory roots that hold trusted executables on Windows.
+
+    These are the system and program-install locations a non-privileged
+    attacker generally cannot write to. Derived from environment variables
+    (which the user controls but malware typically does not rewrite) with
+    hard-coded fallbacks so the guard still functions if a variable is unset.
+    Per-user program installs (``%LOCALAPPDATA%\\Programs``) are included
+    because that is where python.org, nvm-windows, and similar place real
+    interpreters.
+    """
+    roots: list[Path] = []
+    for env_var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        value = os.environ.get(env_var)
+        if value:
+            roots.append(Path(value))
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        roots.append(Path(local_appdata) / "Programs")
+    # Fallbacks if the environment is missing the variables above.
+    roots.extend(
+        (
+            Path(r"C:\Windows"),
+            Path(r"C:\Program Files"),
+            Path(r"C:\Program Files (x86)"),
+        )
+    )
+    resolved: list[Path] = []
+    for root in roots:
+        try:
+            resolved.append(root.resolve())
+        except OSError:
+            continue
+    return resolved
+
+
 def _is_trusted_path(
     resolved_path: Path,
     workspace: Path | None = None,
     platform: str | None = None,
 ) -> bool:
-    """Verify executable lives in a trusted system directory or a known venv.
+    """Verify an executable lives in a trusted system directory or a known venv.
 
     A venv binary is trusted only when it belongs to the interpreter's own
     environment (``sys.prefix``/``sys.base_prefix``) or to a ``.venv``/``venv``
     directory rooted directly in *workspace* (defaults to the process CWD).
     A bare substring match on ".venv" is NOT sufficient — that would let any
     attacker-writable path like ``/tmp/.venv/evil`` defeat the check.
+
+    Windows is NOT permissive: the resolved binary must live under a system or
+    program-install root (see :func:`_windows_trusted_roots`), the interpreter's
+    own environment, or a workspace venv. This blocks PATH hijacking where a
+    malicious ``git.exe`` planted in an attacker-writable directory earlier in
+    ``PATH`` would otherwise be executed.
     """
-    if (platform or sys.platform) == "win32":
-        return True  # Windows PATH hijacking is different threat model
+    plat = platform or sys.platform
 
-    path_str = str(resolved_path)
-    for prefix in TRUSTED_PATH_PREFIXES:
-        if path_str.startswith(prefix):
-            return True
-
-    # The running interpreter's environment (covers the active venv)
+    # Common to every platform: the running interpreter's environment (this
+    # covers the active venv) and venvs rooted directly in the workspace.
     for env_root in (sys.prefix, sys.base_prefix):
         try:
             if resolved_path.is_relative_to(Path(env_root).resolve()):
@@ -81,7 +119,6 @@ def _is_trusted_path(
         except (OSError, ValueError):
             continue
 
-    # Venvs rooted directly in the workspace
     root = (workspace or Path.cwd()).resolve()
     for venv_name in _WORKSPACE_VENV_NAMES:
         candidate = root / venv_name
@@ -91,7 +128,55 @@ def _is_trusted_path(
         except (OSError, ValueError):
             continue
 
-    return False
+    if plat == "win32":
+        for trusted_root in _windows_trusted_roots():
+            try:
+                if resolved_path.is_relative_to(trusted_root):
+                    return True
+            except (OSError, ValueError):
+                continue
+        return False
+
+    path_str = str(resolved_path)
+    return any(path_str.startswith(prefix) for prefix in TRUSTED_PATH_PREFIXES)
+
+
+#: Single-dash flags that turn an allowlisted interpreter into an arbitrary-code
+#: engine by taking program text directly on the command line. Blocking these
+#: closes the no-approval RCE path (``execute_command`` runs without a diff/
+#: approval gate); running a *file* still requires the file to exist, and any
+#: agent-authored file must first pass the DiffPreview write-approval flow.
+_INTERPRETER_INLINE_FLAGS: dict[str, frozenset[str]] = {
+    "python": frozenset({"-c"}),
+    "python3": frozenset({"-c"}),
+    "node": frozenset({"-e", "--eval", "-p", "--print", "--eval-stdin"}),
+    "nodejs": frozenset({"-e", "--eval", "-p", "--print", "--eval-stdin"}),
+}
+
+
+def _find_inline_code_flag(executable: str, args: tuple[str, ...]) -> str | None:
+    """Return the first inline-code flag found for *executable*, or ``None``.
+
+    Handles Python short-flag clustering (``-Ic`` is equivalent to ``-I -c``)
+    so ``python -Ic '<code>'`` cannot slip past an exact ``-c`` match. No
+    legitimate single-dash Python flag other than ``-c`` contains the letter
+    ``c``, so a cluster containing ``c`` is an unambiguous inline-code request.
+    """
+    exe = Path(executable).name.lower()
+    if exe in ("python", "python3"):
+        for arg in args:
+            if arg == "-c":
+                return arg
+            # Short-flag cluster (single dash, not "--…") containing 'c'.
+            if len(arg) >= 2 and arg[0] == "-" and arg[1] != "-" and "c" in arg:
+                return arg
+        return None
+    blocked = _INTERPRETER_INLINE_FLAGS.get(exe)
+    if blocked:
+        for arg in args:
+            if arg in blocked:
+                return arg
+    return None
 
 
 @dataclass(frozen=True)
@@ -121,6 +206,18 @@ class CommandSpec:
             raise SandboxError(
                 f"Executable '{self.executable}' is not in the allowed list. "
                 f"Permitted: {sorted(allowed)}"
+            )
+
+        # Interpreters on the allowlist (python, node, …) can otherwise execute
+        # arbitrary inline program text, escaping the workspace boundary with no
+        # approval gate. Reject the inline-code flags; running a file is still
+        # permitted (and any agent-authored file goes through write-approval).
+        inline_flag = _find_inline_code_flag(self.executable, self.args)
+        if inline_flag is not None:
+            raise SandboxError(
+                f"Inline-code execution flag '{inline_flag}' is not permitted for "
+                f"interpreter '{self.executable}'. Run a script file in the workspace "
+                f"instead — inline code bypasses the workspace boundary."
             )
 
         exe_path = shutil.which(self.executable)

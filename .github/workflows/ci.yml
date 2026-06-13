@@ -10,12 +10,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default token: CI only needs to read the checkout. Any job
+# that requires more must opt in explicitly with its own permissions block.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -41,7 +46,7 @@ jobs:
     name: Security
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -68,7 +73,7 @@ jobs:
           bandit -c pyproject.toml -r velune/ --severity-level medium --confidence-level medium
 
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
           GITLEAKS_ENABLE_SUMMARY: "true"
@@ -106,7 +111,7 @@ jobs:
     env:
       PYTHONIOENCODING: utf-8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -130,7 +135,7 @@ jobs:
     name: Build & Validate Artifacts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Full history so SOURCE_DATE_EPOCH can be derived from the commit.
           fetch-depth: 0
@@ -167,7 +172,7 @@ jobs:
           echo "✓ Pure-python wheel: $(ls dist/*.whl)"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -191,7 +196,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Download built wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/

@@ -28,16 +28,16 @@ REDACTION_PLACEHOLDER = "***REDACTED***"
 # Provider key shapes. Each is prefix-anchored and requires a long opaque tail
 # so ordinary words ("skipped", "token budget") are never matched.
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),       # Anthropic
-    re.compile(r"sk-proj-[A-Za-z0-9_-]{20,}"),       # OpenAI project keys
-    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),            # OpenAI / generic sk-
-    re.compile(r"xai-[A-Za-z0-9]{20,}"),             # xAI
-    re.compile(r"gsk_[A-Za-z0-9]{20,}"),             # Groq
-    re.compile(r"hf_[A-Za-z0-9]{20,}"),              # Hugging Face
-    re.compile(r"AIza[A-Za-z0-9_-]{20,}"),           # Google API keys
-    re.compile(r"r8_[A-Za-z0-9]{20,}"),              # Replicate
-    re.compile(r"fw_[A-Za-z0-9]{20,}"),              # Fireworks
-    re.compile(r"sk-or-[A-Za-z0-9_-]{20,}"),         # OpenRouter
+    re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),  # Anthropic
+    re.compile(r"sk-proj-[A-Za-z0-9_-]{20,}"),  # OpenAI project keys
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),  # OpenAI / generic sk-
+    re.compile(r"xai-[A-Za-z0-9]{20,}"),  # xAI
+    re.compile(r"gsk_[A-Za-z0-9]{20,}"),  # Groq
+    re.compile(r"hf_[A-Za-z0-9]{20,}"),  # Hugging Face
+    re.compile(r"AIza[A-Za-z0-9_-]{20,}"),  # Google API keys
+    re.compile(r"r8_[A-Za-z0-9]{20,}"),  # Replicate
+    re.compile(r"fw_[A-Za-z0-9]{20,}"),  # Fireworks
+    re.compile(r"sk-or-[A-Za-z0-9_-]{20,}"),  # OpenRouter
     # Authorization headers: "Bearer <token>" / "Authorization: Token <token>"
     re.compile(r"(?i)\b(bearer|token)\s+[A-Za-z0-9._~+/=-]{16,}"),
 )

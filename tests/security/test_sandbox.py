@@ -124,6 +124,78 @@ class TestExecution:
         result = sandbox.execute(spec)
         assert "hello" in result.stdout
 
+    def test_high_output_does_not_deadlock(self, workspace: Path) -> None:
+        # Regression: a child writing more than the OS pipe buffer (~64 KiB) and
+        # exiting immediately used to block on write() because the parent only
+        # drained the pipe via communicate() *after* poll() saw the process
+        # exit — which never happened. It would then be killed as a false
+        # timeout with all output lost. With a generous timeout, a well-behaved
+        # fast producer must complete promptly with its output intact.
+        start = time.perf_counter()
+        sandbox = make_sandbox(workspace)
+        result = sandbox.execute(
+            script_spec(
+                workspace,
+                "import sys\nsys.stdout.write('A' * 1_000_000)\nsys.stdout.flush()\n",
+                timeout=30.0,
+            )
+        )
+        elapsed = time.perf_counter() - start
+        assert result.exit_code == 0
+        assert len(result.stdout) == 1_000_000
+        assert elapsed < 15, f"fast high-output command took {elapsed:.1f}s (deadlock?)"
+
+    def test_high_output_on_both_streams(self, workspace: Path) -> None:
+        # Both pipes must be drained concurrently; filling only stdout's drain
+        # while stderr blocks (or vice versa) would still deadlock.
+        sandbox = make_sandbox(workspace)
+        result = sandbox.execute(
+            script_spec(
+                workspace,
+                "import sys\n"
+                "sys.stdout.write('O' * 500_000)\n"
+                "sys.stderr.write('E' * 500_000)\n",
+                timeout=30.0,
+            )
+        )
+        assert result.exit_code == 0
+        assert len(result.stdout) == 500_000
+        assert len(result.stderr) == 500_000
+
+    def test_output_capped_at_limit(self, workspace: Path) -> None:
+        # A runaway producer must not exhaust parent memory: captured output is
+        # bounded and flagged as truncated, but draining continues to EOF so the
+        # child never blocks.
+        sandbox = make_sandbox(workspace, max_output_bytes=100_000)
+        result = sandbox.execute(
+            script_spec(
+                workspace,
+                "import sys\nsys.stdout.write('Z' * 1_000_000)\n",
+                timeout=30.0,
+            )
+        )
+        assert result.exit_code == 0
+        assert len(result.stdout) < 200_000
+        assert "truncated" in result.stdout
+
+    def test_timeout_recovers_partial_output(self, workspace: Path) -> None:
+        # On timeout the captured output that was already drained must survive in
+        # the error message — the old code lost it because communicate() ran
+        # against an already-killed process.
+        sandbox = make_sandbox(workspace)
+        with pytest.raises(SandboxError, match="timed out") as exc_info:
+            sandbox.execute(
+                script_spec(
+                    workspace,
+                    "import sys, time\n"
+                    "sys.stdout.write('partial-marker\\n')\n"
+                    "sys.stdout.flush()\n"
+                    "time.sleep(60)\n",
+                    timeout=2.0,
+                )
+            )
+        assert "partial-marker" in str(exc_info.value)
+
 
 @pytest.mark.integration
 @pytest.mark.slow
