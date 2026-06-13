@@ -1,150 +1,49 @@
 # Running Velune on Windows
 
-Velune works on Windows via WSL2 (Windows Subsystem for Linux 2).
-This guide covers every step from a fresh Windows installation.
+Velune is fully supported on Windows. You can run it either **natively** (recommended) or inside a **WSL2** (Windows Subsystem for Linux 2) environment.
 
 ---
 
-## 1. Why WSL2, not native Windows
+## Option A — Native Windows Setup (Recommended)
 
-Most Python AI tools — including Ollama, CUDA drivers for LLMs,
-and many native extensions — target Linux first. WSL2 runs a real
-Linux kernel inside Windows using lightweight Hyper-V virtualization.
-You get:
+Running Velune natively gives you the best CLI performance and integrates directly with the native Windows Terminal, the Windows Credential Locker, and Windows path resolution.
 
-- Full Linux environment with no performance penalty for CPU/GPU work
-- Access to your Windows files from inside Linux (`/mnt/c/Users/...`)
-- Ollama and all Velune dependencies work without modification
-- GPU passthrough to NVIDIA GPUs via CUDA on Windows
+### 1. Prerequisites
 
-Native Windows support for Velune is planned. For now, WSL2 is the
-recommended path on Windows.
+Make sure you have the following installed on your system:
 
----
+- **Python 3.11+**: Download from [python.org](https://www.python.org/downloads/) (ensure you check the box to "Add Python to PATH" during installation) or install via `winget`:
+  ```powershell
+  winget install Python.Python.3.11
+  ```
+- **Git**: Download from [git-scm.com](https://git-scm.com/) or install via `winget`:
+  ```powershell
+  winget install Git.Git
+  ```
+- **Ollama for Windows** (Optional — only required for local LLMs): Download from [ollama.com](https://ollama.com/) and pull a coding model from your terminal:
+  ```powershell
+  ollama pull qwen2.5-coder:7b
+  ```
 
-## 2. Enable WSL2
+### 2. Installation
 
-Open **PowerShell as Administrator** (right-click the Start menu →
-"Windows PowerShell (Admin)" or "Terminal (Admin)"):
+Open **PowerShell** or **Command Prompt** (running as a normal user is fine) and run:
 
 ```powershell
-wsl --install
-wsl --set-default-version 2
-```
+# 1. Install Velune
+pip install velune-cli
 
-The first command installs WSL2 and Ubuntu in one step on Windows 11.
-On Windows 10, it may prompt you to enable optional features first.
+# 2. Navigate to your project folder
+cd C:\path\to\your-project
 
-**Restart your machine** after the install completes. WSL2 requires
-a reboot to activate the kernel component.
-
-Verify the installation after restart:
-
-```powershell
-wsl --list --verbose
-```
-
-You should see a distribution (Ubuntu) with `VERSION 2`.
-
-> **If you see an error about virtualization:** see the
-> [Common issues](#9-common-issues) section below.
-
----
-
-## 3. Install Ubuntu 22.04
-
-If the `wsl --install` command above already installed Ubuntu, skip
-to step 4.
-
-Otherwise, open the Microsoft Store, search for
-**Ubuntu 22.04.3 LTS**, and click **Install**.
-
-After installation, launch Ubuntu from the Start menu. On first
-launch it will ask you to create a Linux username and password.
-This is your WSL2 user — it does not need to match your Windows
-username.
-
----
-
-## 4. Install Ollama inside WSL2
-
-Open your Ubuntu terminal and run:
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-Start the Ollama server in the background:
-
-```bash
-ollama serve &
-```
-
-Pull a coding model (this downloads ~4.7 GB — takes a few minutes):
-
-```bash
-ollama pull qwen2.5-coder:7b
-```
-
-Verify it works:
-
-```bash
-ollama run qwen2.5-coder:7b "say hello"
-```
-
-You should see a short response. Press `Ctrl+D` to exit.
-
----
-
-## 5. Install Python 3.11+
-
-Ubuntu 22.04 ships with Python 3.10. Install 3.11:
-
-```bash
-sudo apt update && sudo apt install python3.11 python3-pip python3.11-venv -y
-```
-
-Confirm the version:
-
-```bash
-python3 --version
-```
-
-Expected output: `Python 3.11.x`
-
-> On Ubuntu 22.04, `python3` points to the system Python.
-> Always use `python3` (not `python`) unless you set up a virtual
-> environment or alias.
-
----
-
-## 6. Install Velune
-
-```bash
-pip3 install velune-cli
-```
-
-If `pip3` is not found after the install above, use:
-
-```bash
-python3 -m pip install velune-cli
-```
-
-Initialize Velune in your project directory:
-
-```bash
-cd /your/project
+# 3. Initialize Velune configuration
 velune init
-```
 
-Run the health check to confirm everything is wired up:
-
-```bash
+# 4. Verify system health and paths
 velune doctor
 ```
 
-A healthy output looks like:
-
+A successful `velune doctor` output looks like:
 ```text
 ✓ Python 3.11
 ✓ Ollama reachable (localhost:11434)
@@ -153,198 +52,68 @@ A healthy output looks like:
 ✓ Hardware: 16 GB RAM · tier: capable
 ```
 
-Start the REPL:
+### 3. Run Velune
 
-```bash
+Start the interactive REPL in your project folder:
+```powershell
 velune
 ```
 
----
+### 4. Windows Security & Sandboxing Details
 
-## 7. Access your Windows files from WSL2
+When running natively on Windows, Velune enforces robust security boundaries:
 
-Your Windows drives are mounted under `/mnt/`:
-
-```text
-C:\  →  /mnt/c/
-D:\  →  /mnt/d/
-```
-
-To navigate to a Windows project folder:
-
-```bash
-cd /mnt/c/Users/YourName/Projects/my-project
-```
-
-To resolve your Windows username automatically:
-
-```bash
-WIN_USER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r')
-cd /mnt/c/Users/$WIN_USER/Projects
-```
-
-> **Performance note:** File I/O on `/mnt/c/` is 5–10x slower than
-> the native Linux filesystem. For best performance, keep your
-> project files inside WSL2 itself:
->
-> ```bash
-> mkdir -p ~/projects && cd ~/projects
-> git clone <your-repo>
-> ```
->
-> You can still open them in VS Code from Windows using the
-> [WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl).
+- **Windows Credential Locker**: When you run `velune setup`, Velune securely stores your provider API keys (Groq, OpenAI, Anthropic, Gemini, xAI, etc.) in the Windows Credential Locker using the Python `keyring` package. Your keys are never stored in plain-text configuration files or git history.
+- **PATH-Hijack Guard**: Windows-native command execution enforces a strict path guard. Allowlisted binaries (`python`, `git`, `pytest`, etc.) must resolve to trusted directories. On Windows, these trusted directories are:
+  - System directories under `%SystemRoot%` or `%windir%` (e.g., `C:\Windows`)
+  - Standard Program Files directories (`C:\Program Files`, `C:\Program Files (x86)`)
+  - User-local program installations (`%LOCALAPPDATA%\Programs`)
+  - A virtual environment folder named `.venv` or `venv` rooted directly in your active workspace folder.
+- **Inline-code Blocking**: Allowlisted interpreters (like `python` and `node`) are blocked from executing inline code flags (`python -c`, `node -e`). All code written by the agent must go through file writes, which require your explicit approval via the `DiffPreview` flow.
 
 ---
 
-## 8. GPU passthrough (NVIDIA users)
+## Option B — WSL2 Setup (Alternative)
 
-WSL2 can use your NVIDIA GPU directly for Ollama inference.
+If your development team primarily targets Linux environments or you prefer to containerize your tools, you can run Velune via WSL2.
 
-**Step 1 — Install the NVIDIA driver on Windows (not inside WSL2).**
-
-Download and install the latest Game Ready or Studio driver from
-<https://www.nvidia.com/download/index.aspx>. The WSL2 CUDA support
-is bundled with the Windows driver since version 515+.
-
-**Step 2 — Do NOT install a separate CUDA toolkit inside WSL2.**
-
-The driver installed on Windows exposes CUDA to WSL2 automatically
-via `/usr/lib/wsl/lib/`. Installing a second CUDA toolkit inside WSL2
-will conflict with it.
-
-**Step 3 — Verify GPU visibility inside WSL2:**
-
-```bash
-nvidia-smi
-```
-
-Expected output shows your GPU name, driver version, and VRAM.
-If this fails, see the [Common issues](#9-common-issues) section.
-
-**Step 4 — Verify Ollama uses the GPU:**
-
-```bash
-ollama run qwen2.5-coder:7b "write a hello world function"
-```
-
-Watch GPU memory in a second terminal:
-
-```bash
-nvidia-smi --query-gpu=memory.used --format=csv --loop=1
-```
-
-You should see VRAM usage increase during inference.
-
----
-
-## 9. Common issues
-
-**"WSL2 requires a virtual machine platform component" or "virtualization not enabled"**
-
-WSL2 uses Hyper-V. If your CPU supports it but it is disabled,
-enable it in your BIOS:
-
-- **Intel:** look for "Intel VT-x" or "Virtualization Technology" → Enable
-- **AMD:** look for "AMD-V" or "SVM Mode" → Enable
-
-The setting is usually under "Advanced CPU Configuration" or
-"Advanced > CPU Configuration" in your BIOS/UEFI setup screen
-(press Del or F2 at startup to enter).
-
-After enabling, save and restart. Then run `wsl --install` again.
-
----
-
-**Ollama port conflict — REPL shows "no providers reachable"**
-
-This can happen if a previous WSL2 session left Ollama running.
-Reset WSL2 and restart:
-
+### 1. Enable WSL2 and Install Ubuntu
+Open **PowerShell as Administrator** and run:
 ```powershell
-wsl --shutdown
+wsl --install
+wsl --set-default-version 2
+```
+*Restart your machine after the installation completes.*
+
+If Ubuntu wasn't automatically installed, get **Ubuntu 22.04 LTS** from the Microsoft Store, open it, and set up your Linux username and password.
+
+### 2. Install Ollama and Python inside WSL2
+In your Ubuntu terminal:
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve &
+ollama pull qwen2.5-coder:7b
+
+# Install Python 3.11
+sudo apt update && sudo apt install python3.11 python3-pip python3.11-venv -y
 ```
 
-Then open Ubuntu again and run `ollama serve &` before starting
-Velune.
-
----
-
-**`python` command not found**
-
-Ubuntu uses `python3`. Either use `python3` directly or create an
-alias:
-
+### 3. Install and Run Velune
 ```bash
-echo "alias python=python3" >> ~/.bashrc
-source ~/.bashrc
-```
-
----
-
-**Slow file access — Velune is sluggish when editing files**
-
-You are likely working on a project inside `/mnt/c/`. Move it to
-your WSL2 home directory for 10x faster I/O:
-
-```bash
-cp -r /mnt/c/Users/YourName/Projects/my-project ~/projects/
-cd ~/projects/my-project
+pip3 install velune-cli
+cd /mnt/c/Users/YourName/path/to/project
 velune init
+velune doctor
+velune
 ```
 
----
-
-**`nvidia-smi` not found inside WSL2**
-
-The `nvidia-smi` binary for WSL2 lives at `/usr/lib/wsl/lib/nvidia-smi`.
-If it is not on your PATH:
-
-```bash
-export PATH=$PATH:/usr/lib/wsl/lib
-```
-
-Add that line to `~/.bashrc` to make it permanent.
+*Note: For the best file system performance, it is recommended to keep your project files inside the Linux root directory (e.g. `~/projects/`) instead of the Windows mount `/mnt/c/`.*
 
 ---
 
-**WSL2 clock drift causing API request failures**
+## Recommended Terminal: Windows Terminal
 
-WSL2 can fall out of sync with the Windows system clock after
-suspend/resume. Fix it with:
+For the best visual experience, run Velune inside **Windows Terminal** (installed from the Microsoft Store or pre-installed on Windows 11). 
 
-```bash
-sudo hwclock -s
-```
-
----
-
-## 10. Windows Terminal (recommended)
-
-Install **Windows Terminal** from the Microsoft Store for the best
-experience with Velune's rich terminal UI (color, unicode, scrollback).
-
-After installation:
-
-1. Open Windows Terminal settings (Ctrl+,)
-2. Under **Startup → Default profile**, select **Ubuntu**
-3. Optionally set a dark theme under **Appearance**
-
-Windows Terminal renders Velune's colored panels, emoji mode badges,
-and the context-window bar correctly. The default `cmd.exe` console
-does not support 256-color output and will show garbled characters.
-
----
-
-## Quick reference
-
-| Goal                            | Command                                      |
-|---------------------------------|----------------------------------------------|
-| Open WSL2                       | Start menu → Ubuntu                          |
-| Restart WSL2                    | `wsl --shutdown` in PowerShell, then reopen  |
-| Access Windows files            | `cd /mnt/c/Users/YourName/...`               |
-| Start Ollama                    | `ollama serve &`                             |
-| Pull a model                    | `ollama pull qwen2.5-coder:7b`               |
-| Start Velune                    | `velune`                                     |
-| Health check                    | `velune doctor`                              |
-| Verify GPU                      | `nvidia-smi`                                 |
+Windows Terminal correctly renders Velune's 256-color theme, emoji badges, panel layouts, and interactive arrow-key picker menus. The legacy command console (`cmd.exe`) does not support these features and may render garbled characters.

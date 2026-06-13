@@ -172,7 +172,7 @@ Velune maintains five memory tiers across sessions:
 
 1. **Working** — current conversation turns (in-process, TTL-evicted)
 2. **Episodic** — session history (SQLite, persisted to `~/.velune/`)
-3. **Semantic** — vector search over past interactions (local Qdrant)
+3. **Semantic** — vector search over past interactions (local LanceDB and Qdrant)
 4. **Graph** — repository structure and symbol relationships
 5. **Lineage** — decision history, what was tried and why
 
@@ -208,9 +208,9 @@ external MCP servers are trust-gated — see the
 
 ## Windows
 
-Velune runs on Windows via WSL2. Native Windows support is planned.
+Velune runs natively on Windows (supporting native command execution sandboxing, local Ollama integration, and keyring credentials). It can also run via WSL2 if preferred.
 
-See [WINDOWS.md](WINDOWS.md) for the complete WSL2 setup guide.
+See [WINDOWS.md](WINDOWS.md) for the complete native Windows and WSL2 setup guides.
 
 ---
 
@@ -218,10 +218,10 @@ See [WINDOWS.md](WINDOWS.md) for the complete WSL2 setup guide.
 
 | Doc | What's inside |
 | --- | --- |
-| [ARCHITECTURE_STATUS.md](ARCHITECTURE_STATUS.md) | Per-subsystem maturity (stable / experimental / planned) and known limitations |
+| [docs/ARCHITECTURE_STATUS.md](docs/ARCHITECTURE_STATUS.md) | Per-subsystem maturity (stable / experimental / planned) and known limitations |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layering and import-boundary rules |
-| [CI_CD.md](CI_CD.md) | What CI runs and how to reproduce every gate locally |
-| [RELEASE.md](RELEASE.md) | Versioning and the PyPI release pipeline |
+| [docs/CI_CD.md](docs/CI_CD.md) | What CI runs and how to reproduce every gate locally |
+| [docs/RELEASE.md](docs/RELEASE.md) | Versioning and the PyPI release pipeline |
 | [SECURITY.md](SECURITY.md) / [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Security posture, trust boundaries, reporting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup and contribution workflow |
 

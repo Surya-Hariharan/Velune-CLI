@@ -47,23 +47,23 @@ velune doctor
 ## Running tests and linting
 
 ```bash
-# Fast unit tests
-pytest tests/unit -q
+# Fast security tests
+pytest tests/security -v
 
-# Full suite
+# Full suite (includes security and integration tests)
 pytest tests/ -v
 
-# Lint (must pass before merging)
+# Lint check (must pass before merging)
 ruff check velune/
 
-# Type check (informational — not a merge gate yet)
-mypy velune/ --ignore-missing-imports
+# Type check (must pass before merging)
+pyright velune/
 
-# Coverage
-pytest tests/ --cov=velune --cov-report=term-missing -q
+# Coverage (must pass the 20% floor benchmark)
+pytest tests/ --cov=velune --cov-report=term-missing --cov-fail-under=20
 ```
 
-All `ruff` and `pytest` checks must pass before a PR will be merged.
+All `ruff`, `pyright`, and `pytest` checks must pass before a PR will be merged.
 
 ---
 

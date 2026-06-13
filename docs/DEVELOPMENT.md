@@ -44,15 +44,12 @@ ruff format velune/ tests/
 
 # Type checking
 pyright velune/
-
-# Architecture validation
-python scripts/check_architecture.py
 ```
 
 **CI will block merge if:**
 - Code has style violations
 - Type errors found
-- Coverage < 70%
+- Coverage < 20%
 - Any test fails
 
 ### Type Hints
@@ -84,36 +81,29 @@ pyright velune/
 
 ### Testing
 
-#### Unit Tests
 ```bash
-# Run all unit tests
-pytest tests/unit/ -v
+# Run all tests
+pytest tests/ -v
+
+# Run security tests
+pytest tests/security/ -v
 
 # Run specific test
-pytest tests/unit/test_health_monitor.py::test_manifest_recording -v
+pytest tests/test_session_lifecycle.py::test_session_create -v
 
-# Run with coverage
-pytest tests/unit/ --cov=velune --cov-fail-under=70
+# Run with coverage (enforces 20% floor)
+pytest tests/ --cov=velune --cov-fail-under=20
 
 # Generate HTML coverage report
-pytest tests/unit/ --cov=velune --cov-report=html
+pytest tests/ --cov=velune --cov-report=html
 # Open htmlcov/index.html to see coverage
-```
-
-#### Integration Tests
-```bash
-# Run integration tests (slower)
-pytest tests/integration/ -v
-
-# Run specific integration test
-pytest tests/integration/test_mcp_server.py -v
 ```
 
 #### Test Requirements
 - All tests must pass
-- Must have ≥ 70% code coverage
+- Must have ≥ 20% code coverage
 - Individual unit tests must complete in < 60 seconds
-- Individual integration tests must complete in < 300 seconds
+- Individual integration/slow tests must complete in < 300 seconds
 
 ## Git Workflow
 
@@ -165,14 +155,13 @@ was slow to respond. Add 2-second timeout.
 
 2. **Make changes and commit**
    ```bash
-   # Make changes, test locally
-   pytest tests/unit/ --cov=velune --cov-fail-under=70
-   ruff check velune/ tests/
-   pyright velune/
-   python scripts/check_architecture.py
-   
-   git add .
-   git commit -m "feat: add my feature"
+    # Make changes, test locally
+    pytest tests/ --cov=velune --cov-fail-under=20
+    ruff check velune/ tests/
+    pyright velune/
+    
+    git add .
+    git commit -m "feat: add my feature"
    ```
 
 3. **Push and create PR**
@@ -197,7 +186,7 @@ was slow to respond. Add 2-second timeout.
 
 ## Architecture Rules
 
-The codebase enforces layer boundaries via `scripts/check_architecture.py`:
+The codebase follows strict layer boundaries:
 
 **Valid dependencies:**
 - CLI can import from any lower layer ✓
@@ -209,11 +198,6 @@ The codebase enforces layer boundaries via `scripts/check_architecture.py`:
 - Kernel imports from CLI ✗
 - Providers imports from Cognition ✗
 - Memory imports from CLI ✗
-
-```bash
-# Check before committing
-python scripts/check_architecture.py
-```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for full layer diagram.
 
@@ -398,14 +382,12 @@ python -m cProfile -s cumtime -m velune doctor check
 All checks run automatically on push/PR:
 
 - **lint** (30s) - ruff + pyright
-- **security** (60s) - pip-audit, regression checks
-- **architecture** (10s) - layer boundaries
-- **test-unit** (60s) - pytest with 70% coverage
+- **security** (60s) - pip-audit, bandit, gitleaks, anti-regression checks
+- **test** (60s) - pytest with 20% coverage matrix
 - **build-check** (20s) - python -m build
-- **test-integration** (5m, PRs/main only)
-- **startup-perf** (30s, main only)
+- **install-smoke** (2m) - clean wheel installation checks
 
-See [CI_CD_SETUP.md](../CI_CD_SETUP.md) for details.
+See [CI_CD.md](CI_CD.md) for details.
 
 ## Release Process
 
@@ -444,5 +426,5 @@ See [CI_CD_SETUP.md](../CI_CD_SETUP.md) for details.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Codebase organization
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guidelines
-- [CI_CD_SETUP.md](../CI_CD_SETUP.md) - Testing and deployment
+- [CI_CD.md](CI_CD.md) - Testing and deployment
 - [pyproject.toml](../pyproject.toml) - Tool configurations
