@@ -209,6 +209,13 @@ class VeluneREPL:
         self._status_state.context_pct = (
             self._context_tracker.percentage if self.active_model else 0.0
         )
+        if self.active_model:
+            self._status_state.context_used = self._context_tracker.used_tokens
+            self._status_state.context_max = self._context_tracker.max_tokens
+        else:
+            self._status_state.context_used = None
+            self._status_state.context_max = None
+        self._status_state.session_cost = self.session_cost
         self._status_state.workspace_name = folder_name
 
         return FormattedText(tokens)
@@ -630,9 +637,9 @@ class VeluneREPL:
 
         table = Table(
             show_header=True,
-            border_style="blue",
+            border_style="dim",
             padding=(0, 1),
-            header_style="bold blue",
+            header_style="bold cyan",
         )
         table.add_column("Command", style="cyan", width=16)
         table.add_column("Aliases", style="dim white", width=12)
@@ -1006,8 +1013,13 @@ class VeluneREPL:
 
         self.console.print()
 
+        from rich.console import Group
         from rich.live import Live
         from rich.panel import Panel
+
+        from velune.cli.display.pipeline import PipelineTracker
+
+        tracker = PipelineTracker()
 
         _phase_colors: dict[str, str] = {
             "planner": "magenta",
@@ -1038,6 +1050,10 @@ class VeluneREPL:
                 expand=True,
             )
 
+        def make_view(phase_name: str, messages: list[str]) -> Group:
+            # Persistent pipeline spine above the live per-phase detail panel.
+            return Group(tracker.render(), "", make_panel(phase_name, messages))
+
         try:
             async with self._interrupts.foreground():
                 async for milestone in orchestrator.stream(task):
@@ -1052,9 +1068,10 @@ class VeluneREPL:
 
                         current_phase = phase
                         phase_messages = []
+                        tracker.advance(phase)
 
                         active_live = Live(
-                            make_panel(current_phase, phase_messages),
+                            make_view(current_phase, phase_messages),
                             console=self.console,
                             refresh_per_second=4,
                             transient=True,
@@ -1063,11 +1080,14 @@ class VeluneREPL:
 
                     phase_messages.append(message)
                     if active_live:
-                        active_live.update(make_panel(current_phase, phase_messages))
+                        active_live.update(make_view(current_phase, phase_messages))
 
                 if active_live:
                     active_live.stop()
                     self.console.print(make_panel(current_phase, phase_messages))
+                tracker.complete()
+                self.console.print()
+                self.console.print(tracker.render())
 
         except asyncio.CancelledError:
             if not self._interrupts.consume_user_cancelled():
@@ -1087,6 +1107,8 @@ class VeluneREPL:
         except Exception as e:
             if active_live:
                 active_live.stop()
+            tracker.fail(current_phase)
+            self.console.print(tracker.render())
             from velune.cli.rendering.error_panel import render_error, render_unexpected_error
             from velune.core.errors.catalog import VeluneError
 

@@ -13,6 +13,7 @@ from velune.cli.commands import (
     ask_command,
     chat_command,
     config_cmd,
+    context_cmd,
     daemon_cmd,
     doctor_cmd,
     init_command,
@@ -22,6 +23,7 @@ from velune.cli.commands import (
     models_cmd,
     run_command,
     setup_command,
+    trace_cmd,
     workspace_cmd,
 )
 from velune.kernel.registry import ServiceContainer
@@ -34,6 +36,8 @@ BUILTIN_COMMAND_MODULES: Sequence[str] = (
     "velune.cli.commands.workspace",
     "velune.cli.commands.memory",
     "velune.cli.commands.config",
+    "velune.cli.commands.context",
+    "velune.cli.commands.trace",
     "velune.cli.commands.daemon",
     "velune.cli.commands.doctor",
     "velune.cli.commands.mcp",
@@ -64,6 +68,8 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     app.command(name="run")(run_command)
     app.command(name="setup")(setup_command)
     app.command(name="mcp-serve")(mcp_serve)
+    app.add_typer(context_cmd, name="context")
+    app.add_typer(trace_cmd, name="trace")
     app.add_typer(models_cmd, name="models")
     app.add_typer(workspace_cmd, name="workspace")
     app.add_typer(memory_cmd, name="memory")

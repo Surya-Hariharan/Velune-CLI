@@ -128,7 +128,27 @@ class CouncilOrchestrator:
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         queue = asyncio.Queue()
 
+        # Persist the real execution stream so `velune trace` can replay it. This
+        # is the single chokepoint every milestone (for every consumer — REPL,
+        # `ask`, `run`) passes through, so tracing here captures the genuine
+        # planner→coder→reviewer→synthesis flow with no fabrication. Best-effort:
+        # a missing workspace or write error must never break a run.
+        trace_log = None
+        try:
+            from velune.kernel.registry import get_container
+
+            _container = get_container()
+            if _container.has("runtime.workspace"):
+                from velune.observability.trace_sink import trace_log_for_workspace
+
+                trace_log = trace_log_for_workspace(_container.get("runtime.workspace"))
+        except Exception:
+            trace_log = None
+
+        _seq = 0
+
         def progress_callback(msg: str):
+            nonlocal _seq
             phase = ""
             message = msg
             if msg.startswith("[") and "]" in msg:
@@ -136,6 +156,11 @@ class CouncilOrchestrator:
                 phase = parts[0][1:].lower()
                 message = parts[1].strip()
             queue.put_nowait(StreamProgress(run_id=run_id, phase=phase, message=message))
+            if trace_log is not None:
+                from velune.observability.trace_sink import record_milestone
+
+                _seq += 1
+                record_milestone(trace_log, run_id, _seq, phase, message)
 
         # First, emit context reconstruction milestone before indexing
         progress_callback("[Context Reconstruction] Gathering repository context snapshot...")

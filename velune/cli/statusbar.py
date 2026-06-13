@@ -39,6 +39,27 @@ class StatusBarState:
     retrieval_note: str | None = None  # e.g. "3 memories" after a retrieval
     workspace_name: str | None = None  # active project workspace
     exit_hint: bool = False  # "press Ctrl+C again to exit" window is open
+    # Runtime visibility (Phase 2). All default-off: a segment only renders once
+    # the REPL has a real value for it, so unconfigured sessions stay quiet.
+    context_used: int | None = None  # tokens consumed in the live conversation
+    context_max: int | None = None  # active model's context window
+    session_cost: float = 0.0  # cumulative $ this session
+    provider_health: str | None = None  # "ok" | "degraded" | "down"
+
+
+def _format_tokens(n: int) -> str:
+    """Compact token count: 142000 -> '142k', 1500 -> '1.5k', 800 -> '800'."""
+    if n >= 1000:
+        val = n / 1000
+        return f"{val:.0f}k" if val >= 10 or val == int(val) else f"{val:.1f}k"
+    return str(n)
+
+
+_PROVIDER_STYLES = {
+    "ok": ("class:bottom-toolbar.ok", "● provider ok"),
+    "degraded": ("class:bottom-toolbar.warn", "● provider degraded"),
+    "down": ("class:bottom-toolbar.danger", "● provider down"),
+}
 
 
 def render_status_bar(state: StatusBarState) -> FormattedText:
@@ -69,7 +90,25 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
         if pct < 90
         else "class:bottom-toolbar.danger"
     )
-    parts.append((ctx_style, f"ctx {pct:.0f}%"))
+    # Show the underlying budget (142k / 200k) alongside the percentage when
+    # the REPL knows both — turns an abstract "71%" into a concrete headroom.
+    if state.context_used is not None and state.context_max:
+        ctx_label = (
+            f"ctx {pct:.0f}%  "
+            f"{_format_tokens(state.context_used)}/{_format_tokens(state.context_max)}"
+        )
+    else:
+        ctx_label = f"ctx {pct:.0f}%"
+    parts.append((ctx_style, ctx_label))
+
+    if state.session_cost > 0:
+        parts.append(_SEP)
+        parts.append(("class:bottom-toolbar", f"${state.session_cost:.2f}"))
+
+    if state.provider_health in _PROVIDER_STYLES:
+        style, label = _PROVIDER_STYLES[state.provider_health]
+        parts.append(_SEP)
+        parts.append((style, label))
 
     if state.last_latency_ms is not None:
         parts.append(_SEP)

@@ -1,5 +1,7 @@
 from rich.console import Console
 
+from velune import __version__
+
 
 def render_startup_banner(
     console: Console,
@@ -8,7 +10,7 @@ def render_startup_banner(
     ollama_live: bool,
     workspace_path: str,
     active_model_id: str | None,
-    version: str = "0.1.0",
+    version: str = __version__,
     project_type_name: str | None = None,
     runtime_profile_label: str | None = None,
 ) -> None:
@@ -66,15 +68,13 @@ def render_startup_banner(
             for suggestion in hardware_profile.suggestions:
                 console.print(f"  [cyan]→[/cyan]  {suggestion}")
 
-    # 4. Recommendation box
+    # 4. Recommendation box. Width-adaptive rule so the banner stays clean on
+    # narrow / SSH terminals instead of wrapping a fixed 80-char line.
+    rule = "─" * max(24, min(console.width, 80))
     console.print()
-    console.print(
-        "[dim]────────────────────────────────────────────────────────────────────────────────[/dim]"
-    )
+    console.print(f"[dim]{rule}[/dim]")
     console.print(
         '  [bold cyan]>[/bold cyan] [dim]Try "how does[/dim] [cyan]<filepath>[/cyan] [dim]work?"[/dim]'
     )
-    console.print(
-        "[dim]────────────────────────────────────────────────────────────────────────────────[/dim]"
-    )
+    console.print(f"[dim]{rule}[/dim]")
     console.print("  [dim]? for shortcuts · /help for commands[/dim]")

@@ -161,3 +161,101 @@ class TestStatusBar:
         assert "tok/s" not in text
         assert "first token" not in text
         assert "no model" in text
+
+    def test_token_budget_rendered_when_known(self):
+        state = StatusBarState(context_pct=71.0, context_used=142_000, context_max=200_000)
+        text = self._text(state)
+        assert "ctx 71%" in text
+        assert "142k/200k" in text
+
+    def test_token_budget_omitted_without_max(self):
+        text = self._text(StatusBarState(context_pct=10.0, context_used=500))
+        assert "ctx 10%" in text
+        assert "/" not in text.split("ctx 10%")[1].split("│")[0]
+
+    def test_session_cost_only_when_nonzero(self):
+        assert "$" not in self._text(StatusBarState(session_cost=0.0))
+        assert "$0.42" in self._text(StatusBarState(session_cost=0.42))
+
+    def test_provider_health_states(self):
+        assert "provider ok" in self._text(StatusBarState(provider_health="ok"))
+        assert "provider degraded" in self._text(StatusBarState(provider_health="degraded"))
+        assert "provider down" in self._text(StatusBarState(provider_health="down"))
+        assert "provider" not in self._text(StatusBarState(provider_health=None))
+
+
+class TestPipelineTracker:
+    def _plain(self, tracker) -> str:
+        return tracker.render().plain
+
+    def test_initial_all_waiting(self):
+        from velune.cli.display.pipeline import PipelineTracker
+
+        tracker = PipelineTracker()
+        plain = self._plain(tracker)
+        assert "Planner" in plain and "Synthesis" in plain
+        assert "◆" not in plain  # nothing active yet
+        assert "✓" not in plain  # nothing done yet
+
+    def test_advance_completes_earlier_stages(self):
+        from velune.cli.display.pipeline import PipelineTracker
+
+        tracker = PipelineTracker()
+        tracker.advance("planner")
+        tracker.advance("reviewer")
+        assert tracker.state_of("planner") == "done"
+        assert tracker.state_of("coder") == "done"
+        assert tracker.state_of("reviewer") == "active"
+        assert tracker.state_of("synthesis") == "waiting"
+
+    def test_unknown_phase_is_appended_not_dropped(self):
+        from velune.cli.display.pipeline import PipelineTracker
+
+        tracker = PipelineTracker()
+        tracker.advance("debate")
+        assert "Debate" in self._plain(tracker)
+        assert tracker.state_of("debate") == "active"
+
+    def test_fail_marks_current_stage(self):
+        from velune.cli.display.pipeline import PipelineTracker
+
+        tracker = PipelineTracker()
+        tracker.advance("coder")
+        tracker.fail()
+        assert tracker.state_of("coder") == "failed"
+        assert "✗" in self._plain(tracker)
+
+    def test_complete_finishes_active_stage(self):
+        from velune.cli.display.pipeline import PipelineTracker
+
+        tracker = PipelineTracker()
+        tracker.advance("synthesis")
+        tracker.complete()
+        assert tracker.state_of("synthesis") == "done"
+
+    def test_failed_stage_not_overwritten_by_advance(self):
+        from velune.cli.display.pipeline import PipelineTracker
+
+        tracker = PipelineTracker()
+        tracker.advance("planner")
+        tracker.fail("planner")
+        tracker.advance("reviewer")
+        assert tracker.state_of("planner") == "failed"
+
+
+class TestDesignTokens:
+    def test_context_state_thresholds(self):
+        from velune.cli import design
+
+        assert design.context_state(0.0) == "ok"
+        assert design.context_state(69.9) == "ok"
+        assert design.context_state(70.0) == "warn"
+        assert design.context_state(89.9) == "warn"
+        assert design.context_state(90.0) == "danger"
+        assert design.context_state(100.0) == "danger"
+
+    def test_color_enabled_honors_no_color(self, monkeypatch):
+        from velune.cli import design
+
+        monkeypatch.setenv("NO_COLOR", "1")
+        assert design.color_enabled() is False
