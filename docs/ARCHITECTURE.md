@@ -326,6 +326,6 @@ velune/
 
 ## Further Reading
 
-- [CI/CD Pipeline](CI_CD.md) - Testing and deployment
+- [CI/CD Pipeline](../CI_CD_SETUP.md) - Testing and deployment
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Developer workflow
 - [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) - Community guidelines
