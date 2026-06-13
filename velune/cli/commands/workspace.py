@@ -339,7 +339,7 @@ async def _workspace_graph_async(
         await lifecycle.shutdown()
 
 
-def _render_graph(console: Console, report) -> None:  # noqa: ANN001 - DependencyGraphReport
+def _render_graph(console: Console, report: DependencyGraphReport) -> None:
     """Render the dependency-graph report as calm, infrastructure-grade panels."""
     # --- Summary header ---
     header = Text()
@@ -404,7 +404,7 @@ def _render_graph(console: Console, report) -> None:  # noqa: ANN001 - Dependenc
         console.print(f"[{design.OK}]✓ No import cycles detected.[/]")
 
 
-def _hotspot_table(title: str, stats: list, key: str) -> Table:  # noqa: ANN001
+def _hotspot_table(title: str, stats: list[GraphNodeStat], key: str) -> Table:
     table = Table(box=ROUNDED, border_style=design.FAINT, title=f"[bold]{title}[/bold]", expand=False)
     table.add_column("File", style=design.INFO, no_wrap=False)
     table.add_column("fan-in", justify="right", style=design.MUTED)
@@ -419,7 +419,7 @@ def _hotspot_table(title: str, stats: list, key: str) -> Table:  # noqa: ANN001
     return table
 
 
-def _render_focus(console: Console, focus) -> None:  # noqa: ANN001 - FocusView
+def _render_focus(console: Console, focus: FocusView) -> None:
     console.print()
     summary = Text()
     summary.append(focus.node, style=f"bold {design.ACCENT}")
