@@ -99,7 +99,7 @@ async def _workspace_init_async(
     num_edges = len(snapshot.edges)
     skipped_secrets = snapshot.summary.get("skipped_secrets", [])
 
-    languages = {}
+    languages: dict[str, int] = {}
     for f in snapshot.files:
         languages[f.language.value] = languages.get(f.language.value, 0) + 1
 
