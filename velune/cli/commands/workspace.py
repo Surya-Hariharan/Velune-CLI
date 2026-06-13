@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.box import ROUNDED
@@ -15,6 +16,13 @@ from rich.tree import Tree
 
 from velune.cli import design
 from velune.cli.context import CLIContext
+
+if TYPE_CHECKING:
+    from velune.observability.workspace_graph import (
+        DependencyGraphReport,
+        FocusView,
+        GraphNodeStat,
+    )
 
 console = Console()
 workspace_cmd = typer.Typer(help="Workspace management commands")
