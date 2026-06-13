@@ -97,6 +97,7 @@ dev = [
     "black>=23.12.0",
     "pre-commit>=3.6.0",
     "pip-audit>=2.6.0",
+    "bandit[toml]>=1.7.0",
     "types-toml>=0.10.0",
     "build>=1.0.0",
     "twine>=4.0.0",
@@ -211,71 +212,32 @@ markers = [
     "critical: marks routing correctness tests that block CI if any fail",
 ]
 
+[tool.bandit]
+# Scan velune/ only; tests legitimately exercise unsafe patterns.
+exclude_dirs = ["tests", ".venv", "build", "dist"]
+# B404/B603/B607: subprocess usage is intentional and hardened in
+# velune/execution/sandbox.py (shell=False, argv-only, env-scrubbed,
+# process-tree kill). B101 assert: not used for security control flow.
+skips = ["B101", "B404", "B603", "B607"]
+
 [tool.coverage.run]
 source = ["velune"]
+# Honest omit policy: we exclude ONLY surfaces that cannot be exercised by
+# unit tests without a live TTY, a background daemon, external network
+# services, or optional native wheels. Everything else — including the
+# security-critical execution, kernel, memory, and repository layers — is
+# measured and counts toward the enforced floor (see cov-fail-under in CI).
 omit = [
-    "velune/cli/*",
-    "velune/__main__.py",
-    "velune/providers/discovery/*",
-    "velune/providers/ollama_manager.py",
-    "velune/providers/local_paths.py",
-    "velune/providers/local_resolver.py",
-    "velune/providers/benchmarker.py",
-    "velune/providers/keystore.py",
-    "velune/providers/registry.py",
-    "velune/providers/router.py",
-    "velune/providers/module.py",
-    "velune/tools/*",
-    "velune/telemetry/*",
-    "velune/hardware/*",
-    "velune/kernel/bootstrap.py",
-    "velune/kernel/lifecycle.py",
-    "velune/kernel/module.py",
-    "velune/kernel/modules.py",
-    "velune/mcp/*",
-    "velune/memory/embedding_pipeline.py",
-    "velune/memory/module.py",
-    "velune/memory/prioritizer.py",
-    "velune/memory/tiers/graph.py",
-    "velune/memory/tiers/semantic.py",
-    "velune/memory/tiers/lineage.py",
-    "velune/memory/tiers/episodic.py",
-    "velune/memory/vitality.py",
-    "velune/models/*",
-    "velune/orchestration/role_assignments.py",
-    "velune/orchestration/module.py",
-    "velune/plugins/*",
-    "velune/retrieval/slow_path.py",
-    "velune/retrieval/fast_path.py",
-    "velune/retrieval/module.py",
-    "velune/retrieval/vector.py",
-    "velune/main.py",
-    "velune/daemon/*",
-    "velune/core/paths.py",
-    "velune/core/logging.py",
-    "velune/core/runtime.py",
-    "velune/core/task_registry.py",
-    "velune/core/startup_profiler.py",
-    "velune/core/background.py",
-    "velune/events.py",
-    "velune/repository/incremental_indexer.py",
-    "velune/repository/tracker.py",
-    "velune/repository/project_type.py",
-    "velune/repository/ast_parser.py",
-    "velune/repository/parser.py",
-    "velune/repository/import_graph.py",
-    "velune/repository/module.py",
-    "velune/execution/diff_preview.py",
-    "velune/execution/multi_diff.py",
-    "velune/execution/planner.py",
-    "velune/execution/cancellation.py",
-    "velune/execution/validator.py",
-    "velune/execution/module.py",
-    "velune/cognition/personality.py",
-    "velune/cognition/verification.py",
-    "velune/cognition/module.py",
-    "velune/context/extractive.py",
-    "**/__pycache__/*"
+    "velune/__main__.py",          # `python -m velune` entrypoint shim
+    "velune/main.py",              # Typer app wiring (interactive entrypoint)
+    "velune/cli/*",                # prompt-toolkit / Rich REPL — needs a TTY
+    "velune/daemon/*",             # long-lived background server process
+    "velune/mcp/*",                # stdio MCP servers — integration-only
+    "velune/plugins/*",            # dynamic third-party plugin loading
+    "velune/providers/discovery/*",  # probes live GPUs / Ollama / network
+    "velune/providers/ollama_manager.py",  # talks to a running Ollama daemon
+    "velune/telemetry/*",          # OTLP exporters — require a collector
+    "**/__pycache__/*",
 ]
 branch = true
 

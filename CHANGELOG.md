@@ -9,8 +9,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Security
+
+- Added Bandit static analysis to CI (gates on medium+ severity) and gitleaks secret scanning.
+- Resolved Bandit high/medium findings: marked the non-cryptographic workspace-slug SHA-1 with `usedforsecurity=False`, and gave the Ollama HTTP client a bounded default timeout (60s, 5s connect) so non-streaming calls cannot hang indefinitely.
+
+### Changed
+
+- CI test matrix expanded to **Ubuntu / Windows / macOS × Python 3.11 / 3.12**.
+- Release pipeline now publishes to PyPI via **OIDC trusted publishing** (no long-lived token); removed the `continue-on-error` that silently swallowed failed publishes.
+- Coverage reporting made honest: shrank the `omit` list from ~70 modules to only un-unit-testable surfaces (TTY/daemon/live-network/optional-native). Full-codebase coverage is now measured (~21%) with a CI floor of 20%.
+- Migrated the event-bus `Event` model from Pydantic v1 `class Config` to `ConfigDict` (removes a deprecation warning, forward-compatible with Pydantic v3).
+
 ### Added
 
+- `RELEASE.md` (versioning + release pipeline) and `ARCHITECTURE_STATUS.md` (subsystem maturity + known limitations).
+- Unit tests for `execution/validator.py` (16% → 90% coverage).
 - **CLI Design Modernization** — Comprehensive frontend redesign for professional appearance
   - Modern startup banner with clean, spacious layout
   - Refined REPL prompt with sophisticated color palette (blue primary + gold accent)

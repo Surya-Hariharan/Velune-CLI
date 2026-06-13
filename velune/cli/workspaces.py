@@ -211,9 +211,7 @@ async def switch_workspace(container: Any, new_workspace: Path) -> list[str]:
                 await instance.initialize()
             rebuilt += 1
         except Exception as exc:
-            _log.warning(
-                "Workspace switch: module '%s' failed to rebuild: %s", module.name, exc
-            )
+            _log.warning("Workspace switch: module '%s' failed to rebuild: %s", module.name, exc)
             notes.append(f"warning: {module.name} unavailable in this workspace")
 
     notes.insert(0, f"{rebuilt} workspace services rebound")

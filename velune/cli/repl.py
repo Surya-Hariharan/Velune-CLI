@@ -851,7 +851,10 @@ class VeluneREPL:
                 selected_index[0] = min(selected_index[0], len(visible) - 1)
             lines: list[tuple[str, str]] = []
             lines.append(
-                ("bold", "  Select a model  (type to filter · ↑↓ navigate · Enter select · Esc cancel)\n")
+                (
+                    "bold",
+                    "  Select a model  (type to filter · ↑↓ navigate · Enter select · Esc cancel)\n",
+                )
             )
             if filter_text[0]:
                 lines.append(("fg:ansicyan", f"  filter: {filter_text[0]}\n\n"))
@@ -1477,8 +1480,7 @@ class VeluneREPL:
         workspaces = self._workspace_registry.list()
         if not workspaces:
             self.console.print(
-                "[dim]No workspaces registered yet. Use /project add <path> "
-                "to register one.[/dim]"
+                "[dim]No workspaces registered yet. Use /project add <path> to register one.[/dim]"
             )
             return
         current = str(Path(self.container.get("runtime.workspace")).resolve())

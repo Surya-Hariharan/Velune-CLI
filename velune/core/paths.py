@@ -80,7 +80,10 @@ def _workspace_slug(workspace: Path) -> str:
         resolved = workspace.resolve()
     except Exception:
         resolved = workspace.absolute()
-    digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:10]
+    # Non-cryptographic: digest only disambiguates same-named folders.
+    digest = hashlib.sha1(  # noqa: S324
+        str(resolved).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[:10]
     name = re.sub(r"[^A-Za-z0-9._-]", "_", resolved.name) or "workspace"
     return f"{name}-{digest}"
 

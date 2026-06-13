@@ -88,7 +88,9 @@ RECOMMENDED_MODELS: list[dict] = [
 
 class OllamaManager:
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(timeout=None)
+        # Sane default so non-streaming calls (e.g. delete) cannot hang forever.
+        # Long-running calls (model pull) override per-request below.
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0))
 
     async def is_running(self) -> bool:
         try:
@@ -121,6 +123,7 @@ class OllamaManager:
                     "POST",
                     f"{OLLAMA_BASE}/api/pull",
                     json={"name": model_id, "stream": True},
+                    timeout=None,  # model downloads can take many minutes
                 ) as response:
                     if response.status_code != 200:
                         error_msg[0] = f"HTTP {response.status_code}"

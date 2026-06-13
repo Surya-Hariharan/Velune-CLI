@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger("velune.events")
 
@@ -28,8 +28,7 @@ class Event(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     correlation_id: str | None = None
 
-    class Config:
-        frozen = True
+    model_config = ConfigDict(frozen=True)
 
 
 EventHandler = Callable[[Event], None | Any]
