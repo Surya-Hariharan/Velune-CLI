@@ -191,7 +191,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Download built wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
