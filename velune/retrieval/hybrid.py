@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from typing import Any
 
 logger = logging.getLogger("velune.retrieval.hybrid")
@@ -50,25 +51,51 @@ class HybridRetriever:
             self.vector_retriever.upsert(doc)
 
     async def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
-        """Performs full hybrid retrieval, merges candidate pools, and reranks."""
+        """Performs full hybrid retrieval, merges candidate pools, and reranks.
+
+        Records real, measured per-stage diagnostics (enablement, hit counts,
+        wall-clock timing, and whether a vector embedding was available) into
+        ``result.metadata["diagnostics"]`` so callers — notably
+        ``velune retrieval trace`` — can prove what the pipeline actually did.
+        """
         lexical_hits: list[RetrievalHit] = []
         vector_hits: list[RetrievalHit] = []
         graph_hits: list[RetrievalHit] = []
 
+        # Per-stage diagnostics — every value below is measured from this run.
+        diagnostics: dict[str, Any] = {
+            "lexical": {"enabled": query.lexical_weight > 0.0, "hits": 0, "ms": 0.0},
+            "vector": {
+                "enabled": query.vector_weight > 0.0,
+                "hits": 0,
+                "ms": 0.0,
+                "embedding_available": None,
+            },
+            "graph": {"enabled": query.graph_weight > 0.0, "hits": 0, "ms": 0.0, "seeds": 0},
+            "fusion": {"candidates": 0, "ms": 0.0},
+            "rerank": {"in": 0, "out": 0, "ms": 0.0},
+        }
+        t_start = time.perf_counter()
+
         # 1. Execute Lexical search (BM25)
         if query.lexical_weight > 0.0:
+            t0 = time.perf_counter()
             try:
                 lexical_hits = self.lexical_retriever.retrieve(
                     query.text, top_k=query.top_k, namespace=query.namespace
                 )
             except Exception:
                 pass
+            diagnostics["lexical"]["ms"] = (time.perf_counter() - t0) * 1000.0
+            diagnostics["lexical"]["hits"] = len(lexical_hits)
 
         # 2. Execute Vector search (Qdrant)
         if query.vector_weight > 0.0:
+            t0 = time.perf_counter()
             try:
                 # Generate embedding for the query
                 emb = await self._generate_embedding_async(query.text)
+                diagnostics["vector"]["embedding_available"] = emb is not None
                 if emb is not None:  # Only do vector search if real embedding
                     vector_hits = self.vector_retriever.retrieve(
                         emb, top_k=query.top_k, namespace=query.namespace
@@ -77,10 +104,13 @@ class HybridRetriever:
                     logger.info("Vector retrieval skipped — no embedding available")
             except Exception:
                 pass
+            diagnostics["vector"]["ms"] = (time.perf_counter() - t0) * 1000.0
+            diagnostics["vector"]["hits"] = len(vector_hits)
 
         # 3. Execute Graph traversal search
         # If we have hits from lexical or vector search, traverse neighboring file links
         if query.graph_weight > 0.0:
+            t0 = time.perf_counter()
             seed_nodes = []
             # Gather file path candidates
             for hit in lexical_hits[:3] + vector_hits[:3]:
@@ -91,14 +121,19 @@ class HybridRetriever:
                 if name:
                     seed_nodes.append(name)
 
-            for node in set(seed_nodes):
+            unique_seeds = set(seed_nodes)
+            diagnostics["graph"]["seeds"] = len(unique_seeds)
+            for node in unique_seeds:
                 try:
                     gh = self.graph_retriever.retrieve(node, depth=1, top_k=5)
                     graph_hits.extend(gh)
                 except Exception:
                     pass
+            diagnostics["graph"]["ms"] = (time.perf_counter() - t0) * 1000.0
+            diagnostics["graph"]["hits"] = len(graph_hits)
 
         # 4. Fusion and Deduplication
+        t_fuse = time.perf_counter()
         merged_hits_map: dict[str, RetrievalHit] = {}
 
         # Helper to blend weights into score
@@ -122,12 +157,24 @@ class HybridRetriever:
             merge_hit(h, query.graph_weight)
 
         all_hits = list(merged_hits_map.values())
+        diagnostics["fusion"]["candidates"] = len(all_hits)
+        diagnostics["fusion"]["ms"] = (time.perf_counter() - t_fuse) * 1000.0
 
         # 5. Rerank final combined candidates
+        t_rerank = time.perf_counter()
         reranked_hits = self.reranker.rerank(all_hits, query.text)
+        diagnostics["rerank"]["in"] = len(all_hits)
+        diagnostics["rerank"]["ms"] = (time.perf_counter() - t_rerank) * 1000.0
+
+        final_hits = reranked_hits[: query.top_k]
+        diagnostics["rerank"]["out"] = len(final_hits)
+        diagnostics["total_ms"] = (time.perf_counter() - t_start) * 1000.0
 
         return RetrievalResult(
-            query=query, hits=reranked_hits[: query.top_k], strategy="hybrid-fusion-reranked"
+            query=query,
+            hits=final_hits,
+            strategy="hybrid-fusion-reranked",
+            metadata={"diagnostics": diagnostics},
         )
 
     def search_sync(self, query: RetrievalQuery) -> RetrievalResult:

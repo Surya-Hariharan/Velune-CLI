@@ -1,15 +1,19 @@
-"""Workspace commands — velune workspace init/status."""
+"""Workspace commands — velune workspace init/status/graph."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
 from rich.box import ROUNDED
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
+from rich.tree import Tree
 
+from velune.cli import design
 from velune.cli.context import CLIContext
 
 console = Console()
@@ -215,8 +219,6 @@ async def _workspace_status_async(
     git_branch = snapshot.summary.get("git", {}).get("active_branch", "untracked")
 
     if cli_context.json_mode:
-        import json
-
         print(
             json.dumps(
                 {
@@ -247,3 +249,209 @@ async def _workspace_status_async(
         )
 
     await lifecycle.shutdown()
+
+
+@workspace_cmd.command("graph")
+def workspace_graph(
+    ctx: typer.Context,
+    path: Path = typer.Option(Path.cwd(), "--path", "-p", help="Workspace path"),
+    focus: str = typer.Option(
+        None, "--focus", "-f", help="Centre the graph on a file (path or suffix, e.g. cognition.py)"
+    ),
+    depth: int = typer.Option(2, "--depth", "-d", min=1, max=6, help="Focus tree expansion depth"),
+    limit: int = typer.Option(15, "--limit", "-l", min=1, max=100, help="Hotspot rows to show"),
+    edge_type: str = typer.Option(
+        "imports", "--edge-type", help="Edge type to graph (imports, calls, contains)"
+    ),
+) -> None:
+    """Render the real module-dependency graph from the indexed import edges.
+
+    Shows fan-in/fan-out hotspots and import cycles derived from
+    ``RepositorySnapshot.edges`` — the same edges Velune builds while indexing.
+    Use ``--focus`` to inspect one file's dependencies and dependents.
+    """
+    velune_dir = path / ".velune"
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    if not velune_dir.exists():
+        if cli_context.json_mode:
+            print(json.dumps({"error": "Not a Velune workspace (no .velune directory detected)"}))
+        else:
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import WorkspaceNotInitializedError
+
+            console.print(
+                render_error(
+                    WorkspaceNotInitializedError(
+                        cause_override=f"No .velune directory found in {path}."
+                    )
+                )
+            )
+        return
+
+    from velune.core.event_loop import submit
+
+    submit(_workspace_graph_async(cli_context, path, focus, depth, limit, edge_type))
+
+
+async def _workspace_graph_async(
+    cli_context: CLIContext,
+    path: Path,
+    focus: str | None,
+    depth: int,
+    limit: int,
+    edge_type: str,
+) -> None:
+    from velune.observability.workspace_graph import build_dependency_graph
+
+    container = cli_context.container
+    lifecycle = container.get("runtime.lifecycle")
+    repo_cognition = container.get("runtime.repository_cognition")
+
+    await lifecycle.startup()
+    try:
+        if not cli_context.json_mode:
+            with console.status("[bold cyan]Building dependency graph from index...[/bold cyan]"):
+                snapshot = repo_cognition.index(force=False)
+        else:
+            snapshot = repo_cognition.index(force=False)
+
+        report = build_dependency_graph(
+            snapshot, edge_type=edge_type, focus=focus, depth=depth, top_n=limit
+        )
+
+        if cli_context.json_mode:
+            print(json.dumps(report.to_dict()))
+        else:
+            _render_graph(console, report)
+    finally:
+        await lifecycle.shutdown()
+
+
+def _render_graph(console: Console, report) -> None:  # noqa: ANN001 - DependencyGraphReport
+    """Render the dependency-graph report as calm, infrastructure-grade panels."""
+    # --- Summary header ---
+    header = Text()
+    header.append("Workspace  ", style=design.MUTED)
+    header.append(report.root + "\n", style=f"bold {design.ACCENT}")
+    header.append("Edge type  ", style=design.MUTED)
+    header.append(f"{report.edge_type}\n", style=design.INFO)
+    header.append("Files      ", style=design.MUTED)
+    header.append(f"{report.file_count}", style="bold")
+    header.append("   Connected ", style=design.MUTED)
+    header.append(f"{report.node_count}", style="bold")
+    header.append("   Edges ", style=design.MUTED)
+    header.append(f"{report.edge_count}", style="bold")
+    header.append("   Orphans ", style=design.MUTED)
+    orphan_style = design.WARN if report.orphan_count else design.MUTED
+    header.append(f"{report.orphan_count}", style=orphan_style)
+    if report.edge_type_breakdown:
+        bd = "  ".join(f"{et}:{n}" for et, n in report.edge_type_breakdown)
+        header.append("\nAll edges  ", style=design.MUTED)
+        header.append(bd, style=design.FAINT)
+    console.print(
+        Panel(header, border_style=design.ACCENT_SOFT, box=ROUNDED, title="[bold]Dependency Graph[/bold]")
+    )
+
+    if report.node_count == 0:
+        console.print(
+            f"[{design.MUTED}]No '{report.edge_type}' edges in the index. "
+            f"Try --edge-type contains, or run `velune workspace init` to (re)index.[/]"
+        )
+        return
+
+    # --- Focus view takes priority when requested ---
+    if report.focus is not None:
+        _render_focus(console, report.focus)
+        return
+    if report.focus_candidates:
+        console.print(
+            f"[{design.WARN}]Ambiguous focus — multiple files match. Candidates:[/]"
+        )
+        for cand in report.focus_candidates:
+            console.print(f"  [{design.MUTED}]•[/] {cand}")
+        return
+
+    # --- Hotspot tables ---
+    console.print()
+    console.print(_hotspot_table("Most depended-upon (fan-in)", report.top_fan_in, "fan_in"))
+    console.print()
+    console.print(_hotspot_table("Most dependencies (fan-out)", report.top_fan_out, "fan_out"))
+
+    # --- Import cycles ---
+    console.print()
+    if report.cycles:
+        cyc = Text()
+        cyc.append(f"{len(report.cycles)} import cycle(s) detected\n\n", style=f"bold {design.WARN}")
+        for i, cycle in enumerate(report.cycles, 1):
+            cyc.append(f"{i}. ", style=design.MUTED)
+            cyc.append(" → ".join(cycle) + " → …\n", style=design.DANGER)
+        console.print(
+            Panel(cyc, border_style=design.WARN, box=ROUNDED, title="[bold]Import Cycles[/bold]")
+        )
+    else:
+        console.print(f"[{design.OK}]✓ No import cycles detected.[/]")
+
+
+def _hotspot_table(title: str, stats: list, key: str) -> Table:  # noqa: ANN001
+    table = Table(box=ROUNDED, border_style=design.FAINT, title=f"[bold]{title}[/bold]", expand=False)
+    table.add_column("File", style=design.INFO, no_wrap=False)
+    table.add_column("fan-in", justify="right", style=design.MUTED)
+    table.add_column("fan-out", justify="right", style=design.MUTED)
+    for s in stats:
+        primary = design.HIGHLIGHT if getattr(s, key) > 0 else design.MUTED
+        table.add_row(
+            s.path,
+            Text(str(s.fan_in), style=primary if key == "fan_in" else design.MUTED),
+            Text(str(s.fan_out), style=primary if key == "fan_out" else design.MUTED),
+        )
+    return table
+
+
+def _render_focus(console: Console, focus) -> None:  # noqa: ANN001 - FocusView
+    console.print()
+    summary = Text()
+    summary.append(focus.node, style=f"bold {design.ACCENT}")
+    summary.append(
+        f"   imports {len(focus.imports)} · imported by {len(focus.imported_by)}\n",
+        style=design.MUTED,
+    )
+    console.print(summary)
+
+    tree = Tree(f"[bold {design.ACCENT}]{focus.node}[/]", guide_style=design.FAINT)
+    _attach_tree(tree, focus.tree)
+    if not focus.tree:
+        tree.add(f"[{design.MUTED}](no outgoing imports)[/]")
+    console.print(
+        Panel(
+            tree,
+            border_style=design.ACCENT_SOFT,
+            box=ROUNDED,
+            title=f"[bold]Imports (downstream, depth {focus.depth})[/bold]",
+        )
+    )
+
+    if focus.imported_by:
+        body = Text()
+        for dep in focus.imported_by:
+            body.append("← ", style=design.MUTED)
+            body.append(dep + "\n", style=design.INFO)
+        console.print(
+            Panel(body, border_style=design.FAINT, box=ROUNDED, title="[bold]Imported by (upstream)[/bold]")
+        )
+    else:
+        console.print(f"[{design.MUTED}]Nothing imports this file (entry point or leaf).[/]")
+
+
+def _attach_tree(branch: Tree, children: dict) -> None:
+    """Recursively attach the nested focus tree dict to a rich Tree."""
+    for name, sub in children.items():
+        if isinstance(sub, dict) and sub.get("__cycle__"):
+            branch.add(f"[{design.DANGER}]{name} ↺ (cycle)[/]")
+            continue
+        node = branch.add(f"[{design.INFO}]{name}[/]")
+        if isinstance(sub, dict) and sub:
+            _attach_tree(node, sub)

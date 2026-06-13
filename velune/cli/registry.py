@@ -21,6 +21,7 @@ from velune.cli.commands import (
     mcp_serve,
     memory_cmd,
     models_cmd,
+    retrieval_cmd,
     run_command,
     setup_command,
     trace_cmd,
@@ -38,6 +39,7 @@ BUILTIN_COMMAND_MODULES: Sequence[str] = (
     "velune.cli.commands.config",
     "velune.cli.commands.context",
     "velune.cli.commands.trace",
+    "velune.cli.commands.retrieval",
     "velune.cli.commands.daemon",
     "velune.cli.commands.doctor",
     "velune.cli.commands.mcp",
@@ -70,6 +72,7 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     app.command(name="mcp-serve")(mcp_serve)
     app.add_typer(context_cmd, name="context")
     app.add_typer(trace_cmd, name="trace")
+    app.add_typer(retrieval_cmd, name="retrieval")
     app.add_typer(models_cmd, name="models")
     app.add_typer(workspace_cmd, name="workspace")
     app.add_typer(memory_cmd, name="memory")
