@@ -39,7 +39,7 @@ def _redact(value: Any) -> Any:
         return redact_secrets(value)
     if isinstance(value, dict):
         return {k: _redact(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_redact(v) for v in value]
     return value
 

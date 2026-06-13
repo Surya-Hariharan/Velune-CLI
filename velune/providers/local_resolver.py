@@ -186,7 +186,7 @@ class LocalModelResolver:
         raw_params = meta.get("parameter_count") or meta.get("llm.parameter_count") or 0
         if isinstance(raw_params, int) and raw_params > 1_000_000:
             param_count_b: float | None = raw_params / 1e9
-        elif isinstance(raw_params, (int, float)) and raw_params > 0:
+        elif isinstance(raw_params, int | float) and raw_params > 0:
             param_count_b = float(raw_params)
         else:
             param_count_b = None

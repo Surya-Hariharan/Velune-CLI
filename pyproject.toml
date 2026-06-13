@@ -159,6 +159,17 @@ ignore = [
     "B904",    # raise ... from inside except clauses
 ]
 
+[tool.ruff.lint.pep8-naming]
+extend-ignore-names = [
+    "visit_ClassDef",
+    "visit_Attribute",
+    "visit_FunctionDef",
+    "visit_Name",
+    "visit_Import",
+    "visit_ImportFrom",
+    "visit_AsyncFunctionDef",
+]
+
 [tool.ruff.lint.isort]
 known-first-party = ["velune"]
 known-third-party = ["pydantic", "typer", "rich"]
