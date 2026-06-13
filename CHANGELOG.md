@@ -69,7 +69,6 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 
 ### Added
 
-- `RELEASE.md` (versioning + release pipeline), `ARCHITECTURE_STATUS.md` (subsystem maturity + known limitations), and `CI_CD.md` (CI gate reference + local reproduction).
 - New CI **`build`** + **`install-smoke`** jobs: reproducible build, strict metadata validation, pure-python wheel assertion, and a cross-platform (Ubuntu/Windows/macOS × Py 3.11/3.13) wheel-install + `velune --version`/`--help` REPL smoke test.
 - Python 3.13 classifier, `Typing :: Typed` classifier, and a `Documentation` project URL in `pyproject.toml`.
 - Unit tests for `execution/validator.py` (16% → 90% coverage).
@@ -229,7 +228,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Architecture boundary enforcement
 - Pre-commit hooks for local security
 
-## [1.1.0] — 2026-06-07
+## [0.5.0-beta] — 2026-06-07
 
 ### Added
 

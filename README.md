@@ -218,10 +218,7 @@ See [WINDOWS.md](WINDOWS.md) for the complete native Windows and WSL2 setup guid
 
 | Doc | What's inside |
 | --- | --- |
-| [docs/ARCHITECTURE_STATUS.md](docs/ARCHITECTURE_STATUS.md) | Per-subsystem maturity (stable / experimental / planned) and known limitations |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layering and import-boundary rules |
-| [docs/CI_CD.md](docs/CI_CD.md) | What CI runs and how to reproduce every gate locally |
-| [docs/RELEASE.md](docs/RELEASE.md) | Versioning and the PyPI release pipeline |
 | [SECURITY.md](SECURITY.md) / [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Security posture, trust boundaries, reporting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup and contribution workflow |
 
