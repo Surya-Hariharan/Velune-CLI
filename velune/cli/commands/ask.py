@@ -25,7 +25,7 @@ def ask_command(
         None, "--council-tier", help="Override council execution tier (instant, standard, full)"
     ),
 ) -> None:
-    """Deliberates with the Reasoning Council for conceptual answers and code reviews without execution."""
+    """Ask a question or request a code review (no code execution)."""
 
     if ctx.invoked_subcommand is not None:
         return

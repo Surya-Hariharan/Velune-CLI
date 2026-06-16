@@ -165,33 +165,52 @@ class CouncilOrchestrator:
         # First, emit context reconstruction milestone before indexing
         progress_callback("[Context Reconstruction] Gathering repository context snapshot...")
 
-        repo_context = "Repository context summary."
+        repo_context = "Repository context unavailable."
         try:
             from velune.kernel.registry import get_container
 
             container = get_container()
             if container.has("runtime.repository_cognition"):
                 repository_cognition = container.get("runtime.repository_cognition")
+
+                # Before indexing, probe for file-system changes so that files the
+                # user created/deleted since the last prompt are already reflected in
+                # the snapshot.  The git-SHA fast path makes this effectively free
+                # when nothing has changed.
+                await repository_cognition.probe_for_changes()
+
                 snapshot = repository_cognition.index(force=False)
                 if snapshot:
-                    lines = [f"Repository Root: {snapshot.root_path}"]
-                    lines.append("Codebase Files:")
-                    for f in snapshot.files[:25]:
-                        lines.append(f"  - {f.path} ({f.language.value})")
-                    repo_context = "\n".join(lines)
+                    from velune.repository.context_builder import WorkspaceContextBuilder
 
-                    # Scan and sanitize context injection to prevent persistent prompt injection
-                    scan_res = self.firewall.scan_file_for_injection("repo_context", repo_context)
+                    builder = WorkspaceContextBuilder()
+                    snapshot_text, drift_text = builder.build(
+                        snapshot,
+                        delta=repository_cognition.last_delta,
+                    )
+                    # Clear the consumed delta so the next run doesn't re-announce it.
+                    repository_cognition._last_delta = None
+
+                    # Firewall: scan for prompt injection in workspace-derived content.
+                    scan_res = self.firewall.scan_file_for_injection(
+                        "repo_context", snapshot_text
+                    )
                     if scan_res.get("quarantined"):
-                        repo_context = scan_res.get("neutralized_content", "")
+                        snapshot_text = scan_res.get("neutralized_content", "")
                         logger.warning(
                             "Repository context neutralized by firewall before prompt injection."
                         )
-                    # Always wrap in untrusted-content boundary markers so agents treat
-                    # this as data, even when the content passed the injection scan.
+
+                    # Always wrap in untrusted-content boundary so agents treat
+                    # file-system data as data, not instructions.
                     repo_context = self.firewall.wrap_workspace_content(
-                        "repository_context", repo_context
+                        "repository_context", snapshot_text
                     )
+
+                    # Surface architectural violations in the ARCHITECTURAL_DRIFT
+                    # progress milestone so they appear in the trace.
+                    if drift_text:
+                        progress_callback(f"[Context Reconstruction] {drift_text}")
         except Exception as e:
             logger.warning("Could not gather repository snapshot: %s", e)
 

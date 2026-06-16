@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from velune.observability.retrieval_report import RetrievalTraceReport
 
 console = Console()
-retrieval_cmd = typer.Typer(help="Inspect and trace the retrieval pipeline")
+retrieval_cmd = typer.Typer(help="Trace a retrieval query through the search pipeline.")
 
 _SOURCE_STYLE = {
     "vector": design.ACCENT_SOFT,

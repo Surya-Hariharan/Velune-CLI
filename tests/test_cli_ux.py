@@ -101,6 +101,14 @@ class TestMarkdownStreamBuffer:
         assert MarkdownStreamBuffer._stabilize("text\n`") == "text"
         assert MarkdownStreamBuffer._stabilize("text\n``") == "text"
         assert MarkdownStreamBuffer._stabilize("`") == ""
+        assert MarkdownStreamBuffer._stabilize("``") == ""
+
+    def test_lone_triple_backtick_at_end_closes_as_open_fence(self):
+        # "```" alone is parsed as an opening fence (fence_count == 1), so it
+        # must be virtually closed. The result should have an even fence count.
+        stabilized = MarkdownStreamBuffer._stabilize("```")
+        fences = [ln for ln in stabilized.splitlines() if ln.lstrip().startswith("```")]
+        assert len(fences) % 2 == 0
 
     def test_open_fence_virtually_closed(self):
         stabilized = MarkdownStreamBuffer._stabilize("```python\nprint('hi')")
@@ -120,6 +128,25 @@ class TestMarkdownStreamBuffer:
         assert buf.get_renderable() is first
         buf.append(" more")
         assert buf.get_renderable() is not first
+
+    def test_fence_split_across_small_chunks(self):
+        """Provider streaming in 1-char deltas must not corrupt fence detection."""
+        full = "```python\nfor i in range(10):\n    print(i)\n```"
+        buf = MarkdownStreamBuffer()
+        for char in full:
+            buf.append(char)
+        # After the full fence is consumed the buffer should be stable (even fence count)
+        stabilized = MarkdownStreamBuffer._stabilize(buf.raw_content)
+        fences = [ln for ln in stabilized.splitlines() if ln.lstrip().startswith("```")]
+        assert len(fences) % 2 == 0
+        assert buf.raw_content == full
+
+    def test_two_code_blocks_balanced(self):
+        content = "```py\nfoo()\n```\n\nSome text\n\n```js\nbar()\n```"
+        stabilized = MarkdownStreamBuffer._stabilize(content)
+        fences = [ln for ln in stabilized.splitlines() if ln.lstrip().startswith("```")]
+        assert len(fences) == 4  # 2 open + 2 close, already balanced
+        assert stabilized == content  # no mutation needed
 
 
 class TestStreamStats:

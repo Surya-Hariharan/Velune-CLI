@@ -60,8 +60,28 @@ class VeluneREPL:
         self._apply_role_overrides_to_orchestrator()
         self._episodic_session_id: str | None = None
         from velune.context.utilization import ContextUtilizationTracker
+        from velune.hooks import HookDispatcher
 
         self._context_tracker = ContextUtilizationTracker()
+        workspace_path = self.container.get("runtime.workspace")
+        self._hook_dispatcher = HookDispatcher(
+            workspace=Path(workspace_path) if workspace_path else None,
+            session_id=None,  # auto-generated UUID
+        )
+
+        # MCP server registry — populated lazily on first /mcp use or during run()
+        from velune.mcp.registry import MCPServerRegistry
+
+        self._mcp_registry = MCPServerRegistry(
+            workspace=Path(workspace_path) if workspace_path else None,
+        )
+
+        # Plugin manager — declarative plugins discovered at startup
+        from velune.plugins.manager import PluginManager
+
+        self._plugin_manager = PluginManager(
+            workspace=Path(workspace_path) if workspace_path else None,
+        )
 
     # ------------------------------------------------------------------
     # prompt_toolkit session
@@ -73,22 +93,23 @@ class VeluneREPL:
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.styles import Style
 
+        from velune.cli import design
         from velune.cli.autocomplete import COMMAND_CATEGORIES, CommandEntry, SlashCompleter
         from velune.cli.statusbar import STATUS_BAR_STYLES
 
         style = Style.from_dict(
             {
-                "prompt.frame": "#6a6a7a",  # Dim frame glyphs ╭─ ╰─
-                "prompt.prefix": "#c084fc bold",  # Claude purple-lavender bold
-                "prompt.branch": "#8a8a8a",  # Dim gray for Git branch
-                "prompt.model": "#606060",  # Subtle gray
-                "prompt.mode": "#d4af37",  # Accent gold
-                "prompt.arrow": "#a78bfa bold",  # Match accent purple
-                "ctx.ok": "#00ff87 bold",  # Green
-                "ctx.warn": "#ffaf00 bold",  # Yellow
-                "ctx.danger": "#ff5f5f bold",  # Red
-                "mode.godly": "#ff00ff bold",  # Magenta
-                "mode.optimus": "#ffaf00 bold",  # Yellow
+                "prompt.frame": design.FAINT,
+                "prompt.prefix": f"{design.ACCENT} bold",
+                "prompt.branch": "#8a8a8a",
+                "prompt.model": design.FAINT,
+                "prompt.mode": design.HIGHLIGHT,
+                "prompt.arrow": f"{design.ACCENT_SOFT} bold",
+                "ctx.ok": f"{design.OK} bold",
+                "ctx.warn": f"{design.WARN} bold",
+                "ctx.danger": f"{design.DANGER} bold",
+                "mode.godly": "#ff00ff bold",
+                "mode.optimus": f"{design.WARN} bold",
                 **STATUS_BAR_STYLES,
             }
         )
@@ -150,6 +171,7 @@ class VeluneREPL:
         return render_status_bar(self._status_state)
 
     def _get_prompt_tokens(self) -> FormattedText:
+        from velune.cli import design
         from velune.cli.modes import SessionMode
         from velune.repository.tracker import GitTracker
 
@@ -192,9 +214,9 @@ class VeluneREPL:
             pct = self._context_tracker.percentage
             badge = self._context_tracker.formatted_badge
 
-            if pct < 70.0:
+            if pct < design.CTX_WARN_PCT:
                 bar_style = "class:ctx.ok"
-            elif pct < 90.0:
+            elif pct < design.CTX_DANGER_PCT:
                 bar_style = "class:ctx.warn"
             else:
                 bar_style = "class:ctx.danger"
@@ -228,6 +250,52 @@ class VeluneREPL:
         session = self._build_prompt_session()
         await asyncio.to_thread(self._print_startup_banner)
         await self._start_episodic_session()
+
+        # SessionStart hooks — may supply a session title or startup notice
+        model_id = self.active_model.model_id if self.active_model else ""
+        _hook_start = await self._hook_dispatcher.dispatch_session_start(
+            session_id=self._episodic_session_id or self._hook_dispatcher.session_id,
+            model_id=model_id,
+        )
+        if _hook_start.system_message:
+            self.console.print(f"[dim]{_hook_start.system_message}[/dim]")
+
+        # Load and connect MCP servers from .mcp.json / velune.toml
+        try:
+            self._mcp_registry.load_config()
+            if self._mcp_registry._entries:
+                server_count = len(self._mcp_registry._entries)
+                self.console.print(
+                    f"[dim]Connecting {server_count} MCP server(s)...[/dim]"
+                )
+                results = await self._mcp_registry.connect_all()
+                ok = sum(1 for v in results.values() if v)
+                if ok:
+                    self.console.print(
+                        f"[dim]MCP: {ok}/{server_count} server(s) connected. "
+                        "Use [bold]/mcp[/bold] to inspect.[/dim]"
+                    )
+        except Exception as exc:
+            _log.debug("MCP auto-connect error (non-fatal): %s", exc)
+
+        # Load declarative plugins — hook/MCP wiring happens before the REPL loop
+        try:
+            new_plugins = self._plugin_manager.load()
+            if new_plugins:
+                self.console.print(
+                    f"[dim]Loaded {len(new_plugins)} plugin(s): "
+                    + ", ".join(f"[bold]{p.name}[/bold]" for p in new_plugins)
+                    + ". Use [bold]/plugin[/bold] to inspect.[/dim]"
+                )
+                # Wire plugin commands into the live slash registry
+                self._register_plugin_commands(new_plugins)
+                # Inject plugin hooks into the running HookDispatcher
+                self._plugin_manager.wire_hooks(self._hook_dispatcher)
+                # Inject plugin MCP servers into the running MCP registry
+                self._plugin_manager.wire_mcp(self._mcp_registry)
+        except Exception as exc:
+            _log.debug("Plugin load error (non-fatal): %s", exc)
+
         self._interrupts.install()
         try:
             self._workspace_registry.touch(Path(self.container.get("runtime.workspace")))
@@ -294,12 +362,54 @@ class VeluneREPL:
         ``velune.kernel.entrypoint._async_main`` — this only handles the
         session-level state the REPL itself owns.
         """
+        # Stop hooks — run before archiving so they can still access the session
+        try:
+            import tempfile, json as _json
+            transcript_path = ""
+            if self._conversation:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False, encoding="utf-8"
+                ) as tf:
+                    _json.dump(self._conversation, tf)
+                    transcript_path = tf.name
+
+            _hook_stop = await self._hook_dispatcher.dispatch_stop(
+                reason="normal_exit",
+                transcript_path=transcript_path,
+                session_id=self._episodic_session_id or self._hook_dispatcher.session_id,
+            )
+            if _hook_stop.blocked:
+                # Stop hook asked to keep the session alive — honour it by
+                # injecting the feedback as an assistant message and resuming.
+                if _hook_stop.block_reason:
+                    self.console.print(
+                        f"[yellow]Stop blocked by hook:[/yellow] {_hook_stop.block_reason}"
+                    )
+                if _hook_stop.additional_context:
+                    self._conversation.append(
+                        {"role": "assistant", "content": _hook_stop.additional_context}
+                    )
+                # Don't continue teardown — the run() loop will re-raise SystemExit
+                # if the user really wants to quit.
+            elif _hook_stop.additional_context:
+                self._conversation.append(
+                    {"role": "assistant", "content": _hook_stop.additional_context}
+                )
+        except Exception as exc:
+            _log.debug("Stop hook error (non-fatal): %s", exc)
+
         self.console.print("[dim]Saving session...[/dim]")
         try:
             self._archive_current_session()
         except Exception as exc:
             _log.warning("Session archive on exit failed: %s", exc)
         await self._end_episodic_session()
+
+        # Disconnect all MCP servers cleanly
+        try:
+            await self._mcp_registry.disconnect_all()
+        except Exception as exc:
+            _log.debug("MCP disconnect error (non-fatal): %s", exc)
 
         self.console.print("[dim]Stopping background tasks...[/dim]")
         try:
@@ -624,6 +734,33 @@ class VeluneREPL:
                 description="Show REPL command execution history",
                 usage="/history",
                 handler=self._cmd_history,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="hooks",
+                aliases=[],
+                description="List active lifecycle hooks and their config",
+                usage="/hooks",
+                handler=self._cmd_hooks,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="mcp",
+                aliases=[],
+                description="Inspect MCP servers, tools, and resources",
+                usage="/mcp [servers|tools|resources|connect <name>|disconnect <name>|refresh <name>]",
+                handler=self._cmd_mcp,
+            )
+        )
+        registry.register(
+            SlashCommand(
+                name="plugin",
+                aliases=["plugins", "pl"],
+                description="List, enable, disable, or reload declarative plugins",
+                usage="/plugin [list|enable <name>|disable <name>|reload [name]|show <name>]",
+                handler=self._cmd_plugin,
             )
         )
         return registry
@@ -2034,6 +2171,234 @@ class VeluneREPL:
         except Exception as e:
             self.console.print(f"[red]Failed to read history: {e}[/red]")
 
+    async def _cmd_hooks(self, args: str) -> None:
+        """List active hook bindings from project + user config."""
+        from rich.table import Table
+
+        rows = self._hook_dispatcher.summary()
+        if not rows:
+            self.console.print(
+                "[dim]No hooks configured. "
+                "Create [bold].velune/hooks.json[/bold] or [bold]~/.velune/hooks.json[/bold] to add lifecycle hooks.[/dim]"
+            )
+            return
+
+        table = Table(
+            show_header=True,
+            border_style="dim",
+            padding=(0, 1),
+            header_style="bold cyan",
+            title="[bold cyan]Lifecycle Hooks[/bold cyan]",
+        )
+        table.add_column("Event", style="cyan", width=20)
+        table.add_column("Matcher", style="dim white", width=14)
+        table.add_column("Command", width=34)
+        table.add_column("Timeout", justify="right", width=9)
+        table.add_column("If Condition", style="dim yellow")
+
+        for row in rows:
+            table.add_row(
+                row.get("event", ""),
+                row.get("matcher", "*") or "*",
+                row.get("command", ""),
+                f"{row.get('timeout', 10)}s",
+                row.get("if", "") or "—",
+            )
+
+        self.console.print(table)
+        self.console.print(
+            f"\n[dim]{len(rows)} hook(s) loaded. "
+            "Use [bold]/hooks[/bold] after editing hooks.json to see updates (cache reloads automatically).[/dim]"
+        )
+
+    async def _cmd_mcp(self, args: str) -> None:
+        """Inspect and manage MCP server connections."""
+        from rich.table import Table
+
+        parts = args.strip().split(maxsplit=1)
+        sub = parts[0].lower() if parts else "servers"
+        rest = parts[1].strip() if len(parts) > 1 else ""
+
+        if sub in ("", "servers"):
+            await self._mcp_show_servers()
+        elif sub == "tools":
+            self._mcp_show_tools(server_filter=rest or None)
+        elif sub == "resources":
+            self._mcp_show_resources(server_filter=rest or None)
+        elif sub == "connect":
+            if not rest:
+                self.console.print("[yellow]Usage: /mcp connect <server-name>[/yellow]")
+                return
+            self.console.print(f"[dim]Connecting to MCP server '{rest}'...[/dim]")
+            ok = await self._mcp_registry.connect(rest)
+            if ok:
+                tools = self._mcp_registry.tools_for_server(rest)
+                self.console.print(
+                    f"[green]✓[/green] Connected to [bold]{rest}[/bold] "
+                    f"({len(tools)} tool(s))."
+                )
+            else:
+                status = next(
+                    (s for s in self._mcp_registry.status() if s["name"] == rest), {}
+                )
+                self.console.print(
+                    f"[red]✗[/red] Failed to connect to [bold]{rest}[/bold]: "
+                    f"{status.get('error', 'unknown error')}"
+                )
+        elif sub == "disconnect":
+            if not rest:
+                self.console.print("[yellow]Usage: /mcp disconnect <server-name>[/yellow]")
+                return
+            await self._mcp_registry.disconnect(rest)
+            self.console.print(f"[dim]Disconnected from [bold]{rest}[/bold].[/dim]")
+        elif sub == "refresh":
+            if not rest:
+                self.console.print("[yellow]Usage: /mcp refresh <server-name>[/yellow]")
+                return
+            ok = await self._mcp_registry.refresh_tools(rest)
+            if ok:
+                tools = self._mcp_registry.tools_for_server(rest)
+                self.console.print(
+                    f"[green]✓[/green] Refreshed [bold]{rest}[/bold] "
+                    f"({len(tools)} tool(s))."
+                )
+            else:
+                self.console.print(
+                    f"[yellow]Could not refresh '{rest}' — is it connected?[/yellow]"
+                )
+        else:
+            self.console.print(
+                "[yellow]Unknown sub-command. "
+                "Try: /mcp servers | tools | resources | connect <name> | "
+                "disconnect <name> | refresh <name>[/yellow]"
+            )
+
+    async def _mcp_show_servers(self) -> None:
+        from rich.table import Table
+
+        rows = self._mcp_registry.status()
+        if not rows:
+            self.console.print(
+                "[dim]No MCP servers configured. "
+                "Create [bold].mcp.json[/bold] in the workspace to add servers.[/dim]"
+            )
+            self.console.print()
+            self.console.print(
+                "[dim]Example .mcp.json:[/dim]\n"
+                '  [dim]{"filesystem": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]}}}[/dim]'
+            )
+            return
+
+        table = Table(
+            show_header=True,
+            border_style="dim",
+            padding=(0, 1),
+            header_style="bold cyan",
+            title="[bold cyan]MCP Servers[/bold cyan]",
+        )
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("State", width=12)
+        table.add_column("Transport", style="dim", width=10)
+        table.add_column("Endpoint", width=38)
+        table.add_column("Tools", justify="right", width=6)
+        table.add_column("Resources", justify="right", width=10)
+
+        _state_style = {
+            "connected": "green",
+            "connecting": "yellow",
+            "disconnected": "dim",
+            "error": "red",
+        }
+
+        for row in rows:
+            state = row["state"]
+            style = _state_style.get(state, "dim")
+            error = f" ({row['error'][:40]})" if row.get("error") else ""
+            table.add_row(
+                row["name"],
+                f"[{style}]{state}{error}[/{style}]",
+                row["transport"],
+                row["endpoint"][:38],
+                str(row["tools"]),
+                str(row["resources"]),
+            )
+
+        self.console.print(table)
+        self.console.print(
+            "\n[dim]Sub-commands: /mcp tools | /mcp resources | /mcp connect <name> | "
+            "/mcp disconnect <name> | /mcp refresh <name>[/dim]"
+        )
+
+    def _mcp_show_tools(self, server_filter: str | None = None) -> None:
+        from rich.table import Table
+
+        all_tools = self._mcp_registry.all_tools()
+        if server_filter:
+            all_tools = [t for t in all_tools if t.server_name == server_filter]
+
+        if not all_tools:
+            label = f" from '{server_filter}'" if server_filter else ""
+            self.console.print(f"[dim]No tools available{label}.[/dim]")
+            return
+
+        table = Table(
+            show_header=True,
+            border_style="dim",
+            padding=(0, 1),
+            header_style="bold cyan",
+            title="[bold cyan]MCP Tools[/bold cyan]",
+        )
+        table.add_column("Server", style="dim cyan", width=16, no_wrap=True)
+        table.add_column("Tool", style="cyan", width=28, no_wrap=True)
+        table.add_column("Description")
+
+        for tool in all_tools:
+            desc = tool.description
+            if len(desc) > 80:
+                desc = desc[:77] + "..."
+            table.add_row(tool.server_name, tool.name, desc)
+
+        self.console.print(table)
+        self.console.print(f"\n[dim]{len(all_tools)} tool(s) available.[/dim]")
+
+    def _mcp_show_resources(self, server_filter: str | None = None) -> None:
+        from rich.table import Table
+
+        all_resources = self._mcp_registry.all_resources()
+        if server_filter:
+            all_resources = [r for r in all_resources if r.server_name == server_filter]
+
+        if not all_resources:
+            label = f" from '{server_filter}'" if server_filter else ""
+            self.console.print(
+                f"[dim]No resources available{label}. "
+                "(Resources are optional — not all servers expose them.)[/dim]"
+            )
+            return
+
+        table = Table(
+            show_header=True,
+            border_style="dim",
+            padding=(0, 1),
+            header_style="bold cyan",
+            title="[bold cyan]MCP Resources[/bold cyan]",
+        )
+        table.add_column("Server", style="dim cyan", width=16, no_wrap=True)
+        table.add_column("URI", style="cyan", width=36)
+        table.add_column("Name", width=22)
+        table.add_column("MIME", style="dim", width=14)
+
+        for res in all_resources:
+            table.add_row(
+                res.server_name,
+                res.uri[:36],
+                res.name[:22],
+                res.mime_type or "—",
+            )
+
+        self.console.print(table)
+        self.console.print(f"\n[dim]{len(all_resources)} resource(s) available.[/dim]")
+
     async def _refresh_model_registry(self) -> None:
         model_registry = self.container.get("runtime.model_registry")
         if not model_registry:
@@ -2193,6 +2558,21 @@ class VeluneREPL:
         from velune.cli.rendering import CustomMarkdown, MarkdownStreamBuffer, StreamStats
         from velune.core.types.inference import InferenceRequest
 
+        # UserPromptSubmit hook — can transform or block the prompt
+        _hook_prompt = await self._hook_dispatcher.dispatch_user_prompt(
+            user_prompt=text,
+            session_id=self._episodic_session_id or self._hook_dispatcher.session_id,
+        )
+        if _hook_prompt.blocked:
+            self.console.print(
+                f"[yellow]⊘ Prompt blocked by hook:[/yellow] {_hook_prompt.block_reason}"
+            )
+            return
+        if _hook_prompt.system_message:
+            self.console.print(f"[dim]{_hook_prompt.system_message}[/dim]")
+        if _hook_prompt.transformed_prompt:
+            text = _hook_prompt.transformed_prompt
+
         model, provider = await self._resolve_active_model_and_provider()
         if not model or not provider:
             from velune.cli.rendering.error_panel import render_error
@@ -2227,6 +2607,15 @@ class VeluneREPL:
                     )
             except Exception:
                 pass
+
+        # Inject plugin skills matching this turn's user text
+        try:
+            skill_blocks = self._plugin_manager.matching_skills(text)
+            if skill_blocks:
+                skill_context = "\n\n---\n\n".join(skill_blocks)
+                self._conversation.append({"role": "system", "content": skill_context})
+        except Exception as exc:
+            _log.debug("Plugin skill injection error (non-fatal): %s", exc)
 
         self._conversation.append({"role": "user", "content": text})
 
@@ -2331,6 +2720,21 @@ class VeluneREPL:
             return
 
         assistant_text = "".join(full_content)
+
+        # MessageDisplay hook — may transform output before it's stored/shown
+        try:
+            _hook_msg = await self._hook_dispatcher.dispatch_message_display(
+                message=assistant_text,
+                role="assistant",
+                session_id=self._episodic_session_id or self._hook_dispatcher.session_id,
+            )
+            if _hook_msg.transformed_message:
+                assistant_text = _hook_msg.transformed_message
+            if _hook_msg.system_message:
+                self.console.print(f"[dim]{_hook_msg.system_message}[/dim]")
+        except Exception as exc:
+            _log.debug("MessageDisplay hook error (non-fatal): %s", exc)
+
         self._conversation.append({"role": "assistant", "content": assistant_text})
         effective_tokens = tokens_used or len(assistant_text) // 4
         self._display_usage(model, effective_tokens)
@@ -2404,6 +2808,143 @@ class VeluneREPL:
             return ProjectTypeDetector().detect(Path(workspace))
         except Exception:
             return None
+
+    # ------------------------------------------------------------------
+    # Plugin helpers
+    # ------------------------------------------------------------------
+
+    def _register_plugin_commands(self, plugins) -> None:
+        """Inject plugin slash commands into the live REPL registry."""
+        for plugin in plugins:
+            for cmd in plugin.commands:
+                plugin_root = plugin.root
+
+                def _make_handler(c=cmd, root=plugin_root):
+                    async def _handler(args: str) -> None:
+                        rendered = c.render(args, root)
+                        self.console.print(
+                            f"[dim]Plugin command [bold]/{c.name}[/bold] → sending to model[/dim]"
+                        )
+                        await self._handle_prompt(rendered)
+
+                    return _handler
+
+                self._registry.register(
+                    SlashCommand(
+                        name=cmd.name,
+                        aliases=cmd.aliases,
+                        description=f"{cmd.description}  {cmd.help_label}",
+                        usage=cmd.usage,
+                        handler=_make_handler(),
+                    )
+                )
+        # Rebuild completer entries to include new commands
+        if self._completer is not None:
+            from velune.cli.autocomplete import COMMAND_CATEGORIES, CommandEntry
+
+            entries = [
+                CommandEntry(
+                    name=c.name,
+                    description=c.description,
+                    category=COMMAND_CATEGORIES.get(c.name, "Plugin"),
+                    aliases=tuple(c.aliases),
+                )
+                for c in self._registry.all_unique()
+            ]
+            self._completer.commands = entries
+
+    async def _cmd_plugin(self, args: str) -> None:
+        from rich.table import Table
+
+        parts = args.strip().split(None, 1)
+        sub = parts[0].lower() if parts else "list"
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if sub in ("list", ""):
+            rows = self._plugin_manager.status()
+            if not rows:
+                self.console.print("[dim]No plugins loaded.  Drop a plugin into "
+                                   "[cyan]~/.velune/plugins/[/cyan] or "
+                                   "[cyan].velune/plugins/[/cyan] and run [bold]/plugin reload[/bold].[/dim]")
+                return
+            tbl = Table(show_header=True, border_style="dim", padding=(0, 1), header_style="bold cyan")
+            tbl.add_column("Name", style="cyan", width=18)
+            tbl.add_column("Version", width=8)
+            tbl.add_column("Cmds", width=5)
+            tbl.add_column("Skills", width=6)
+            tbl.add_column("Hooks", width=6)
+            tbl.add_column("MCP", width=5)
+            tbl.add_column("Status", width=10)
+            tbl.add_column("Description")
+            for r in rows:
+                status = "[green]enabled[/green]" if r["enabled"] else "[red]disabled[/red]"
+                tbl.add_row(
+                    r["name"], r["version"],
+                    str(r["commands"]), str(r["skills"]),
+                    "[green]yes[/green]" if r["hooks"] else "[dim]no[/dim]",
+                    "[green]yes[/green]" if r["mcp"] else "[dim]no[/dim]",
+                    status, r["description"],
+                )
+            self.console.print(tbl)
+
+        elif sub == "enable":
+            if not arg:
+                self.console.print("[yellow]Usage: /plugin enable <name>[/yellow]")
+                return
+            ok = self._plugin_manager.enable(arg)
+            self.console.print(
+                f"[green]Plugin '{arg}' enabled.[/green]" if ok
+                else f"[yellow]Plugin '{arg}' not found.[/yellow]"
+            )
+
+        elif sub == "disable":
+            if not arg:
+                self.console.print("[yellow]Usage: /plugin disable <name>[/yellow]")
+                return
+            ok = self._plugin_manager.disable(arg)
+            self.console.print(
+                f"[yellow]Plugin '{arg}' disabled.[/yellow]" if ok
+                else f"[yellow]Plugin '{arg}' not found.[/yellow]"
+            )
+
+        elif sub == "reload":
+            name = arg or None
+            new_plugins = self._plugin_manager.reload(name)
+            label = f"'{name}'" if name else "all"
+            self.console.print(
+                f"[green]Reloaded {label} — {len(new_plugins)} plugin(s) active.[/green]"
+            )
+            if new_plugins:
+                self._register_plugin_commands(new_plugins)
+
+        elif sub == "show":
+            if not arg:
+                self.console.print("[yellow]Usage: /plugin show <name>[/yellow]")
+                return
+            p = self._plugin_manager.get_plugin(arg)
+            if p is None:
+                self.console.print(f"[yellow]Plugin '{arg}' not found.[/yellow]")
+                return
+            s = p.summary()
+            self.console.print(f"[bold cyan]{s['name']}[/bold cyan] v{s['version']}  {s['description']}")
+            self.console.print(f"  Author : {s['author']}")
+            self.console.print(f"  Root   : {s['root']}")
+            self.console.print(f"  Status : {'[green]enabled[/green]' if s['enabled'] else '[red]disabled[/red]'}")
+            if p.commands:
+                self.console.print(f"  [bold]Commands ({len(p.commands)}):[/bold]")
+                for cmd in p.commands:
+                    self.console.print(f"    [cyan]/{cmd.name}[/cyan]  {cmd.description}")
+            if p.skills:
+                self.console.print(f"  [bold]Skills ({len(p.skills)}):[/bold]")
+                for skill in p.skills:
+                    triggers = ", ".join(skill.triggers) if skill.triggers else "(always)" if skill.always else "(none)"
+                    self.console.print(f"    [magenta]{skill.name}[/magenta]  triggers: {triggers}")
+
+        else:
+            self.console.print(
+                "[yellow]Unknown sub-command.[/yellow]  "
+                "Usage: [bold]/plugin[/bold] [list|enable <name>|disable <name>|reload [name]|show <name>]"
+            )
 
 
 async def run_repl(runtime: RuntimeContext) -> None:

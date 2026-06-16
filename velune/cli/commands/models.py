@@ -12,7 +12,7 @@ from velune.cli.context import CLIContext
 
 console = Console()
 
-models_cmd = typer.Typer(help="Model management commands")
+models_cmd = typer.Typer(help="Scan, list, and assign AI models.")
 
 
 @models_cmd.command("scan")

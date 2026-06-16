@@ -15,7 +15,7 @@ from velune.providers.keystore import get_key
 from velune.telemetry import print_provider_health_report
 
 console = Console()
-doctor_cmd = typer.Typer(help="Environment health diagnostics")
+doctor_cmd = typer.Typer(help="Check that providers, models, and paths are healthy.")
 
 
 @doctor_cmd.callback(invoke_without_command=True)
@@ -710,20 +710,11 @@ def _check_memory_health() -> dict:
 
 
 def _render_results(results: list) -> None:
-    from velune.cli import theme
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
 
-    table = Table(title="Velune Environment Diagnostics", show_header=True, expand=True)
-    table.add_column("Category", style=f"bold {theme.ACCENT}", width=15)
-    table.add_column("Check", style="bold white", width=30)
-    table.add_column("Status", width=12)
-    table.add_column("Details", style=theme.DIM)
-
-    status_styles = {
-        "ok": f"[{theme.SUCCESS}]✓ OK[/{theme.SUCCESS}]",
-        "warn": f"[{theme.WARNING}]⚠ WARN[/{theme.WARNING}]",
-        "fail": f"[{theme.ERROR}]✗ FAIL[/{theme.ERROR}]",
-        "error": f"[{theme.ERROR}]✗ ERROR[/{theme.ERROR}]",
-    }
+    from velune.cli import design
 
     categories_map = {
         "Internet Connectivity": "Providers",
@@ -751,27 +742,73 @@ def _render_results(results: list) -> None:
     }
 
     categories = ["Providers", "Storage", "Security", "Performance"]
-    grouped = {cat: [] for cat in categories}
-
+    grouped: dict[str, list] = {cat: [] for cat in categories}
     for r in results:
         cat = categories_map.get(r["name"], "Performance")
         grouped[cat].append(r)
+
+    # --- Summary header ---
+    total = len(results)
+    fails = sum(1 for r in results if r["status"] in ("fail", "error"))
+    warns = sum(1 for r in results if r["status"] == "warn")
+
+    if fails:
+        summary_color = design.DANGER
+        summary_icon = "✗"
+        summary_tail = f"  [{design.DANGER}]{fails} failed[/{design.DANGER}]"
+        if warns:
+            summary_tail += f"  [{design.WARN}]{warns} warning{'s' if warns > 1 else ''}[/{design.WARN}]"
+    elif warns:
+        summary_color = design.WARN
+        summary_icon = "⚠"
+        summary_tail = f"  [{design.WARN}]{warns} warning{'s' if warns > 1 else ''}[/{design.WARN}]"
+    else:
+        summary_color = design.OK
+        summary_icon = "✓"
+        summary_tail = f"  [{design.OK}]all clear[/{design.OK}]"
+
+    console.print()
+    console.print(
+        Text.assemble(
+            (f" {summary_icon} ", f"bold {summary_color}"),
+            ("Velune Environment — ", "bold white"),
+            (f"{total} checks", "white"),
+        )
+        .__add__(Text.from_markup(summary_tail))
+    )
+    console.print()
+
+    # --- Per-category panels ---
+    _STATUS_ICONS = {
+        "ok": (f"[{design.OK}]✓[/{design.OK}]", design.OK),
+        "warn": (f"[{design.WARN}]⚠[/{design.WARN}]", design.WARN),
+        "fail": (f"[{design.DANGER}]✗[/{design.DANGER}]", design.DANGER),
+        "error": (f"[{design.DANGER}]✗[/{design.DANGER}]", design.DANGER),
+    }
 
     for cat in categories:
         cat_results = grouped[cat]
         if not cat_results:
             continue
 
-        first = True
-        for result in cat_results:
-            cat_cell = cat if first else ""
-            first = False
+        cat_fails = any(r["status"] in ("fail", "error") for r in cat_results)
+        cat_warns = any(r["status"] == "warn" for r in cat_results)
+        border_color = design.DANGER if cat_fails else design.WARN if cat_warns else design.FAINT
 
-            table.add_row(
-                cat_cell,
-                result["name"],
-                status_styles.get(result["status"], result["status"]),
-                result.get("message", ""),
+        table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+        table.add_column("icon", width=3, no_wrap=True)
+        table.add_column("name", style=f"bold {design.MUTED}", no_wrap=True)
+        table.add_column("details", style=design.MUTED)
+
+        for r in cat_results:
+            icon_markup, _ = _STATUS_ICONS.get(r["status"], ("?", design.MUTED))
+            table.add_row(icon_markup, r["name"], r.get("message", ""))
+
+        console.print(
+            Panel(
+                table,
+                title=f"[bold]{cat}[/bold]",
+                border_style=border_color,
+                padding=(0, 1),
             )
-
-    console.print(table)
+        )

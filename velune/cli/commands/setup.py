@@ -7,6 +7,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from velune.cli import design
 from velune.providers.keystore import get_key, has_key, save_key
 
 console = Console()
@@ -81,11 +82,13 @@ def run_setup_wizard() -> None:
     """Run the interactive API key setup wizard."""
     console.print(
         Panel(
-            "[bold cyan]Velune Provider Setup[/bold cyan]\n"
-            "[dim]Configure which AI providers you want to use.[/dim]\n"
-            "[dim]Keys are stored securely in your OS keychain.[/dim]\n\n"
-            "🔒 [bold green]Privacy Notice:[/bold green] [dim]Your code and conversations stay on this machine unless you configure a cloud provider.[/dim]",
-            border_style="cyan",
+            f"[bold {design.ACCENT}]Velune Provider Setup[/bold {design.ACCENT}]\n"
+            f"[{design.MUTED}]Configure which AI providers you want to use.[/{design.MUTED}]\n"
+            f"[{design.MUTED}]Keys are stored securely in your OS keychain.[/{design.MUTED}]\n\n"
+            f"🔒 [bold {design.OK}]Privacy Notice:[/bold {design.OK}] "
+            f"[{design.MUTED}]Your code and conversations stay on this machine "
+            f"unless you configure a cloud provider.[/{design.MUTED}]",
+            border_style=design.ACCENT,
             padding=(0, 1),
         )
     )
@@ -93,19 +96,31 @@ def run_setup_wizard() -> None:
 
     chosen = _select_providers()
     if not chosen:
-        console.print("[yellow]No providers selected. Run `velune setup` any time.[/yellow]")
+        console.print(f"[{design.WARN}]No providers selected. Run `velune setup` any time.[/{design.WARN}]")
         return
 
-    configured: list[str] = []
-    for pid in chosen:
-        meta = PROVIDER_METADATA[pid]
-        if not meta.get("requires_key"):
-            console.print(f"[green]✓[/green] {meta['label']} — no key required")
-            configured.append(pid)
-            continue
+    needs_key = [pid for pid in chosen if PROVIDER_METADATA[pid].get("requires_key")]
+    no_key = [pid for pid in chosen if not PROVIDER_METADATA[pid].get("requires_key")]
+    total_steps = len(needs_key)
+    step = 0
 
-        console.print(f"\n[cyan]{meta['label']}[/cyan]")
-        console.print(f"  [dim]Get your key: {meta.get('get_key_url', '')}[/dim]")
+    configured: list[str] = []
+
+    for pid in no_key:
+        meta = PROVIDER_METADATA[pid]
+        console.print(f"[{design.OK}]✓[/{design.OK}] {meta['label']} — no key required")
+        configured.append(pid)
+
+    for pid in needs_key:
+        meta = PROVIDER_METADATA[pid]
+        step += 1
+        step_label = f"[{design.MUTED}]({step}/{total_steps})[/{design.MUTED}]"
+
+        console.print(
+            f"\n{step_label} [{design.INFO}]{meta['label']}[/{design.INFO}]"
+        )
+        if meta.get("get_key_url"):
+            console.print(f"  [{design.MUTED}]Get your key: {meta['get_key_url']}[/{design.MUTED}]")
 
         if has_key(pid):
             existing = get_key(pid)
@@ -124,40 +139,45 @@ def run_setup_wizard() -> None:
         )
 
         if not key.strip():
-            console.print("  [yellow]Skipped — no key entered.[/yellow]")
+            console.print(f"  [{design.WARN}]Skipped — no key entered.[/{design.WARN}]")
             continue
 
         save_key(pid, key.strip())
-        console.print("  [green]✓ Saved to OS keychain[/green]")
+        console.print(f"  [{design.OK}]✓ Saved to OS keychain[/{design.OK}]")
         configured.append(pid)
 
     console.print()
     if configured:
-        console.print(f"[bold green]✓ Configured providers:[/bold green] {', '.join(configured)}")
-        console.print("[dim]Run `velune doctor` to verify connectivity.[/dim]")
+        console.print(
+            f"[bold {design.OK}]✓ Configured providers:[/bold {design.OK}] {', '.join(configured)}"
+        )
+        console.print(f"[{design.MUTED}]Run `velune doctor` to verify connectivity.[/{design.MUTED}]")
 
 
 def _select_providers() -> list[str]:
-    table = Table(border_style="dim", padding=(0, 1))
-    table.add_column("#", style="dim", width=3)
-    table.add_column("Provider", style="cyan")
-    table.add_column("Type", style="dim")
-    table.add_column("Cost", style="dim")
+    table = Table(border_style=design.FAINT, padding=(0, 1))
+    table.add_column("#", style=design.MUTED, width=3)
+    table.add_column("Provider", style=design.INFO)
+    table.add_column("Type", style=design.MUTED)
+    table.add_column("Cost", style=design.MUTED)
     table.add_column("Status")
 
     provider_ids = list(PROVIDER_METADATA.keys())
     for i, pid in enumerate(provider_ids, 1):
         meta = PROVIDER_METADATA[pid]
-        cost = "[green]free[/green]" if meta.get("free") else "[dim]paid[/dim]"
-        status = "[green]✓ configured[/green]" if has_key(pid) else "[dim]not set[/dim]"
+        cost = f"[{design.OK}]free[/{design.OK}]" if meta.get("free") else f"[{design.MUTED}]paid[/{design.MUTED}]"
+        status = f"[{design.OK}]✓ configured[/{design.OK}]" if has_key(pid) else f"[{design.MUTED}]not set[/{design.MUTED}]"
         ptype = "local" if not meta.get("requires_key") else "cloud"
         table.add_row(str(i), meta["label"], ptype, cost, status)
 
     console.print(table)
+    console.print(
+        f"  [{design.MUTED}]Recommended start: Ollama (local, free) + Groq (cloud, free tier)[/{design.MUTED}]"
+    )
     console.print()
 
     raw = Prompt.ask(
-        "Select providers to configure [dim](comma-separated numbers, e.g. 1,2,3)[/dim]",
+        f"Select providers to configure [{design.MUTED}](comma-separated numbers, e.g. 1,2,3)[/{design.MUTED}]",
         default="1",
     )
 

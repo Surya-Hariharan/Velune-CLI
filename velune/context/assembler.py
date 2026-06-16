@@ -206,18 +206,85 @@ class ContextAssembler:
         return kept_chunks, tokens_trimmed
 
     def _trim_repository_snapshot(self, chunks: list[ContextChunk]) -> list[ContextChunk]:
-        """Reduce REPOSITORY_SNAPSHOT to architecture summary if over 2000 tokens.
+        """Reduce REPOSITORY_SNAPSHOT to fit within a 2000-token budget.
 
-        Currently returns chunks as-is. Future enhancement: extract and preserve
-        only high-level architecture info when exceeding 2000 tokens.
+        Strategy (applied in order until the section fits):
+
+        1. Drop the lowest-priority chunks first (sort by priority ascending).
+        2. If a single chunk is still over the budget, truncate its content at
+           the token boundary — keeping the opening lines which contain the
+           workspace header and recent-changes sections (highest information
+           density per token).
+
+        Chunks with priority >= 0.9 are treated as "must-keep" headers and are
+        never dropped at step 1 (they may still be truncated at step 2).
         """
+        _SNAPSHOT_TOKEN_BUDGET = 2000
+        _CHARS_PER_TOKEN = 4  # fast estimate, same as context_builder
+        _MUST_KEEP_PRIORITY = 0.9
+
         total_tokens = sum(c.token_count for c in chunks)
-        if total_tokens > 2000:
-            logger.debug(
-                f"REPOSITORY_SNAPSHOT exceeds 2000 tokens ({total_tokens}); "
-                "consider extracting architecture summary only"
-            )
-        return chunks
+        if total_tokens <= _SNAPSHOT_TOKEN_BUDGET:
+            return chunks
+
+        logger.debug(
+            "REPOSITORY_SNAPSHOT: %d tokens exceeds budget (%d); trimming.",
+            total_tokens,
+            _SNAPSHOT_TOKEN_BUDGET,
+        )
+
+        # Step 1: drop low-priority chunks until we fit.
+        droppable = sorted(
+            [c for c in chunks if c.priority < _MUST_KEEP_PRIORITY],
+            key=lambda c: c.priority,  # lowest priority first
+        )
+        must_keep = [c for c in chunks if c.priority >= _MUST_KEEP_PRIORITY]
+
+        kept = list(must_keep)
+        remaining_budget = _SNAPSHOT_TOKEN_BUDGET - sum(c.token_count for c in kept)
+
+        # Add droppable chunks from highest to lowest priority until budget runs out.
+        for chunk in reversed(droppable):
+            if chunk.token_count <= remaining_budget:
+                kept.append(chunk)
+                remaining_budget -= chunk.token_count
+
+        if sum(c.token_count for c in kept) <= _SNAPSHOT_TOKEN_BUDGET:
+            return kept
+
+        # Step 2: single-chunk truncation as a last resort.
+        budget_chars = _SNAPSHOT_TOKEN_BUDGET * _CHARS_PER_TOKEN
+        trimmed: list[ContextChunk] = []
+        chars_used = 0
+        for chunk in sorted(kept, key=lambda c: -c.priority):
+            if chars_used >= budget_chars:
+                break
+            available = budget_chars - chars_used
+            if len(chunk.content) <= available:
+                trimmed.append(chunk)
+                chars_used += len(chunk.content)
+            else:
+                # Truncate at the last newline within the available window.
+                cutoff = chunk.content[:available].rfind("\n")
+                if cutoff <= 0:
+                    cutoff = available
+                truncated_content = chunk.content[:cutoff] + "\n... [snapshot truncated to fit context budget]"
+                import dataclasses
+                trimmed.append(
+                    dataclasses.replace(
+                        chunk,
+                        content=truncated_content,
+                        token_count=len(truncated_content) // _CHARS_PER_TOKEN,
+                    )
+                )
+                chars_used += len(truncated_content)
+
+        logger.debug(
+            "REPOSITORY_SNAPSHOT trimmed: %d → %d tokens.",
+            total_tokens,
+            sum(c.token_count for c in trimmed),
+        )
+        return trimmed
 
     def _render_section(self, section: ContextSection, chunks: list[ContextChunk]) -> str:
         """Render a section with header, content, and footer."""

@@ -12,6 +12,7 @@ from velune.cli.commands.memory import memory_cmd
 from velune.cli.commands.models import models_cmd
 from velune.cli.commands.retrieval import retrieval_cmd
 from velune.cli.commands.run import run_cmd, run_command
+from velune.cli.commands.session import session_cmd
 from velune.cli.commands.setup import setup_command
 from velune.cli.commands.trace import trace_cmd
 from velune.cli.commands.workspace import workspace_cmd
@@ -25,6 +26,7 @@ __all__ = [
     "init_command",
     "trace_cmd",
     "memory_cmd",
+    "session_cmd",
     "setup_command",
     "models_cmd",
     "retrieval_cmd",

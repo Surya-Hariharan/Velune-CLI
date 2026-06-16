@@ -99,6 +99,9 @@ jobs:
           echo "✓ asyncio.run() count is acceptable ($count)"
           exit 0
 
+      - name: Security audit (sync-over-async + regression checks)
+        run: python scripts/security_audit.py
+
 
   test:
     name: Test (${{ matrix.os }}, py${{ matrix.python-version }})

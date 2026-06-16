@@ -68,7 +68,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("council", "Force full council on a task"),
     ("diff", "Show pending file changes as unified diff"),
     ("memory", "Inspect memory tiers and session stats"),
-    ("session", "Save, list, resume, or export sessions"),
+    ("session", "Save, list, resume, or export sessions (interactive picker if no args)"),
     ("context", "Show context window usage"),
     ("optimus", "Switch to speed mode — smallest model, instant tier"),
     ("godly", "Switch to max power mode — largest model, full council"),

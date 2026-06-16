@@ -1,8 +1,20 @@
-"""Consistent color palette constants for the Velune CLI."""
+"""Compatibility shim — the canonical palette now lives in ``velune.cli.design``.
 
-ACCENT = "cyan"
-SUCCESS = "green"
-WARNING = "yellow"
-ERROR = "red"
-DIM = "dim"
+All color constants re-exported here so existing importers get the correct hex
+values from design.py without requiring a mass rename.
+"""
+
+from velune.cli.design import (  # noqa: F401
+    ACCENT,
+    ACCENT_SOFT,
+    DANGER as ERROR,
+    FAINT,
+    HIGHLIGHT,
+    INFO,
+    MUTED as DIM,
+    OK as SUCCESS,
+    SURFACE,
+    WARN as WARNING,
+)
+
 CODE_BG = "#2e2e2e"

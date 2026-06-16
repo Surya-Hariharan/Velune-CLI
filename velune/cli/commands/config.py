@@ -12,7 +12,7 @@ from velune.cli.context import CLIContext
 
 console = Console()
 
-config_cmd = typer.Typer(help="Configuration management commands")
+config_cmd = typer.Typer(help="Read and write velune.toml settings.")
 
 
 @config_cmd.command("set")

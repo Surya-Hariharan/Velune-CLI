@@ -31,7 +31,7 @@ def run_command(
         False, "--yes", "-y", help="Skip cost confirmation prompts (for scripting)"
     ),
 ) -> None:
-    """Deliberate with the stateful LangGraph Reasoning Council and execute in the secured sandbox."""
+    """Run a task — AI plans, writes, and executes it in a secure sandbox."""
 
     cli_context = ctx.obj
     if not isinstance(cli_context, CLIContext):

@@ -31,6 +31,14 @@ class RepositoryCognitionService:
         self.analyzer = CodebaseAnalyzer(self.root_path)
         self._state_path = self.root_path / ".velune" / _STATE_FILENAME
         self._bg_index_task: asyncio.Task | None = None
+        # Tracks the most recent file-level change set so the orchestrator can
+        # surface "what changed since last run" in the prompt without re-indexing.
+        self._last_delta: object | None = None  # IndexDelta | None
+
+    @property
+    def last_delta(self) -> object | None:
+        """The IndexDelta from the most recent incremental index, or None."""
+        return self._last_delta
 
     # ------------------------------------------------------------------
     # Lifecycle protocol (called by LifecycleCoordinator)
@@ -66,7 +74,44 @@ class RepositoryCognitionService:
 
         n = delta.total
         _print(f"[dim]Indexing {n} changed file(s)...[/dim]")
+        self._last_delta = delta
         self._bg_index_task = asyncio.create_task(self._background_apply(inc, delta, n))
+
+    async def probe_for_changes(self) -> bool:
+        """Check if the workspace has changed since the last index; re-index if so.
+
+        Returns True when an incremental re-index was triggered, False when the
+        workspace was already up to date.  Safe to call frequently — the git-SHA
+        fast path makes it cheap when nothing has changed.
+        """
+        from velune.repository.incremental_indexer import IncrementalIndexer
+
+        inc = IncrementalIndexer(self.workspace_root, self._state_path)
+        try:
+            delta = await inc.compute_delta()
+        except Exception as exc:
+            logger.debug("probe_for_changes: delta computation failed: %s", exc)
+            return False
+
+        if delta.is_empty:
+            return False
+
+        logger.debug(
+            "probe_for_changes: %d file(s) changed — triggering incremental re-index.",
+            delta.total,
+        )
+        self._last_delta = delta
+        # Re-use the background task slot so there is at most one running at a time.
+        if self._bg_index_task and not self._bg_index_task.done():
+            self._bg_index_task.cancel()
+            try:
+                await self._bg_index_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._bg_index_task = asyncio.create_task(
+            self._background_apply(inc, delta, delta.total)
+        )
+        return True
 
     async def shutdown(self) -> None:
         """Cancel any pending background indexing task."""
@@ -310,6 +355,9 @@ class RepositoryCognitionService:
             if console:
                 console.print(msg)
             logger.info("Background incremental index complete: %d file(s) processed.", n)
+            # Keep last_delta so the next orchestrator run can surface it in context,
+            # then clear it so subsequent runs don't re-announce the same changes.
+            # (The orchestrator reads last_delta before calling index(), so the order is safe.)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

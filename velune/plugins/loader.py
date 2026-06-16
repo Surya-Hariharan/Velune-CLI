@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from velune.execution.path_guard import PathGuard, PathTraversalError
 from velune.plugins.registry import PluginRegistry
 from velune.plugins.schemas import PluginManifest
 
@@ -98,7 +99,15 @@ class PluginLoader:
             data = json.load(f)
 
         manifest = PluginManifest(**data)
-        entry_file = folder_path / manifest.entry_point
+
+        # Validate entry_point stays within the plugin's own folder — a crafted
+        # manifest.json with entry_point="../../sensitive.py" would otherwise escape.
+        try:
+            entry_file = PathGuard(folder_path).validate(folder_path / manifest.entry_point)
+        except PathTraversalError as exc:
+            raise ValueError(
+                f"Plugin '{manifest.name}' manifest.entry_point escapes plugin folder: {exc}"
+            ) from exc
 
         if not entry_file.exists():
             raise FileNotFoundError(

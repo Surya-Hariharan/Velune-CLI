@@ -186,8 +186,8 @@ def _read_memory_tables(db_path: Path) -> list[MemoryTableStat]:
         for table in tables:
             try:
                 # Table names come from sqlite_master (trusted catalog), not user
-                # input; quote-wrap defends against unusual identifiers anyway.
-                count = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                # input; double-quoting is SQL identifier quoting, not injection.
+                count = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]  # nosec B608
             except sqlite3.Error:
                 continue
             stats.append(MemoryTableStat(table=table, rows=int(count)))

@@ -25,7 +25,7 @@ from velune.cli.context import CLIContext
 from velune.cli.display.memory_view import MemoryDisplayView
 
 console = Console()
-memory_cmd = typer.Typer(help="Memory management commands")
+memory_cmd = typer.Typer(help="Inspect, clear, or compact AI memory tiers.")
 
 
 @memory_cmd.command("stats")

@@ -29,7 +29,7 @@ from velune.observability.context_report import ContextReport, build_context_rep
 from velune.observability.format import human_bytes, relative_time
 
 console = Console()
-context_cmd = typer.Typer(help="Inspect repository context, indexing, and freshness")
+context_cmd = typer.Typer(help="Show index freshness, file counts, and workspace health.")
 
 _FRESHNESS_STYLE = {
     "synced": (design.OK, "● synced"),

@@ -34,7 +34,7 @@ from velune.observability.trace_log import TraceLog
 from velune.observability.trace_sink import trace_log_for_workspace
 
 console = Console()
-trace_cmd = typer.Typer(help="Inspect the real execution event trace")
+trace_cmd = typer.Typer(help="View recent execution events (use 'live' to follow).")
 
 # Coarse source → color mapping so the eye can group stages without noise.
 _SOURCE_COLORS = {

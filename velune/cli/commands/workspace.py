@@ -1,4 +1,4 @@
-"""Workspace commands — velune workspace init/status/graph."""
+"""Workspace commands — velune workspace init/status/graph/list/open/remove."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     )
 
 console = Console()
-workspace_cmd = typer.Typer(help="Workspace management commands")
+workspace_cmd = typer.Typer(help="Browse, index, and switch projects.")
 
 
 @workspace_cmd.command("init")
@@ -63,6 +63,15 @@ def workspace_init(
             console.print(
                 "[green]✓[/green] Created default .veluneignore (edit to customise index exclusions)."
             )
+
+    # Register in the global workspace registry so `velune workspace list` can
+    # find this project immediately after init, without needing a chat/run first.
+    try:
+        from velune.cli.workspaces import WorkspaceRegistry
+
+        WorkspaceRegistry().register(path)
+    except Exception:
+        pass
 
     from velune.core.event_loop import submit
 
@@ -475,3 +484,230 @@ def _attach_tree(branch: Tree, children: dict) -> None:
         node = branch.add(f"[{design.INFO}]{name}[/]")
         if isinstance(sub, dict) and sub:
             _attach_tree(node, sub)
+
+
+# ── Directory tree view ──────────────────────────────────────────────────────
+
+
+@workspace_cmd.command("tree")
+def workspace_tree(
+    ctx: typer.Context,
+    path: Path = typer.Option(Path.cwd(), "--path", "-p", help="Workspace path"),
+    depth: int = typer.Option(3, "--depth", "-d", min=1, max=10, help="Max depth to display"),
+    all_files: bool = typer.Option(
+        False, "--all", "-a", help="Show all files including ignored ones"
+    ),
+    dirs_only: bool = typer.Option(False, "--dirs", help="Show directories only"),
+) -> None:
+    """Render the workspace directory tree, respecting .gitignore and .veluneignore rules."""
+    from velune.repository.scanner import FilesystemScanner
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    root = path.resolve()
+    if not root.exists():
+        console.print(f"[{design.DANGER}]Path not found: {root}[/]")
+        raise typer.Exit(1)
+
+    scanner = FilesystemScanner(root) if not all_files else None
+
+    def _is_ignored(p: Path) -> bool:
+        return False if scanner is None else scanner.is_ignored(p)
+
+    file_count = 0
+    dir_count = 0
+
+    def _build(branch: Tree, current: Path, current_depth: int) -> None:
+        nonlocal file_count, dir_count
+        if current_depth > depth:
+            return
+        try:
+            items = sorted(current.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))
+        except PermissionError:
+            branch.add(f"[{design.DANGER}](permission denied)[/]")
+            return
+
+        for item in items:
+            if _is_ignored(item):
+                continue
+            if item.is_dir():
+                dir_count += 1
+                sub = branch.add(f"[bold {design.ACCENT}]{item.name}/[/]")
+                _build(sub, item, current_depth + 1)
+            elif not dirs_only and item.is_file():
+                file_count += 1
+                # Colour by extension type
+                suffix = item.suffix.lower()
+                if suffix in {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java"}:
+                    style = design.INFO
+                elif suffix in {".md", ".txt", ".rst"}:
+                    style = design.MUTED
+                elif suffix in {".toml", ".yaml", ".yml", ".json", ".ini", ".cfg"}:
+                    style = design.HIGHLIGHT
+                else:
+                    style = design.FAINT
+                branch.add(f"[{style}]{item.name}[/]")
+
+    tree = Tree(
+        f"[bold {design.ACCENT}]{root.name}/[/]",
+        guide_style=design.FAINT,
+    )
+    _build(tree, root, 1)
+
+    console.print(tree)
+    console.print()
+    console.print(
+        f"[{design.MUTED}]{dir_count} director{'ies' if dir_count != 1 else 'y'}  ·  "
+        f"{file_count} file{'s' if file_count != 1 else ''}[/]  "
+        f"[{design.FAINT}](depth {depth}{'  ·  all files shown' if all_files else ''})[/]"
+    )
+
+
+# ── Multi-workspace management ────────────────────────────────────────────────
+
+
+@workspace_cmd.command("list")
+def workspace_list(ctx: typer.Context) -> None:
+    """List all registered Velune workspaces."""
+    from velune.cli.workspaces import WorkspaceRegistry
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    registry = WorkspaceRegistry()
+    workspaces = registry.list()
+
+    if cli_context.json_mode:
+        from dataclasses import asdict
+
+        print(json.dumps([asdict(w) for w in workspaces]))
+        return
+
+    if not workspaces:
+        console.print(
+            f"[{design.MUTED}]No workspaces registered yet.[/]\n"
+            f"[{design.MUTED}]Run[/] [bold]velune workspace init[/bold] [{design.MUTED}]inside a project to register it.[/]"
+        )
+        return
+
+    current = str(cli_context.workspace.resolve()).lower()
+
+    table = Table(box=ROUNDED, border_style=design.FAINT, expand=False)
+    table.add_column("", width=2, no_wrap=True)
+    table.add_column("Name", style=design.ACCENT)
+    table.add_column("Path", style=design.INFO)
+    table.add_column("Type", style=design.MUTED)
+    table.add_column("Git", style=design.MUTED, justify="center")
+    table.add_column("Last opened", style=design.MUTED, no_wrap=True)
+
+    for w in workspaces:
+        is_active = w.path.lower() == current
+        marker = Text("▶", style=design.OK) if is_active else Text("")
+        table.add_row(
+            marker,
+            w.name,
+            w.path,
+            w.project_type or "—",
+            "✓" if w.is_git else "—",
+            w.last_opened[:16].replace("T", " "),
+        )
+
+    console.print(table)
+    console.print()
+    console.print(
+        f"[{design.MUTED}]▶ = current workspace  ·  "
+        f"Switch with:[/] [bold]velune workspace open <path>[/bold]"
+    )
+
+
+@workspace_cmd.command("open")
+def workspace_open(
+    ctx: typer.Context,
+    path: Path = typer.Argument(..., help="Path to the project workspace"),
+    init: bool = typer.Option(
+        False, "--init", "-i", help="Also run workspace init to index the project"
+    ),
+) -> None:
+    """Register a workspace and print the command to use it.
+
+    Velune uses the working directory (or --workspace flag) to determine the
+    active workspace per invocation. This command registers the workspace in
+    the global registry and shows you how to target it in any velune command.
+    """
+    from velune.cli.workspaces import WorkspaceRegistry
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    resolved = path.resolve()
+    if not resolved.exists():
+        console.print(f"[{design.DANGER}]Path does not exist: {resolved}[/]")
+        raise typer.Exit(1)
+
+    registry = WorkspaceRegistry()
+    info = registry.register(resolved)
+
+    console.print(
+        Panel(
+            Text.assemble(
+                (f"[bold]Name:[/bold]   {info.name}\n"),
+                (f"[bold]Path:[/bold]   {info.path}\n"),
+                (f"[bold]Type:[/bold]   {info.project_type or 'unknown'}\n"),
+                (f"[bold]Git:[/bold]    {'yes' if info.is_git else 'no'}\n\n"),
+                (f"[{design.MUTED}]To use this workspace in any command:[/]\n"),
+                (f"  velune --workspace {info.path} chat\n"),
+                (f"  velune --workspace {info.path} run <task>\n\n"),
+                (f"[{design.MUTED}]Or cd into the project and run velune directly.[/]"),
+            ),
+            border_style=design.ACCENT_SOFT,
+            box=ROUNDED,
+            title=f"[bold]Workspace registered — {info.name}[/bold]",
+        )
+    )
+
+    if init:
+        velune_dir = resolved / ".velune"
+        velune_dir.mkdir(exist_ok=True)
+        for sub in ("memory", "retrieval", "index", "snapshots"):
+            (velune_dir / sub).mkdir(exist_ok=True)
+
+        from velune.core.event_loop import submit
+
+        submit(_workspace_init_async(cli_context, resolved, velune_dir, force=False))
+
+
+@workspace_cmd.command("forget")
+def workspace_remove(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Workspace name to remove from registry"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Remove a workspace from the registry (does not delete files)."""
+    from velune.cli.workspaces import WorkspaceRegistry
+
+    registry = WorkspaceRegistry()
+    info = registry.find_by_name(name)
+    if info is None:
+        console.print(f"[{design.DANGER}]No workspace named '{name}' found in registry.[/]")
+        console.print(
+            f"[{design.MUTED}]Run[/] [bold]velune workspace list[/bold] "
+            f"[{design.MUTED}]to see registered workspaces.[/]"
+        )
+        raise typer.Exit(1)
+
+    if not yes:
+        typer.confirm(
+            f"Remove workspace '{name}' ({info.path}) from registry?",
+            default=False,
+            abort=True,
+        )
+
+    registry.remove(name)
+    console.print(
+        f"[{design.OK}]✓[/] Workspace [bold]{name}[/bold] removed from registry.\n"
+        f"[{design.MUTED}]Project files at {info.path} were not touched.[/]"
+    )

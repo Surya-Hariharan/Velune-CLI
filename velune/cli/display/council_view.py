@@ -10,6 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from velune.cli import design
 from velune.cognition.council.planner import TaskPlan
 from velune.models.specializations import CouncilRole
 
@@ -26,12 +27,12 @@ class CouncilDisplayView:
         self.console.print(
             Panel(
                 Text.assemble(
-                    (
-                        "[bold magenta]VELUNE COGNITIVE OS[/bold magenta] — [cyan]Reasoning Council Active[/cyan]\n"
-                    ),
-                    ("[dim]Objective:[/dim] ", "[italic white]" + task + "[/italic white]"),
+                    (f"[bold {design.ACCENT}]VELUNE COGNITIVE OS[/bold {design.ACCENT}]"
+                     f" — [{design.INFO}]Reasoning Council Active[/{design.INFO}]\n"),
+                    (f"[{design.MUTED}]Objective:[/{design.MUTED}] ",
+                     f"[italic white]{task}[/italic white]"),
                 ),
-                border_style="magenta",
+                border_style=design.ACCENT,
                 box=ROUNDED,
                 title="[bold white]🧠 Cognitive Deliberation[/bold white]",
                 title_align="left",
@@ -41,15 +42,15 @@ class CouncilDisplayView:
     def render_role_assignments(self, assignments: dict[CouncilRole, Any]) -> None:
         """Render a table displaying mapped specialized models for the council."""
         table = Table(
-            title="[bold cyan]Mapped Council Specializations[/bold cyan]",
+            title=f"[bold {design.INFO}]Mapped Council Specializations[/bold {design.INFO}]",
             box=ROUNDED,
-            border_style="dim",
+            border_style=design.FAINT,
             expand=True,
         )
-        table.add_column("Council Seat", style="bold yellow")
-        table.add_column("Provider / Endpoint", style="green")
-        table.add_column("Target Model", style="cyan")
-        table.add_column("Key Skills / Tags", style="magenta")
+        table.add_column("Council Seat", style=f"bold {design.HIGHLIGHT}")
+        table.add_column("Provider / Endpoint", style=design.OK)
+        table.add_column("Target Model", style=design.INFO)
+        table.add_column("Key Skills / Tags", style=design.ACCENT_SOFT)
 
         for role, desc in assignments.items():
             caps = []
@@ -72,21 +73,22 @@ class CouncilDisplayView:
     def render_step_header(self, step_name: str, agent_emoji: str = "🤖") -> None:
         """Draw an elegant boundary indicating a change in agent active deliberation."""
         self.console.print(
-            f"\n[bold magenta]●[/bold magenta] [bold white]{agent_emoji} {step_name}[/bold white] is deliberating..."
+            f"\n[bold {design.ACCENT}]●[/bold {design.ACCENT}]"
+            f" [bold white]{agent_emoji} {step_name}[/bold white] is deliberating..."
         )
 
     def render_planner_dag(self, plan: TaskPlan) -> None:
         """Render the Planner's task plan DAG as a neat hierarchical or sequential table."""
         table = Table(
-            title="[bold yellow]Execution Plan Compiled by Council Planner[/bold yellow]",
+            title=f"[bold {design.HIGHLIGHT}]Execution Plan Compiled by Council Planner[/bold {design.HIGHLIGHT}]",
             box=ROUNDED,
-            border_style="yellow",
+            border_style=design.HIGHLIGHT,
             expand=True,
         )
-        table.add_column("ID", style="bold cyan", width=8)
+        table.add_column("ID", style=f"bold {design.INFO}", width=8)
         table.add_column("Description", style="white")
-        table.add_column("Dependencies", style="magenta")
-        table.add_column("Validation Strategy", style="green")
+        table.add_column("Dependencies", style=design.ACCENT_SOFT)
+        table.add_column("Validation Strategy", style=design.OK)
 
         for step in plan.steps:
             deps = ", ".join(step.dependencies) if step.dependencies else "[dim]None[/dim]"
@@ -99,9 +101,9 @@ class CouncilDisplayView:
         """Format the coder's proposed implementation code inside a syntax-focused block."""
         self.console.print(
             Panel(
-                Text(code_proposal, style="green"),
-                title="[bold green]💻 Coder Proposed Patch[/bold green]",
-                border_style="green",
+                Text(code_proposal, style=design.OK),
+                title=f"[bold {design.OK}]💻 Coder Proposed Patch[/bold {design.OK}]",
+                border_style=design.OK,
                 box=ROUNDED,
                 expand=True,
             )
@@ -118,22 +120,26 @@ class CouncilDisplayView:
             confidence = report.confidence_rating
             issues = report.critical_issues
 
+        ok_c = design.OK
+        err_c = design.DANGER
         status_text = (
-            "[bold green]PASS[/bold green]" if passed else "[bold red]FAIL / BLOCKED[/bold red]"
+            f"[bold {ok_c}]PASS[/bold {ok_c}]"
+            if passed
+            else f"[bold {err_c}]FAIL / BLOCKED[/bold {err_c}]"
         )
-        border_style = "green" if passed else "red"
+        border_style = design.OK if passed else design.DANGER
 
         content = []
         content.append(f"[bold]Verification Status:[/bold] {status_text}")
         content.append(f"[bold]Confidence Rating:[/bold] {confidence:.2f}")
 
         if issues:
-            content.append("\n[bold red]⚠️ Critical Issues Detected:[/bold red]")
+            content.append(f"\n[bold {err_c}]⚠️ Critical Issues Detected:[/bold {err_c}]")
             for issue in issues:
-                content.append(f"  [red]•[/red] {issue}")
+                content.append(f"  [{err_c}]•[/{err_c}] {issue}")
         else:
             content.append(
-                "\n[green]✓ Static static checks passed. No syntactical or safety concerns raised.[/green]"
+                f"\n[{ok_c}]✓ Static checks passed. No syntactical or safety concerns raised.[/{ok_c}]"
             )
 
         self.console.print(
@@ -155,20 +161,21 @@ class CouncilDisplayView:
             severity = report.severity_rating
             vectors = report.failure_vectors
 
-        border_style = "yellow" if severity > 0.4 else "dim"
+        warn_c = design.WARN
+        border_style = warn_c if severity > 0.4 else design.FAINT
 
         content = []
         content.append(
-            f"[bold]Adversarial Severity Rating:[/bold] [bold red]{severity:.2f}[/bold red] / 1.00"
+            f"[bold]Adversarial Severity Rating:[/bold] [bold {design.DANGER}]{severity:.2f}[/bold {design.DANGER}] / 1.00"
         )
 
         if vectors:
-            content.append("\n[bold yellow]⚡ Failure Vectors Simulated:[/bold yellow]")
+            content.append(f"\n[bold {warn_c}]⚡ Failure Vectors Simulated:[/bold {warn_c}]")
             for vec in vectors:
-                content.append(f"  [yellow]•[/yellow] {vec}")
+                content.append(f"  [{warn_c}]•[/{warn_c}] {vec}")
         else:
             content.append(
-                "\n[dim]No significant failure vectors or edge-case gaps simulated.[/dim]"
+                f"\n[{design.MUTED}]No significant failure vectors or edge-case gaps simulated.[/{design.MUTED}]"
             )
 
         self.console.print(
@@ -196,23 +203,25 @@ class CouncilDisplayView:
             winning_claims = res.winning_claims
             synthesis_inst = res.synthesis_instructions
 
-        # Color calibrated confidence based on score
+        ok_c = design.OK
+        warn_c = design.WARN
+        err_c = design.DANGER
         if confidence > 0.75:
-            conf_str = f"[bold green]{confidence * 100:.1f}% (High Confidence)[/bold green]"
-            border_style = "green"
+            conf_str = f"[bold {ok_c}]{confidence * 100:.1f}% (High Confidence)[/bold {ok_c}]"
+            border_style = ok_c
         elif confidence > 0.55:
-            conf_str = f"[bold yellow]{confidence * 100:.1f}% (Medium Confidence)[/bold yellow]"
-            border_style = "yellow"
+            conf_str = f"[bold {warn_c}]{confidence * 100:.1f}% (Medium Confidence)[/bold {warn_c}]"
+            border_style = warn_c
         else:
             conf_str = (
-                f"[bold red]{confidence * 100:.1f}% (Low Confidence / High Volatility)[/bold red]"
+                f"[bold {err_c}]{confidence * 100:.1f}% (Low Confidence / High Volatility)[/bold {err_c}]"
             )
-            border_style = "red"
+            border_style = err_c
 
         status_text = (
-            "[bold red]YES (Blocked / Escalate)[/bold red]"
+            f"[bold {err_c}]YES (Blocked / Escalate)[/bold {err_c}]"
             if review_required
-            else "[bold green]NO (Autonomous Pass)[/bold green]"
+            else f"[bold {ok_c}]NO (Autonomous Pass)[/bold {ok_c}]"
         )
 
         content = []
@@ -220,16 +229,16 @@ class CouncilDisplayView:
         content.append(f"[bold]Escalate to Human-in-the-Loop Review:[/bold] {status_text}")
 
         if flags:
-            content.append(f"[bold red]System Flags Raised:[/bold red] {', '.join(flags)}")
+            content.append(f"[bold {err_c}]System Flags Raised:[/bold {err_c}] {', '.join(flags)}")
 
         if winning_claims:
-            content.append("\n[bold cyan]Winning Claims & Arbitration Compromise:[/bold cyan]")
+            content.append(f"\n[bold {design.INFO}]Winning Claims & Arbitration Compromise:[/bold {design.INFO}]")
             for claim in winning_claims:
-                content.append(f"  [cyan]✓[/cyan] {claim}")
+                content.append(f"  [{design.INFO}]✓[/{design.INFO}] {claim}")
 
         if synthesis_inst:
-            content.append("\n[bold dim]Arbitrator Instructions for Synthesizer:[/bold dim]")
-            content.append(f"[dim]{synthesis_inst}[/dim]")
+            content.append(f"\n[bold {design.MUTED}]Arbitrator Instructions for Synthesizer:[/bold {design.MUTED}]")
+            content.append(f"[{design.MUTED}]{synthesis_inst}[/{design.MUTED}]")
 
         self.console.print(
             Panel(
@@ -246,8 +255,8 @@ class CouncilDisplayView:
         self.console.print(
             Panel(
                 Text(text, style="white"),
-                title="[bold magenta]🚀 Deliberated Walkthrough & Accomplishments[/bold magenta]",
-                border_style="magenta",
+                title=f"[bold {design.ACCENT}]🚀 Deliberated Walkthrough & Accomplishments[/bold {design.ACCENT}]",
+                border_style=design.ACCENT,
                 box=ROUNDED,
                 expand=True,
             )

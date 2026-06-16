@@ -2,24 +2,28 @@
 
 from rich.theme import Theme
 
+from velune.cli import design
+
 
 class VeluneTheme:
-    """Velune CLI theme — modern, restrained color palette."""
+    """Velune CLI theme — driven by the canonical palette in ``velune.cli.design``."""
 
     @staticmethod
     def get_theme() -> Theme:
-        """Get the Velune theme with sophisticated color choices."""
+        """Return a Rich Theme whose semantic names map to design.py hex values."""
         return Theme(
             {
-                "info": "blue",  # Primary blue for info
-                "warning": "yellow",  # Warm yellow for warnings
-                "error": "red",  # Clear red for errors
-                "success": "green",  # Green for success
-                "title": "bold blue",  # Primary blue titles
-                "subtitle": "dim blue",  # Subtle secondary blue
-                "key": "dim white",  # Subtle key labels
-                "value": "white",  # Clear values
-                "muted": "dim",  # Background/muted text
-                "accent": "#d4af37",  # Warm gold accent
+                "info": design.INFO,
+                "warning": design.WARN,
+                "error": design.DANGER,
+                "success": design.OK,
+                "title": f"bold {design.INFO}",
+                "subtitle": f"dim {design.INFO}",
+                "key": "dim white",
+                "value": "white",
+                "muted": design.MUTED,
+                "accent": design.HIGHLIGHT,
+                "velune.accent": design.ACCENT,
+                "velune.soft": design.ACCENT_SOFT,
             }
         )

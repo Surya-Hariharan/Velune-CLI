@@ -11,7 +11,7 @@ from rich.console import Console
 from velune.daemon.client import DaemonClient
 from velune.daemon.transport import DAEMON_PID_FILE
 
-daemon_cmd = typer.Typer(help="Velune daemon management")
+daemon_cmd = typer.Typer(help="Start, stop, or check the background service.")
 console = Console()
 
 

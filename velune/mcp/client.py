@@ -1,129 +1,185 @@
-"""MCP client consuming external MCP servers."""
+"""MCP client — connects to external MCP servers and exposes them as Velune tools.
+
+``VeluneMCPClient`` is the original single-server API (backward compatible).
+New code should prefer :class:`velune.mcp.registry.MCPServerRegistry` for
+multi-server setups.
+
+Transport is now selected automatically based on server config:
+- Provide ``command`` (+ optional ``args``) → stdio subprocess transport
+- Provide ``url`` with ``type: "sse"`` (default for URLs) → SSE transport
+- Provide ``url`` with ``type: "http"`` → HTTP streamable transport
+"""
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import TYPE_CHECKING, Any
 
-from mcp.types import Tool
+from velune.mcp.transports.base import ServerConfig, ToolInfo, TransportType
+from velune.mcp.transports.factory import make_connection
 
-from velune.tools.base.tool import BaseTool
+if TYPE_CHECKING:
+    from velune.tools.base.tool import BaseTool
+
+logger = logging.getLogger("velune.mcp.client")
 
 
-class MCPToolWrapper(BaseTool):
-    """Wraps an external MCP tool as a Velune BaseTool."""
+def _base_tool_cls() -> type:
+    """Lazy import of BaseTool to avoid CLI-layer circular imports."""
+    from velune.tools.base.tool import BaseTool  # noqa: PLC0415
+    return BaseTool
 
-    def __init__(self, client: VeluneMCPClient, name: str, description: str, input_schema: dict):
-        self.client = client
-        self.name = name
-        self.description = description
-        self.input_schema = input_schema
+
+class _MCPToolWrapperBase:
+    """Mixin holding the implementation; actual base class resolved lazily."""
+
+    def __init__(
+        self,
+        client: "VeluneMCPClient",
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+    ) -> None:
+        self._client = client
+        self._name = name
+        self._description = description
+        self._input_schema = input_schema
 
     def get_name(self) -> str:
-        # Namespace tool with the server name prefix to avoid collisions
-        return f"{self.client.server_name}_{self.name}"
+        return f"{self._client.server_name}_{self._name}"
 
     def get_description(self) -> str:
-        return self.description
+        return self._description
 
     def get_schema(self) -> dict[str, Any]:
-        return self.input_schema
+        return self._input_schema
 
-    async def execute(self, **kwargs) -> Any:
-        if not self.client.session:
-            raise RuntimeError(f"Client for tool {self.get_name()} is not connected.")
-        result = await self.client.session.call_tool(self.name, arguments=kwargs)
+    async def execute(self, **kwargs: Any) -> Any:
+        if self._client._connection is None:
+            raise RuntimeError(
+                f"MCP client '{self._client.server_name}' is not connected."
+            )
+        return await self._client._connection.call_tool(self._name, kwargs)
 
-        # CallToolResult structure holds content. Let's parse text contents.
-        text_contents = []
-        if hasattr(result, "content") and result.content:
-            for content in result.content:
-                if hasattr(content, "text"):
-                    text_contents.append(content.text)
-                elif isinstance(content, dict) and "text" in content:
-                    text_contents.append(content["text"])
-                else:
-                    text_contents.append(str(content))
-        return "\n".join(text_contents) if text_contents else str(result)
+
+def _make_wrapper_class() -> type:
+    """Build MCPToolWrapper inheriting from BaseTool (deferred until first use)."""
+    Base = _base_tool_cls()
+
+    class MCPToolWrapper(_MCPToolWrapperBase, Base):  # type: ignore[misc]
+        """Wraps an external MCP tool as a Velune BaseTool."""
+
+    return MCPToolWrapper
+
+
+_MCPToolWrapper: type | None = None
+
+
+def MCPToolWrapper(  # noqa: N802
+    client: "VeluneMCPClient",
+    name: str,
+    description: str,
+    input_schema: dict[str, Any],
+) -> Any:
+    """Factory that creates an MCPToolWrapper (BaseTool subclass) on first call."""
+    global _MCPToolWrapper
+    if _MCPToolWrapper is None:
+        _MCPToolWrapper = _make_wrapper_class()
+    return _MCPToolWrapper(client, name, description, input_schema)
 
 
 class VeluneMCPClient:
-    """Connects to external MCP servers and exposes them as Velune tools."""
+    """Single-server MCP client with automatic transport selection.
+
+    Supports the original SSE-URL usage::
+
+        client = VeluneMCPClient("http://localhost:7788/sse", "myserver")
+        tools = await client.connect()
+        result = await client.call_tool("my_tool", {"key": "value"})
+        await client.disconnect()
+
+    And the new config-dict usage for stdio servers::
+
+        client = VeluneMCPClient.from_config({
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+        }, name="filesystem")
+    """
 
     def __init__(
         self,
         server_url: str,
         server_name: str,
         allowed_hosts: list[str] | None = None,
-    ):
+    ) -> None:
         self.server_url = server_url
         self.server_name = server_name
-        self.allowed_hosts = allowed_hosts
-        self._sse_ctx = None
-        self._session_ctx = None
-        self.session = None
-        self.raw_tools: list[Tool] = []
+        self._allowed_hosts = allowed_hosts
+        self._connection = None
+        self._raw_tools: list[ToolInfo] = []
+        # Build config from the legacy URL-only signature
+        self._config = ServerConfig(
+            name=server_name,
+            transport=TransportType.SSE,
+            url=server_url,
+        )
 
-    async def connect(self) -> list[dict]:
-        """Connect and return available tools.
+    @classmethod
+    def from_config(
+        cls,
+        config_dict: dict[str, Any],
+        name: str,
+        allowed_hosts: list[str] | None = None,
+    ) -> "VeluneMCPClient":
+        """Build a client from a raw ``.mcp.json`` entry dict."""
+        client = cls.__new__(cls)
+        client.server_name = name
+        client._allowed_hosts = allowed_hosts
+        client._connection = None
+        client._raw_tools = []
+        client._config = ServerConfig.from_dict(name, config_dict)
+        client.server_url = client._config.url
+        return client
 
-        The server URL is trust-validated first (SSRF guard + optional host
-        allowlist) — see :func:`velune.mcp.security.validate_mcp_url`.
-        """
-        from mcp import ClientSession
-        from mcp.client.sse import sse_client
-
-        from velune.mcp.security import validate_mcp_url
-
-        validate_mcp_url(self.server_url, self.allowed_hosts)
-
-        self._sse_ctx = sse_client(self.server_url)
-        self._read, self._write = await self._sse_ctx.__aenter__()
-
-        self._session_ctx = ClientSession(self._read, self._write)
-        self.session = await self._session_ctx.__aenter__()
-        await self.session.initialize()
-
-        tools_result = await self.session.list_tools()
-        self.raw_tools = tools_result.tools
-
-        # Convert tools to list of dict
-        result = []
-        for tool in self.raw_tools:
-            result.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "inputSchema": tool.inputSchema,
-                }
-            )
-        return result
+    async def connect(self) -> list[dict[str, Any]]:
+        """Connect and return list of available tool dicts."""
+        conn = make_connection(self._config, allowed_hosts=self._allowed_hosts)
+        await conn.connect()
+        self._connection = conn
+        self._raw_tools = await conn.list_tools()
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "inputSchema": t.input_schema,
+            }
+            for t in self._raw_tools
+        ]
 
     def to_velune_tools(self) -> list[BaseTool]:
         """Convert MCP tools to Velune BaseTool wrappers."""
-        velune_tools = []
-        for tool in self.raw_tools:
-            velune_tools.append(
-                MCPToolWrapper(
-                    client=self,
-                    name=tool.name,
-                    description=tool.description or "",
-                    input_schema=tool.inputSchema,
-                )
+        return [
+            MCPToolWrapper(
+                client=self,
+                name=t.name,
+                description=t.description,
+                input_schema=t.input_schema,
             )
-        return velune_tools
+            for t in self._raw_tools
+        ]
+
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Directly call a tool by its raw (un-prefixed) name."""
+        if self._connection is None:
+            raise RuntimeError(f"MCP client '{self.server_name}' is not connected.")
+        return await self._connection.call_tool(tool_name, arguments)
 
     async def disconnect(self) -> None:
-        """Disconnect and clean up resources."""
-        if self._session_ctx:
+        """Disconnect and clean up."""
+        if self._connection is not None:
             try:
-                await self._session_ctx.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._session_ctx = None
-            self.session = None
-        if self._sse_ctx:
-            try:
-                await self._sse_ctx.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._sse_ctx = None
+                await self._connection.disconnect()
+            except Exception as exc:
+                logger.debug("Disconnect error for '%s': %s", self.server_name, exc)
+            self._connection = None
+            self._raw_tools = []

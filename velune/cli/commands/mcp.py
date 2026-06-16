@@ -15,7 +15,7 @@ from velune.mcp.client import VeluneMCPClient
 from velune.mcp.server import VeluneMCPServer
 
 console = Console()
-mcp_cmd = typer.Typer(help="Model Context Protocol (MCP) commands")
+mcp_cmd = typer.Typer(help="Connect to or expose an MCP server.")
 
 
 @mcp_cmd.command("connect")

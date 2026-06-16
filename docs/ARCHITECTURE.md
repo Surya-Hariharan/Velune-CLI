@@ -216,6 +216,45 @@ Real-time provider status in `velune/providers/health_monitor.py`:
 2. Implement agent protocol
 3. Register in `velune/cognition/council_orchestrator.py`
 
+### Plugins (experimental — read this before proceeding)
+
+> **Plugin sandboxing is designed but not yet implemented.**
+> Plugin loading is experimental and currently runs plugins **in-process with
+> full process privileges** — unrestricted filesystem, network, and credential
+> access, identical to running the plugin source directly as a Python script.
+> **Do not enable in production workspaces or with plugins you do not fully
+> trust.**
+
+Plugin loading is **disabled by default** and unreachable from any shipped CLI
+command. It must be explicitly opted into:
+
+```bash
+VELUNE_ENABLE_EXPERIMENTAL_PLUGINS=1 velune <command>
+```
+
+Or programmatically via `PluginLoader(registry, search_paths, experimental=True)`.
+
+When enabled, each plugin directory must contain a `manifest.json`:
+
+```json
+{
+  "name": "my-plugin",
+  "version": "0.1.0",
+  "description": "What this plugin does",
+  "entry_point": "plugin.py",
+  "hooks": ["pre_execute", "post_execute"],
+  "author": "Your Name"
+}
+```
+
+The `entry_point` path is validated to stay within the plugin directory
+(path-traversal protection). The plugin class named `Plugin` (or the name in
+`metadata.class_name`) is instantiated and its hook methods are registered.
+
+**Roadmap:** subprocess isolation with a manifest-declared permission set
+(`filesystem.read`, `filesystem.write`, `tools.allowed`, `network.allowed`)
+is planned but not yet implemented. See `THREAT_MODEL.md §B5`.
+
 ## Dependency Graph
 
 ```

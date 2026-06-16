@@ -35,6 +35,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from velune import __version__
+from velune.cli import design
 from velune.cli.context import CLIContext
 from velune.cli.registry import register_commands
 from velune.core.runtime import build_runtime
@@ -46,12 +47,13 @@ _startup_mark("cli.app imported (typer/rich/runtime ready)")
 
 def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
     body = (
-        f"[bold cyan]Velune[/bold cyan] [dim]v{__version__}[/dim] · "
-        "[green]Local-first AI Orchestrator[/green]"
+        f"[bold {design.ACCENT}]Velune[/bold {design.ACCENT}]"
+        f" [{design.MUTED}]v{__version__}[/{design.MUTED}] · "
+        f"[{design.OK}]Local-first AI Orchestrator[/{design.OK}]"
     )
     frame = Panel(
         Text.from_markup(body),
-        border_style="cyan",
+        border_style=design.ACCENT,
         padding=(0, 2),
     )
     return [frame]
@@ -109,7 +111,9 @@ def create_app() -> typer.Typer:
                 print(json.dumps({"version": __version__}))
             else:
                 Console().print(
-                    f"[bold cyan]velune[/bold cyan] version [green]{__version__}[/green]"
+                    f"[bold {design.ACCENT}]velune[/bold {design.ACCENT}]"
+                    f" [{design.MUTED}]version[/{design.MUTED}]"
+                    f" [{design.OK}]{__version__}[/{design.OK}]"
                 )
             raise typer.Exit()
 
@@ -178,9 +182,9 @@ def create_app() -> typer.Typer:
                 if not configured:
                     runtime.console.print(
                         Panel(
-                            "[yellow]No AI providers configured.[/yellow]\n"
-                            "[dim]Velune needs at least one provider to work.[/dim]",
-                            border_style="yellow",
+                            f"[{design.WARN}]No AI providers configured.[/{design.WARN}]\n"
+                            f"[{design.MUTED}]Velune needs at least one provider to work.[/{design.MUTED}]",
+                            border_style=design.WARN,
                         )
                     )
                     run_now = typer.confirm("Run setup now?", default=True)
@@ -190,7 +194,7 @@ def create_app() -> typer.Typer:
                         run_setup_wizard()
                     else:
                         runtime.console.print(
-                            "[dim]Run `velune setup` any time to configure providers.[/dim]"
+                            f"[{design.MUTED}]Run `velune setup` any time to configure providers.[/{design.MUTED}]"
                         )
                     # NO EXIT HERE — fall through to REPL regardless. The only
                     # ways out of Velune are /exit, /quit, or Ctrl+C twice.
