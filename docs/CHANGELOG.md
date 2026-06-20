@@ -7,6 +7,82 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [1.0.0] — 2026-06-20
+
+### Added
+
+- **Intent reconstruction** — new `velune/cognition/intent.py` with `IntentClassifier`
+  and `IntentType` enum (EXPLAIN / GENERATE / REFACTOR / DEBUG / REVIEW / QUESTION / COMMAND).
+  Zero-latency keyword + word-boundary scoring; wired into `ContextOrchestrationEngine`
+  as Phase 0 on every prompt. (`velune/cognition/intent.py`)
+
+- **Council pipeline** — `CouncilRunner` orchestrates the full planner → coder →
+  reviewer → debate → synthesizer pipeline. Cycle exhaustion escalates REVISE to REJECT
+  automatically. (`velune/cognition/council_runner.py`)
+
+- **DebateSession** — scores and ranks council proposals using challenger severity and
+  reviewer decision; produces structured audit reports for the synthesizer.
+  (`velune/cognition/council/debate.py`)
+
+- **Multi-model role dispatch** — `ContextOrchestrationEngine.execute()` routes requests
+  through `CouncilRunner` when a `CouncilAgentFactory` is configured; degrades
+  gracefully when no factory is present. (`velune/orchestration/engine.py`)
+
+- **WebSocket MCP transport** — `WebSocketConnection` implements the `MCPConnection`
+  contract over JSON-RPC 2.0 on `ws://` and `wss://` URLs, with SSRF URL validation,
+  per-call timeout guards, and optional resource discovery.
+  (`velune/mcp/transports/websocket.py`)
+
+- **`/doctor` council panel** — new "Council" category in `velune doctor` output shows
+  role assignment coverage (roles → model IDs) or warnings for unmapped roles.
+  (`velune/cli/commands/doctor.py`)
+
+### Refactored
+
+- **`velune/cli/slash_dispatcher.py`** (new) — extracted `_build_registry` and
+  `_load_file_commands` from `VeluneREPL`. `repl.py` reduced by ~440 lines
+  (4,138 → 3,697).
+
+- **`velune/cli/stream_renderer.py`** (new) — extracted streaming / non-streaming
+  render loop from `_handle_prompt` into `StreamRenderer.render()` returning
+  `RenderResult(full_content, tokens_used, interrupted)`.
+
+- **Provider fallback** — `ProviderRouter.get_ordered_candidates()` returns all viable
+  candidates in capability-score order; `BaseCouncilAgent` iterates fallback providers
+  on failure.
+
+- **Lineage search** — `MemoryLifecycleCoordinator.get_lineage_warnings()` now
+  delegates to `LineageStore.query_continuity_warnings()` instead of returning `[]`.
+
+- **Diff parsing** — `CoderAgent._parse_diffs()` replaced with `parse_with_fallback()`
+  from `velune/execution/edit_formats/registry.py`.
+
+- **Plugins** — deleted `velune/plugins/schemas.py` (legacy `PluginManifest`); updated
+  `PluginRegistry` and `PluginLoader` to use `DeclarativePluginManifest` and an inline
+  `PluginManifest` dataclass respectively. Deleted `velune/context/window.py` (legacy
+  `ContextWindowTracker`); `estimate_tokens()` now lives in `token_counter.py`.
+
+### Fixed
+
+- **Intent classifier word boundaries** — `_score()` now uses `\b` anchors so
+  `"build"` no longer fires on `"rebuild"` and `"implement"` no longer fires on
+  `"implementation"`. Debug signals use substring matching to catch `"KeyError"` etc.
+
+- **`velune/plugins/registry.py`** — `register_plugin` now calls
+  `_extract_hook_names()` which handles both declarative (hooks JSON file) and legacy
+  (inline `hooks` list) manifest shapes.
+
+### Tests
+
+- `tests/test_intent.py` — 7 intent-type test classes + confidence + engine integration
+  tests (28 cases total).
+- `tests/test_council_runner.py` — happy path, revise-then-approve, reject-on-exhaustion,
+  failure isolation, `DebateSession` unit tests, helper function tests (21 cases).
+- Updated `tests/test_mcp_phase2.py` — `test_unsupported_transport_raises` replaced by
+  `test_returns_websocket_connection` now that WebSocket is implemented.
+
+---
+
 ## [Unreleased]
 
 ### Security
