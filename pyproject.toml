@@ -1,0 +1,284 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "velune-cli"
+dynamic = ["version"]
+description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+  { name = "Surya HA", email = "suryahariharan2006@gmail.com" }
+]
+keywords = [
+  "ai", "cli", "llm", "ollama", "local-ai",
+  "coding-assistant", "multi-agent", "terminal",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+  "Topic :: Terminals",
+  "Typing :: Typed",
+]
+
+dependencies = [
+    # Core
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "toml>=0.10.2",
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    "platformdirs>=4.2.0",
+    "keyring>=24.0.0",
+    "prompt-toolkit>=3.0.0",
+    "pathspec>=0.12.0",
+
+    # Providers
+    "openai>=1.10.0",
+    "anthropic>=0.18.0",
+    "httpx>=0.26.0",
+
+    # Memory
+    "aiosqlite>=0.19.0",
+    "qdrant-client>=1.7.0",
+    "lancedb>=0.5.0",
+    "pyarrow>=14.0.0",
+    "numpy>=1.24.0",
+
+    # Retrieval
+    "rank-bm25>=0.2.2",
+
+    # Repository
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
+    "tree-sitter-rust>=0.21.0",
+    "tree-sitter-go>=0.21.0",
+    "gitpython>=3.1.40",
+    "networkx>=3.2.0",
+
+    # Execution
+    "psutil>=5.9.0",
+
+    # Telemetry
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "opentelemetry-exporter-otlp>=1.22.0",
+    "structlog>=24.0.0",
+
+    # Utilities
+    "orjson>=3.9.0",
+    "tiktoken>=0.5.0",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+# GGUF metadata reading only — safe, no diskcache dependency
+gguf = ["gguf>=0.6.0"]
+# In-process GGUF inference via llama.cpp.
+# SECURITY ADVISORY: llama-cpp-python pulls in diskcache<=5.6.3 which has an
+# unsafe pickle deserialization issue (no patched version exists as of 2026-06).
+# An attacker with write access to the cache directory can achieve arbitrary
+# code execution. Only install in trusted, single-user environments.
+# See: https://github.com/advisories/GHSA-... (diskcache pickle RCE)
+llamacpp = ["llama-cpp-python>=0.2.0"]
+# Docker sandbox isolation — install to enable execution.docker_sandbox = true
+docker = ["docker>=7.0.0"]
+# 'all' deliberately excludes [llamacpp] due to the diskcache security advisory.
+all = ["velune-cli[gguf,docker]"]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.12.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-timeout>=2.2.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "pyright>=1.1.350",
+    "mypy>=1.8.0",
+    "coverage>=7.0.0",
+    "black>=23.12.0",
+    "pre-commit>=3.6.0",
+    "pip-audit>=2.6.0",
+    "bandit[toml]>=1.7.0",
+    "types-toml>=0.10.0",
+    "build>=1.0.0",
+    "twine>=4.0.0",
+]
+
+[project.scripts]
+velune = "velune.main:app"
+
+[project.urls]
+Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
+Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
+Documentation = "https://github.com/Surya-Hariharan/Velune-CLI/tree/main/docs"
+Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
+Changelog = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "velune/__init__.py"
+
+[tool.hatch.build]
+# Deterministic artifacts: Hatchling zeroes mtimes and sorts archive members.
+# When SOURCE_DATE_EPOCH is exported in CI the timestamps are pinned to the
+# commit date, so `python -m build` is byte-for-byte reproducible.
+reproducible = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["velune"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "velune/",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  "pyproject.toml",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]
+ignore = [
+    "E501",    # Line too long (handled by formatter)
+    "E402",    # Module level import not at top of file
+    "E701",    # Multiple statements on one line
+    "F403",    # Unable to detect undefined names from star imports
+    "F405",    # Name may be undefined from star imports
+    "N818",    # Exception name should be named with an Error suffix
+    "B008",    # Function call in default argument
+    "C901",    # Function is too complex
+    "B024",    # ABC has no abstract methods
+    "B904",    # raise ... from inside except clauses
+]
+
+[tool.ruff.lint.pep8-naming]
+extend-ignore-names = [
+    "visit_ClassDef",
+    "visit_Attribute",
+    "visit_FunctionDef",
+    "visit_Name",
+    "visit_Import",
+    "visit_ImportFrom",
+    "visit_AsyncFunctionDef",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["velune"]
+known-third-party = ["pydantic", "typer", "rich"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
+include = ["velune"]
+exclude = ["tests", "**/__pycache__"]
+reportMissingImports = false
+reportMissingTypeStubs = false
+reportUnusedImport = false
+reportUnusedVariable = false
+reportUnusedFunction = false
+reportGeneralTypeIssues = false
+reportOptionalMemberAccess = false
+reportOptionalIterable = false
+reportArgumentType = false
+reportCallIssue = false
+reportAttributeAccessIssue = false
+reportAssignmentType = false
+reportOperatorIssue = false
+reportIncompatibleMethodOverride = false
+reportPossiblyUnboundVariable = false
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+# Third-party dependencies that ship no type stubs / py.typed marker.
+[[tool.mypy.overrides]]
+module = [
+    "psutil",
+    "pynvml",
+    "rank_bm25",
+    "networkx",
+    "llama_cpp",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--tb=short --strict-markers -ra"
+timeout = 300
+timeout_method = "thread"
+markers = [
+    "integration: marks tests requiring real filesystem or subprocess",
+    "slow: marks tests taking > 1 second",
+    "critical: marks routing correctness tests that block CI if any fail",
+]
+
+[tool.bandit]
+# Scan velune/ only; tests legitimately exercise unsafe patterns.
+exclude_dirs = ["tests", ".venv", "build", "dist"]
+# B404/B603/B607: subprocess usage is intentional and hardened in
+# velune/execution/sandbox.py (shell=False, argv-only, env-scrubbed,
+# process-tree kill). B101 assert: not used for security control flow.
+skips = ["B101", "B404", "B603", "B607"]
+
+[tool.coverage.run]
+source = ["velune"]
+# Honest omit policy: we exclude ONLY surfaces that cannot be exercised by
+# unit tests without a live TTY, a background daemon, external network
+# services, or optional native wheels. Everything else — including the
+# security-critical execution, kernel, memory, and repository layers — is
+# measured and counts toward the enforced floor (see cov-fail-under in CI).
+omit = [
+    "velune/__main__.py",          # `python -m velune` entrypoint shim
+    "velune/main.py",              # Typer app wiring (interactive entrypoint)
+    "velune/cli/*",                # prompt-toolkit / Rich REPL — needs a TTY
+    "velune/daemon/*",             # long-lived background server process
+    "velune/mcp/*",                # stdio MCP servers — integration-only
+    "velune/plugins/*",            # dynamic third-party plugin loading
+    "velune/providers/discovery/*",  # probes live GPUs / Ollama / network
+    "velune/providers/ollama_manager.py",  # talks to a running Ollama daemon
+    "velune/telemetry/*",          # OTLP exporters — require a collector
+    "**/__pycache__/*",
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

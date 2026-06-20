@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "Surya-Hariharan"
+    allow:
+      - dependency-type: "all"
+    # Batch low-risk bumps into single PRs to cut review noise; majors stay
+    # individual so breaking changes get scrutinized one at a time.
+    groups:
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "python"
+      - dependency-name: "pip"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "Surya-Hariharan"
+    groups:
+      actions:
+        update-types:
+          - "minor"
+          - "patch"

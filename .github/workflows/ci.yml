@@ -1,0 +1,241 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default token: CI only needs to read the checkout. Any job
+# that requires more must opt in explicitly with its own permissions block.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pyright
+
+      - name: Ruff lint check
+        run: ruff check velune/
+
+      - name: Ruff format check
+        run: ruff format --check velune/
+
+      - name: Pyright type checking
+        run: pyright velune/
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit "bandit[toml]"
+          # Install the package so pip-audit sees velune's real runtime
+          # dependency closure, not just pip-audit's own deps.
+          pip install -e .
+
+      - name: Check for pip vulnerabilities
+        run: pip-audit
+
+      - name: Bandit static security scan
+        # Gate on medium+ severity & confidence; full low-severity report is
+        # printed for visibility but does not fail the build.
+        run: |
+          bandit -c pyproject.toml -r velune/ || true
+          bandit -c pyproject.toml -r velune/ --severity-level medium --confidence-level medium
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+
+      - name: Check for shell=True usage (P0-2 regression)
+        run: |
+          if grep -rn "shell=True" velune/ 2>/dev/null; then
+            echo "❌ FATAL: shell=True found in codebase (P0-2 regression)"
+            exit 1
+          fi
+          echo "✓ No shell=True found"
+          exit 0
+
+      - name: Check asyncio.run() count (P0-1 regression)
+        run: |
+          count=$(grep -rn "asyncio\.run(" velune/ | wc -l)
+          if [ "$count" -gt 1 ]; then
+            echo "❌ FATAL: Found $count asyncio.run() calls. Maximum is 1 (P0-1 regression)"
+            grep -rn "asyncio\.run(" velune/
+            exit 1
+          fi
+          echo "✓ asyncio.run() count is acceptable ($count)"
+          exit 0
+
+      - name: Security audit (sync-over-async + regression checks)
+        run: python scripts/security_audit.py
+
+
+  test:
+    name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install package with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run test suite with coverage
+        # Floor is a regression ratchet set just below the honest measured
+        # baseline (~21% across the full codebase under the minimal omit list
+        # in pyproject.toml). Raise it as real coverage grows; never inflate
+        # it by widening the omit list.
+        run: pytest tests/ -v --tb=short --cov=velune --cov-report=term-missing --cov-fail-under=20
+
+  build:
+    name: Build & Validate Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so SOURCE_DATE_EPOCH can be derived from the commit.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build sdist + wheel (reproducible)
+        run: |
+          # Pin archive timestamps to the commit date so builds are
+          # byte-for-byte reproducible (Hatchling honors SOURCE_DATE_EPOCH).
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          python -m build
+
+      - name: Validate metadata (twine check --strict)
+        run: twine check --strict dist/*
+
+      - name: Verify wheel is pure-python (no platform tag)
+        run: |
+          if ls dist/*.whl | grep -qv 'py3-none-any'; then
+            echo "❌ Expected a single pure-python (py3-none-any) wheel"
+            ls -lh dist/
+            exit 1
+          fi
+          echo "✓ Pure-python wheel: $(ls dist/*.whl)"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  install-smoke:
+    name: Wheel Install + REPL Smoke (${{ matrix.os }}, py${{ matrix.python-version }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.13"]
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install the built wheel into a clean environment
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          # Install the wheel (not the source tree) to verify the published
+          # artifact and its dependency closure resolve on every OS.
+          python -m pip install dist/*.whl
+
+      - name: REPL smoke test (entrypoint resolves, no import-time crash)
+        shell: bash
+        run: |
+          velune --version
+          velune --help
+          # The console-script and module form must agree.
+          python -m velune --version
+
+  ci-pass:
+    name: CI Pass
+    runs-on: ubuntu-latest
+    needs: [lint, security, test, build, install-smoke]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.security.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ] || \
+             [ "${{ needs.install-smoke.result }}" != "success" ]; then
+            echo "❌ One or more jobs failed"
+            exit 1
+          fi
+          echo "✓ All CI checks passed"
+          exit 0
+

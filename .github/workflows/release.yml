@@ -1,0 +1,171 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  ci:
+    name: Run CI Pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" ruff pyright pip-audit build wheel
+
+      - name: Ruff lint
+        run: ruff check velune/
+
+      - name: Ruff format
+        run: ruff format --check velune/
+
+      - name: Pyright
+        run: pyright velune/
+
+      - name: Security checks
+        run: |
+          pip-audit
+          if grep -rn "shell=True" velune/ 2>/dev/null; then
+            echo "❌ FATAL: shell=True found in codebase"
+            exit 1
+          fi
+          count=$(grep -rn "asyncio\.run(" velune/ | wc -l)
+          if [ "$count" -gt 1 ]; then
+            echo "❌ FATAL: Found $count asyncio.run() calls"
+            exit 1
+          fi
+
+
+  build:
+    name: Build Package
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Verify tag matches package version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          PKG="$(python -c 'import velune; print(velune.__version__)')"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "❌ Tag v$TAG does not match velune.__version__ ($PKG)"
+            exit 1
+          fi
+          echo "✓ Tag matches package version: $PKG"
+
+      - name: Build package (reproducible)
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          python -m build
+
+      - name: Validate metadata (twine check --strict)
+        run: twine check --strict dist/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # OIDC trusted publishing — no long-lived API token. Requires a PyPI
+    # publisher configured for this repo + the `pypi` environment.
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/project/velune-cli
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # No `password:` — the action exchanges the OIDC token for a
+          # short-lived PyPI credential automatically.
+          packages-dir: dist/
+
+  release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Extract changelog
+        id: changelog
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
+          {
+            echo "body<<CHANGELOG_EOF"
+            python -c 'import sys, textwrap; exec(textwrap.dedent(sys.argv[2]))' "$CLEAN_VERSION" '
+            import re, sys
+            from pathlib import Path
+            version = sys.argv[1]
+            changelog = Path("CHANGELOG.md")
+            if not changelog.exists():
+                print("Release " + version)
+                sys.exit(0)
+            text = changelog.read_text(encoding="utf-8")
+            pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                print(match.group(1).strip())
+            else:
+                print("Release " + version + " — see CHANGELOG.md for details.")
+            '
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

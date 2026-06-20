@@ -1,0 +1,119 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing & Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/
+
+# Type checking & Linting
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# Claude Code / AI tooling internals
+.claude/
+
+# Velune runtime/cache
+.velune/
+
+# Dev container
+.devcontainer/
+
+# Benchmarks
+.benchmarks/
+
+# Scripts (local utility scripts)
+scripts/*.sh
+scripts/*.ts
+
+# Project-specific
+examples/
+
+# Source code — not distributed via repository
+velune/
+tests/
+scripts/
+uv.lock
+MANIFEST.in
+
+# Secrets & credentials — never commit these
+.env
+.env.*
+*.env
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+config/local.py
+config/local.json
+local_settings.py
+
+# OS & system artifacts
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Distribution / packaging internals
+*.whl
+RECORD
+installer/
+
+# Profiling
+*.prof
+*.lprof
+
+# Jupyter (if any notebooks are local-only)
+.ipynb_checkpoints/
+
+# Node (if any frontend tooling)
+node_modules/
+package-lock.json
+yarn.lock

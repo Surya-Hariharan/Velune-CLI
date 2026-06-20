@@ -1,0 +1,96 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug.
+        Please fill in as much detail as possible so we can reproduce and fix it quickly.
+        **Security vulnerabilities must NOT be reported here — use [Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new) instead.**
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: When I run `velune run "..."`, the output is...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps to reproduce the behaviour.
+      placeholder: |
+        1. Run `velune workspace init`
+        2. Run `velune run "refactor X"`
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened? Include the full error message and traceback.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Velune version
+      description: Output of `velune --version` or the git SHA.
+      placeholder: "0.1.0 / abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: python
+    attributes:
+      label: Python version
+      options:
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - Other (specify in additional context)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Active model provider
+      description: e.g. Ollama (llama3.2), LM Studio, OpenAI, llama.cpp
+      placeholder: Ollama — qwen2.5-coder:7b
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: |
+        Attach relevant logs, config snippets, or screenshots.
+        Run `velune doctor check` and paste the output here if relevant.
