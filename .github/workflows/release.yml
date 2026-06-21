@@ -119,10 +119,8 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-          # When PYPI_API_TOKEN secret is set, uses API token auth.
-          # When secret is absent/empty, uses OIDC trusted publishing
-          # (requires a Trusted Publisher configured at pypi.org/manage/account/publishing/).
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          # Uses the PYPI_TOKEN repo secret for API token auth.
+          password: ${{ secrets.PYPI_TOKEN }}
 
   release:
     name: Create GitHub Release
