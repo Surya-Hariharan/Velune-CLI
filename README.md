@@ -211,7 +211,7 @@ to local hardware without sending your code to a third party.
 
 Run `velune mcp --help` for the server commands. Outbound connections to
 external MCP servers are trust-gated — see the
-[MCP trust gating](SECURITY.md#mcp-trust-gating) section of the security policy.
+[MCP trust gating](docs/SECURITY.md#mcp-trust-gating) section of the security policy.
 
 ---
 
@@ -219,17 +219,15 @@ external MCP servers are trust-gated — see the
 
 Velune runs natively on Windows (supporting native command execution sandboxing, local Ollama integration, and keyring credentials). It can also run via WSL2 if preferred.
 
-See [WINDOWS.md](WINDOWS.md) for the complete native Windows and WSL2 setup guides.
-
 ---
 
 ## Project docs
 
 | Doc | What's inside |
 | --- | --- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layering and import-boundary rules |
-| [SECURITY.md](SECURITY.md) / [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Security posture, trust boundaries, reporting |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup and contribution workflow |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security posture, trust boundaries, reporting |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Dev setup and contribution workflow |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Full version history |
 
 ---
 
@@ -265,8 +263,8 @@ pytest tests/ -q
 ```
 
 Report security issues via
-[GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new) —
-not public issues.
+[GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new)
+— not public issues.
 
 ---
 

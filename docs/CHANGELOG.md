@@ -7,7 +7,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [1.0.0] — 2026-06-20
+## [Unreleased]
+
+### Security
+
+- **Isolated `llama-cpp-python` from the default install set** to eliminate the
+  `diskcache ≤ 5.6.3` transitive vulnerability (unsafe pickle deserialization — no
+  patched version exists). The `[gguf]` optional extra now installs only the
+  `gguf` metadata library, which is unaffected. In-process GGUF inference is
+  available via the new `[llamacpp]` extra (`pip install 'velune-cli[llamacpp]'`),
+  which is deliberately excluded from `[all]`. `pip-audit` now reports
+  **no known vulnerabilities** on a default install. (`pyproject.toml`,
+  `velune/providers/adapters/llamacpp.py`)
 
 ### Added
 
@@ -36,67 +47,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **`/doctor` council panel** — new "Council" category in `velune doctor` output shows
   role assignment coverage (roles → model IDs) or warnings for unmapped roles.
   (`velune/cli/commands/doctor.py`)
-
-### Refactored
-
-- **`velune/cli/slash_dispatcher.py`** (new) — extracted `_build_registry` and
-  `_load_file_commands` from `VeluneREPL`. `repl.py` reduced by ~440 lines
-  (4,138 → 3,697).
-
-- **`velune/cli/stream_renderer.py`** (new) — extracted streaming / non-streaming
-  render loop from `_handle_prompt` into `StreamRenderer.render()` returning
-  `RenderResult(full_content, tokens_used, interrupted)`.
-
-- **Provider fallback** — `ProviderRouter.get_ordered_candidates()` returns all viable
-  candidates in capability-score order; `BaseCouncilAgent` iterates fallback providers
-  on failure.
-
-- **Lineage search** — `MemoryLifecycleCoordinator.get_lineage_warnings()` now
-  delegates to `LineageStore.query_continuity_warnings()` instead of returning `[]`.
-
-- **Diff parsing** — `CoderAgent._parse_diffs()` replaced with `parse_with_fallback()`
-  from `velune/execution/edit_formats/registry.py`.
-
-- **Plugins** — deleted `velune/plugins/schemas.py` (legacy `PluginManifest`); updated
-  `PluginRegistry` and `PluginLoader` to use `DeclarativePluginManifest` and an inline
-  `PluginManifest` dataclass respectively. Deleted `velune/context/window.py` (legacy
-  `ContextWindowTracker`); `estimate_tokens()` now lives in `token_counter.py`.
-
-### Fixed
-
-- **Intent classifier word boundaries** — `_score()` now uses `\b` anchors so
-  `"build"` no longer fires on `"rebuild"` and `"implement"` no longer fires on
-  `"implementation"`. Debug signals use substring matching to catch `"KeyError"` etc.
-
-- **`velune/plugins/registry.py`** — `register_plugin` now calls
-  `_extract_hook_names()` which handles both declarative (hooks JSON file) and legacy
-  (inline `hooks` list) manifest shapes.
-
-### Tests
-
-- `tests/test_intent.py` — 7 intent-type test classes + confidence + engine integration
-  tests (28 cases total).
-- `tests/test_council_runner.py` — happy path, revise-then-approve, reject-on-exhaustion,
-  failure isolation, `DebateSession` unit tests, helper function tests (21 cases).
-- Updated `tests/test_mcp_phase2.py` — `test_unsupported_transport_raises` replaced by
-  `test_returns_websocket_connection` now that WebSocket is implemented.
-
----
-
-## [Unreleased]
-
-### Security
-
-- **Isolated `llama-cpp-python` from the default install set** to eliminate the
-  `diskcache ≤ 5.6.3` transitive vulnerability (unsafe pickle deserialization — no
-  patched version exists). The `[gguf]` optional extra now installs only the
-  `gguf` metadata library, which is unaffected. In-process GGUF inference is
-  available via the new `[llamacpp]` extra (`pip install 'velune-cli[llamacpp]'`),
-  which is deliberately excluded from `[all]`. `pip-audit` now reports
-  **no known vulnerabilities** on a default install. (`pyproject.toml`,
-  `velune/providers/adapters/llamacpp.py`)
-
-### Added
 
 - **Async background tasks** — long `/run` tasks no longer block the REPL prompt.
   - `/run --bg <task>` submits a task to the background and returns immediately.
@@ -142,6 +92,31 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **52 new unit tests** covering loop detection, retry policy, job registry,
   proactive watcher, and dashboard builders (all passing).
 
+### Refactored
+
+- **`velune/cli/slash_dispatcher.py`** (new) — extracted `_build_registry` and
+  `_load_file_commands` from `VeluneREPL`. `repl.py` reduced by ~440 lines
+  (4,138 → 3,697).
+
+- **`velune/cli/stream_renderer.py`** (new) — extracted streaming / non-streaming
+  render loop from `_handle_prompt` into `StreamRenderer.render()` returning
+  `RenderResult(full_content, tokens_used, interrupted)`.
+
+- **Provider fallback** — `ProviderRouter.get_ordered_candidates()` returns all viable
+  candidates in capability-score order; `BaseCouncilAgent` iterates fallback providers
+  on failure.
+
+- **Lineage search** — `MemoryLifecycleCoordinator.get_lineage_warnings()` now
+  delegates to `LineageStore.query_continuity_warnings()` instead of returning `[]`.
+
+- **Diff parsing** — `CoderAgent._parse_diffs()` replaced with `parse_with_fallback()`
+  from `velune/execution/edit_formats/registry.py`.
+
+- **Plugins** — deleted `velune/plugins/schemas.py` (legacy `PluginManifest`); updated
+  `PluginRegistry` and `PluginLoader` to use `DeclarativePluginManifest` and an inline
+  `PluginManifest` dataclass respectively. Deleted `velune/context/window.py` (legacy
+  `ContextWindowTracker`); `estimate_tokens()` now lives in `token_counter.py`.
+
 ### Changed
 
 - `StatusBarState` gains `bg_job_count` and `alert_count` fields; `render_status_bar`
@@ -150,6 +125,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   service container at startup. (`velune/kernel/bootstrap.py`)
 - `_async_main()` now starts `ProactiveWatcher` after `lifecycle.startup()` and
   cleanly stops it in the `finally` block. (`velune/kernel/entrypoint.py`)
+
+### Fixed
+
+- **Intent classifier word boundaries** — `_score()` now uses `\b` anchors so
+  `"build"` no longer fires on `"rebuild"` and `"implement"` no longer fires on
+  `"implementation"`. Debug signals use substring matching to catch `"KeyError"` etc.
+
+- **`velune/plugins/registry.py`** — `register_plugin` now calls
+  `_extract_hook_names()` which handles both declarative (hooks JSON file) and legacy
+  (inline `hooks` list) manifest shapes.
+
+### Tests
+
+- `tests/test_intent.py` — 7 intent-type test classes + confidence + engine integration
+  tests (28 cases total).
+- `tests/test_council_runner.py` — happy path, revise-then-approve, reject-on-exhaustion,
+  failure isolation, `DebateSession` unit tests, helper function tests (21 cases).
+- Updated `tests/test_mcp_phase2.py` — `test_unsupported_transport_raises` replaced by
+  `test_returns_websocket_connection` now that WebSocket is implemented.
 
 ## [0.9.1] - 2026-06-14
 
