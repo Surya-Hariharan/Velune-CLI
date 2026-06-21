@@ -34,7 +34,7 @@ classifiers = [
 dependencies = [
     # Core
     "pydantic>=2.5.0",
-    "pydantic-settings>=2.1.0",
+    "pydantic-settings>=2.14.2",
     "toml>=0.10.2",
     "typer>=0.9.0",
     "rich>=13.7.0",
@@ -242,6 +242,11 @@ markers = [
     "slow: marks tests taking > 1 second",
     "critical: marks routing correctness tests that block CI if any fail",
 ]
+
+[tool.uv]
+# Security: force patched floors for transitive deps flagged by Dependabot.
+# msgpack <=1.2.0: GHSA-6v7p-g79w-8964 (out-of-bounds read / Unpacker reuse crash)
+constraint-dependencies = ["msgpack>=1.2.1"]
 
 [tool.bandit]
 # Scan velune/ only; tests legitimately exercise unsafe patterns.
