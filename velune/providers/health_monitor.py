@@ -83,6 +83,10 @@ class ProviderHealthMonitor:
             "huggingface",
             "lmstudio",
             "llamacpp",
+            "deepseek",
+            "mistral",
+            "cohere",
+            "nvidia",
         ]
 
         while self._running:

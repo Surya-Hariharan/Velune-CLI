@@ -36,6 +36,10 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "huggingface": "HF_TOKEN",
     "together": "TOGETHER_API_KEY",
     "fireworks": "FIREWORKS_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "cohere": "COHERE_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
 }
 
 _ENV_VARS = PROVIDER_ENV_VARS

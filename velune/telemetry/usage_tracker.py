@@ -1,15 +1,15 @@
-"""Token and cost tracking for sessions.
+"""Provider-aware token and cost tracking for sessions.
 
-Tracks:
-- Token usage per model
-- Estimated costs per session
-- Cross-session analytics
+Schema v2 adds:
+- provider_id column for per-provider analytics
+- latency_ms column for performance tracking
+- success column and error_code for failure analysis
 """
 
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
@@ -18,31 +18,168 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Cost estimates per 1M tokens (approximate)
-DEFAULT_COSTS = {
+# Cost per 1M tokens (input, output) in USD — updated June 2026
+PROVIDER_COSTS: dict[str, dict[str, dict[str, float]]] = {
+    "anthropic": {
+        "claude-opus-4-5": {"input": 15.0, "output": 75.0},
+        "claude-opus-4-8": {"input": 15.0, "output": 75.0},
+        "claude-sonnet-4-5": {"input": 3.0, "output": 15.0},
+        "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
+        "claude-haiku-4-5": {"input": 0.80, "output": 4.0},
+        "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
+    },
+    "openai": {
+        "gpt-4o": {"input": 5.0, "output": 15.0},
+        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+        "o1": {"input": 15.0, "output": 60.0},
+        "o1-mini": {"input": 3.0, "output": 12.0},
+        "gpt-4-turbo": {"input": 10.0, "output": 30.0},
+        "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+    },
+    "google": {
+        "gemini-2.0-flash": {"input": 0.075, "output": 0.30},
+        "gemini-2.0-flash-exp": {"input": 0.0, "output": 0.0},
+        "gemini-1.5-pro": {"input": 3.50, "output": 10.50},
+        "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+        "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
+    },
+    "groq": {
+        # Groq free tier — $0 for public models
+        "llama-3.3-70b-versatile": {"input": 0.0, "output": 0.0},
+        "llama-3.1-8b-instant": {"input": 0.0, "output": 0.0},
+        "mixtral-8x7b-32768": {"input": 0.0, "output": 0.0},
+        "gemma2-9b-it": {"input": 0.0, "output": 0.0},
+    },
+    "xai": {
+        "grok-2": {"input": 2.0, "output": 10.0},
+        "grok-2-mini": {"input": 0.20, "output": 1.0},
+        "grok-beta": {"input": 5.0, "output": 15.0},
+    },
+    "deepseek": {
+        "deepseek-chat": {"input": 0.14, "output": 0.28},
+        "deepseek-reasoner": {"input": 0.55, "output": 2.19},
+    },
+    "mistral": {
+        "mistral-large-latest": {"input": 2.0, "output": 6.0},
+        "mistral-small-latest": {"input": 0.20, "output": 0.60},
+        "codestral-latest": {"input": 0.30, "output": 0.90},
+        "mistral-nemo": {"input": 0.15, "output": 0.15},
+    },
+    "cohere": {
+        "command-r-plus-08-2024": {"input": 2.50, "output": 10.0},
+        "command-r-08-2024": {"input": 0.15, "output": 0.60},
+    },
+    "nvidia": {
+        "meta/llama-3.3-70b-instruct": {"input": 0.27, "output": 0.27},
+        "mistralai/mistral-large-2-instruct": {"input": 2.0, "output": 6.0},
+        "nvidia/llama-3.1-nemotron-70b-instruct": {"input": 0.35, "output": 0.35},
+    },
+    "together": {
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo": {"input": 0.88, "output": 0.88},
+        "mistralai/Mistral-7B-Instruct-v0.3": {"input": 0.20, "output": 0.20},
+        "Qwen/Qwen2.5-72B-Instruct-Turbo": {"input": 1.20, "output": 1.20},
+    },
+    "fireworks": {
+        "accounts/fireworks/models/llama-v3p3-70b-instruct": {"input": 0.90, "output": 0.90},
+        "accounts/fireworks/models/mixtral-8x22b-instruct": {"input": 1.20, "output": 1.20},
+    },
+    "openrouter": {},  # Dynamic — populated from model metadata at runtime
+    "ollama": {},      # Local — always free
+    "lmstudio": {},    # Local — always free
+    "huggingface": {}, # Inference API — complex pricing, treat as $0 for tracking
+}
+
+_FALLBACK_COSTS: dict[str, dict[str, float]] = {
+    # Fallback prefix matching when exact model ID is not in the table
     "claude-opus": {"input": 15.0, "output": 75.0},
     "claude-sonnet": {"input": 3.0, "output": 15.0},
     "claude-haiku": {"input": 0.80, "output": 4.0},
-    "gpt-4": {"input": 30.0, "output": 60.0},
-    "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4o": {"input": 5.0, "output": 15.0},
+    "gpt-4": {"input": 10.0, "output": 30.0},
+    "gpt-3.5": {"input": 0.50, "output": 1.50},
+    "gemini-2.0": {"input": 0.075, "output": 0.30},
+    "gemini-1.5": {"input": 3.50, "output": 10.50},
+    "deepseek": {"input": 0.14, "output": 0.28},
+    "mistral": {"input": 0.20, "output": 0.60},
+    "llama": {"input": 0.27, "output": 0.27},
 }
 
 
 @dataclass
+class UsageEvent:
+    """A single model completion event for the analytics pipeline."""
+
+    provider_id: str
+    model_id: str
+    session_id: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float = 0.0
+    success: bool = True
+    error_code: str | None = None
+    cost_usd: float | None = None
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+    def __post_init__(self) -> None:
+        if self.cost_usd is None:
+            self.cost_usd = _estimate_cost(self.provider_id, self.model_id,
+                                           self.input_tokens, self.output_tokens)
+
+
+@dataclass
 class UsageRecord:
-    """Single record of model usage."""
+    """Single record of model usage (DB row)."""
 
     session_id: str
     timestamp: str
+    provider_id: str
     model: str
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    latency_ms: float = 0.0
+    success: bool = True
+    error_code: str | None = None
     estimated_cost: float | None = None
 
 
 @dataclass
-class UsageSummary:
+class ProviderUsage:
+    """Aggregate usage statistics for a single provider."""
+
+    provider_id: str
+    requests: int = 0
+    successes: int = 0
+    failures: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    avg_latency_ms: float = 0.0
+    models_used: list[str] = field(default_factory=list)
+
+    @property
+    def success_rate(self) -> float:
+        return (self.successes / self.requests * 100) if self.requests else 0.0
+
+
+@dataclass
+class ModelUsage:
+    """Aggregate usage statistics for a single model."""
+
+    model_id: str
+    provider_id: str
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    avg_latency_ms: float = 0.0
+
+
+@dataclass
+class SessionUsage:
     """Summary of usage for a session."""
 
     session_id: str
@@ -50,52 +187,151 @@ class UsageSummary:
     total_cost: float | None
     total_input_tokens: int
     total_output_tokens: int
-    model_breakdown: dict[str, int]  # {model: total_tokens}
+    model_breakdown: dict[str, int]
+    provider_breakdown: dict[str, int]
     record_count: int
     start_time: str
     end_time: str
 
 
+@dataclass
+class UsageSummary:
+    """Alias kept for backwards compatibility."""
+
+    session_id: str
+    total_tokens: int
+    total_cost: float | None
+    total_input_tokens: int
+    total_output_tokens: int
+    model_breakdown: dict[str, int]
+    record_count: int
+    start_time: str
+    end_time: str
+
+
+def _estimate_cost(
+    provider_id: str, model_id: str, input_tokens: int, output_tokens: int
+) -> float | None:
+    """Return estimated USD cost or None for free/unknown providers."""
+    if provider_id in ("ollama", "lmstudio", "llamacpp"):
+        return 0.0
+
+    # Exact match first
+    provider_table = PROVIDER_COSTS.get(provider_id, {})
+    rates = provider_table.get(model_id)
+
+    # Prefix match fallback
+    if rates is None:
+        model_lower = model_id.lower()
+        for prefix, r in _FALLBACK_COSTS.items():
+            if prefix.lower() in model_lower:
+                rates = r
+                break
+
+    if rates is None:
+        return None
+
+    input_cost = (input_tokens / 1_000_000) * rates["input"]
+    output_cost = (output_tokens / 1_000_000) * rates["output"]
+    return input_cost + output_cost
+
+
 class SessionUsageTracker:
-    """Tracks token and cost usage per session."""
+    """Tracks token and cost usage per session with full provider attribution."""
+
+    _SCHEMA_VERSION = 2
 
     def __init__(self, db_path: Path | None = None) -> None:
-        """Initialize tracker with SQLite database.
-
-        Args:
-            db_path: Path to SQLite database (default: ~/.velune/telemetry/usage.db)
-        """
         if db_path is None:
             db_path = Path.home() / ".velune" / "telemetry" / "usage.db"
-
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
         self._lock = Lock()
-
-        # Initialize database
         self._init_db()
 
     def _init_db(self) -> None:
-        """Initialize SQLite schema."""
         with sqlite3.connect(self.db_path) as conn:
+            # Main records table — v2 schema with provider_id, latency, success columns
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS usage_records (
-                    id INTEGER PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    input_tokens INTEGER NOT NULL,
-                    output_tokens INTEGER NOT NULL,
-                    total_tokens INTEGER NOT NULL,
+                    id          INTEGER PRIMARY KEY,
+                    session_id  TEXT    NOT NULL,
+                    timestamp   TEXT    NOT NULL,
+                    provider_id TEXT    NOT NULL DEFAULT '',
+                    model       TEXT    NOT NULL,
+                    input_tokens  INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens  INTEGER NOT NULL DEFAULT 0,
+                    latency_ms    REAL    NOT NULL DEFAULT 0,
+                    success       INTEGER NOT NULL DEFAULT 1,
+                    error_code    TEXT,
                     estimated_cost REAL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON usage_records(session_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)")
+            # Migrate v1 → v2: add missing columns if absent
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(usage_records)")}
+            for col, defn in [
+                ("provider_id", "TEXT NOT NULL DEFAULT ''"),
+                ("latency_ms", "REAL NOT NULL DEFAULT 0"),
+                ("success", "INTEGER NOT NULL DEFAULT 1"),
+                ("error_code", "TEXT"),
+            ]:
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE usage_records ADD COLUMN {col} {defn}")
+
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_session_id ON usage_records(session_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_provider ON usage_records(provider_id)"
+            )
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Write
+    # ------------------------------------------------------------------
+
+    def record_event(self, event: UsageEvent) -> None:
+        """Record a :class:`UsageEvent` from the analytics pipeline."""
+        total = event.input_tokens + event.output_tokens
+        with self._lock:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO usage_records
+                    (session_id, timestamp, provider_id, model,
+                     input_tokens, output_tokens, total_tokens,
+                     latency_ms, success, error_code, estimated_cost)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.session_id,
+                        event.timestamp,
+                        event.provider_id,
+                        event.model_id,
+                        event.input_tokens,
+                        event.output_tokens,
+                        total,
+                        event.latency_ms,
+                        1 if event.success else 0,
+                        event.error_code,
+                        event.cost_usd,
+                    ),
+                )
+                conn.commit()
+        logger.debug(
+            "Usage event recorded",
+            provider=event.provider_id,
+            model=event.model_id,
+            tokens=total,
+            cost=event.cost_usd,
+        )
 
     def record_completion(
         self,
@@ -103,179 +339,235 @@ class SessionUsageTracker:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        provider_id: str = "",
+        latency_ms: float = 0.0,
+        success: bool = True,
+        error_code: str | None = None,
     ) -> None:
-        """Record a model completion.
-
-        Args:
-            session_id: Session identifier
-            model: Model name (e.g., "claude-opus")
-            input_tokens: Input tokens used
-            output_tokens: Output tokens used
-        """
+        """Record a model completion (backwards-compatible API)."""
         total_tokens = input_tokens + output_tokens
-        estimated_cost = self._estimate_cost(model, input_tokens, output_tokens)
-
-        record = UsageRecord(
-            session_id=session_id,
-            timestamp=datetime.utcnow().isoformat(),
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            estimated_cost=estimated_cost,
-        )
+        estimated_cost = _estimate_cost(provider_id, model, input_tokens, output_tokens)
 
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     """
                     INSERT INTO usage_records
-                    (session_id, timestamp, model, input_tokens, output_tokens, total_tokens, estimated_cost)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (session_id, timestamp, provider_id, model,
+                     input_tokens, output_tokens, total_tokens,
+                     latency_ms, success, error_code, estimated_cost)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        record.session_id,
-                        record.timestamp,
-                        record.model,
-                        record.input_tokens,
-                        record.output_tokens,
-                        record.total_tokens,
-                        record.estimated_cost,
+                        session_id,
+                        datetime.utcnow().isoformat(),
+                        provider_id,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                        latency_ms,
+                        1 if success else 0,
+                        error_code,
+                        estimated_cost,
                     ),
                 )
                 conn.commit()
 
-        logger.debug(
-            "Usage recorded",
-            session_id=session_id,
-            model=model,
-            tokens=total_tokens,
-            cost=estimated_cost,
-        )
+    # ------------------------------------------------------------------
+    # Session queries
+    # ------------------------------------------------------------------
 
     def get_session_total_tokens(self, session_id: str) -> int:
-        """Get total tokens used in a session."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
+            row = conn.execute(
                 "SELECT SUM(total_tokens) FROM usage_records WHERE session_id = ?",
                 (session_id,),
-            )
-            result = cursor.fetchone()
-            return result[0] if result and result[0] else 0
+            ).fetchone()
+            return row[0] if row and row[0] else 0
 
     def get_session_estimated_cost(self, session_id: str) -> float | None:
-        """Get estimated total cost for a session."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
+            row = conn.execute(
                 "SELECT SUM(estimated_cost) FROM usage_records WHERE session_id = ?",
                 (session_id,),
-            )
-            result = cursor.fetchone()
-            return result[0] if result and result[0] else None
+            ).fetchone()
+            return row[0] if row and row[0] else None
 
     def get_session_summary(self, session_id: str) -> UsageSummary | None:
-        """Get complete summary for a session."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
+            row = conn.execute(
                 """
-                SELECT
-                    SUM(total_tokens) as total_tokens,
-                    SUM(estimated_cost) as total_cost,
-                    SUM(input_tokens) as input_tokens,
-                    SUM(output_tokens) as output_tokens,
-                    COUNT(*) as record_count,
-                    MIN(timestamp) as start_time,
-                    MAX(timestamp) as end_time
+                SELECT SUM(total_tokens), SUM(estimated_cost),
+                       SUM(input_tokens), SUM(output_tokens),
+                       COUNT(*), MIN(timestamp), MAX(timestamp)
                 FROM usage_records
                 WHERE session_id = ?
                 """,
                 (session_id,),
-            )
-            row = cursor.fetchone()
+            ).fetchone()
 
             if not row or row[0] is None:
                 return None
 
-            # Get model breakdown
-            cursor = conn.execute(
+            model_rows = conn.execute(
                 """
                 SELECT model, SUM(total_tokens)
-                FROM usage_records
-                WHERE session_id = ?
+                FROM usage_records WHERE session_id = ?
                 GROUP BY model
                 """,
                 (session_id,),
-            )
-            model_breakdown = {row[0]: row[1] for row in cursor.fetchall()}
+            ).fetchall()
 
-            return UsageSummary(
-                session_id=session_id,
-                total_tokens=row[0],
-                total_cost=row[1],
-                total_input_tokens=row[2],
-                total_output_tokens=row[3],
-                model_breakdown=model_breakdown,
-                record_count=row[4],
-                start_time=row[5],
-                end_time=row[6],
-            )
+        return UsageSummary(
+            session_id=session_id,
+            total_tokens=row[0],
+            total_cost=row[1],
+            total_input_tokens=row[2],
+            total_output_tokens=row[3],
+            model_breakdown={r[0]: r[1] for r in model_rows},
+            record_count=row[4],
+            start_time=row[5],
+            end_time=row[6],
+        )
 
-    def get_recent_sessions(self, days: int = 7) -> list[UsageSummary]:
-        """Get summaries for sessions in the last N days."""
-        cutoff = datetime.utcnow() - timedelta(days=days)
+    # ------------------------------------------------------------------
+    # Provider-level analytics
+    # ------------------------------------------------------------------
 
+    def get_provider_usage(self, days: int = 30) -> list[ProviderUsage]:
+        """Return per-provider usage aggregated over the last *days* days."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                SELECT DISTINCT session_id
-                FROM usage_records
-                WHERE timestamp > ?
-                ORDER BY timestamp DESC
-                """,
-                (cutoff.isoformat(),),
-            )
-
-            sessions = [row[0] for row in cursor.fetchall()]
-
-        summaries = []
-        for session_id in sessions:
-            summary = self.get_session_summary(session_id)
-            if summary:
-                summaries.append(summary)
-
-        return summaries
-
-    def get_stats_last_n_days(self, days: int = 7) -> dict[str, any]:
-        """Get aggregated stats for last N days."""
-        cutoff = datetime.utcnow() - timedelta(days=days)
-
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
+            rows = conn.execute(
                 """
                 SELECT
-                    COUNT(DISTINCT session_id) as session_count,
-                    SUM(total_tokens) as total_tokens,
-                    SUM(estimated_cost) as total_cost,
-                    COUNT(*) as completion_count
+                    provider_id,
+                    COUNT(*)                    AS requests,
+                    SUM(success)                AS successes,
+                    SUM(1 - success)            AS failures,
+                    SUM(input_tokens)           AS input_tokens,
+                    SUM(output_tokens)          AS output_tokens,
+                    SUM(total_tokens)           AS total_tokens,
+                    SUM(estimated_cost)         AS cost_usd,
+                    AVG(latency_ms)             AS avg_latency_ms
                 FROM usage_records
                 WHERE timestamp > ?
+                GROUP BY provider_id
+                ORDER BY SUM(total_tokens) DESC
                 """,
-                (cutoff.isoformat(),),
-            )
-            row = cursor.fetchone()
+                (cutoff,),
+            ).fetchall()
 
-            cursor = conn.execute(
+            result: list[ProviderUsage] = []
+            for row in rows:
+                pid = row[0] or "unknown"
+                # Fetch distinct models used
+                model_rows = conn.execute(
+                    """
+                    SELECT DISTINCT model FROM usage_records
+                    WHERE provider_id = ? AND timestamp > ?
+                    """,
+                    (pid, cutoff),
+                ).fetchall()
+                result.append(
+                    ProviderUsage(
+                        provider_id=pid,
+                        requests=row[1] or 0,
+                        successes=row[2] or 0,
+                        failures=row[3] or 0,
+                        input_tokens=row[4] or 0,
+                        output_tokens=row[5] or 0,
+                        total_tokens=row[6] or 0,
+                        cost_usd=row[7] or 0.0,
+                        avg_latency_ms=row[8] or 0.0,
+                        models_used=[r[0] for r in model_rows],
+                    )
+                )
+        return result
+
+    def get_model_usage(self, days: int = 30) -> list[ModelUsage]:
+        """Return per-model usage aggregated over the last *days* days."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    model,
+                    provider_id,
+                    COUNT(*)                    AS requests,
+                    SUM(input_tokens)           AS input_tokens,
+                    SUM(output_tokens)          AS output_tokens,
+                    SUM(total_tokens)           AS total_tokens,
+                    SUM(estimated_cost)         AS cost_usd,
+                    AVG(latency_ms)             AS avg_latency_ms
+                FROM usage_records
+                WHERE timestamp > ?
+                GROUP BY model, provider_id
+                ORDER BY SUM(total_tokens) DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+
+        return [
+            ModelUsage(
+                model_id=row[0],
+                provider_id=row[1] or "unknown",
+                requests=row[2] or 0,
+                input_tokens=row[3] or 0,
+                output_tokens=row[4] or 0,
+                total_tokens=row[5] or 0,
+                cost_usd=row[6] or 0.0,
+                avg_latency_ms=row[7] or 0.0,
+            )
+            for row in rows
+        ]
+
+    def get_total_cost(self, days: int = 30) -> float:
+        """Return total estimated cost over *days* days."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT SUM(estimated_cost) FROM usage_records WHERE timestamp > ?",
+                (cutoff,),
+            ).fetchone()
+        return row[0] or 0.0
+
+    # ------------------------------------------------------------------
+    # Historical queries (kept from v1)
+    # ------------------------------------------------------------------
+
+    def get_recent_sessions(self, days: int = 7) -> list[UsageSummary]:
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            session_ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT DISTINCT session_id FROM usage_records WHERE timestamp > ? ORDER BY timestamp DESC",
+                    (cutoff,),
+                ).fetchall()
+            ]
+        return [s for s_id in session_ids if (s := self.get_session_summary(s_id))]
+
+    def get_stats_last_n_days(self, days: int = 7) -> dict:
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT session_id), SUM(total_tokens),
+                       SUM(estimated_cost), COUNT(*)
+                FROM usage_records WHERE timestamp > ?
+                """,
+                (cutoff,),
+            ).fetchone()
+            most_used = conn.execute(
                 """
                 SELECT model, SUM(total_tokens)
-                FROM usage_records
-                WHERE timestamp > ?
-                GROUP BY model
-                ORDER BY SUM(total_tokens) DESC
-                LIMIT 1
+                FROM usage_records WHERE timestamp > ?
+                GROUP BY model ORDER BY SUM(total_tokens) DESC LIMIT 1
                 """,
-                (cutoff.isoformat(),),
-            )
-            most_used = cursor.fetchone()
+                (cutoff,),
+            ).fetchone()
 
         return {
             "days": days,
@@ -287,54 +579,52 @@ class SessionUsageTracker:
             "most_used_model_tokens": most_used[1] if most_used else 0,
         }
 
-    def _estimate_cost(
-        self,
-        model: str,
-        input_tokens: int,
-        output_tokens: int,
-    ) -> float | None:
-        """Estimate cost for a completion.
-
-        Uses DEFAULT_COSTS table. Returns None if model not found.
-        """
-        # Normalize model name
-        model_lower = model.lower()
-        for key in DEFAULT_COSTS:
-            if key.lower() in model_lower or model_lower in key.lower():
-                costs = DEFAULT_COSTS[key]
-                input_cost = (input_tokens / 1_000_000) * costs["input"]
-                output_cost = (output_tokens / 1_000_000) * costs["output"]
-                return input_cost + output_cost
-
-        # Unknown model
-        return None
-
     def cleanup_old_records(self, days: int = 90) -> int:
-        """Delete records older than N days. Returns count deleted."""
-        cutoff = datetime.utcnow() - timedelta(days=days)
-
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
-                    "DELETE FROM usage_records WHERE timestamp < ?",
-                    (cutoff.isoformat(),),
+                    "DELETE FROM usage_records WHERE timestamp < ?", (cutoff,)
                 )
                 count = cursor.rowcount
                 conn.commit()
-
         if count > 0:
             logger.info("Cleaned up old usage records", count=count, days_old=days)
-
         return count
 
 
-# Global instance
+# ---------------------------------------------------------------------------
+# Global singleton
+# ---------------------------------------------------------------------------
+
 _tracker: SessionUsageTracker | None = None
 
 
 def get_tracker() -> SessionUsageTracker:
-    """Get or create global usage tracker instance."""
     global _tracker
     if _tracker is None:
         _tracker = SessionUsageTracker()
     return _tracker
+
+
+def record_usage(
+    session_id: str,
+    provider_id: str,
+    model_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    latency_ms: float = 0.0,
+    success: bool = True,
+    error_code: str | None = None,
+) -> None:
+    """Convenience one-liner for the runtime to record a completion."""
+    get_tracker().record_completion(
+        session_id=session_id,
+        model=model_id,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        provider_id=provider_id,
+        latency_ms=latency_ms,
+        success=success,
+        error_code=error_code,
+    )

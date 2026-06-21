@@ -1,4 +1,4 @@
-"""Interactive provider setup wizard — stores keys in the OS keychain."""
+"""Interactive provider setup wizard — validates API keys before storing them."""
 
 from __future__ import annotations
 
@@ -18,6 +18,12 @@ PROVIDER_METADATA: dict[str, dict] = {
         "requires_key": False,
         "free": True,
         "url": "https://ollama.com",
+    },
+    "lmstudio": {
+        "label": "LM Studio (local — free, no key needed)",
+        "requires_key": False,
+        "free": True,
+        "url": "https://lmstudio.ai",
     },
     "groq": {
         "label": "Groq (cloud — free tier, very fast)",
@@ -40,13 +46,6 @@ PROVIDER_METADATA: dict[str, dict] = {
         "key_label": "Anthropic API key",
         "get_key_url": "https://console.anthropic.com",
     },
-    "xai": {
-        "label": "xAI (cloud — Grok, paid)",
-        "requires_key": True,
-        "free": False,
-        "key_label": "xAI API key",
-        "get_key_url": "https://console.x.ai",
-    },
     "google": {
         "label": "Google Gemini (cloud — 2.0 Flash free quota)",
         "requires_key": True,
@@ -61,6 +60,34 @@ PROVIDER_METADATA: dict[str, dict] = {
         "key_label": "OpenRouter API key",
         "get_key_url": "https://openrouter.ai/keys",
     },
+    "deepseek": {
+        "label": "DeepSeek (cloud — DeepSeek Chat & R1, very cheap)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "DeepSeek API key",
+        "get_key_url": "https://platform.deepseek.com/api_keys",
+    },
+    "mistral": {
+        "label": "Mistral AI (cloud — Mistral Large & Codestral)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "Mistral API key",
+        "get_key_url": "https://console.mistral.ai/api-keys",
+    },
+    "cohere": {
+        "label": "Cohere (cloud — Command R+, enterprise RAG)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "Cohere API key",
+        "get_key_url": "https://dashboard.cohere.com/api-keys",
+    },
+    "nvidia": {
+        "label": "NVIDIA NIM (cloud — Llama, Nemotron, Mistral on GPU)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "NVIDIA API key",
+        "get_key_url": "https://build.nvidia.com/",
+    },
     "together": {
         "label": "Together.AI (cloud — Llama, Qwen, DeepSeek, cheap)",
         "requires_key": True,
@@ -74,6 +101,20 @@ PROVIDER_METADATA: dict[str, dict] = {
         "free": False,
         "key_label": "Fireworks.AI API key",
         "get_key_url": "https://fireworks.ai/account/api-keys",
+    },
+    "xai": {
+        "label": "xAI (cloud — Grok, paid)",
+        "requires_key": True,
+        "free": False,
+        "key_label": "xAI API key",
+        "get_key_url": "https://console.x.ai",
+    },
+    "huggingface": {
+        "label": "HuggingFace (cloud — Inference API)",
+        "requires_key": True,
+        "free": True,
+        "key_label": "HuggingFace token",
+        "get_key_url": "https://huggingface.co/settings/tokens",
     },
 }
 
@@ -108,11 +149,21 @@ def run_setup_wizard() -> None:
 
     configured: list[str] = []
 
+    # Local providers — validate reachability
     for pid in no_key:
         meta = PROVIDER_METADATA[pid]
-        console.print(f"[{design.OK}]✓[/{design.OK}] {meta['label']} — no key required")
-        configured.append(pid)
+        console.print(f"\n[{design.INFO}]{meta['label']}[/{design.INFO}]")
+        with console.status(f"  [{design.MUTED}]Checking {pid} server...[/{design.MUTED}]"):
+            result = _validate_sync(pid, "")
+        if result.ok:
+            console.print(f"  [{design.OK}]✓ {result.human_message()}[/{design.OK}]")
+            configured.append(pid)
+        else:
+            console.print(f"  [{design.WARN}]{result.human_message()}[/{design.WARN}]")
+            # Still add it — server might start later
+            configured.append(pid)
 
+    # Cloud providers — prompt for key, validate, then save
     for pid in needs_key:
         meta = PROVIDER_METADATA[pid]
         step += 1
@@ -142,9 +193,36 @@ def run_setup_wizard() -> None:
             console.print(f"  [{design.WARN}]Skipped — no key entered.[/{design.WARN}]")
             continue
 
-        save_key(pid, key.strip())
-        console.print(f"  [{design.OK}]✓ Saved to OS keychain[/{design.OK}]")
-        configured.append(pid)
+        key = key.strip()
+
+        # Validate before saving
+        with console.status(f"  [{design.MUTED}]Validating key...[/{design.MUTED}]"):
+            result = _validate_sync(pid, key)
+
+        if result.ok:
+            save_key(pid, key)
+            console.print(f"  [{design.OK}]✓ {result.human_message()}[/{design.OK}]")
+            if result.models:
+                _show_models_preview(result.models[:8])
+            configured.append(pid)
+        else:
+            console.print(f"  [{design.ERR if hasattr(design, 'ERR') else design.WARN}]{result.human_message()}[/{design.ERR if hasattr(design, 'ERR') else design.WARN}]")
+
+            # Give the user a chance to retry or skip
+            if result.status.value not in ("network_error",):
+                retry = Confirm.ask("  Save anyway? (not recommended)", default=False)
+                if retry:
+                    save_key(pid, key)
+                    console.print(f"  [{design.WARN}]⚠ Key saved without validation.[/{design.WARN}]")
+                    configured.append(pid)
+                else:
+                    console.print(f"  [{design.MUTED}]Skipped.[/{design.MUTED}]")
+            else:
+                save_anyway = Confirm.ask("  Save key for later (network may be offline)?", default=True)
+                if save_anyway:
+                    save_key(pid, key)
+                    console.print(f"  [{design.WARN}]⚠ Key saved (not validated — check network).[/{design.WARN}]")
+                    configured.append(pid)
 
     console.print()
     if configured:
@@ -154,6 +232,21 @@ def run_setup_wizard() -> None:
         console.print(
             f"[{design.MUTED}]Run `velune doctor` to verify connectivity.[/{design.MUTED}]"
         )
+
+
+def _validate_sync(provider_id: str, api_key: str):
+    """Run validation synchronously from the wizard context."""
+    from velune.providers.validation import validate_provider_sync
+    return validate_provider_sync(provider_id, api_key)
+
+
+def _show_models_preview(models: list[str]) -> None:
+    if not models:
+        return
+    preview = ", ".join(models[:5])
+    if len(models) > 5:
+        preview += f" +{len(models) - 5} more"
+    console.print(f"  [{design.MUTED}]Models: {preview}[/{design.MUTED}]")
 
 
 def _select_providers() -> list[str]:

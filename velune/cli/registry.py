@@ -16,15 +16,22 @@ from velune.cli.commands import (
     context_cmd,
     daemon_cmd,
     doctor_cmd,
+    health_cmd,
+    health_command,
     init_command,
     mcp_cmd,
     memory_cmd,
     models_cmd,
+    provider_cmd,
+    quota_cmd,
+    quota_command,
     retrieval_cmd,
     run_command,
     session_cmd,
     setup_command,
     trace_cmd,
+    usage_cmd,
+    usage_command,
     workspace_cmd,
 )
 from velune.kernel.registry import ServiceContainer
@@ -97,11 +104,23 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
         rich_help_panel=_SETUP,
     )
     app.add_typer(
+        provider_cmd,
+        name="provider",
+        help="Manage AI providers — add, remove, test, list, and check status.",
+        rich_help_panel=_SETUP,
+    )
+    app.add_typer(
         config_cmd,
         name="config",
         help="Read and write velune.toml settings.",
         rich_help_panel=_SETUP,
     )
+
+    # ── Analytics & Monitoring ────────────────────────────────────────────
+    _ANALYTICS = "Analytics & Monitoring"
+    app.command(name="usage", rich_help_panel=_ANALYTICS)(usage_command)
+    app.command(name="quota", rich_help_panel=_ANALYTICS)(quota_command)
+    app.command(name="health", rich_help_panel=_ANALYTICS)(health_command)
 
     # ── Diagnostics ───────────────────────────────────────────────────────
     app.add_typer(

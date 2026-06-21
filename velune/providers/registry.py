@@ -169,6 +169,34 @@ class ProviderRegistry:
             ),
         )
 
+        self.register_factory(
+            "deepseek",
+            self._keyed_factory(
+                "velune.providers.adapters.deepseek", "DeepSeekProvider", "deepseek"
+            ),
+        )
+
+        self.register_factory(
+            "mistral",
+            self._keyed_factory(
+                "velune.providers.adapters.mistral", "MistralProvider", "mistral"
+            ),
+        )
+
+        self.register_factory(
+            "cohere",
+            self._keyed_factory(
+                "velune.providers.adapters.cohere", "CohereProvider", "cohere"
+            ),
+        )
+
+        self.register_factory(
+            "nvidia",
+            self._keyed_factory(
+                "velune.providers.adapters.nvidia", "NVIDIAProvider", "nvidia"
+            ),
+        )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
