@@ -762,7 +762,8 @@ class CouncilOrchestrator:
                 _assignment_str = "  |  ".join(
                     f"{_role.value}: {_desc.model_id}" for _role, _desc in _role_map.items()
                 )
-                progress_callback(f"[Model Assignment] {_assignment_str}")
+                if progress_callback is not None:
+                    progress_callback(f"[Model Assignment] {_assignment_str}")
             except Exception:
                 pass
 

@@ -45,7 +45,7 @@ class ErrorLoopDetector:
 
     def _fingerprint(self, exc: BaseException) -> str:
         key = f"{type(exc).__name__}:{str(exc)[:100]}"
-        return hashlib.sha1(key.encode()).hexdigest()[:16]
+        return hashlib.sha1(key.encode(), usedforsecurity=False).hexdigest()[:16]
 
     def _evict_old(self, fp: str, now: float) -> None:
         dq = self._occurrences[fp]
