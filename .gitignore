@@ -71,13 +71,6 @@ scripts/*.ts
 # Project-specific
 examples/
 
-# Source code — not distributed via repository
-velune/
-tests/
-scripts/
-uv.lock
-MANIFEST.in
-
 # Secrets & credentials — never commit these
 .env
 .env.*

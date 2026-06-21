@@ -1,0 +1,224 @@
+"""Workspace-scoped conversation session store with metadata and auto-naming.
+
+Sessions are the *conversation* layer of Velune's workspace model: each one is
+an isolated rolling context that lives inside a persistent project workspace.
+Archiving or switching sessions never touches project memory, embeddings, or
+repository cognition — those belong to the workspace, not the conversation.
+
+Snapshots are stored as one JSON file per session under
+``~/.velune/sessions/`` with a ``meta`` block (title, project, model, mode,
+tags, token usage) plus the full conversation, so any session can be resumed
+exactly as it was left.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+_log = logging.getLogger("velune.cli.sessions")
+
+DEFAULT_SESSIONS_DIR = Path.home() / ".velune" / "sessions"
+
+# Words that carry no intent signal when deriving a session title.
+_TITLE_STOPWORDS = frozenset(
+    "a an the and or but if then else please can could would should you your "
+    "i we me my our us it its this that these those of in on at to for with "
+    "is are was were be been being do does did have has had how what why "
+    "when where which who whom there here about into from as by want need "
+    "help hey hi hello okay ok just some any let lets".split()
+)
+
+
+@dataclass(slots=True)
+class SessionMeta:
+    """Metadata describing one conversational session."""
+
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    workspace: str
+    project_name: str
+    model_id: str
+    mode: str = "normal"
+    tags: list[str] = field(default_factory=list)
+    total_tokens: int = 0
+    turn_count: int = 0
+    summary: str | None = None
+
+
+def auto_title(conversation: list[dict], max_words: int = 6, max_chars: int = 48) -> str:
+    """Derive a human-readable session title from the conversation's intent.
+
+    Uses the first substantive user message: strips slash-command prefixes and
+    filler words, then keeps the leading significant words in their original
+    order so titles read like "JWT refresh debugging" rather than raw prompts.
+    """
+    first_user = next(
+        (m.get("content", "") for m in conversation if m.get("role") == "user"),
+        "",
+    )
+    text = first_user.strip()
+    if text.startswith("/"):
+        # "/run fix the auth bug" → "fix the auth bug"
+        text = text.split(None, 1)[1] if " " in text else ""
+    text = text.splitlines()[0] if text else ""
+    words = re.findall(r"[A-Za-z0-9_./-]+", text)
+    significant = [w for w in words if w.lower() not in _TITLE_STOPWORDS]
+    chosen = (significant or words)[:max_words]
+    if not chosen:
+        return "Untitled session"
+    title = " ".join(chosen)
+    if len(title) > max_chars:
+        title = title[: max_chars - 1].rstrip() + "…"
+    return title[0].upper() + title[1:]
+
+
+class SessionStore:
+    """Persist, list, and restore conversation sessions, namespaced by workspace."""
+
+    def __init__(self, root: Path | None = None) -> None:
+        self.root = root or DEFAULT_SESSIONS_DIR
+
+    # ── Persistence ──────────────────────────────────────────────────────
+
+    def save(
+        self,
+        conversation: list[dict],
+        *,
+        workspace: str,
+        model_id: str,
+        mode: str = "normal",
+        title: str | None = None,
+        tags: list[str] | None = None,
+        total_tokens: int = 0,
+        session_id: str | None = None,
+        summary: str | None = None,
+    ) -> SessionMeta:
+        """Write a session snapshot; reuses *session_id* to update in place."""
+        self.root.mkdir(parents=True, exist_ok=True)
+        now = datetime.now().isoformat(timespec="seconds")
+        sid = session_id or uuid.uuid4().hex[:8]
+        created = now
+        if session_id:
+            existing = self.load_meta(session_id)
+            if existing:
+                created = existing.created_at
+        meta = SessionMeta(
+            id=sid,
+            title=title or auto_title(conversation),
+            created_at=created,
+            updated_at=now,
+            workspace=workspace,
+            project_name=Path(workspace).name if workspace else "unknown",
+            model_id=model_id,
+            mode=mode,
+            tags=tags or [],
+            total_tokens=total_tokens,
+            turn_count=len(conversation),
+            summary=summary,
+        )
+        payload = {"meta": asdict(meta), "conversation": conversation}
+        path = self.root / f"{sid}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+        return meta
+
+    def load(self, session_id: str) -> tuple[SessionMeta, list[dict]] | None:
+        data = self._read(session_id)
+        if data is None:
+            return None
+        return self._meta_from(data), data.get("conversation", [])
+
+    def load_meta(self, session_id: str) -> SessionMeta | None:
+        data = self._read(session_id)
+        return self._meta_from(data) if data is not None else None
+
+    def list(self, workspace: str | None = None, limit: int = 50) -> list[SessionMeta]:
+        """Sessions sorted newest-first, optionally filtered to one workspace."""
+        if not self.root.exists():
+            return []
+        metas: list[SessionMeta] = []
+        for f in self.root.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                meta = self._meta_from(data)
+                if workspace is None or self._same_workspace(meta.workspace, workspace):
+                    metas.append(meta)
+            except Exception:
+                continue
+        metas.sort(key=lambda m: m.updated_at, reverse=True)
+        return metas[:limit]
+
+    def delete(self, session_id: str) -> bool:
+        path = self.root / f"{session_id}.json"
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def export_markdown(self, session_id: str) -> str | None:
+        loaded = self.load(session_id)
+        if loaded is None:
+            return None
+        meta, conversation = loaded
+        lines = [
+            f"# Velune Session — {meta.title}",
+            f"**Created:** {meta.created_at}",
+            f"**Model:** {meta.model_id}",
+            f"**Project:** {meta.project_name}",
+            f"**Workspace:** {meta.workspace}",
+            "",
+        ]
+        for turn in conversation:
+            lines.append(f"### {turn.get('role', 'unknown').capitalize()}")
+            lines.append(turn.get("content", ""))
+            lines.append("")
+        return "\n".join(lines)
+
+    # ── Internals ────────────────────────────────────────────────────────
+
+    def _read(self, session_id: str) -> dict | None:
+        path = self.root / f"{session_id}.json"
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            _log.warning("Could not read session %s: %s", session_id, exc)
+            return None
+
+    @staticmethod
+    def _same_workspace(a: str, b: str) -> bool:
+        try:
+            return Path(a).resolve() == Path(b).resolve()
+        except Exception:
+            return a == b
+
+    @staticmethod
+    def _meta_from(data: dict) -> SessionMeta:
+        raw = data.get("meta")
+        if raw:
+            known = set(SessionMeta.__dataclass_fields__)
+            return SessionMeta(**{k: v for k, v in raw.items() if k in known})
+        # Legacy flat format from the original session_manager module.
+        conversation = data.get("conversation", [])
+        ts = data.get("timestamp", datetime.now().isoformat(timespec="seconds"))
+        workspace = data.get("workspace", "")
+        return SessionMeta(
+            id=data.get("id", "unknown"),
+            title=auto_title(conversation),
+            created_at=ts,
+            updated_at=ts,
+            workspace=workspace,
+            project_name=Path(workspace).name if workspace else "unknown",
+            model_id=data.get("model_id", "unknown"),
+            turn_count=data.get("turn_count", len(conversation)),
+        )

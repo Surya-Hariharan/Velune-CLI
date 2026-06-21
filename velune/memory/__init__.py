@@ -1,0 +1,32 @@
+"""Hierarchical Memory Subsystem for Velune Cognitive OS.
+
+Includes working (Tier 1), episodic (Tier 2), semantic (Tier 3), graph (Tier 4)
+and lineage memory systems along with prioritized lifecycle managers.
+"""
+
+from velune.memory.lifecycle import MemoryLifecycleCoordinator, MemoryLifecycleManager
+from velune.memory.prioritizer import MemoryPrioritizer
+from velune.memory.tiers.episodic import EpisodicMemoryTier, EpisodicStep, EpisodicTurn
+from velune.memory.tiers.graph import GraphEdge, GraphMemoryTier, GraphNode
+from velune.memory.tiers.lineage import LineageMemoryTier
+from velune.memory.tiers.semantic import SemanticMemoryTier
+from velune.memory.tiers.working import MemoryTurn, WorkingMemoryTier
+
+__all__ = [
+    "WorkingMemoryTier",
+    "MemoryTurn",
+    "EpisodicMemoryTier",
+    "EpisodicTurn",
+    "EpisodicStep",
+    "SemanticMemoryTier",
+    "GraphMemoryTier",
+    "GraphNode",
+    "GraphEdge",
+    "LineageMemoryTier",
+    "MemoryPrioritizer",
+    # Lifecycle managers — MemoryLifecycleCoordinator is the simple coordinator;
+    # MemoryLifecycleManager is the full Phase 2a production class with multi-tier
+    # retrieval, vitality-based filtering, and health reporting.
+    "MemoryLifecycleCoordinator",
+    "MemoryLifecycleManager",
+]

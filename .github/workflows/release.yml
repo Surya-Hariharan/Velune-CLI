@@ -43,9 +43,9 @@ jobs:
             echo "❌ FATAL: shell=True found in codebase"
             exit 1
           fi
-          count=$(grep -rn "asyncio\.run(" velune/ | wc -l)
+          count=$(grep -rn "asyncio\.run(" velune/ --exclude="runner.py" | wc -l)
           if [ "$count" -gt 1 ]; then
-            echo "❌ FATAL: Found $count asyncio.run() calls"
+            echo "❌ FATAL: Found $count asyncio.run() calls outside allowlist"
             exit 1
           fi
 
