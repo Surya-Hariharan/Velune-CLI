@@ -84,9 +84,9 @@ PROVIDER_COSTS: dict[str, dict[str, dict[str, float]]] = {
         "accounts/fireworks/models/mixtral-8x22b-instruct": {"input": 1.20, "output": 1.20},
     },
     "openrouter": {},  # Dynamic — populated from model metadata at runtime
-    "ollama": {},      # Local — always free
-    "lmstudio": {},    # Local — always free
-    "huggingface": {}, # Inference API — complex pricing, treat as $0 for tracking
+    "ollama": {},  # Local — always free
+    "lmstudio": {},  # Local — always free
+    "huggingface": {},  # Inference API — complex pricing, treat as $0 for tracking
 }
 
 _FALLBACK_COSTS: dict[str, dict[str, float]] = {
@@ -123,8 +123,9 @@ class UsageEvent:
 
     def __post_init__(self) -> None:
         if self.cost_usd is None:
-            self.cost_usd = _estimate_cost(self.provider_id, self.model_id,
-                                           self.input_tokens, self.output_tokens)
+            self.cost_usd = _estimate_cost(
+                self.provider_id, self.model_id, self.input_tokens, self.output_tokens
+            )
 
 
 @dataclass
@@ -282,15 +283,9 @@ class SessionUsageTracker:
                 if col not in existing:
                     conn.execute(f"ALTER TABLE usage_records ADD COLUMN {col} {defn}")
 
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_session_id ON usage_records(session_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_provider ON usage_records(provider_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON usage_records(session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_provider ON usage_records(provider_id)")
             conn.commit()
 
     # ------------------------------------------------------------------
@@ -583,9 +578,7 @@ class SessionUsageTracker:
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute(
-                    "DELETE FROM usage_records WHERE timestamp < ?", (cutoff,)
-                )
+                cursor = conn.execute("DELETE FROM usage_records WHERE timestamp < ?", (cutoff,))
                 count = cursor.rowcount
                 conn.commit()
         if count > 0:

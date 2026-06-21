@@ -16,7 +16,7 @@ from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
 
 
-def _to_cohere_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+def _to_cohere_messages(messages: list[dict]) -> tuple[str, list[dict], str]:
     """Convert OpenAI-style messages to Cohere chat history + preamble."""
     preamble = ""
     history: list[dict] = []

@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import typer
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
 from velune.cli import design
 from velune.providers.keystore import (
-    PROVIDER_ENV_VARS,
     delete_key,
     get_key,
     has_key,
     is_ollama_live,
     save_key,
 )
-from velune.providers.validation import ValidationStatus, supported_providers, validate_provider_sync
+from velune.providers.validation import (
+    ValidationStatus,
+    validate_provider_sync,
+)
 
 provider_cmd = typer.Typer(
     name="provider",
@@ -33,36 +32,91 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 _PROVIDER_META: dict[str, dict] = {
-    "openai": {"label": "OpenAI", "env": "OPENAI_API_KEY", "local": False,
-               "url": "https://platform.openai.com/api-keys"},
-    "anthropic": {"label": "Anthropic", "env": "ANTHROPIC_API_KEY", "local": False,
-                  "url": "https://console.anthropic.com"},
-    "google": {"label": "Google Gemini", "env": "GOOGLE_API_KEY", "local": False,
-               "url": "https://aistudio.google.com/app/apikey"},
-    "groq": {"label": "Groq", "env": "GROQ_API_KEY", "local": False,
-             "url": "https://console.groq.com/keys"},
-    "openrouter": {"label": "OpenRouter", "env": "OPENROUTER_API_KEY", "local": False,
-                   "url": "https://openrouter.ai/keys"},
-    "deepseek": {"label": "DeepSeek", "env": "DEEPSEEK_API_KEY", "local": False,
-                 "url": "https://platform.deepseek.com/api_keys"},
-    "mistral": {"label": "Mistral AI", "env": "MISTRAL_API_KEY", "local": False,
-                "url": "https://console.mistral.ai/api-keys"},
-    "cohere": {"label": "Cohere", "env": "COHERE_API_KEY", "local": False,
-               "url": "https://dashboard.cohere.com/api-keys"},
-    "nvidia": {"label": "NVIDIA NIM", "env": "NVIDIA_API_KEY", "local": False,
-               "url": "https://build.nvidia.com/"},
-    "together": {"label": "Together.AI", "env": "TOGETHER_API_KEY", "local": False,
-                 "url": "https://api.together.ai/settings/api-keys"},
-    "fireworks": {"label": "Fireworks.AI", "env": "FIREWORKS_API_KEY", "local": False,
-                  "url": "https://fireworks.ai/account/api-keys"},
-    "xai": {"label": "xAI (Grok)", "env": "XAI_API_KEY", "local": False,
-            "url": "https://console.x.ai"},
-    "huggingface": {"label": "HuggingFace", "env": "HF_TOKEN", "local": False,
-                    "url": "https://huggingface.co/settings/tokens"},
-    "ollama": {"label": "Ollama (local)", "env": None, "local": True,
-               "url": "https://ollama.com"},
-    "lmstudio": {"label": "LM Studio (local)", "env": None, "local": True,
-                 "url": "https://lmstudio.ai"},
+    "openai": {
+        "label": "OpenAI",
+        "env": "OPENAI_API_KEY",
+        "local": False,
+        "url": "https://platform.openai.com/api-keys",
+    },
+    "anthropic": {
+        "label": "Anthropic",
+        "env": "ANTHROPIC_API_KEY",
+        "local": False,
+        "url": "https://console.anthropic.com",
+    },
+    "google": {
+        "label": "Google Gemini",
+        "env": "GOOGLE_API_KEY",
+        "local": False,
+        "url": "https://aistudio.google.com/app/apikey",
+    },
+    "groq": {
+        "label": "Groq",
+        "env": "GROQ_API_KEY",
+        "local": False,
+        "url": "https://console.groq.com/keys",
+    },
+    "openrouter": {
+        "label": "OpenRouter",
+        "env": "OPENROUTER_API_KEY",
+        "local": False,
+        "url": "https://openrouter.ai/keys",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "env": "DEEPSEEK_API_KEY",
+        "local": False,
+        "url": "https://platform.deepseek.com/api_keys",
+    },
+    "mistral": {
+        "label": "Mistral AI",
+        "env": "MISTRAL_API_KEY",
+        "local": False,
+        "url": "https://console.mistral.ai/api-keys",
+    },
+    "cohere": {
+        "label": "Cohere",
+        "env": "COHERE_API_KEY",
+        "local": False,
+        "url": "https://dashboard.cohere.com/api-keys",
+    },
+    "nvidia": {
+        "label": "NVIDIA NIM",
+        "env": "NVIDIA_API_KEY",
+        "local": False,
+        "url": "https://build.nvidia.com/",
+    },
+    "together": {
+        "label": "Together.AI",
+        "env": "TOGETHER_API_KEY",
+        "local": False,
+        "url": "https://api.together.ai/settings/api-keys",
+    },
+    "fireworks": {
+        "label": "Fireworks.AI",
+        "env": "FIREWORKS_API_KEY",
+        "local": False,
+        "url": "https://fireworks.ai/account/api-keys",
+    },
+    "xai": {
+        "label": "xAI (Grok)",
+        "env": "XAI_API_KEY",
+        "local": False,
+        "url": "https://console.x.ai",
+    },
+    "huggingface": {
+        "label": "HuggingFace",
+        "env": "HF_TOKEN",
+        "local": False,
+        "url": "https://huggingface.co/settings/tokens",
+    },
+    "ollama": {"label": "Ollama (local)", "env": None, "local": True, "url": "https://ollama.com"},
+    "lmstudio": {
+        "label": "LM Studio (local)",
+        "env": None,
+        "local": True,
+        "url": "https://lmstudio.ai",
+    },
 }
 
 
@@ -74,6 +128,7 @@ def _is_configured(pid: str) -> bool:
         if pid == "lmstudio":
             try:
                 import httpx
+
                 r = httpx.get("http://localhost:1234/v1/models", timeout=1.0)
                 return r.status_code == 200
             except Exception:
@@ -84,6 +139,7 @@ def _is_configured(pid: str) -> bool:
 # ---------------------------------------------------------------------------
 # velune provider list
 # ---------------------------------------------------------------------------
+
 
 @provider_cmd.command("list")
 def list_providers() -> None:
@@ -131,6 +187,7 @@ def list_providers() -> None:
 # ---------------------------------------------------------------------------
 # velune provider add
 # ---------------------------------------------------------------------------
+
 
 @provider_cmd.command("add")
 def add_provider(
@@ -182,7 +239,9 @@ def add_provider(
         )
         return
 
-    with console.status(f"[{design.MUTED}]Validating {meta['label']} credentials...[/{design.MUTED}]"):
+    with console.status(
+        f"[{design.MUTED}]Validating {meta['label']} credentials...[/{design.MUTED}]"
+    ):
         result = validate_provider_sync(pid, api_key)
 
     if result.ok:
@@ -205,6 +264,7 @@ def add_provider(
 # ---------------------------------------------------------------------------
 # velune provider remove
 # ---------------------------------------------------------------------------
+
 
 @provider_cmd.command("remove")
 def remove_provider(
@@ -238,6 +298,7 @@ def remove_provider(
 # ---------------------------------------------------------------------------
 # velune provider test
 # ---------------------------------------------------------------------------
+
 
 @provider_cmd.command("test")
 def test_provider(
@@ -286,8 +347,7 @@ def _test_all() -> None:
     table.add_column("Message", style=design.MUTED)
 
     providers_to_test = [
-        (pid, meta) for pid, meta in _PROVIDER_META.items()
-        if meta.get("local") or has_key(pid)
+        (pid, meta) for pid, meta in _PROVIDER_META.items() if meta.get("local") or has_key(pid)
     ]
 
     if not providers_to_test:
@@ -324,6 +384,7 @@ def _test_all() -> None:
 # velune provider models
 # ---------------------------------------------------------------------------
 
+
 @provider_cmd.command("models")
 def list_provider_models(
     provider_id: str = typer.Argument(..., help="Provider name"),
@@ -343,7 +404,9 @@ def list_provider_models(
         )
         raise typer.Exit(1)
 
-    with console.status(f"[{design.MUTED}]Fetching models from {meta['label']}...[/{design.MUTED}]"):
+    with console.status(
+        f"[{design.MUTED}]Fetching models from {meta['label']}...[/{design.MUTED}]"
+    ):
         result = validate_provider_sync(pid, key)
 
     if not result.ok:
@@ -372,6 +435,7 @@ def list_provider_models(
 # velune provider status
 # ---------------------------------------------------------------------------
 
+
 @provider_cmd.command("status")
 def provider_status(
     provider_id: str = typer.Argument(
@@ -382,10 +446,7 @@ def provider_status(
     if provider_id:
         pids = [provider_id.lower().strip()]
     else:
-        pids = [
-            pid for pid, meta in _PROVIDER_META.items()
-            if meta.get("local") or has_key(pid)
-        ]
+        pids = [pid for pid, meta in _PROVIDER_META.items() if meta.get("local") or has_key(pid)]
 
     if not pids:
         console.print(f"[{design.WARN}]No providers configured.[/{design.WARN}]")
@@ -413,12 +474,19 @@ def provider_status(
             model_count = str(len(result.models)) if result.models else "—"
             msg = "Authenticated"
         else:
-            icon = "⚠" if result.status in (
-                ValidationStatus.RATE_LIMITED,
-                ValidationStatus.NETWORK_ERROR,
-            ) else "✗"
+            icon = (
+                "⚠"
+                if result.status
+                in (
+                    ValidationStatus.RATE_LIMITED,
+                    ValidationStatus.NETWORK_ERROR,
+                )
+                else "✗"
+            )
             color = design.WARN
-            status_str = f"[{color}]{icon} {result.status.value.replace('_', ' ').title()}[/{color}]"
+            status_str = (
+                f"[{color}]{icon} {result.status.value.replace('_', ' ').title()}[/{color}]"
+            )
             model_count = "—"
             msg = result.message[:60]
 
@@ -430,6 +498,7 @@ def provider_status(
 # ---------------------------------------------------------------------------
 # velune provider edit
 # ---------------------------------------------------------------------------
+
 
 @provider_cmd.command("edit")
 def edit_provider(
@@ -443,6 +512,7 @@ def edit_provider(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _show_models_preview(c: Console, models: list[str], total: int) -> None:
     preview = ", ".join(models)

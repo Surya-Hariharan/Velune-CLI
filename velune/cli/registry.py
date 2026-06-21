@@ -16,21 +16,18 @@ from velune.cli.commands import (
     context_cmd,
     daemon_cmd,
     doctor_cmd,
-    health_cmd,
     health_command,
     init_command,
     mcp_cmd,
     memory_cmd,
     models_cmd,
     provider_cmd,
-    quota_cmd,
     quota_command,
     retrieval_cmd,
     run_command,
     session_cmd,
     setup_command,
     trace_cmd,
-    usage_cmd,
     usage_command,
     workspace_cmd,
 )
@@ -117,10 +114,10 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     )
 
     # ── Analytics & Monitoring ────────────────────────────────────────────
-    _ANALYTICS = "Analytics & Monitoring"
-    app.command(name="usage", rich_help_panel=_ANALYTICS)(usage_command)
-    app.command(name="quota", rich_help_panel=_ANALYTICS)(quota_command)
-    app.command(name="health", rich_help_panel=_ANALYTICS)(health_command)
+    analytics_panel = "Analytics & Monitoring"
+    app.command(name="usage", rich_help_panel=analytics_panel)(usage_command)
+    app.command(name="quota", rich_help_panel=analytics_panel)(quota_command)
+    app.command(name="health", rich_help_panel=analytics_panel)(health_command)
 
     # ── Diagnostics ───────────────────────────────────────────────────────
     app.add_typer(

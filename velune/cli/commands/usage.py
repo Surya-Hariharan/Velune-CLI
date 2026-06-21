@@ -9,7 +9,6 @@ Commands:
 from __future__ import annotations
 
 import typer
-from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -44,6 +43,7 @@ health_cmd = typer.Typer(
 # velune usage
 # ---------------------------------------------------------------------------
 
+
 @usage_cmd.callback(invoke_without_command=True)
 def usage_summary(
     days: int = typer.Option(30, "--days", "-d", help="Number of days to include"),
@@ -63,6 +63,7 @@ def usage_summary(
 
     if json_output:
         import json
+
         output = {
             "days": days,
             "providers": [
@@ -281,6 +282,7 @@ def _fmt_tokens(n: int) -> str:
 # velune quota
 # ---------------------------------------------------------------------------
 
+
 @quota_cmd.callback(invoke_without_command=True)
 def quota_overview(
     days: int = typer.Option(30, "--days", "-d", help="Days to include in current period"),
@@ -296,8 +298,10 @@ def quota_overview(
     total_cost = sum(p.cost_usd for p in provider_data)
 
     console.print()
-    console.print(f"[bold {design.ACCENT}]Quota & Budget[/bold {design.ACCENT}]  "
-                  f"[{design.MUTED}]last {days} days[/{design.MUTED}]")
+    console.print(
+        f"[bold {design.ACCENT}]Quota & Budget[/bold {design.ACCENT}]  "
+        f"[{design.MUTED}]last {days} days[/{design.MUTED}]"
+    )
     console.print()
 
     if not provider_data:
@@ -360,15 +364,15 @@ def quota_overview(
 # velune health
 # ---------------------------------------------------------------------------
 
+
 @health_cmd.callback(invoke_without_command=True)
 def health_overview(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full diagnostic"),
 ) -> None:
     """Check real-time health of all configured providers."""
-    from velune.providers.keystore import has_key, is_ollama_live
-    from velune.providers.validation import validate_provider_sync
-
     from velune.cli.commands.providers import _PROVIDER_META
+    from velune.providers.keystore import has_key
+    from velune.providers.validation import validate_provider_sync
 
     console.print()
     console.print(f"[bold {design.ACCENT}]Provider Health[/bold {design.ACCENT}]")
@@ -380,6 +384,7 @@ def health_overview(
             to_check.append((pid, meta, ""))
         elif has_key(pid):
             from velune.providers.keystore import get_key
+
             to_check.append((pid, meta, get_key(pid) or ""))
 
     if not to_check:
@@ -399,7 +404,7 @@ def health_overview(
     degraded = 0
     unavailable = 0
 
-    for pid, meta, key in to_check:
+    for pid, _meta, key in to_check:
         with console.status(f"  [{design.MUTED}]Checking {pid}...[/{design.MUTED}]"):
             result = validate_provider_sync(pid, key)
 
@@ -410,6 +415,7 @@ def health_overview(
             detail = "OK"
         else:
             from velune.providers.validation import ValidationStatus
+
             if result.status == ValidationStatus.RATE_LIMITED:
                 degraded += 1
                 status_str = f"[{design.WARN}]⚠ Rate Limited[/{design.WARN}]"
@@ -450,6 +456,7 @@ def health_overview(
 # ---------------------------------------------------------------------------
 # Standalone command entry points (for velune usage / velune quota / velune health)
 # ---------------------------------------------------------------------------
+
 
 def usage_command(
     days: int = typer.Option(30, "--days", "-d"),

@@ -206,22 +206,30 @@ def run_setup_wizard() -> None:
                 _show_models_preview(result.models[:8])
             configured.append(pid)
         else:
-            console.print(f"  [{design.ERR if hasattr(design, 'ERR') else design.WARN}]{result.human_message()}[/{design.ERR if hasattr(design, 'ERR') else design.WARN}]")
+            console.print(
+                f"  [{design.ERR if hasattr(design, 'ERR') else design.WARN}]{result.human_message()}[/{design.ERR if hasattr(design, 'ERR') else design.WARN}]"
+            )
 
             # Give the user a chance to retry or skip
             if result.status.value not in ("network_error",):
                 retry = Confirm.ask("  Save anyway? (not recommended)", default=False)
                 if retry:
                     save_key(pid, key)
-                    console.print(f"  [{design.WARN}]⚠ Key saved without validation.[/{design.WARN}]")
+                    console.print(
+                        f"  [{design.WARN}]⚠ Key saved without validation.[/{design.WARN}]"
+                    )
                     configured.append(pid)
                 else:
                     console.print(f"  [{design.MUTED}]Skipped.[/{design.MUTED}]")
             else:
-                save_anyway = Confirm.ask("  Save key for later (network may be offline)?", default=True)
+                save_anyway = Confirm.ask(
+                    "  Save key for later (network may be offline)?", default=True
+                )
                 if save_anyway:
                     save_key(pid, key)
-                    console.print(f"  [{design.WARN}]⚠ Key saved (not validated — check network).[/{design.WARN}]")
+                    console.print(
+                        f"  [{design.WARN}]⚠ Key saved (not validated — check network).[/{design.WARN}]"
+                    )
                     configured.append(pid)
 
     console.print()
@@ -237,6 +245,7 @@ def run_setup_wizard() -> None:
 def _validate_sync(provider_id: str, api_key: str):
     """Run validation synchronously from the wizard context."""
     from velune.providers.validation import validate_provider_sync
+
     return validate_provider_sync(provider_id, api_key)
 
 
