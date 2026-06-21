@@ -124,7 +124,7 @@ Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
 Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
 Documentation = "https://github.com/Surya-Hariharan/Velune-CLI/tree/main/docs"
 Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
-Changelog = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "velune/__init__.py"
@@ -143,7 +143,7 @@ include = [
   "velune/",
   "README.md",
   "LICENSE",
-  "CHANGELOG.md",
+  "docs/CHANGELOG.md",
   "pyproject.toml",
 ]
 

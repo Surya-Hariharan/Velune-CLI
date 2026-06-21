@@ -126,7 +126,7 @@ async def _memory_inspect_async(
                 # If no session_id filter provided, scan recent turns from a
                 # heuristic default session so the table isn't always empty.
                 sid = session_id or "default"
-                turns = episodic.get_turns(sid)
+                turns = await episodic.get_turns(sid)
                 for turn in turns[-limit:]:
                     records.append(
                         {
@@ -210,7 +210,7 @@ async def _memory_clear_async(cli_context: CLIContext, tier: str, session_id: st
         try:
             episodic = container.get("runtime.episodic_memory")
             if episodic and session_id:
-                episodic.delete_session(session_id)
+                await episodic.delete_session(session_id)
                 cleared.append(f"episodic[session={session_id}]")
         except Exception as exc:
             errors.append(f"episodic: {exc}")

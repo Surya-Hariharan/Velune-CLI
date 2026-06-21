@@ -1556,7 +1556,7 @@ class VeluneREPL:
 
         episodic_count = 0
         try:
-            episodic_count = len(episodic.get_turns("default"))
+            episodic_count = len(await episodic.get_turns("default"))
         except Exception:
             pass
         table.add_row(

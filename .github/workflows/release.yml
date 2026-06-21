@@ -145,7 +145,7 @@ jobs:
             import re, sys
             from pathlib import Path
             version = sys.argv[1]
-            changelog = Path("CHANGELOG.md")
+            changelog = Path("docs/CHANGELOG.md")
             if not changelog.exists():
                 print("Release " + version)
                 sys.exit(0)

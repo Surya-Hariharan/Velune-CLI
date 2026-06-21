@@ -451,6 +451,40 @@ class RepositoryCognitionService:
 
             _console.print(f"[dim green]Repository index updated ({n} file(s))[/dim green]")
             logger.info("Background incremental index complete: %d file(s) processed.", n)
+
+            # Write a minimal retrieval index so BM25 is non-empty even on cold start.
+            # The full symbol-enriched index is written when index() runs synchronously;
+            # this lightweight version ensures file-path + language tokens are available
+            # immediately after the background pass finishes.
+            retrieval_path = self.root_path / ".velune" / "retrieval_index.json"
+            if not retrieval_path.exists():
+                try:
+                    from velune.repository.index_state import IndexState
+
+                    saved_state = IndexState.load(self._state_path)
+                    if saved_state and saved_state.file_index:
+                        docs = []
+                        for rel_path, entry in saved_state.file_index.items():
+                            filename = rel_path.rsplit("/", 1)[-1]
+                            docs.append(
+                                {
+                                    "id": rel_path,
+                                    "content": f"{filename} {entry.language} {rel_path}",
+                                    "metadata": {
+                                        "path": rel_path,
+                                        "language": entry.language,
+                                        "symbols": [],
+                                        "size_bytes": 0,
+                                    },
+                                }
+                            )
+                        retrieval_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(retrieval_path, "w", encoding="utf-8") as fh:
+                            json.dump(docs, fh)
+                        logger.info("Cold-start retrieval index written: %d documents", len(docs))
+                except Exception as exc:
+                    logger.debug("Could not write cold-start retrieval index: %s", exc)
+
             # Keep last_delta so the next orchestrator run can surface it in context,
             # then clear it so subsequent runs don't re-announce the same changes.
             # (The orchestrator reads last_delta before calling index(), so the order is safe.)

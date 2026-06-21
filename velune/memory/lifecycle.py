@@ -218,12 +218,16 @@ class MemoryLifecycleCoordinator:
                 metadata=artifact.metadata,
             )
         if self.episodic:
-            self.episodic.add_turn(
+            coro = self.episodic.add_turn(
                 session_id=session_id,
                 role="system",
                 content=artifact.content,
                 metadata=artifact.metadata,
             )
+            try:
+                asyncio.get_running_loop().create_task(coro)
+            except RuntimeError:
+                coro.close()
 
     def summary(self) -> dict[str, Any]:
         """Retrieve dynamic health and retention stats across all tiers."""
