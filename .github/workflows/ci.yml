@@ -47,6 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks needs full history to resolve push commit ranges
 
       - name: Set up Python
         uses: actions/setup-python@v5
