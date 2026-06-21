@@ -215,7 +215,9 @@ Add `Cohere` to the Providers table in [README.md](README.md).
 
 ### Step 1 — Register in the command registry
 
-`velune/cli/repl.py` → `VeluneREPL._build_registry()`
+`velune/cli/slash_dispatcher.py` → `build_slash_registry()`
+
+Add a `registry.register(...)` call in the appropriate section of the function:
 
 ```python
 registry.register(SlashCommand(
@@ -223,14 +225,14 @@ registry.register(SlashCommand(
     aliases=["yc"],
     description="One-line description of what it does",
     usage="/yourcommand [optional-arg]",
-    handler=self._cmd_yourcommand,
+    handler=repl._cmd_yourcommand,
 ))
 ```
 
 ### Step 2 — Implement the handler
 
-Add the async method to `VeluneREPL` (anywhere in the "Command handlers"
-section of the class):
+Add the async method to `VeluneREPL` in `velune/cli/repl.py` (in the
+"Command handlers" section):
 
 ```python
 async def _cmd_yourcommand(self, args: str) -> None:

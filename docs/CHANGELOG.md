@@ -9,6 +9,110 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Providers
+
+- **Cohere** provider adapter — native Chat API with preamble/history conversion,
+  streaming, and `command-r-plus` / `command-r` model catalog.
+  (`velune/providers/adapters/cohere.py`)
+- **DeepSeek** provider adapter — OpenAI-compatible API at `api.deepseek.com`;
+  supports DeepSeek-R1 and DeepSeek-Coder. (`velune/providers/adapters/deepseek.py`)
+- **Mistral** provider adapter — La Plateforme REST API; Mistral Large, Codestral,
+  and Mixtral models. (`velune/providers/adapters/mistral.py`)
+- **NVIDIA NIM** provider adapter — OpenAI-compatible API at `integrate.api.nvidia.com`;
+  hosts Llama, Mistral, and partner NIM models. (`velune/providers/adapters/nvidia.py`)
+
+### Added — Git Integration
+
+- **GitHub and GitLab REST clients** — `velune/integrations/github.py` and
+  `gitlab.py` implement push-branch, create-PR/MR, fetch-issue, and
+  post-comment operations using each platform's REST API.
+- **`/push` REPL command** — pushes the current branch to `origin` (with optional
+  `--force`). (`velune/cli/slash_dispatcher.py`)
+- **`/pr` REPL command** — creates a pull request (GitHub) or merge request
+  (GitLab) for the current branch from inside the REPL.
+- **`/issue <number>` REPL command** — fetches a GitHub/GitLab issue by number
+  and injects the title, body, and labels as conversation context.
+- **`/sandbox` REPL command** — shows the active sandbox type (subprocess or
+  Docker) and its configuration status.
+
+### Added — Code Intelligence
+
+- **`velune/analysis/` package** — code intelligence tools running locally without
+  an LLM call:
+  - `linter.py` — runs `ruff` / `pyflakes` and surfaces structured diagnostics.
+  - `refactor.py` — detects code smells (long functions, deep nesting, high
+    complexity) and returns ranked findings.
+  - `type_inferrer.py` — suggests type annotations for unannotated function
+    signatures using AST analysis.
+  - `symbol_search.py` — fast symbol and definition lookup across the indexed workspace.
+- **`/lint [file]` REPL command** — lint a Python file and display Rich diagnostic output.
+- **`/refactor <file>` REPL command** — detect code smells with severity rankings.
+- **`/typify <file>` REPL command** — suggest type hints for unannotated functions.
+
+### Added — Declarative Plugin System
+
+- **`velune/plugins/declarative/` package** — Markdown-based plugin manifests:
+  declarative agents (`agent.py`), slash commands (`command.py`), skills
+  (`skill.py`), and a filesystem scanner (`scanner.py`).
+- **SKILL.md injection** — plugins can ship a `SKILL.md` that is automatically
+  appended to the council's system context when the plugin is active.
+- **`/plugin` REPL command** — list, enable, disable, and reload declarative
+  plugins without restarting the session.
+- **Lifecycle hook system** (`velune/hooks/`) — a typed hook dispatcher and executor
+  that fires `pre_tool` / `post_tool` events; plugins register handlers via
+  their manifest.
+
+### Added — Background Service
+
+- **`velune/daemon/` package** — a background Velune service (`server.py`) with
+  an IPC transport (`transport.py`) and a client (`client.py`).
+- **`velune daemon start|stop|status`** CLI subcommands to manage the service.
+
+### Added — CLI Subcommands
+
+- **`velune workspace`** subcommand group — `init`, `status`, `graph`, `list`,
+  `open`, `remove`. `workspace graph` renders an interactive dependency tree
+  from `velune/observability/workspace_graph.py`.
+- **`velune session`** subcommand group — `list`, `delete`, `export`.
+- **`velune provider`** subcommand group — `add`, `remove`, `test`, `list`, `status`.
+- **`velune config`** subcommand group — `get`, `set`, `show`.
+- **`velune usage`**, **`velune quota`**, **`velune health`** commands for
+  analytics and provider monitoring.
+- **`velune logs`** (alias for `trace`) — view or follow the execution event
+  stream from the current workspace.
+- **`velune status`** (alias for `context`) — show index freshness, file counts,
+  and cognitive-core record counts without starting the full runtime.
+- **`velune pipeline`** (alias for `retrieval`) — trace a retrieval query through
+  the BM25 + vector + graph pipeline and show per-stage scores.
+- **`velune memory`** subcommand group — `inspect`, `clear`, `compact`.
+
+### Added — REPL Commands
+
+- **`/council <task>`** — force the full council tier regardless of task
+  complexity classification.
+- **`/new [title]`** — start a fresh conversation while keeping project memory.
+- **`/project [name|path]`** — switch or manage project workspaces from within
+  the REPL.
+- **`/bench [run]`** — view stored benchmark results or trigger a new empirical
+  capability run.
+- **`/graph`** — render a hierarchical tree of knowledge graph entities for the
+  current workspace.
+- **`/hunk`** — toggle hunk-by-hunk review mode; each proposed file edit is
+  shown and approved individually before being applied.
+- **`/undo`** — revert the last Velune-generated git commit, leaving the changes
+  staged for inspection.
+- **`/approve [safe|ask|block]`** — set the tool/command approval gate for the
+  session.
+- **`/hooks`** — list all active lifecycle hooks and their configuration source.
+- **`/stats`** — show session statistics: tokens used, estimated cost, turn
+  count, and uptime.
+- **`/history`** — show the REPL command execution history for the current session.
+- **`/pull [model-id]`** and **`/delete <model-id>`** — download or delete
+  Ollama models from within the REPL with live progress output.
+- **`/mcp`** subcommands — `servers`, `tools`, `resources`, `connect <name>`,
+  `disconnect <name>`, `refresh <name>` — inspect MCP connections without
+  leaving the REPL.
+
 ### Security
 
 - **Isolated `llama-cpp-python` from the default install set** to eliminate the

@@ -93,15 +93,23 @@ Velune features a modern, clean terminal interface designed for productivity:
 
 ## Providers
 
-| Provider              | Type  | Cost           | Models                               | Setup                            |
-|-----------------------|-------|----------------|--------------------------------------|----------------------------------|
-| Ollama                | Local | Free           | Any pulled model                     | Install Ollama, pull a model     |
-| Groq                  | Cloud | Free tier      | Llama 3.3 70B, Mixtral, Gemma2       | `velune setup` → enter key       |
-| OpenRouter            | Cloud | Pay-per-token  | 100+ models                          | `velune setup` → enter key       |
-| OpenAI                | Cloud | Pay-per-token  | GPT-4o, GPT-4o Mini                  | `velune setup` → enter key       |
-| Anthropic             | Cloud | Pay-per-token  | Claude Opus, Sonnet, Haiku           | `velune setup` → enter key       |
-| xAI (Grok)            | Cloud | Pay-per-token  | Grok 2, Grok 2 Mini                  | `velune setup` → enter key       |
-| Google Gemini         | Cloud | Free quota     | Gemini 2.0 Flash, 1.5 Pro/Flash      | `velune setup` → enter key       |
+| Provider     | Type  | Cost          | Models                                        | Setup                        |
+|--------------|-------|---------------|-----------------------------------------------|------------------------------|
+| Ollama       | Local | Free          | Any pulled model                              | Install Ollama, pull a model |
+| LM Studio    | Local | Free          | Any GGUF / MLX model                          | Launch LM Studio server      |
+| Groq         | Cloud | Free tier     | Llama 3.3 70B, Mixtral, Gemma2                | `velune setup` → enter key   |
+| OpenRouter   | Cloud | Pay-per-token | 100+ models                                   | `velune setup` → enter key   |
+| OpenAI       | Cloud | Pay-per-token | GPT-4o, GPT-4o Mini                           | `velune setup` → enter key   |
+| Anthropic    | Cloud | Pay-per-token | Claude Opus, Sonnet, Haiku                    | `velune setup` → enter key   |
+| xAI (Grok)   | Cloud | Pay-per-token | Grok 2, Grok 2 Mini                           | `velune setup` → enter key   |
+| Google       | Cloud | Free quota    | Gemini 2.0 Flash, 1.5 Pro/Flash               | `velune setup` → enter key   |
+| Together AI  | Cloud | Pay-per-token | Llama 3.3 70B, Qwen 2.5 Coder, DeepSeek R1    | `velune setup` → enter key   |
+| Fireworks AI | Cloud | Pay-per-token | DeepSeek R1, Qwen 2.5 Coder, Mixtral 8x22B    | `velune setup` → enter key   |
+| Mistral      | Cloud | Pay-per-token | Mistral Large, Codestral, Mixtral             | `velune setup` → enter key   |
+| DeepSeek     | Cloud | Pay-per-token | DeepSeek R1, DeepSeek Coder                   | `velune setup` → enter key   |
+| Cohere       | Cloud | Pay-per-token | Command R+, Command R                         | `velune setup` → enter key   |
+| NVIDIA NIM   | Cloud | Pay-per-token | Llama, Mistral, and other NIM models          | `velune setup` → enter key   |
+| HuggingFace  | Cloud | Free/paid     | Open models via Inference API                 | `velune setup` → enter key   |
 
 Keys are stored in your OS keyring — never in files, never in git.
 
@@ -109,46 +117,122 @@ Keys are stored in your OS keyring — never in files, never in git.
 
 ## Commands
 
-### CLI (before the REPL starts)
+### CLI (terminal, before the REPL)
 
 ```bash
-velune              # Start the persistent REPL session
-velune init         # Initialize Velune in a project
-velune setup        # Configure API keys securely (stored in OS keyring)
-velune doctor       # Check hardware, providers, dependencies
-velune models scan  # Discover all available local and cloud models
+# Core
+velune                    # Start the interactive REPL session
+velune chat               # Same as above (explicit form)
+velune run "<task>"       # Run a task non-interactively and exit
+velune ask "<question>"   # Ask a one-shot question and exit
+velune init               # Initialize Velune in a project directory
+
+# Workspace & sessions
+velune workspace init     # Index the current workspace
+velune workspace status   # Show index freshness and file counts
+velune workspace graph    # Render the workspace dependency graph
+velune workspace list     # List all known workspaces
+velune session list       # List saved chat sessions
+velune session delete <id>  # Delete a saved session
+
+# Setup & models
+velune setup              # Configure API keys (stored in OS keyring)
+velune models scan        # Discover all available local and cloud models
+velune models list        # List discovered models
+velune provider list      # Show all configured providers and their status
+velune provider add       # Add a new provider interactively
+velune config show        # Print effective velune.toml settings
+velune config set <k> <v> # Write a setting to velune.toml
+
+# Analytics & monitoring
+velune usage              # Token usage and estimated cost for recent sessions
+velune quota              # Check provider rate-limit and quota status
+velune health             # Check provider reachability and response time
+
+# Diagnostics
+velune doctor             # Run full environment health check
+velune logs               # View recent execution event log
+velune logs live          # Follow new events as they are written
+velune status             # Index freshness and workspace health snapshot
+velune pipeline "<query>" # Trace a retrieval query through the search pipeline
+velune daemon start       # Start the background Velune service
+velune daemon stop        # Stop the background service
+velune mcp serve          # Expose Velune's tool council as an MCP server
+velune mcp connect <url> <name>  # Connect to an external MCP server and list tools
+velune memory inspect     # Show memory tier sizes and record counts
+velune memory clear       # Clear all memory tiers for the current workspace
 ```
 
 ### Inside the REPL
 
 ```text
-/run <task>              Execute a task through the council
+─── Session ───────────────────────────────────────────────────────────────────
+/help                    Show all commands and their aliases
+/exit                    Exit Velune
+/clear                   Clear the terminal screen (context is preserved)
+/new [title]             Start a new conversation (project memory persists)
+/project [name|path]     Switch or manage project workspaces
+
+─── Council / Execution ───────────────────────────────────────────────────────
+/run <task>              Execute a task through the Reasoning Council
 /run --bg <task>         Submit task to background — prompt returns immediately
+/council <task>          Force full council tier regardless of task complexity
 /jobs                    List all background jobs (ID, status, phase, elapsed)
 /jobs cancel <id>        Cancel a running background job
 /dashboard               Live progress dashboard (jobs + alerts + provider health)
-/model                   Switch active model (arrow-key picker)
+
+─── Models ────────────────────────────────────────────────────────────────────
+/model [model-id]        Switch active model (arrow-key picker if no arg)
 /models                  List all available models
-/optimus                 Speed mode — instant tier, smallest model
-/godly                   Max power — full council, largest model
-/normal                  Return to balanced mode
-/mode                    Show current mode settings
-/memory                  Inspect memory tiers
-/session save            Save current session
-/session list            List saved sessions
-/session resume <id>     Resume a session
-/usage                   Token count and cost for this session
-/context                 Context window usage indicator
-/diff                    Show pending file changes
-/doctor                  Run health checks
-/help                    Show all commands
-/clear                   Clear screen and context
-/exit                    Exit Velune
+/pull [model-id]         Download an Ollama model with live progress
+/delete <model-id>       Delete a locally installed Ollama model
+/councilmodel            Assign specific models to Planner / Coder / Reviewer roles
+/bench [run]             View or run empirical model capability benchmarks
+
+─── Session Modes ─────────────────────────────────────────────────────────────
+/optimus                 Speed mode — instant tier, smallest model, 4k context
+/godly                   Max power — full council, largest model, 128k context
+/normal                  Return to balanced mode (auto-tier, 16k context)
+/mode                    Show current mode settings and active council tier
+
+─── Memory & Context ──────────────────────────────────────────────────────────
+/memory [clear|stats]    Inspect or clear memory tiers
+/session                 Interactive session picker (list / resume / save / export)
+/context                 Show context window usage for the current conversation
+/graph                   Render a tree of knowledge graph entities
+
+─── Diffs & Editing ───────────────────────────────────────────────────────────
+/diff                    Show uncommitted file changes from the last council run
+/undo                    Revert the last Velune-generated git commit (keeps changes staged)
+/hunk                    Toggle hunk-by-hunk review mode for edits
+/approve [safe|ask|block] Set tool/command approval gate
+
+─── Git Integration ───────────────────────────────────────────────────────────
+/push [--force]          Push current branch to remote origin
+/pr <title>              Create a pull request / merge request on GitHub or GitLab
+/issue <number>          Fetch a GitHub/GitLab issue and inject it as context
+/sandbox [docker|status] Show or switch sandbox type (subprocess or Docker)
+
+─── Code Intelligence ─────────────────────────────────────────────────────────
+/lint [file]             Lint a Python file and display diagnostic output
+/refactor <file>         Detect code smells and suggest refactoring targets
+/typify <file>           Suggest type hints for unannotated functions
+
+─── MCP & Plugins ─────────────────────────────────────────────────────────────
+/mcp [servers|tools|resources|connect|disconnect]  Inspect MCP servers and tools
+/plugin [list|enable|disable|reload|show]          Manage declarative plugins
+
+─── Diagnostics ───────────────────────────────────────────────────────────────
+/doctor                  Run environment health checks
+/config                  Show current configuration settings
+/stats                   Session statistics: tokens, cost, turns, uptime
+/history                 Show REPL command execution history
+/hooks                   List active lifecycle hooks and their configuration
 ```
 
-Tab-completion is active for all `/` commands and for model IDs (type `/model` then space to trigger).
+Tab-completion is active for all `/` commands and for model IDs (type `/model` then Space to trigger).
 
-The status bar shows `⚙ N bg` for active background jobs and `⚠ N` for unread proactive alerts. Alerts drain automatically after each prompt input and are printed as Rich panels above the input line.
+The status bar shows `⚙ N bg` for active background jobs and `⚠ N` for unread proactive alerts. Alerts drain automatically after each prompt and are printed as Rich panels above the input line.
 
 ---
 
@@ -157,20 +241,35 @@ The status bar shows `⚙ N bg` for active background jobs and `⚠ N` for unrea
 ```text
 velune/
 ├── cli/              REPL, slash commands, banner, autocomplete, session manager
-│   └── display/      Live dashboards (ProgressDashboard)
-├── providers/        Ollama, Groq, OpenAI, Anthropic, xAI, Google, OpenRouter
-├── cognition/        Council: Planner + Coder + Reviewer + Challenger + Synthesizer
+│   ├── commands/     Typer subcommands (workspace, session, models, doctor, mcp, …)
+│   ├── display/      Live dashboards and council pipeline view
+│   └── rendering/    Rich error panels and markdown streaming
+├── providers/        15 provider adapters (Ollama, Groq, OpenAI, Anthropic, Mistral, …)
+│   ├── adapters/     Per-provider inference + streaming implementations
+│   └── discovery/    Model catalog discovery for each provider
+├── cognition/        Council: Planner → Coder → Reviewer → Challenger → Synthesizer
+│   └── council/      DebateSession, CouncilRunner, per-role agents, tier classifier
 ├── memory/           5-tier: working → episodic → semantic → graph → lineage
 ├── proactive/        Alert store + watcher (CognitiveBus event subscriptions)
-├── repository/       AST indexing, dependency graph, .veluneignore
+├── repository/       AST indexing, import graph, blast-radius estimator, .veluneignore
+├── retrieval/        Hybrid retrieval: BM25 + vector + graph, cross-encoder reranker
 ├── execution/        Managed execution (allowlist + limits), diff preview, rollback
+│   └── edit_formats/ Diff format parsers (unified, search-replace, XML, JSON)
+├── analysis/         Code intelligence: linting, code-smell detection, type inference
+├── integrations/     GitHub and GitLab REST clients (push, PR, issues)
+├── hooks/            Lifecycle hook dispatcher and executor (pre/post tool events)
+├── observability/    Context reports, execution trace log, workspace dependency graph
+├── mcp/              MCP server + client; stdio / SSE / HTTP / WebSocket transports
 ├── hardware/         Hardware detection, tier classification, GPU probe
 ├── telemetry/        Token tracking, cost estimation, latency profiling
 ├── models/           Model registry, capability scoring, specializations
-├── context/          Context window tracking, extractive compression
+├── context/          Context window tracking, token counting, extractive compression
+├── orchestration/    ContextOrchestrationEngine — wires intent → council → output
 ├── core/             Loop detector, retry policy, task/job registry, error types
 ├── kernel/           Bootstrap, lifecycle coordinator, service container
-└── plugins/          Plugin loader & hook registry (experimental; unsandboxed, off by default)
+├── daemon/           Background Velune service (server + IPC transport)
+├── tools/            File-system, git, web-fetch, and terminal tool implementations
+└── plugins/          Declarative plugin loader, SKILL.md injection, hook wiring
 ```
 
 ---
@@ -205,13 +304,18 @@ Switch modes at any time mid-session. The prompt badge updates immediately.
 
 ## MCP integration
 
-Velune exposes an MCP server so that Claude Desktop and VS Code can call
-Velune's local model council as a tool — giving cloud-based editors access
-to local hardware without sending your code to a third party.
+Velune works as both an MCP **server** and an MCP **client**:
 
-Run `velune mcp --help` for the server commands. Outbound connections to
-external MCP servers are trust-gated — see the
-[MCP trust gating](docs/SECURITY.md#mcp-trust-gating) section of the security policy.
+- **Server** (`velune mcp serve`) — exposes Velune's local tool council over
+  stdio so Claude Desktop, VS Code, and other MCP-capable editors can call
+  Velune's models without sending your code to a third party.
+- **Client** (`velune mcp connect <url> <name>`) — connects to any external MCP
+  server, lists its tools, and makes them available inside the REPL via `/mcp`.
+- **Transports** — stdio, SSE, HTTP, and WebSocket (`ws://` / `wss://`) are all
+  supported. Servers can also be declared in `.mcp.json` and loaded automatically.
+
+Outbound connections to external MCP servers are trust-gated — see
+[MCP trust gating](docs/SECURITY.md#mcp-trust-gating) in the security policy.
 
 ---
 
