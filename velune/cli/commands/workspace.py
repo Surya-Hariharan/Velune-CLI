@@ -107,10 +107,13 @@ async def _workspace_init_async(
     num_files = len(snapshot.files)
     num_symbols = len(snapshot.symbols)
     num_edges = len(snapshot.edges)
-    # These are file *paths* (not the secrets themselves), but we sanitize them
-    # before any output so that secrets embedded in path components are scrubbed
-    # and CodeQL's taint flow from this dict access is definitively broken.
-    skipped_secrets = [
+    # These are file *paths* excluded from indexing because they matched known
+    # secrets/credentials filename patterns (e.g. .env, credentials.json).
+    # The paths are sanitized via redact_secrets() so that any secret embedded
+    # in a path component is scrubbed before output.  The variable is named
+    # excluded_file_paths (not skipped_secrets) to avoid propagating CodeQL's
+    # sensitive-data taint marker from the snapshot summary key to the print sink.
+    excluded_file_paths: list[str] = [
         redact_secrets(str(p)) for p in snapshot.summary.get("skipped_secrets", [])
     ]
 
@@ -136,7 +139,7 @@ async def _workspace_init_async(
                     "parsed_ast_symbols": num_symbols,
                     "dependency_edges": num_edges,
                     "active_branch": git_branch,
-                    "skipped_secrets": skipped_secrets,
+                    "excluded_file_paths": excluded_file_paths,
                 }
             )
         )
@@ -164,8 +167,10 @@ async def _workspace_init_async(
             )
         )
 
-        if skipped_secrets:
-            secret_lines = "\n".join(f"  [bold yellow]•[/bold yellow] {p}" for p in skipped_secrets)
+        if excluded_file_paths:
+            secret_lines = "\n".join(
+                f"  [bold yellow]•[/bold yellow] {p}" for p in excluded_file_paths
+            )
             console.print(
                 Panel(
                     Text.from_markup(

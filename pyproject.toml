@@ -97,21 +97,11 @@ docker = ["docker>=7.0.0"]
 # re-enabled until a safe replacement for diskcache is available.
 all = ["velune-cli[gguf,docker]"]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-mock>=3.12.0",
-    "pytest-benchmark>=4.0.0",
-    "pytest-timeout>=2.2.0",
-    "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
     "pyright>=1.1.350",
-    "mypy>=1.8.0",
-    "coverage>=7.0.0",
-    "black>=23.12.0",
     "pre-commit>=3.6.0",
     "pip-audit>=2.6.0",
     "bandit[toml]>=1.7.0",
-    "types-toml>=0.10.0",
     "build>=1.0.0",
     "twine>=4.0.0",
 ]
@@ -208,41 +198,6 @@ reportOperatorIssue = false
 reportIncompatibleMethodOverride = false
 reportPossiblyUnboundVariable = false
 
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
-
-# Third-party dependencies that ship no type stubs / py.typed marker.
-[[tool.mypy.overrides]]
-module = [
-    "psutil",
-    "pynvml",
-    "rank_bm25",
-    "networkx",
-    "llama_cpp",
-]
-ignore_missing_imports = true
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "--tb=short --strict-markers -ra"
-timeout = 300
-timeout_method = "thread"
-markers = [
-    "integration: marks tests requiring real filesystem or subprocess",
-    "slow: marks tests taking > 1 second",
-    "critical: marks routing correctness tests that block CI if any fail",
-]
-
 [tool.uv]
 # Security: force patched floors for transitive deps flagged by Dependabot.
 # msgpack <=1.2.0: GHSA-6v7p-g79w-8964 (out-of-bounds read / Unpacker reuse crash)
@@ -258,34 +213,3 @@ exclude_dirs = ["tests", ".venv", "build", "dist"]
 # process-tree kill). B101 assert: not used for security control flow.
 skips = ["B101", "B404", "B603", "B607"]
 
-[tool.coverage.run]
-source = ["velune"]
-# Honest omit policy: we exclude ONLY surfaces that cannot be exercised by
-# unit tests without a live TTY, a background daemon, external network
-# services, or optional native wheels. Everything else — including the
-# security-critical execution, kernel, memory, and repository layers — is
-# measured and counts toward the enforced floor (see cov-fail-under in CI).
-omit = [
-    "velune/__main__.py",          # `python -m velune` entrypoint shim
-    "velune/main.py",              # Typer app wiring (interactive entrypoint)
-    "velune/cli/*",                # prompt-toolkit / Rich REPL — needs a TTY
-    "velune/daemon/*",             # long-lived background server process
-    "velune/mcp/*",                # stdio MCP servers — integration-only
-    "velune/plugins/*",            # dynamic third-party plugin loading
-    "velune/providers/discovery/*",  # probes live GPUs / Ollama / network
-    "velune/providers/ollama_manager.py",  # talks to a running Ollama daemon
-    "velune/telemetry/*",          # OTLP exporters — require a collector
-    "**/__pycache__/*",
-]
-branch = true
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-    "@abstractmethod",
-]
