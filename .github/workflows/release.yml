@@ -102,8 +102,8 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    # OIDC trusted publishing — no long-lived API token. Requires a PyPI
-    # publisher configured for this repo + the `pypi` environment.
+    # OIDC trusted publishing — no long-lived API token required when configured.
+    # Fallback: set PYPI_API_TOKEN repository secret to use API token auth instead.
     permissions:
       id-token: write
     environment:
@@ -115,12 +115,14 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Publish to PyPI (trusted publishing)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # No `password:` — the action exchanges the OIDC token for a
-          # short-lived PyPI credential automatically.
           packages-dir: dist/
+          # When PYPI_API_TOKEN secret is set, uses API token auth.
+          # When secret is absent/empty, uses OIDC trusted publishing
+          # (requires a Trusted Publisher configured at pypi.org/manage/account/publishing/).
+          password: ${{ secrets.PYPI_API_TOKEN }}
 
   release:
     name: Create GitHub Release
@@ -137,37 +139,40 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "clean_version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Extract changelog
         id: changelog
         run: |
-          VERSION=${{ steps.get_version.outputs.version }}
-          CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
+          CLEAN_VERSION="${{ steps.get_version.outputs.clean_version }}"
+          python3 - "$CLEAN_VERSION" > /tmp/changelog_body.txt << 'PYEOF'
+          import re, sys
+          from pathlib import Path
+          version = sys.argv[1]
+          changelog = Path("docs/CHANGELOG.md")
+          if not changelog.exists():
+              print("Release " + version)
+              sys.exit(0)
+          text = changelog.read_text(encoding="utf-8")
+          pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
+          match = re.search(pattern, text, re.DOTALL)
+          if match:
+              print(match.group(1).strip())
+          else:
+              print("Release " + version + " — see docs/CHANGELOG.md for details.")
+          PYEOF
           {
             echo "body<<CHANGELOG_EOF"
-            python -c 'import sys, textwrap; exec(textwrap.dedent(sys.argv[2]))' "$CLEAN_VERSION" '
-            import re, sys
-            from pathlib import Path
-            version = sys.argv[1]
-            changelog = Path("docs/CHANGELOG.md")
-            if not changelog.exists():
-                print("Release " + version)
-                sys.exit(0)
-            text = changelog.read_text(encoding="utf-8")
-            pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
-            match = re.search(pattern, text, re.DOTALL)
-            if match:
-                print(match.group(1).strip())
-            else:
-                print("Release " + version + " — see CHANGELOG.md for details.")
-            '
+            cat /tmp/changelog_body.txt
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.get_version.outputs.clean_version }}
           files: dist/*
           body: ${{ steps.changelog.outputs.body }}
           draft: false
