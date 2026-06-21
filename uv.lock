@@ -618,15 +618,6 @@ wheels = [
 ]
 
 [[package]]
-name = "diskcache"
-version = "5.6.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3f/21/1c1ffc1a039ddcc459db43cc108658f32c57d271d7289a2794e401d0fdb6/diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc", size = 67916, upload-time = "2023-08-31T06:12:00.316Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/27/4570e78fc0bf5ea0ca45eb1de3818a23787af9b390c0b0a0033a1b8236f9/diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19", size = 45550, upload-time = "2023-08-31T06:11:58.822Z" },
-]
-
-[[package]]
 name = "distlib"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1246,18 +1237,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/40/71/d89bb0e71b1415453
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/40/791891d4c0c4dab4c5e187c17261cedc26285fd41541577f900470a45a4d/license_expression-30.4.4-py3-none-any.whl", hash = "sha256:421788fdcadb41f049d2dc934ce666626265aeccefddd25e162a26f23bcbf8a4", size = 120615, upload-time = "2025-07-22T11:13:31.217Z" },
 ]
-
-[[package]]
-name = "llama-cpp-python"
-version = "0.3.30"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "diskcache" },
-    { name = "jinja2" },
-    { name = "numpy" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1e/45/2bca210df9ab2403efbd20316b6f53a2c322fd71a313d8bf090e2ee148e4/llama_cpp_python-0.3.30.tar.gz", hash = "sha256:798c9b42652d2e0bff5fe81e7e762089f425a99e67f66ffe5ae156957876e0d1", size = 70191382, upload-time = "2026-06-16T07:51:16.654Z" }
 
 [[package]]
 name = "markdown-it-py"
@@ -3409,9 +3388,6 @@ docker = [
 gguf = [
     { name = "gguf" },
 ]
-llamacpp = [
-    { name = "llama-cpp-python" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -3429,7 +3405,6 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "keyring", specifier = ">=24.0.0" },
     { name = "lancedb", specifier = ">=0.5.0" },
-    { name = "llama-cpp-python", marker = "extra == 'llamacpp'", specifier = ">=0.2.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "networkx", specifier = ">=3.2.0" },
@@ -3471,7 +3446,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.9.0" },
     { name = "types-toml", marker = "extra == 'dev'", specifier = ">=0.10.0" },
 ]
-provides-extras = ["all", "dev", "docker", "gguf", "llamacpp"]
+provides-extras = ["all", "dev", "docker", "gguf"]
 
 [[package]]
 name = "virtualenv"

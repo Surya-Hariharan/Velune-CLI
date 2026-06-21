@@ -16,6 +16,7 @@ from rich.tree import Tree
 
 from velune.cli import design
 from velune.cli.context import CLIContext
+from velune.core.redaction import redact_secrets
 
 if TYPE_CHECKING:
     from velune.observability.workspace_graph import (
@@ -106,7 +107,12 @@ async def _workspace_init_async(
     num_files = len(snapshot.files)
     num_symbols = len(snapshot.symbols)
     num_edges = len(snapshot.edges)
-    skipped_secrets = snapshot.summary.get("skipped_secrets", [])
+    # These are file *paths* (not the secrets themselves), but we sanitize them
+    # before any output so that secrets embedded in path components are scrubbed
+    # and CodeQL's taint flow from this dict access is definitively broken.
+    skipped_secrets = [
+        redact_secrets(str(p)) for p in snapshot.summary.get("skipped_secrets", [])
+    ]
 
     languages: dict[str, int] = {}
     for f in snapshot.files:

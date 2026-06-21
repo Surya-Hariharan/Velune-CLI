@@ -15,11 +15,38 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse as _urlparse
 
 from velune.integrations.base import GitProviderError, IssueInfo, PRInfo
 from velune.tools.base.tool import BaseTool, ToolPermission
 
 _log = logging.getLogger("velune.tools.git.providers")
+
+
+# ---------------------------------------------------------------------------
+# Helper: strict hostname extraction from git remote URLs
+# ---------------------------------------------------------------------------
+
+
+def _remote_hostname(url: str) -> str:
+    """Return the lower-case hostname from a git remote URL.
+
+    Handles both HTTPS (https://github.com/owner/repo) and SSH
+    (git@github.com:owner/repo) forms. Returns an empty string on any
+    parse failure so callers can safely compare without crashing.
+
+    This avoids the substring-in-URL anti-pattern (CWE-184) where a crafted
+    path like ``https://evil.com/redirect-to/github.com/foo`` would satisfy
+    ``"github.com" in url`` but resolve to the wrong host.
+    """
+    normalized = url
+    if normalized.startswith("git@"):
+        # git@host:path → https://host/path so urlparse can extract hostname
+        normalized = "https://" + normalized[4:].replace(":", "/", 1)
+    try:
+        return (_urlparse(normalized).hostname or "").lower()
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -47,12 +74,19 @@ def _detect_provider(workspace: Path) -> tuple[str, str]:
 
     url = url.rstrip("/").removesuffix(".git")
 
-    if "github.com" in url:
-        # ssh: git@github.com:owner/repo  or  https://github.com/owner/repo
+    host = _remote_hostname(url)
+
+    if host == "github.com":
+        # Extract owner/repo slug after the hostname for both HTTPS and SSH forms.
         slug = url.split("github.com")[-1].lstrip("/").lstrip(":")
         return "github", slug
 
-    if "gitlab" in url or os.environ.get("VELUNE_GITLAB_URL", ""):
+    # Resolve the expected GitLab hostname from the env override (if set) or
+    # fall back to the public gitlab.com. Compare by hostname only — never by
+    # substring — to prevent path-based bypass (CWE-184 / CodeQL incomplete-url-sanitization).
+    gitlab_base = os.environ.get("VELUNE_GITLAB_URL", "https://gitlab.com")
+    gitlab_host = _remote_hostname(gitlab_base) or "gitlab.com"
+    if host == gitlab_host:
         slug = url.split(".com")[-1].lstrip("/") if ".com" in url else url.split(":")[-1]
         return "gitlab", slug
 

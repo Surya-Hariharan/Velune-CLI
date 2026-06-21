@@ -9,6 +9,11 @@ permissions:
   contents: write
   id-token: write
 
+# Node.js 24 became the default on 2026-06-16. Force it explicitly so the
+# pinned @v4/@v5 action tags use Node 24 runtimes consistently.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   ci:
     name: Run CI Pipeline

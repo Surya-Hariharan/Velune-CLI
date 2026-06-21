@@ -85,16 +85,16 @@ dependencies = [
 [project.optional-dependencies]
 # GGUF metadata reading only — safe, no diskcache dependency
 gguf = ["gguf>=0.6.0"]
-# In-process GGUF inference via llama.cpp.
-# SECURITY ADVISORY: llama-cpp-python pulls in diskcache<=5.6.3 which has an
-# unsafe pickle deserialization issue (no patched version exists as of 2026-06).
-# An attacker with write access to the cache directory can achieve arbitrary
-# code execution. Only install in trusted, single-user environments.
-# See: https://github.com/advisories/GHSA-... (diskcache pickle RCE)
-llamacpp = ["llama-cpp-python>=0.2.0"]
 # Docker sandbox isolation — install to enable execution.docker_sandbox = true
 docker = ["docker>=7.0.0"]
-# 'all' deliberately excludes [llamacpp] due to the diskcache security advisory.
+# NOTE: the former [llamacpp] extra (llama-cpp-python) has been permanently
+# removed. llama-cpp-python transitively depends on diskcache<=5.6.3, which
+# deserialises cache entries with pickle and allows arbitrary code execution
+# when an attacker can write to the cache directory. No patched version of
+# diskcache exists (Dependabot advisory, 2026-06). The adapter code in
+# velune/providers/adapters/llamacpp.py is retained but its is_available()
+# guard returns False when llama-cpp-python is not installed; it will not be
+# re-enabled until a safe replacement for diskcache is available.
 all = ["velune-cli[gguf,docker]"]
 dev = [
     "pytest>=7.4.0",
@@ -246,6 +246,8 @@ markers = [
 [tool.uv]
 # Security: force patched floors for transitive deps flagged by Dependabot.
 # msgpack <=1.2.0: GHSA-6v7p-g79w-8964 (out-of-bounds read / Unpacker reuse crash)
+# diskcache: removed from the dependency tree (see [llamacpp] removal above).
+#            diskcache has no patched version; the only safe fix is removal.
 constraint-dependencies = ["msgpack>=1.2.1"]
 
 [tool.bandit]

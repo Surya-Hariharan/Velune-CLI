@@ -21,26 +21,45 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
 
-from velune.core.redaction import redact_secrets
+from velune.core.redaction import REDACTION_PLACEHOLDER, redact_secrets
 
 logger = logging.getLogger("velune.observability.trace_log")
 
 DEFAULT_MAX_ENTRIES = 2000
 TRACE_FILENAME = "trace.jsonl"
 
+# Keys whose values must be replaced entirely regardless of format.
+# This covers short or custom tokens that don't match the known-shape patterns
+# in redact_secrets(), closing the gap that CodeQL tracks as cleartext storage.
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?i)\b(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|"
+    r"access[_\-]?key|credential|auth(?:orization)?|bearer|passphrase)\b"
+)
 
-def _redact(value: Any) -> Any:
-    """Recursively scrub secrets from a JSON-able value."""
+
+def _redact(value: Any, *, _key: str | None = None) -> Any:
+    """Recursively scrub secrets from a JSON-able value.
+
+    Two-tier strategy:
+    1. Key-name tier: if the parent dict key matches a sensitive pattern, replace
+       the entire string value with REDACTION_PLACEHOLDER without inspecting it.
+    2. Pattern tier: all other strings pass through redact_secrets() which scrubs
+       known credential shapes and live env-var values.
+    """
     if isinstance(value, str):
+        if _key and _SENSITIVE_KEY_RE.search(_key):
+            return REDACTION_PLACEHOLDER
         return redact_secrets(value)
     if isinstance(value, dict):
-        return {k: _redact(v) for k, v in value.items()}
+        return {k: _redact(v, _key=k) for k, v in value.items()}
     if isinstance(value, list | tuple):
-        return [_redact(v) for v in value]
+        # Propagate parent key so list items under a sensitive key are also redacted.
+        return [_redact(v, _key=_key) for v in value]
     return value
 
 
@@ -66,11 +85,14 @@ class TraceLog:
         breaks the run it is observing.
         """
         record = _redact(entry)
+        # Second-pass: redact the serialised string to catch anything json.dumps
+        # may have stringified from a non-str value that escaped struct-level redaction.
+        line = redact_secrets(json.dumps(record, ensure_ascii=False))
         with self._lock:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    f.write(line + "\n")
             except OSError as exc:
                 logger.debug("Could not append trace entry: %s", exc)
                 return

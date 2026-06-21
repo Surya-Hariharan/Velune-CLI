@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Node.js 24 became the default on 2026-06-16. Force it explicitly so the
+# pinned @v4/@v5 action tags use Node 24 runtimes consistently.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 # Least-privilege default token: CI only needs to read the checkout. Any job
 # that requires more must opt in explicitly with its own permissions block.
 permissions:

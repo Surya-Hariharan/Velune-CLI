@@ -1,5 +1,5 @@
 """Velune package metadata."""
 
-__version__ = "1.0.0"
+__version__ = "0.9.1"
 
 __all__ = ["__version__"]
