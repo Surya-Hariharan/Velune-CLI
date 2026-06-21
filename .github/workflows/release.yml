@@ -102,8 +102,6 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    # OIDC trusted publishing — no long-lived API token required when configured.
-    # Fallback: set PYPI_API_TOKEN repository secret to use API token auth instead.
     permissions:
       id-token: write
     environment:
