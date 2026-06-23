@@ -74,9 +74,18 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="project",
             aliases=["proj", "workspace"],
-            description="Switch or manage project workspaces",
-            usage="/project [name|path] | add <path> | list",
+            description="Open, close, or inspect project workspaces (no cognition)",
+            usage="/project [open <path>|close|status|list|add <path>|<name|path>]",
             handler=repl._cmd_project,
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="cognition",
+            aliases=["cog", "index"],
+            description="Analyze the workspace on demand: quick, standard, or deep",
+            usage="/cognition [init|quick|standard|deep|status|cancel|rebuild]",
+            handler=repl._cmd_cognition,
         )
     )
 
@@ -134,8 +143,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="model",
             aliases=["m"],
-            description="Switch the active model interactively",
-            usage="/model [model-id]",
+            description="Discover, connect, switch, or inspect models",
+            usage="/model [model-id|discover|connect <id>|use <id>|list|status|remove <id>]",
             handler=repl._cmd_model,
         )
     )

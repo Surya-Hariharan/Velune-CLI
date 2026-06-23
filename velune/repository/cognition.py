@@ -48,37 +48,17 @@ class RepositoryCognitionService:
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Start background incremental indexing — non-blocking for the REPL."""
-        from velune.repository.incremental_indexer import IncrementalIndexer
+        """Lifecycle hook — intentionally inert.
 
-        try:
-            from rich.console import Console
-
-            console = Console(stderr=True)
-        except Exception:
-            console = None  # type: ignore[assignment]
-
-        def _print(msg: str) -> None:
-            if console:
-                console.print(msg)
-
-        _print("[dim]Checking repository...[/dim]")
-
-        inc = IncrementalIndexer(self.workspace_root, self._state_path)
-        try:
-            delta = await inc.compute_delta()
-        except Exception as exc:
-            logger.warning("Incremental delta check failed: %s", exc)
-            return
-
-        if delta.is_empty:
-            _print("[dim green]Repository index is up to date[/dim green]")
-            return
-
-        n = delta.total
-        _print(f"[dim]Indexing {n} changed file(s)...[/dim]")
-        self._last_delta = delta
-        self._bg_index_task = asyncio.create_task(self._background_apply(inc, delta, n))
+        Repository cognition is *never* triggered automatically at startup. It
+        is an explicit, user-driven workflow (the ``/cognition`` command). This
+        keeps launch instant and avoids scanning unrelated directories when
+        Velune is started outside a project. The methods below
+        (:meth:`quick_summary`, :meth:`preview`, :meth:`run_incremental`,
+        :meth:`index`) are the manual entry points the REPL calls on demand.
+        """
+        logger.debug("RepositoryCognitionService.initialize: no-op (cognition is manual).")
+        return
 
     async def probe_for_changes(self) -> bool:
         """Check if the workspace has changed since the last index; re-index if so.
@@ -88,6 +68,10 @@ class RepositoryCognitionService:
         fast path makes it cheap when nothing has changed.
         """
         from velune.repository.incremental_indexer import IncrementalIndexer
+        from velune.repository.scanner import unsafe_index_root_reason
+
+        if unsafe_index_root_reason(self.workspace_root):
+            return False
 
         inc = IncrementalIndexer(self.workspace_root, self._state_path)
         try:
@@ -113,6 +97,97 @@ class RepositoryCognitionService:
                 pass
         self._bg_index_task = asyncio.create_task(self._background_apply(inc, delta, delta.total))
         return True
+
+    # ------------------------------------------------------------------
+    # Manual cognition entry points (called by the /cognition command)
+    # ------------------------------------------------------------------
+
+    def unsafe_reason(self) -> str | None:
+        """Return a human-readable reason this root must not be indexed, or None."""
+        from velune.repository.scanner import unsafe_index_root_reason
+
+        return unsafe_index_root_reason(self.workspace_root)
+
+    def quick_summary(self) -> dict:
+        """Fast, manifest-only scan: technology stack + project type. No indexing.
+
+        Targets a 2–5s budget by reading only well-known manifest files
+        (pyproject.toml, package.json, Cargo.toml, …) via the existing
+        detectors rather than walking the whole tree.
+        """
+        from velune.repository.project_type import ProjectTypeDetector
+        from velune.repository.technology_detector import TechnologyDetector
+
+        summary: dict = {"root": str(self.root_path)}
+        try:
+            tech = TechnologyDetector(self.root_path).detect()
+            summary["tech_stack"] = tech.to_dict()
+        except Exception as exc:
+            logger.debug("quick_summary: technology detection failed: %s", exc)
+        try:
+            profile = ProjectTypeDetector().detect(self.root_path)
+            if profile is not None:
+                summary["project_type"] = (
+                    profile.get("display_name")
+                    if isinstance(profile, dict)
+                    else getattr(profile, "display_name", None)
+                )
+        except Exception as exc:
+            logger.debug("quick_summary: project-type detection failed: %s", exc)
+        return summary
+
+    async def preview(self) -> dict:
+        """Estimate scope before a standard/deep index: file count + rough tokens.
+
+        Uses ``FilesystemScanner`` to count code files and a cheap bytes→tokens
+        heuristic (~4 bytes/token) from each file's size — no file contents are
+        read.
+        """
+        return await asyncio.to_thread(self._preview_sync)
+
+    def _preview_sync(self) -> dict:
+        from velune.repository.scanner import FilesystemScanner
+
+        files = FilesystemScanner(self.root_path).scan_code_files()
+        total_bytes = 0
+        for f in files:
+            try:
+                total_bytes += f.stat().st_size
+            except OSError:
+                continue
+        est_tokens = total_bytes // 4
+        return {
+            "file_count": len(files),
+            "total_bytes": total_bytes,
+            "est_tokens": est_tokens,
+        }
+
+    async def run_incremental(self, progress_callback=None) -> object:
+        """Compute and apply a file-level symbol index on demand (``standard`` mode).
+
+        Returns the applied :class:`IndexDelta`. Runs synchronously to
+        completion (the caller decides whether to wrap it in a background job).
+        """
+        from velune.repository.incremental_indexer import IncrementalIndexer
+
+        inc = IncrementalIndexer(self.workspace_root, self._state_path)
+        delta = await inc.compute_delta()
+        if delta.is_empty:
+            self._last_delta = delta
+            return delta
+        if progress_callback is not None:
+            inc.progress_callback = progress_callback
+        await inc.apply_delta(delta)
+        self._last_delta = delta
+        return delta
+
+    async def run_deep(self) -> RepositorySnapshot:
+        """Full repository cognition (``deep`` mode): symbols + graph + architecture.
+
+        Wraps the synchronous :meth:`index` pipeline in a worker thread so the
+        REPL event loop stays responsive.
+        """
+        return await asyncio.to_thread(self.index, True)
 
     async def shutdown(self) -> None:
         """Cancel any pending background indexing task."""

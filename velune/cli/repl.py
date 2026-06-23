@@ -27,6 +27,8 @@ class VeluneREPL:
         self.container = runtime.container
         self.console = runtime.console
         self.active_model: ModelDescriptor | None = None
+        # Most recent /cognition background job id (for /cognition status|cancel).
+        self._cognition_job_id: str | None = None
         from velune.cli.modes import ModeManager
         from velune.cli.statusbar import StatusBarState
 
@@ -317,6 +319,8 @@ class VeluneREPL:
 
     async def run(self) -> None:
         session = self._build_prompt_session()
+        # Restore the persisted default model (best-effort; no network discovery).
+        self._restore_active_model()
         await asyncio.to_thread(self._print_startup_banner)
         await self._start_episodic_session()
 
@@ -721,6 +725,25 @@ class VeluneREPL:
             self.console.print("[green]All checks passed.[/green]")
 
     async def _cmd_model(self, args: str) -> None:
+        # Subcommand router — discover/connect/use/list/status/remove. Anything
+        # else (a bare model id, or no args) falls through to the legacy
+        # direct-switch / interactive picker behavior below.
+        parts = args.strip().split(None, 1)
+        sub = parts[0].lower() if parts else ""
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        if sub == "discover":
+            return await self._model_discover()
+        if sub == "connect":
+            return await self._model_connect(rest)
+        if sub == "use":
+            return await self._model_use(rest)
+        if sub == "list":
+            return await self._cmd_models("")
+        if sub == "status":
+            return await self._model_status()
+        if sub == "remove":
+            return await self._model_remove(rest)
+
         model_registry = self.container.get("runtime.model_registry")
         provider_registry = self.container.get("runtime.provider_registry")
 
@@ -934,6 +957,454 @@ class VeluneREPL:
                 top_skill,
             )
         self.console.print(table)
+
+    # ------------------------------------------------------------------
+    # Model registry commands (/model discover|connect|use|status|remove)
+    # ------------------------------------------------------------------
+
+    async def _activate_model(self, model: ModelDescriptor) -> None:
+        """Set *model* as active and persist it as the default for next launch."""
+        self.active_model = model
+        from velune.cli.model_prefs import save_active_model
+
+        save_active_model(model.provider_id, model.model_id)
+        self._persist_default_provider(model.provider_id)
+        self.console.print(
+            f"[green]✓ Active model:[/green] [cyan]{model.model_id}[/cyan] "
+            f"[dim]{model.provider_id} · ctx {model.context_length:,} · "
+            f"{'local' if model.is_local else 'cloud'}[/dim]"
+        )
+
+    def _persist_default_provider(self, provider_id: str) -> None:
+        """Best-effort write of providers.default_provider into velune.toml."""
+        try:
+            import toml
+
+            workspace = Path(self.container.get("runtime.workspace"))
+            config_path = self.container.get("runtime.config_path") or (workspace / "velune.toml")
+            config_path = Path(config_path)
+            data = toml.load(config_path) if config_path.exists() else {}
+            data.setdefault("providers", {})["default_provider"] = provider_id
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as fh:
+                toml.dump(data, fh)
+        except Exception as exc:
+            _log.debug("Could not persist default provider: %s", exc)
+
+    def _restore_active_model(self) -> None:
+        """Restore the persisted default model from the registry, if available."""
+        if self.active_model is not None:
+            return
+        from velune.cli.model_prefs import load_active_model
+
+        pref = load_active_model()
+        if pref is None:
+            return
+        try:
+            registry = self.container.get("runtime.model_registry")
+            model = registry.get(pref.model_id, pref.provider_id) or registry.get(pref.model_id)
+        except Exception:
+            model = None
+        if model is not None:
+            self.active_model = model
+
+    async def _model_discover(self) -> None:
+        self.console.print(
+            "[dim]Discovering models — Ollama (:11434), LM Studio (:1234), "
+            "OpenAI-compatible servers (:8000/:8080/:3000), "
+            "and configured cloud providers...[/dim]"
+        )
+        registry = self.container.get("runtime.model_registry")
+        try:
+            await registry.refresh()
+        except Exception as exc:
+            self.console.print(f"[red]Discovery failed:[/red] {exc}")
+            return
+        models = registry.list_all()
+        if not models:
+            self.console.print(
+                "[yellow]No models discovered.[/yellow]\n"
+                "[dim]→ Start Ollama ([bold]ollama serve[/bold]) or LM Studio, "
+                "or configure an API key, then run [bold]/model discover[/bold] again.[/dim]"
+            )
+            return
+        self._restore_active_model()
+        provider_registry = self.container.get("runtime.provider_registry")
+        available = [m for m in models if provider_registry.get(m.provider_id) is not None]
+        pool = available or models
+        self.console.print(f"[dim]Discovered {len(pool)} model(s). Select one (Esc to skip):[/dim]")
+        selected = await self._show_model_picker(pool)
+        if selected:
+            await self._activate_model(selected)
+
+    async def _model_connect(self, name: str) -> None:
+        """Register a named model as default; discover first if unknown."""
+        if not name:
+            return await self._model_discover()
+        registry = self.container.get("runtime.model_registry")
+        model = registry.get(name)
+        if model is None:
+            self.console.print(f"[dim]'{name}' not in registry — discovering...[/dim]")
+            try:
+                await registry.refresh()
+            except Exception as exc:
+                self.console.print(f"[red]Discovery failed:[/red] {exc}")
+                return
+            model = registry.get(name)
+        if model is None:
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import ModelNotFoundError
+
+            self.console.print(render_error(ModelNotFoundError(f"'{name}'")))
+            return
+        await self._activate_model(model)
+
+    async def _model_use(self, name: str) -> None:
+        if not name:
+            self.console.print("[yellow]Usage: /model use <model-id>[/yellow]")
+            return
+        registry = self.container.get("runtime.model_registry")
+        model = registry.get(name)
+        if model is None:
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import ModelNotFoundError
+
+            self.console.print(render_error(ModelNotFoundError(f"'{name}'")))
+            self.console.print(
+                "[dim]→ Run [bold]/model discover[/bold] to refresh the registry.[/dim]"
+            )
+            return
+        await self._activate_model(model)
+
+    async def _model_status(self) -> None:
+        from rich.panel import Panel
+
+        if self.active_model is None:
+            self._restore_active_model()
+        if self.active_model is None:
+            self.console.print(
+                "[yellow]No active model.[/yellow] "
+                "[dim]Use [bold]/model discover[/bold] or [bold]/model use <id>[/bold].[/dim]"
+            )
+            return
+        m = self.active_model
+        reachable = "[dim]unknown[/dim]"
+        try:
+            provider_registry = self.container.get("runtime.provider_registry")
+            provider = provider_registry.get(m.provider_id)
+            if provider is not None and hasattr(provider, "health_check"):
+                ok = await provider.health_check()
+                reachable = "[green]reachable[/green]" if ok else "[red]unreachable[/red]"
+        except Exception:
+            pass
+        self.console.print(
+            Panel(
+                f"[bold cyan]{m.model_id}[/bold cyan]\n"
+                f"provider   {m.provider_id}\n"
+                f"location   {'local' if m.is_local else 'cloud'}\n"
+                f"context    {m.context_length:,} tokens\n"
+                f"status     {reachable}",
+                title="Active Model",
+                border_style="dim",
+            )
+        )
+
+    async def _model_remove(self, name: str) -> None:
+        if not name:
+            self.console.print("[yellow]Usage: /model remove <model-id>[/yellow]")
+            return
+        registry = self.container.get("runtime.model_registry")
+        removed = registry.remove(name) if hasattr(registry, "remove") else False
+        from velune.cli.model_prefs import clear_active_model, load_active_model
+
+        pref = load_active_model()
+        if pref and pref.model_id == name:
+            clear_active_model()
+            if self.active_model and self.active_model.model_id == name:
+                self.active_model = None
+        if removed:
+            self.console.print(f"[green]✓ Removed [cyan]{name}[/cyan] from the registry.[/green]")
+        else:
+            self.console.print(
+                f"[yellow]'{name}' was not in the registry.[/yellow] "
+                "[dim](Use [bold]/delete[/bold] to remove an installed Ollama model.)[/dim]"
+            )
+
+    # ------------------------------------------------------------------
+    # Repository cognition commands (/cognition ...)
+    # ------------------------------------------------------------------
+
+    def _get_cognition_service(self):
+        try:
+            return self.container.get("runtime.repository_cognition")
+        except Exception:
+            return None
+
+    def _cognition_model_ready(self) -> bool:
+        if self.active_model is not None:
+            return True
+        try:
+            from velune.providers.keystore import list_configured_providers
+
+            if list_configured_providers():
+                return True
+        except Exception:
+            pass
+        self.console.print(
+            "[yellow]No model configured.[/yellow] "
+            "[dim]Use [bold]/model discover[/bold] or [bold]/model connect[/bold].[/dim]"
+        )
+        return False
+
+    async def _cmd_cognition(self, args: str) -> None:
+        parts = args.strip().split(None, 1)
+        sub = parts[0].lower() if parts else ""
+        cog = self._get_cognition_service()
+        if cog is None:
+            self.console.print("[red]Repository cognition is unavailable in this session.[/red]")
+            return
+        if sub in ("", "init"):
+            await self._cognition_run(cog, deep=False, intro=True)
+        elif sub == "quick":
+            await self._cognition_quick(cog)
+        elif sub == "standard":
+            await self._cognition_run(cog, deep=False)
+        elif sub in ("deep", "rebuild"):
+            await self._cognition_run(cog, deep=True)
+        elif sub == "status":
+            self._cognition_status()
+        elif sub == "cancel":
+            self._cognition_cancel()
+        else:
+            self.console.print(
+                f"[yellow]Unknown /cognition subcommand: {sub}[/yellow]  "
+                "[dim]init | quick | standard | deep | status | cancel | rebuild[/dim]"
+            )
+
+    async def _cognition_quick(self, cog) -> None:
+        if not self._cognition_model_ready():
+            return
+        reason = cog.unsafe_reason()
+        if reason:
+            self.console.print(f"[yellow]⚠ Cannot analyze — workspace is {reason}.[/yellow]")
+            return
+        with self.console.status("[dim]Quick scan (manifests only)...[/dim]"):
+            summary = await asyncio.to_thread(cog.quick_summary)
+        self._render_quick_summary(summary)
+
+    def _render_quick_summary(self, summary: dict) -> None:
+        from rich.panel import Panel
+
+        lines = [f"[bold]Workspace[/bold]  {summary.get('root', '?')}"]
+        if summary.get("project_type"):
+            lines.append(f"[bold]Type[/bold]       {summary['project_type']}")
+        tech = summary.get("tech_stack")
+        if isinstance(tech, dict):
+            for key, val in tech.items():
+                if not val:
+                    continue
+                if isinstance(val, (list, tuple)):
+                    val = ", ".join(map(str, val))
+                elif isinstance(val, dict):
+                    val = ", ".join(f"{k}={v}" for k, v in val.items())
+                lines.append(f"[bold]{str(key).capitalize()}[/bold] {val}")
+        self.console.print(
+            Panel("\n".join(lines), title="Quick Cognition", border_style=design.ACCENT)
+        )
+        self.console.print(
+            "[dim]→ Run [bold]/cognition standard[/bold] to build a full symbol index.[/dim]"
+        )
+
+    async def _cognition_run(self, cog, *, deep: bool, intro: bool = False) -> None:
+        if intro:
+            self.console.print(
+                "[bold]Cognition[/bold] — index this workspace so Velune understands its code."
+            )
+        if not self._cognition_model_ready():
+            return
+        reason = cog.unsafe_reason()
+        if reason:
+            self.console.print(
+                f"[yellow]⚠ Refusing to index — workspace is {reason}.[/yellow] "
+                "[dim]Open a project with [bold]/project open <path>[/bold] first.[/dim]"
+            )
+            return
+        with self.console.status("[dim]Estimating scope...[/dim]"):
+            preview = await cog.preview()
+        if preview.get("file_count", 0) == 0:
+            self.console.print("[yellow]No source files found to index.[/yellow]")
+            return
+        if not self._confirm_cognition(preview, deep=deep):
+            self.console.print("[dim]Cancelled.[/dim]")
+            return
+        await self._submit_cognition_job(cog, deep=deep)
+
+    def _confirm_cognition(self, preview: dict, *, deep: bool) -> bool:
+        from rich.panel import Panel
+        from rich.prompt import Confirm
+
+        workspace = Path(self.container.get("runtime.workspace")).name
+        files = preview.get("file_count", 0)
+        tokens = preview.get("est_tokens", 0)
+        secs = files * (0.06 if deep else 0.025) + 1.0
+        self.console.print(
+            Panel(
+                f"[bold]Workspace[/bold]          {workspace}\n"
+                f"[bold]Mode[/bold]               {'deep' if deep else 'standard'}\n"
+                f"[bold]Files[/bold]              {files:,}\n"
+                f"[bold]Estimated Tokens[/bold]   {self._humanize_count(tokens)}\n"
+                f"[bold]Estimated Cost[/bold]     Local Processing\n"
+                f"[bold]Estimated Duration[/bold] {self._format_duration(secs)}",
+                title="Cognition Preview",
+                border_style=design.ACCENT,
+            )
+        )
+        try:
+            if bool(self.container.get("runtime.auto_accept")):
+                return True
+        except Exception:
+            pass
+        try:
+            return Confirm.ask("  Proceed?", default=True)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _humanize_count(n) -> str:
+        n = int(n or 0)
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}K"
+        return str(n)
+
+    @staticmethod
+    def _format_duration(seconds) -> str:
+        seconds = int(max(1, round(seconds)))
+        if seconds < 60:
+            return f"~{seconds}s"
+        m, s = divmod(seconds, 60)
+        return f"~{m}m {s:02d}s"
+
+    async def _submit_cognition_job(self, cog, *, deep: bool) -> None:
+        from velune.core.task_registry import JobRecord, JobStatus, track
+
+        mode = "deep" if deep else "standard"
+        if self._job_registry is None:
+            with self.console.status(f"[dim]Cognition ({mode})...[/dim]"):
+                try:
+                    if deep:
+                        await cog.run_deep()
+                    else:
+                        await cog.run_incremental()
+                except Exception as exc:
+                    self.console.print(f"[red]Cognition failed:[/red] {exc}")
+                    return
+            self.console.print(f"[green]✓ Cognition complete ({mode}).[/green]")
+            return
+
+        job_id = self._job_registry.new_id()
+        self._job_registry.register(JobRecord(job_id=job_id, name=f"cognition:{mode}"))
+        self._cognition_job_id = job_id
+
+        def _progress(processed: int, total: int, rel_path: str) -> None:
+            self._job_registry.update(job_id, current_phase=f"{processed}/{total}")
+
+        async def _run_cognition() -> None:
+            self._job_registry.update(job_id, status=JobStatus.RUNNING, current_phase="scanning")
+            try:
+                if deep:
+                    snapshot = await cog.run_deep()
+                    summary = snapshot.summary if snapshot else {}
+                    preview = (
+                        f"{summary.get('total_files', '?')} files, "
+                        f"{summary.get('total_symbols', '?')} symbols"
+                    )
+                else:
+                    delta = await cog.run_incremental(progress_callback=_progress)
+                    preview = f"{getattr(delta, 'total', 0)} file(s) indexed"
+                self._job_registry.update(
+                    job_id,
+                    status=JobStatus.COMPLETED,
+                    result_preview=preview[:200],
+                    completed_at=time.monotonic(),
+                )
+            except asyncio.CancelledError:
+                self._job_registry.update(
+                    job_id, status=JobStatus.CANCELLED, completed_at=time.monotonic()
+                )
+                raise
+            except Exception as exc:
+                self._job_registry.update(
+                    job_id,
+                    status=JobStatus.FAILED,
+                    error=str(exc)[:200],
+                    completed_at=time.monotonic(),
+                )
+
+        task_obj = asyncio.create_task(_run_cognition(), name=f"cognition-{job_id}")
+        self._job_registry.update(job_id, task=task_obj)
+        track(task_obj)
+        self.console.print(
+            f"[green]✓ Cognition job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
+        )
+        self.console.print(
+            "[dim]Track with [bold]/cognition status[/bold], [bold]/jobs[/bold], "
+            "or [bold]/dashboard[/bold].[/dim]"
+        )
+
+    def _cognition_status(self) -> None:
+        from rich.table import Table
+
+        if self._job_registry is None:
+            self.console.print("[dim]No job registry available.[/dim]")
+            return
+        jobs = [j for j in self._job_registry.all_jobs() if j.name.startswith("cognition")]
+        if not jobs:
+            self.console.print(
+                "[dim]No cognition jobs yet. Run [bold]/cognition standard[/bold].[/dim]"
+            )
+            return
+        styles = {
+            "running": "yellow",
+            "completed": "green",
+            "failed": "red",
+            "cancelled": "dim",
+            "pending": "cyan",
+        }
+        table = Table(border_style="dim", padding=(0, 1))
+        table.add_column("Job", style="cyan")
+        table.add_column("Mode", style="dim")
+        table.add_column("Status")
+        table.add_column("Phase", style="dim")
+        table.add_column("Result", style="dim")
+        for j in jobs:
+            mode = j.name.split(":", 1)[-1]
+            style = styles.get(j.status.value, "")
+            status_cell = f"[{style}]{j.status.value}[/{style}]" if style else j.status.value
+            table.add_row(
+                j.job_id,
+                mode,
+                status_cell,
+                j.current_phase or "—",
+                (j.result_preview or j.error or "—")[:48],
+            )
+        self.console.print(table)
+
+    def _cognition_cancel(self) -> None:
+        if self._job_registry is None:
+            self.console.print("[dim]No job registry available.[/dim]")
+            return
+        job_id = getattr(self, "_cognition_job_id", None)
+        if job_id and self._job_registry.cancel(job_id):
+            self.console.print(f"[yellow]Cancelled cognition job {job_id}.[/yellow]")
+            return
+        for j in self._job_registry.all_jobs():
+            if j.name.startswith("cognition") and j.status.value in ("running", "pending"):
+                if self._job_registry.cancel(j.job_id):
+                    self.console.print(f"[yellow]Cancelled cognition job {j.job_id}.[/yellow]")
+                    return
+        self.console.print("[dim]No running cognition job to cancel.[/dim]")
 
     async def _cmd_run(self, args: str) -> None:
         if "--bg" in args:
@@ -1796,10 +2267,27 @@ class VeluneREPL:
     # ------------------------------------------------------------------
 
     async def _cmd_project(self, args: str) -> None:
-        """Manage project workspaces: switch, add, list — without restarting."""
+        """Manage project workspaces: open, close, status, add, list, switch.
+
+        Opening a project only *registers + activates* the workspace — it never
+        triggers repository cognition (that is the explicit ``/cognition``
+        workflow).
+        """
         parts = args.strip().split(None, 1)
         sub = parts[0].lower() if parts else ""
         sub_args = parts[1] if len(parts) > 1 else ""
+
+        if sub == "open":
+            await self._project_open(sub_args.strip())
+            return
+
+        if sub == "close":
+            await self._project_close()
+            return
+
+        if sub == "status":
+            await self._project_status()
+            return
 
         if sub == "add":
             target = Path(sub_args.strip() or ".").expanduser()
@@ -1827,6 +2315,57 @@ class VeluneREPL:
             return
 
         await self._project_picker()
+
+    async def _project_open(self, raw_path: str) -> None:
+        """Register and activate *raw_path* as the workspace (no cognition)."""
+        target = Path(raw_path or ".").expanduser()
+        if not target.is_dir():
+            self.console.print(
+                f"[red]Path does not exist or is not a directory:[/red] {target}"
+            )
+            return
+        target = target.resolve()
+        self._workspace_registry.register(target)
+        current = Path(self.container.get("runtime.workspace")).resolve()
+        if target == current:
+            self.console.print(f"[dim]Already in this workspace:[/dim] [cyan]{target.name}[/cyan]")
+            return
+        await self._switch_workspace(target)
+        self.console.print(
+            "[dim]→ Workspace registered. Run [bold]/cognition init[/bold] to analyze it.[/dim]"
+        )
+
+    async def _project_close(self) -> None:
+        """Leave the current project, reverting the workspace to the launch directory."""
+        home = Path.home().resolve()
+        current = Path(self.container.get("runtime.workspace")).resolve()
+        if current == home:
+            self.console.print("[dim]No project is open.[/dim]")
+            return
+        await self._switch_workspace(home)
+        self.console.print("[dim]Project closed.[/dim]")
+
+    async def _project_status(self) -> None:
+        from rich.panel import Panel
+
+        workspace = Path(self.container.get("runtime.workspace")).resolve()
+        info = self._workspace_registry.get(workspace)
+        is_git = (workspace / ".git").exists()
+        indexed = (workspace / ".velune" / "index_state.json").exists()
+        ptype = (info.project_type if info else None) or ("git repo" if is_git else "folder")
+        model = self.active_model.model_id if self.active_model else "[dim]none[/dim]"
+        self.console.print(
+            Panel(
+                f"[bold]Workspace[/bold]  [cyan]{workspace.name}[/cyan]\n"
+                f"[bold]Path[/bold]       {workspace}\n"
+                f"[bold]Type[/bold]       {ptype}\n"
+                f"[bold]Git[/bold]        {'yes' if is_git else 'no'}\n"
+                f"[bold]Indexed[/bold]    {'yes' if indexed else 'no — run /cognition'}\n"
+                f"[bold]Model[/bold]      {model}",
+                title="Project Status",
+                border_style="dim",
+            )
+        )
 
     async def _project_list(self) -> None:
         from rich.table import Table

@@ -123,6 +123,17 @@ class ModelCapabilityRegistry:
         if descriptor.model_id not in self._models:
             self._models[descriptor.model_id] = descriptor
 
+    def remove(self, model_id: str, provider_id: str | None = None) -> bool:
+        """Remove a model from the in-memory catalog. Returns True if anything was removed."""
+        removed = False
+        if provider_id:
+            removed |= self._models.pop(f"{provider_id}/{model_id}", None) is not None
+        # Drop the bare-id alias and any provider-qualified keys for this id.
+        for key in [k for k, m in list(self._models.items()) if m.model_id == model_id]:
+            if self._models.pop(key, None) is not None:
+                removed = True
+        return removed
+
     def get(self, model_id: str, provider_id: str | None = None) -> ModelDescriptor | None:
         """Look up a model descriptor by ID and optional provider prefix."""
         if provider_id:

@@ -15,6 +15,7 @@ from velune.providers.discovery.huggingface import HuggingFaceDiscovery
 from velune.providers.discovery.lmstudio import LMStudioDiscovery
 from velune.providers.discovery.ollama import OllamaDiscovery
 from velune.providers.discovery.openai import OpenAIDiscovery
+from velune.providers.discovery.openai_compat import OpenAICompatDiscovery
 from velune.providers.discovery.openrouter import OpenRouterDiscovery
 from velune.providers.discovery.together import TogetherDiscovery
 from velune.providers.discovery.xai import XAIDiscovery
@@ -22,7 +23,9 @@ from velune.providers.discovery.xai import XAIDiscovery
 logger = logging.getLogger("velune.providers.discovery.scanner")
 
 # Providers that run locally and need no API key
-_LOCAL_PROVIDERS: frozenset[str] = frozenset({"ollama", "lmstudio", "gguf", "llamacpp"})
+_LOCAL_PROVIDERS: frozenset[str] = frozenset(
+    {"ollama", "lmstudio", "gguf", "llamacpp", "openai-compat"}
+)
 
 
 class ModelDiscoveryScanner:
@@ -37,6 +40,7 @@ class ModelDiscoveryScanner:
         self.discoverers = [
             OllamaDiscovery(),
             LMStudioDiscovery(),
+            OpenAICompatDiscovery(),
             GGUFDiscovery(),
             HuggingFaceDiscovery(),
             OpenAIDiscovery(),
@@ -68,9 +72,10 @@ class ModelDiscoveryScanner:
     async def scan_all(self) -> list[ModelDescriptor]:
         """Scan all providers for models in parallel."""
         # Gate server-dependent local providers on reachability
-        ollama_ok, lmstudio_ok = await asyncio.gather(
+        ollama_ok, lmstudio_ok, openai_compat_ok = await asyncio.gather(
             OllamaDiscovery.is_running(),
             LMStudioDiscovery.is_running(),
+            OpenAICompatDiscovery.is_running(),
         )
 
         tasks = []
@@ -78,6 +83,8 @@ class ModelDiscoveryScanner:
             if d.provider_id == "ollama" and not ollama_ok:
                 continue
             if d.provider_id == "lmstudio" and not lmstudio_ok:
+                continue
+            if d.provider_id == "openai-compat" and not openai_compat_ok:
                 continue
             if self._should_run(d):
                 tasks.append(self._collect(d))

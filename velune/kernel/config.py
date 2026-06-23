@@ -134,6 +134,10 @@ class ProvidersConfig(BaseModel):
     lmstudio: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(base_url="http://localhost:1234/v1")
     )
+    # Generic OpenAI-compatible local server (vLLM, LocalAI, llama.cpp server, …).
+    openai_compat: ProviderEntry | None = Field(
+        default_factory=lambda: ProviderEntry(base_url="http://localhost:8000/v1")
+    )
     llamacpp: ProviderEntry | None = Field(default_factory=lambda: ProviderEntry(base_url=""))
     huggingface: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(

@@ -168,6 +168,28 @@ CODE_EXTENSIONS: frozenset[str] = frozenset(
 )
 
 
+def unsafe_index_root_reason(root: Path) -> str | None:
+    """Return a human-readable reason if *root* must never be recursively indexed.
+
+    Auto-indexing the user's home directory or a filesystem/drive root walks and
+    hashes an unbounded tree (OneDrive, Documents, AppData, …), which can stall
+    startup indefinitely. The REPL should still launch in such directories — it
+    just must not crawl them. Returns ``None`` for ordinary project directories.
+    """
+    try:
+        resolved = root.resolve()
+    except Exception:
+        return None
+    try:
+        if resolved == Path.home().resolve():
+            return "your home directory"
+    except Exception:
+        pass
+    if resolved.parent == resolved:  # drive/filesystem root: C:\, D:\, /
+        return "a filesystem root"
+    return None
+
+
 class FilesystemScanner:
     """Discovers source files inside a workspace, respecting gitignore rules.
 

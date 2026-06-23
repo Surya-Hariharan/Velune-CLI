@@ -89,6 +89,20 @@ class ProviderRegistry:
             ),
         )
 
+        openai_compat_url = (
+            cfg.openai_compat.base_url
+            if cfg and cfg.openai_compat and cfg.openai_compat.base_url
+            else None
+        ) or "http://localhost:8000/v1"
+        self.register_factory(
+            "openai-compat",
+            self._provider_factory(
+                "velune.providers.adapters.openai_compat",
+                "OpenAICompatProvider",
+                base_url=openai_compat_url,
+            ),
+        )
+
         self.register_factory(
             "llamacpp",
             self._provider_factory("velune.providers.adapters.llamacpp", "LlamaCppProvider"),

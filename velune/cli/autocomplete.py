@@ -46,6 +46,7 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "history": "Session",
     "clear": "Session",
     "project": "Workspace",
+    "cognition": "Workspace",
     "diff": "Workspace",
     "hunk": "Workspace",
     "forget": "Memory",

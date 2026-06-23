@@ -75,6 +75,39 @@ def _show_startup_banner(console: Console, workspace: Path, config_path: Path | 
     console.print(_startup_frames(workspace, config_path)[-1])
 
 
+# Repository markers that indicate *workspace* is (probably) a project root.
+# Detection is advisory only — it NEVER triggers cognition (Rule 12).
+_REPO_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml", "go.mod")
+
+
+def _detect_repo_marker(path: Path) -> str | None:
+    """Return the directory name if *path* looks like a project root, else None."""
+    try:
+        for marker in _REPO_MARKERS:
+            if (path / marker).exists():
+                return path.name or str(path)
+    except Exception:
+        pass
+    return None
+
+
+def _show_welcome_guide(console: Console) -> None:
+    """First-launch guidance — next steps only, no repository processing (Rule 13)."""
+    console.print(
+        Panel(
+            f"[bold {design.ACCENT}]Welcome to Velune[/bold {design.ACCENT}]\n\n"
+            f"[{design.INFO}]Next steps[/{design.INFO}]\n"
+            "  [bold]1.[/bold] [bold]/model discover[/bold]      [dim]find local + cloud models[/dim]\n"
+            "  [bold]2.[/bold] [bold]/model connect[/bold]       [dim]set your default model[/dim]\n"
+            "  [bold]3.[/bold] [bold]/project open <path>[/bold] [dim]choose a workspace[/dim]\n"
+            "  [bold]4.[/bold] [bold]/cognition init[/bold]      [dim]analyze the workspace[/dim]\n\n"
+            "[dim]Type [bold]/help[/bold] for all commands.[/dim]",
+            border_style=design.ACCENT,
+            padding=(0, 2),
+        )
+    )
+
+
 def create_app() -> typer.Typer:
     """Create the root Typer application."""
 
@@ -222,6 +255,21 @@ def create_app() -> typer.Typer:
                     # ways out of Velune are /exit, /quit, or Ctrl+C twice.
 
                 _show_startup_banner(runtime.console, workspace, config_path)
+
+                # First-launch guidance (no model yet) — never processes the repo.
+                if not configured:
+                    _show_welcome_guide(runtime.console)
+
+                # Advisory repo detection (Rule 12): hint, never auto-cognition.
+                repo_name = _detect_repo_marker(workspace)
+                if repo_name:
+                    runtime.console.print(
+                        f"[{design.INFO}]Repository detected:[/{design.INFO}] "
+                        f"[cyan]{repo_name}[/cyan]  "
+                        f"[dim]→ run [bold]/project open .[/bold], then "
+                        f"[bold]/cognition init[/bold][/dim]"
+                    )
+
                 _startup_mark("REPL handoff (prompt visible)")
                 from velune.kernel.entrypoint import launch
 
