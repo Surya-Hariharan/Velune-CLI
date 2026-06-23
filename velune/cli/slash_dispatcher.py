@@ -74,17 +74,17 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="project",
             aliases=["proj", "workspace"],
-            description="Open, close, or inspect project workspaces (no cognition)",
+            description="Open, close, or inspect project workspaces (no indexing)",
             usage="/project [open <path>|close|status|list|add <path>|<name|path>]",
             handler=repl._cmd_project,
         )
     )
     registry.register(
         SlashCommand(
-            name="cognition",
-            aliases=["cog", "index"],
-            description="Analyze the workspace on demand: quick, standard, or deep",
-            usage="/cognition [init|quick|standard|deep|status|cancel|rebuild]",
+            name="index",
+            aliases=["cognition", "cog"],
+            description="Index the workspace so Velune understands its code: quick, standard, or deep",
+            usage="/index [init|quick|standard|deep|status|cancel|rebuild]",
             handler=repl._cmd_cognition,
         )
     )
@@ -121,7 +121,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     registry.register(
         SlashCommand(
             name="history",
-            aliases=["h"],
+            aliases=["hist"],
             description="Show REPL command execution history",
             usage="/history",
             handler=repl._cmd_history,
@@ -295,9 +295,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     registry.register(
         SlashCommand(
             name="mode",
-            aliases=["status"],
-            description="Show the current session mode and its settings",
-            usage="/mode",
+            aliases=[],
+            description="Show or switch the session mode: fast | max | normal | status",
+            usage="/mode [fast|max|normal|status]",
             handler=repl._cmd_mode,
         )
     )

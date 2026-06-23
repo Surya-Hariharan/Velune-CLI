@@ -79,11 +79,21 @@ def register_commands(app: typer.Typer, container: ServiceContainer) -> None:
     app.command(name="init", rich_help_panel=_CORE)(init_command)
 
     # ── Workspace & Sessions ──────────────────────────────────────────────
+    # `project` is the primary noun so the shell matches the REPL's `/project`.
+    # `workspace` stays registered as a hidden back-compat alias so existing
+    # scripts and muscle memory keep working.
+    app.add_typer(
+        workspace_cmd,
+        name="project",
+        help="Open, index, and switch projects.",
+        rich_help_panel=_WORKSPACE,
+    )
     app.add_typer(
         workspace_cmd,
         name="workspace",
-        help="Browse, index, and switch projects.",
+        help="Alias of `project`.",
         rich_help_panel=_WORKSPACE,
+        hidden=True,
     )
     app.add_typer(
         session_cmd,

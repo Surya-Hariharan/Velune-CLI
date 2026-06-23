@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+
+_log = logging.getLogger("velune.cli.slash_commands")
 
 
 @dataclass
@@ -19,10 +22,28 @@ class SlashCommandRegistry:
     def __init__(self) -> None:
         self._commands: dict[str, SlashCommand] = {}
 
+    def _claim(self, key: str, cmd: SlashCommand) -> None:
+        """Bind *key* to *cmd*, warning if it silently shadows a different command.
+
+        Last-write-wins would otherwise let two commands quietly fight over the
+        same name or alias (e.g. ``/h`` mapping to both ``/help`` and
+        ``/history``). Surfacing the clash turns a silent UX bug into a visible
+        warning that tests and developers can catch.
+        """
+        existing = self._commands.get(key)
+        if existing is not None and existing.name != cmd.name:
+            _log.warning(
+                "Slash command key %r already bound to /%s; overriding with /%s",
+                key,
+                existing.name,
+                cmd.name,
+            )
+        self._commands[key] = cmd
+
     def register(self, cmd: SlashCommand) -> None:
-        self._commands[cmd.name] = cmd
+        self._claim(cmd.name, cmd)
         for alias in cmd.aliases:
-            self._commands[alias] = cmd
+            self._claim(alias, cmd)
 
     def get(self, name: str) -> SlashCommand | None:
         return self._commands.get(name.lower())

@@ -591,19 +591,37 @@ class VeluneREPL:
     async def _cmd_help(self, args: str) -> None:
         from rich.table import Table
 
-        table = Table(
-            show_header=True,
-            border_style="dim",
-            padding=(0, 1),
-            header_style="bold cyan",
-        )
-        table.add_column("Command", style="cyan", width=16)
-        table.add_column("Aliases", style="dim white", width=12)
-        table.add_column("Description")
+        from velune.cli.autocomplete import CATEGORY_ORDER, COMMAND_CATEGORIES
+
+        # Group commands by their shared category so the 40+ command surface
+        # reads as a handful of scannable sections instead of one flat wall.
+        grouped: dict[str, list] = {}
         for cmd in self._registry.all_unique():
-            aliases = ", ".join(f"/{a}" for a in cmd.aliases) if cmd.aliases else ""
-            table.add_row(f"/{cmd.name}", aliases, cmd.description)
-        self.console.print(table)
+            category = COMMAND_CATEGORIES.get(cmd.name, "Other")
+            grouped.setdefault(category, []).append(cmd)
+
+        ordered = [c for c in CATEGORY_ORDER if c in grouped]
+        ordered += sorted(c for c in grouped if c not in CATEGORY_ORDER)
+
+        for category in ordered:
+            table = Table(
+                show_header=False,
+                border_style="dim",
+                padding=(0, 1),
+                title=f"[bold cyan]{category}[/bold cyan]",
+                title_justify="left",
+            )
+            table.add_column("Command", style="cyan", width=16)
+            table.add_column("Aliases", style="dim white", width=14)
+            table.add_column("Description")
+            for cmd in grouped[category]:
+                aliases = ", ".join(f"/{a}" for a in cmd.aliases) if cmd.aliases else ""
+                table.add_row(f"/{cmd.name}", aliases, cmd.description)
+            self.console.print(table)
+
+        self.console.print(
+            "[dim]Tip: press [bold]Tab[/bold] to fuzzy-complete any command.[/dim]"
+        )
 
     async def _cmd_exit(self, args: str) -> None:
         # Teardown (session archive, episodic close, task cancellation) is
@@ -766,15 +784,18 @@ class VeluneREPL:
         # Interactive picker
         models = model_registry.list_all()
         if not models:
-            self.console.print(
-                "[yellow]No models found. Run velune workspace init or "
-                "check your Ollama/API configuration.[/yellow]"
-            )
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import NoModelsAvailableError
+
+            self.console.print(render_error(NoModelsAvailableError()))
             return
 
         available = [m for m in models if provider_registry.get(m.provider_id) is not None]
         if not available:
-            self.console.print("[yellow]No providers are currently reachable.[/yellow]")
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import ProviderUnavailableError
+
+            self.console.print(render_error(ProviderUnavailableError()))
             return
 
         selected = await self._show_model_picker(available)
@@ -925,7 +946,10 @@ class VeluneREPL:
         all_models = model_registry.list_all()
 
         if not all_models:
-            self.console.print("[yellow]No models discovered yet.[/yellow]")
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import NoModelsAvailableError
+
+            self.console.print(render_error(NoModelsAvailableError()))
             return
 
         table = Table(border_style="dim", padding=(0, 1))
@@ -1018,7 +1042,9 @@ class VeluneREPL:
         try:
             await registry.refresh()
         except Exception as exc:
-            self.console.print(f"[red]Discovery failed:[/red] {exc}")
+            from velune.cli.rendering.error_panel import render_unexpected_error
+
+            self.console.print(render_unexpected_error(exc))
             return
         models = registry.list_all()
         if not models:
@@ -1161,7 +1187,10 @@ class VeluneREPL:
         sub = parts[0].lower() if parts else ""
         cog = self._get_cognition_service()
         if cog is None:
-            self.console.print("[red]Repository cognition is unavailable in this session.[/red]")
+            self.console.print(
+                "[red]Repository indexing is unavailable in this session.[/red]  "
+                "[dim]→ Run [bold]/doctor[/bold] to diagnose, then restart Velune.[/dim]"
+            )
             return
         if sub in ("", "init"):
             await self._cognition_run(cog, deep=False, intro=True)
@@ -1177,7 +1206,7 @@ class VeluneREPL:
             self._cognition_cancel()
         else:
             self.console.print(
-                f"[yellow]Unknown /cognition subcommand: {sub}[/yellow]  "
+                f"[yellow]Unknown /index subcommand: {sub}[/yellow]  "
                 "[dim]init | quick | standard | deep | status | cancel | rebuild[/dim]"
             )
 
@@ -1214,7 +1243,7 @@ class VeluneREPL:
             Panel("\n".join(lines), title="Quick Cognition", border_style=design.ACCENT)
         )
         self.console.print(
-            "[dim]→ Run [bold]/cognition standard[/bold] to build a full symbol index.[/dim]"
+            "[dim]→ Run [bold]/index standard[/bold] to build a full symbol index.[/dim]"
         )
 
     async def _cognition_run(self, cog, *, deep: bool, intro: bool = False) -> None:
@@ -1353,7 +1382,7 @@ class VeluneREPL:
             f"[green]✓ Cognition job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
         )
         self.console.print(
-            "[dim]Track with [bold]/cognition status[/bold], [bold]/jobs[/bold], "
+            "[dim]Track with [bold]/index status[/bold], [bold]/jobs[/bold], "
             "or [bold]/dashboard[/bold].[/dim]"
         )
 
@@ -1366,7 +1395,7 @@ class VeluneREPL:
         jobs = [j for j in self._job_registry.all_jobs() if j.name.startswith("cognition")]
         if not jobs:
             self.console.print(
-                "[dim]No cognition jobs yet. Run [bold]/cognition standard[/bold].[/dim]"
+                "[dim]No index jobs yet. Run [bold]/index standard[/bold].[/dim]"
             )
             return
         styles = {
@@ -2334,7 +2363,7 @@ class VeluneREPL:
             return
         await self._switch_workspace(target)
         self.console.print(
-            "[dim]→ Workspace registered. Run [bold]/cognition init[/bold] to analyze it.[/dim]"
+            "[dim]→ Workspace registered. Run [bold]/index[/bold] to analyze it.[/dim]"
         )
 
     async def _project_close(self) -> None:
@@ -2362,7 +2391,7 @@ class VeluneREPL:
                 f"[bold]Path[/bold]       {workspace}\n"
                 f"[bold]Type[/bold]       {ptype}\n"
                 f"[bold]Git[/bold]        {'yes' if is_git else 'no'}\n"
-                f"[bold]Indexed[/bold]    {'yes' if indexed else 'no — run /cognition'}\n"
+                f"[bold]Indexed[/bold]    {'yes' if indexed else 'no — run /index'}\n"
                 f"[bold]Model[/bold]      {model}",
                 title="Project Status",
                 border_style="dim",
@@ -2556,6 +2585,23 @@ class VeluneREPL:
         self.console.print(f"[cyan]● NORMAL MODE[/cyan] — {config.description}")
 
     async def _cmd_mode(self, args: str) -> None:
+        # `/mode` doubles as a switcher: `/mode fast|max|normal` change the
+        # session mode (the friendlier successors to /optimus, /godly, /normal),
+        # while `/mode` or `/mode status` show the current settings table.
+        sub = args.strip().lower()
+        if sub in ("fast", "optimus", "speed"):
+            return await self._cmd_optimus("")
+        if sub in ("max", "godly", "full"):
+            return await self._cmd_godly("")
+        if sub in ("normal", "reset", "balanced"):
+            return await self._cmd_normal("")
+        if sub not in ("", "status", "show"):
+            self.console.print(
+                f"[yellow]Unknown /mode subcommand: {sub}[/yellow]  "
+                "[dim]fast | max | normal | status[/dim]"
+            )
+            return
+
         from rich.table import Table
 
         config = self._mode_manager.config
@@ -2618,7 +2664,10 @@ class VeluneREPL:
             m for m in model_registry.list_all() if provider_registry.get(m.provider_id) is not None
         ]
         if not available:
-            self.console.print("[yellow]No models available. Run /doctor to diagnose.[/yellow]")
+            from velune.cli.rendering.error_panel import render_error
+            from velune.core.errors.catalog import NoModelsAvailableError
+
+            self.console.print(render_error(NoModelsAvailableError()))
             return
 
         from velune.cli.councilmodel_ui import run_councilmodel_ui

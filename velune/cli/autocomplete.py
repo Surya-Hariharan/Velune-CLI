@@ -23,72 +23,125 @@ class CommandEntry:
     aliases: tuple[str, ...] = ()
 
 
-# Category assignments for the built-in REPL commands. Commands not listed
-# here fall back to "General".
+# Display order for categories in /help and the completion menu. Categories
+# not listed here are appended afterwards, alphabetically.
+CATEGORY_ORDER: list[str] = [
+    "Session",
+    "Workspace",
+    "Models",
+    "Council",
+    "Modes",
+    "Memory",
+    "Code",
+    "Git",
+    "Extend",
+    "System",
+]
+
+# Category assignments for the built-in REPL commands. Keyed by canonical
+# command name (not alias). Commands not listed here fall back to "General".
+# This is the single source of truth shared by the completer and /help.
 COMMAND_CATEGORIES: dict[str, str] = {
-    "run": "Council",
-    "council": "Council",
-    "councilmodel": "Council",
+    # Session
+    "help": "Session",
+    "exit": "Session",
+    "clear": "Session",
+    "new": "Session",
+    "session": "Session",
+    "history": "Session",
+    "context": "Session",
+    "stats": "Session",
+    # Workspace
+    "project": "Workspace",
+    "index": "Workspace",
+    "diff": "Workspace",
+    "undo": "Workspace",
+    "hunk": "Workspace",
+    # Models
     "model": "Models",
     "models": "Models",
     "pull": "Models",
     "delete": "Models",
     "bench": "Models",
+    # Council
+    "run": "Council",
+    "council": "Council",
+    "councilmodel": "Council",
+    "jobs": "Council",
+    "dashboard": "Council",
+    # Modes
+    "mode": "Modes",
     "optimus": "Modes",
     "godly": "Modes",
     "normal": "Modes",
-    "mode": "Modes",
+    # Memory
     "memory": "Memory",
     "graph": "Memory",
-    "session": "Session",
-    "new": "Session",
-    "context": "Session",
-    "history": "Session",
-    "clear": "Session",
-    "project": "Workspace",
-    "cognition": "Workspace",
-    "diff": "Workspace",
-    "hunk": "Workspace",
-    "forget": "Memory",
-    "doctor": "System",
-    "config": "System",
-    "help": "System",
-    "exit": "System",
+    # Code
     "lint": "Code",
     "refactor": "Code",
     "typify": "Code",
+    # Git
+    "push": "Git",
+    "pr": "Git",
+    "issue": "Git",
+    "sandbox": "Git",
+    # Extend
+    "mcp": "Extend",
+    "plugin": "Extend",
+    # System
+    "doctor": "System",
+    "config": "System",
+    "hooks": "System",
+    "approve": "System",
 }
 
 # Static fallback used when no live registry is supplied (kept in sync with
-# VeluneREPL._build_registry). Prefer passing `commands=` from the registry.
+# velune.cli.slash_dispatcher.build_slash_registry). Prefer passing
+# `commands=` from the live registry so this can never drift.
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("help", "Show all available commands"),
     ("exit", "Exit the Velune session"),
     ("clear", "Clear the terminal screen (conversation preserved)"),
     ("new", "Start a new conversation session (project memory persists)"),
-    ("project", "Switch or manage project workspaces"),
+    ("project", "Open, close, or inspect project workspaces"),
+    ("index", "Index the workspace so Velune understands its code"),
     ("doctor", "Run environment health checks"),
-    ("model", "Switch the active model interactively"),
+    ("config", "Show current system configuration settings"),
+    ("stats", "Show session statistics: tokens, cost, turns, uptime"),
+    ("history", "Show REPL command execution history"),
+    ("hooks", "List active lifecycle hooks and their config"),
+    ("model", "Discover, connect, switch, or inspect models"),
     ("models", "List all available models"),
-    ("run", "Execute a task through the council"),
-    ("council", "Force full council on a task"),
-    ("diff", "Show pending file changes as unified diff"),
-    ("hunk", "Toggle hunk-by-hunk review mode for edits"),
-    ("forget", "Clear conversation history with confirmation"),
-    ("memory", "Inspect memory tiers and session stats"),
-    ("session", "Save, list, resume, or export sessions (interactive picker if no args)"),
-    ("context", "Show context window usage"),
-    ("optimus", "Switch to speed mode — smallest model, instant tier"),
-    ("godly", "Switch to max power mode — largest model, full council"),
-    ("normal", "Return to balanced normal mode"),
-    ("mode", "Show current session mode and settings"),
-    ("councilmodel", "Assign specific models to council agent roles"),
     ("pull", "Download an Ollama model interactively"),
     ("delete", "Delete a locally installed Ollama model"),
+    ("councilmodel", "Assign specific models to council agent roles"),
+    ("run", "Execute a task through the Reasoning Council"),
+    ("council", "Force full council tier on a task"),
+    ("jobs", "List background jobs or cancel one"),
+    ("dashboard", "Live progress dashboard: jobs, alerts, provider health"),
+    ("session", "Pick, resume, save, or export sessions"),
+    ("memory", "Inspect memory tiers and stats"),
+    ("context", "Show context window usage"),
     ("graph", "Render a hierarchical tree of knowledge graph entities"),
+    ("mode", "Show or switch the session mode: fast | max | normal"),
+    ("optimus", "Speed mode — instant tier, smallest model"),
+    ("godly", "Max power — full council, largest model"),
+    ("normal", "Return to balanced normal mode"),
+    ("diff", "Show uncommitted file changes from the last council run"),
+    ("undo", "Revert the last Velune-generated git commit"),
+    ("hunk", "Toggle hunk-by-hunk review mode for edits"),
+    ("approve", "Set tool/command approval mode: safe | ask | block"),
     ("bench", "View or run empirical model capability benchmarks"),
-    ("config", "Show current system configuration settings"),
-    ("history", "Show REPL command execution history"),
+    ("mcp", "Inspect MCP servers, tools, and resources"),
+    ("plugin", "List, enable, disable, or reload declarative plugins"),
+    ("push", "Push current branch to remote origin"),
+    ("pr", "Create a pull request / merge request"),
+    ("issue", "Fetch a GitHub/GitLab issue as conversation context"),
+    ("sandbox", "Show current sandbox type and status"),
+    ("lint", "Lint a Python file"),
+    ("refactor", "Detect code smells in a Python file"),
+    ("typify", "Suggest type hints for a Python file"),
 ]
 
 # Commands whose first argument is a model id.

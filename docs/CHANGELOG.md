@@ -9,6 +9,53 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-06-24
+
+> Promotes `0.9.3-beta.1` to a stable release and lands a command-architecture
+> and developer-experience pass on the interactive REPL. No behavioral changes
+> to the startup/cognition model introduced in the beta — see `0.9.3-beta.1`
+> migration notes if upgrading from `0.9.2` or earlier.
+
+### Changed — Command architecture & UX
+
+- **`/cognition` renamed to `/index`.** The primary verb is now `/index`
+  (`init` · `quick` · `standard` · `deep` · `status` · `cancel` · `rebuild`),
+  matching the mental model developers bring from other tools. `/cognition`
+  and `/cog` remain as back-compat aliases; all in-app hints now point at
+  `/index`. (`velune/cli/slash_dispatcher.py`, `velune/cli/repl.py`,
+  `velune/cli/app.py`)
+- **`project` is the primary shell noun.** `velune project …` is now the
+  canonical command group (mirroring the REPL's `/project`); `velune workspace`
+  stays as a hidden alias for existing scripts and muscle memory.
+  (`velune/cli/registry.py`)
+- **`/mode` is now a single switcher.** `/mode fast|max|normal` change the
+  session mode (friendlier successors to `/optimus`, `/godly`, `/normal`, which
+  still work), and `/mode` / `/mode status` show the current settings.
+  (`velune/cli/repl.py`)
+- **Categorized `/help`.** The 40+ command surface is grouped into scannable
+  sections (Session · Workspace · Models · Council · Modes · Memory · Code ·
+  Git · Extend · System) instead of one flat table, with a Tab-completion tip.
+  (`velune/cli/repl.py`, `velune/cli/autocomplete.py`)
+
+### Fixed
+
+- **Alias-collision guard.** The slash registry now warns when a name or alias
+  would silently shadow another command (e.g. `/h` mapping to both `/help` and
+  `/history`), turning a latent UX bug into a visible, test-caught failure.
+  `/h` resolves to `/help`; the stale `/status` alias on `/mode` was removed so
+  it no longer clashes with the shell's `velune status`.
+  (`velune/cli/slash_commands.py`)
+- **Structured error panels** replace ad-hoc yellow/red strings in the model,
+  council, and discovery flows (`NoModelsAvailableError`,
+  `ProviderUnavailableError`, unexpected-error rendering), giving consistent,
+  actionable recovery hints. (`velune/cli/repl.py`)
+
+### Added
+
+- **Regression tests** locking in alias integrity, the `cognition`→`index`
+  rename, `/mode` consolidation, and `/help` categorization.
+  (`tests/test_slash_registry.py`)
+
 ## [0.9.3-beta.1] - 2026-06-23
 
 > **Pre-release.** This beta introduces a re-architected startup path and an

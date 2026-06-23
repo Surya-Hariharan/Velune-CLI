@@ -100,7 +100,7 @@ def _show_welcome_guide(console: Console) -> None:
             "  [bold]1.[/bold] [bold]/model discover[/bold]      [dim]find local + cloud models[/dim]\n"
             "  [bold]2.[/bold] [bold]/model connect[/bold]       [dim]set your default model[/dim]\n"
             "  [bold]3.[/bold] [bold]/project open <path>[/bold] [dim]choose a workspace[/dim]\n"
-            "  [bold]4.[/bold] [bold]/cognition init[/bold]      [dim]analyze the workspace[/dim]\n\n"
+            "  [bold]4.[/bold] [bold]/index[/bold]               [dim]index the workspace[/dim]\n\n"
             "[dim]Type [bold]/help[/bold] for all commands.[/dim]",
             border_style=design.ACCENT,
             padding=(0, 2),
@@ -267,7 +267,7 @@ def create_app() -> typer.Typer:
                         f"[{design.INFO}]Repository detected:[/{design.INFO}] "
                         f"[cyan]{repo_name}[/cyan]  "
                         f"[dim]→ run [bold]/project open .[/bold], then "
-                        f"[bold]/cognition init[/bold][/dim]"
+                        f"[bold]/index[/bold][/dim]"
                     )
 
                 _startup_mark("REPL handoff (prompt visible)")
