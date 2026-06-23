@@ -9,6 +9,46 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-23
+
+### Changed — Packaging (lean install)
+
+- **Lean default install.** Heavy/compiled dependencies are moved out of the
+  base install into opt-in extras so `pip install velune-cli` resolves fast and
+  cleanly on every platform. Core dependencies dropped from ~38 to 21 with no
+  heavy compiled wheels. New extras: `[rag]` (lancedb, pyarrow, qdrant-client),
+  `[parsing]` (tree-sitter grammars), `[telemetry]` (opentelemetry), `[git]`
+  (gitpython); `[all]` aggregates everything. Every gated feature degrades
+  gracefully when its extra is absent (e.g. semantic search becomes a no-op
+  while lexical search and chat keep working). (`pyproject.toml`)
+
+### Changed — Startup performance
+
+- **`velune --version` is now near-instant** (~1.6s → ~0.04s). The console
+  script entry point is `velune.main:main`, which fast-paths `--version`
+  without importing the command graph or runtime. The Typer app is built
+  lazily instead of at import time. (`velune/main.py`, `velune/cli/app.py`)
+- **`velune <cmd> --help` no longer bootstraps the runtime** (~3.9s → ~1.6s):
+  the root callback skips full-subsystem initialization when help is requested.
+- Removed a redundant second Ollama reachability probe on REPL startup.
+
+### Fixed
+
+- First run with no providers and a non-interactive stdin now prints the
+  `velune setup` hint and exits cleanly instead of blocking on a confirmation
+  prompt or entering an unusable REPL. (`velune/cli/app.py`)
+- The `llama-cpp-python` adapter error message no longer references the removed
+  `[llamacpp]` extra. (`velune/providers/adapters/llamacpp.py`)
+- `MANIFEST.in` now references the correct `docs/CHANGELOG.md` path.
+
+### Added — Quality
+
+- **Test suite wired into CI.** The `pytest` suite (350 tests) now runs in CI
+  across {Linux, macOS, Windows} × {3.11, 3.13} and gates merges and releases;
+  `asyncio_mode = "auto"` is configured under `[tool.pytest.ini_options]`.
+- README documents `pipx install velune-cli`, the `python -m velune` fallback,
+  and the Windows PATH note for the "`velune` is not recognized" case.
+
 ### Added — Providers
 
 - **Cohere** provider adapter — native Chat API with preamble/history conversion,
