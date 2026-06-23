@@ -9,6 +9,52 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.3-beta.1] - 2026-06-23
+
+> **Pre-release.** This beta introduces a re-architected startup path and an
+> explicit, user-driven cognition model. See the Migration Notes below before
+> upgrading from `0.9.x`.
+
+### Changed — Startup architecture
+
+- **Instant startup with explicit, on-demand cognition.** The REPL no longer
+  runs automatic repository cognition (indexing) on launch. The CLI opens
+  immediately; you connect a model, open a project, and run cognition only when
+  you ask for it. (`velune/cli/repl.py`, `velune/repository/cognition.py`)
+- **New startup flow:** `velune` → CLI opens instantly → connect model →
+  open project → run cognition.
+
+### Added — Workspace, model & cognition commands
+
+- **Workspace management** via `/project`
+  (`open <path>` · `close` · `status` · `list` · `add <path>`). Recently-opened
+  workspaces are remembered so the picker can reopen them instantly.
+  (`velune/cli/workspaces.py`, `velune/cli/slash_dispatcher.py`)
+- **Model registry + local model discovery** via `/model`
+  (`discover` · `connect <id>` · `use <id>` · `list` · `status` ·
+  `remove <id>`). `/model discover` finds locally available models (e.g. Ollama).
+- **Manual cognition** via `/cognition`
+  (`quick` · `standard` · `deep` · `status` · `init` · `cancel` · `rebuild`).
+  `quick` scans manifests only; `standard`/`deep` build a full symbol index.
+
+### Removed
+
+- **Automatic repository cognition on startup.** Indexing is now opt-in through
+  the `/cognition` command. This is the headline behavior change in this release.
+
+### Performance
+
+- Startup no longer blocks on indexing or a second model-reachability probe;
+  cognition cost is paid only when explicitly requested.
+
+### Migration Notes
+
+- **Indexing is no longer automatic.** After opening a project, run
+  `/cognition standard` (or `quick`/`deep`) to build the symbol index that
+  earlier versions built silently at launch.
+- **Connect a model explicitly.** Use `/model discover` then
+  `/model connect <id>` (or `/model use <id>`) before running cognition or chat.
+
 ## [0.9.2] - 2026-06-23
 
 ### Changed — Packaging (lean install)
@@ -601,7 +647,8 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Security sandbox: workspace write guards, network hygiene, secret scrubbing
 - Full pytest suite: unit, integration, async, and benchmark tests
 
-[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.3-beta.1...HEAD
+[0.9.3-beta.1]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.2...v0.9.3-beta.1
 [0.9.2]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/Surya-Hariharan/Velune-CLI/releases/tag/v0.9.0

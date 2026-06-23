@@ -1195,6 +1195,8 @@ class VeluneREPL:
     def _render_quick_summary(self, summary: dict) -> None:
         from rich.panel import Panel
 
+        from velune.cli import design
+
         lines = [f"[bold]Workspace[/bold]  {summary.get('root', '?')}"]
         if summary.get("project_type"):
             lines.append(f"[bold]Type[/bold]       {summary['project_type']}")
@@ -1242,6 +1244,8 @@ class VeluneREPL:
     def _confirm_cognition(self, preview: dict, *, deep: bool) -> bool:
         from rich.panel import Panel
         from rich.prompt import Confirm
+
+        from velune.cli import design
 
         workspace = Path(self.container.get("runtime.workspace")).name
         files = preview.get("file_count", 0)
@@ -2320,9 +2324,7 @@ class VeluneREPL:
         """Register and activate *raw_path* as the workspace (no cognition)."""
         target = Path(raw_path or ".").expanduser()
         if not target.is_dir():
-            self.console.print(
-                f"[red]Path does not exist or is not a directory:[/red] {target}"
-            )
+            self.console.print(f"[red]Path does not exist or is not a directory:[/red] {target}")
             return
         target = target.resolve()
         self._workspace_registry.register(target)

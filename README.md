@@ -107,6 +107,26 @@ On underpowered machines it routes tasks to cloud providers automatically.
 
 ---
 
+## Startup flow
+
+Velune starts instantly and does no work until you ask for it. Repository
+cognition (indexing) is **explicit and on-demand** — it never runs automatically
+on launch.
+
+```text
+velune
+    ↓
+CLI opens instantly
+    ↓
+Connect a model      →  /model discover · /model connect <id> · /model use <id>
+    ↓
+Open a project       →  /project open <path> · /project status
+    ↓
+Run cognition        →  /cognition quick · /cognition standard · /cognition deep
+```
+
+---
+
 ## Interface
 
 Velune features a modern, clean terminal interface designed for productivity:
@@ -199,7 +219,19 @@ velune memory clear       # Clear all memory tiers for the current workspace
 /exit                    Exit Velune
 /clear                   Clear the terminal screen (context is preserved)
 /new [title]             Start a new conversation (project memory persists)
-/project [name|path]     Switch or manage project workspaces
+
+─── Workspace & Cognition ─────────────────────────────────────────────────────
+/project open <path>     Open a directory as the active workspace
+/project close           Close the current workspace
+/project status          Show the active workspace and its cognition state
+/project list            List recently-opened workspaces (reopen instantly)
+/project add <path>      Remember a workspace without switching to it
+/cognition quick         Fast scan — manifests only, no symbol index
+/cognition standard      Build a full symbol index for the workspace
+/cognition deep          Deep index (symbols + import graph + relationships)
+/cognition status        Show index freshness and progress
+/cognition cancel        Cancel a running cognition job
+/cognition rebuild       Discard and rebuild the index from scratch
 
 ─── Council / Execution ───────────────────────────────────────────────────────
 /run <task>              Execute a task through the Reasoning Council
@@ -211,6 +243,11 @@ velune memory clear       # Clear all memory tiers for the current workspace
 
 ─── Models ────────────────────────────────────────────────────────────────────
 /model [model-id]        Switch active model (arrow-key picker if no arg)
+/model discover          Discover locally available models (e.g. Ollama)
+/model connect <id>      Register/connect a model to the active session
+/model use <id>          Set the active model by id
+/model status            Show the active model and connection state
+/model remove <id>       Remove a model from the registry
 /models                  List all available models
 /pull [model-id]         Download an Ollama model with live progress
 /delete <model-id>       Delete a locally installed Ollama model
