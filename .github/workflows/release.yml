@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" ruff pyright pip-audit build wheel
+          pip install -e ".[all,dev]" ruff pyright pip-audit build wheel
 
       - name: Ruff lint
         run: ruff check velune/
@@ -40,6 +40,9 @@ jobs:
 
       - name: Pyright
         run: pyright velune/
+
+      - name: Tests
+        run: pytest
 
       - name: Security checks
         run: |

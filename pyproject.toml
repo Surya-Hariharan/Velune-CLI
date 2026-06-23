@@ -31,8 +31,14 @@ classifiers = [
   "Typing :: Typed",
 ]
 
+# ── Lean core ────────────────────────────────────────────────────────────────
+# The default install is intentionally small and pure-python-friendly so that
+# `pip install velune-cli` resolves fast and cleanly on every platform. Heavy,
+# compiled, or feature-specific dependencies live in the extras below and every
+# import site for them is lazy + self-degrading, so the CLI starts and runs
+# (Ollama / cloud chat, sessions, config, doctor) without any extra installed.
 dependencies = [
-    # Core
+    # Core CLI + config
     "pydantic>=2.5.0",
     "pydantic-settings>=2.14.2",
     "toml>=0.10.2",
@@ -43,49 +49,63 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "pathspec>=0.12.0",
 
-    # Providers
+    # Providers (HTTP-only; no heavy/compiled deps)
     "openai>=1.10.0",
     "anthropic>=0.18.0",
     "httpx>=0.26.0",
+    "mcp>=1.0.0",
 
-    # Memory
+    # Memory metadata store (stdlib-backed; vector store is the [rag] extra)
     "aiosqlite>=0.19.0",
-    "qdrant-client>=1.7.0",
-    "lancedb>=0.5.0",
-    "pyarrow>=14.0.0",
-    "numpy>=1.24.0",
 
-    # Retrieval
+    # Lexical retrieval + repo graph: kept in core so keyword search and the
+    # dependency graph work out of the box. rank-bm25 requires numpy, so numpy
+    # is a core dependency too (it is otherwise only used lazily by [rag]).
     "rank-bm25>=0.2.2",
-
-    # Repository
-    "tree-sitter>=0.21.0",
-    "tree-sitter-python>=0.21.0",
-    "tree-sitter-typescript>=0.21.0",
-    "tree-sitter-rust>=0.21.0",
-    "tree-sitter-go>=0.21.0",
-    "gitpython>=3.1.40",
+    "numpy>=1.24.0",
     "networkx>=3.2.0",
 
-    # Execution
+    # Execution + logging (small)
     "psutil>=5.9.0",
-
-    # Telemetry
-    "opentelemetry-api>=1.22.0",
-    "opentelemetry-sdk>=1.22.0",
-    "opentelemetry-exporter-otlp>=1.22.0",
     "structlog>=24.0.0",
 
     # Utilities
     "orjson>=3.9.0",
     "tiktoken>=0.5.0",
-    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]
-# GGUF metadata reading only — safe, no diskcache dependency
+# ── Heavy / feature-specific extras ──────────────────────────────────────────
+# RAG: semantic memory + vector retrieval. Pulls the large compiled wheels
+# (lancedb/pyarrow/qdrant/numpy). Without it, semantic/vector features
+# transparently degrade to no-ops; lexical (BM25) search still works.
+rag = [
+    "qdrant-client>=1.7.0",
+    "lancedb>=0.5.0",
+    "pyarrow>=14.0.0",
+]
+# Tree-sitter source parsing for deep repository cognition (compiled grammars).
+# Without it, repository indexing falls back to lighter heuristics.
+parsing = [
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
+    "tree-sitter-rust>=0.21.0",
+    "tree-sitter-go>=0.21.0",
+]
+# OpenTelemetry exporters for external trace/metric backends. Velune's own
+# trace log works without these; install only to ship spans to an OTLP collector.
+telemetry = [
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "opentelemetry-exporter-otlp>=1.22.0",
+]
+# Git provider tools (push / PR / issue) and repo git context. All git imports
+# are lazy, so the CLI runs without it; git-backed tools error with a clear hint.
+git = ["gitpython>=3.1.40"]
+# GGUF metadata reading only — safe, no diskcache dependency.
 gguf = ["gguf>=0.6.0"]
-# Docker sandbox isolation — install to enable execution.docker_sandbox = true
+# Docker sandbox isolation — install to enable execution.docker_sandbox = true.
 docker = ["docker>=7.0.0"]
 # NOTE: the former [llamacpp] extra (llama-cpp-python) has been permanently
 # removed. llama-cpp-python transitively depends on diskcache<=5.6.3, which
@@ -95,7 +115,7 @@ docker = ["docker>=7.0.0"]
 # velune/providers/adapters/llamacpp.py is retained but its is_available()
 # guard returns False when llama-cpp-python is not installed; it will not be
 # re-enabled until a safe replacement for diskcache is available.
-all = ["velune-cli[gguf,docker]"]
+all = ["velune-cli[rag,parsing,telemetry,git,gguf,docker]"]
 dev = [
     "ruff>=0.1.0",
     "pyright>=1.1.350",
@@ -104,10 +124,12 @@ dev = [
     "bandit[toml]>=1.7.0",
     "build>=1.0.0",
     "twine>=4.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]
 
 [project.scripts]
-velune = "velune.main:app"
+velune = "velune.main:main"
 
 [project.urls]
 Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
@@ -135,6 +157,16 @@ include = [
   "LICENSE",
   "docs/CHANGELOG.md",
   "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `auto` lets plain `async def test_*` run without per-test @pytest.mark.asyncio.
+asyncio_mode = "auto"
+addopts = "-q"
+markers = [
+    "integration: end-to-end tests that touch real subsystems (deselect with -m 'not integration')",
+    "slow: long-running tests (deselect with -m 'not slow')",
 ]
 
 [tool.black]

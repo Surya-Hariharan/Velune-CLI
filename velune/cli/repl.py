@@ -509,20 +509,16 @@ class VeluneREPL:
         )
 
     def _print_startup_banner(self) -> None:
-        import httpx
-
         from velune import __version__
         from velune.cli.banner import render_startup_banner
         from velune.providers.keystore import list_configured_providers
 
         hardware = self.container.get("runtime.hardware")
+        # list_configured_providers() already performs a single short Ollama
+        # reachability probe and prepends "ollama" when the server is live.
+        # Reuse that result instead of issuing a second redundant probe.
         configured = list_configured_providers()
-
-        try:
-            r = httpx.get("http://localhost:11434/api/tags", timeout=1.5)
-            ollama_live = r.status_code == 200
-        except Exception:
-            ollama_live = False
+        ollama_live = "ollama" in configured
 
         workspace = self.container.get("runtime.workspace")
         workspace_path = str(Path(workspace).resolve()) if workspace else "unknown"

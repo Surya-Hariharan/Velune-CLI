@@ -38,12 +38,13 @@ class LlamaCppProvider(ModelProvider):
             import llama_cpp  # noqa: F401
         except ImportError:
             raise ProviderConnectionError(
-                "llama-cpp-python is not installed. "
-                "It is intentionally excluded from the default install due to a known "
-                "security vulnerability in its transitive dependency diskcache<=5.6.3 "
-                "(unsafe pickle deserialization — no patched version exists). "
-                "Only install in trusted, single-user environments: "
-                "pip install 'velune-cli[llamacpp]'"
+                "llama-cpp-python is not installed and the former [llamacpp] extra "
+                "has been permanently removed: llama-cpp-python pulls in "
+                "diskcache<=5.6.3 (unsafe pickle deserialization — no patched "
+                "version exists). This provider is therefore unavailable. If you "
+                "understand the risk and need in-process GGUF inference, install it "
+                "manually in a trusted, single-user environment: "
+                "pip install llama-cpp-python"
             )
 
     def _resolve_model_path(self, model_id: str) -> Path:

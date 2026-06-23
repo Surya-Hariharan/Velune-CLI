@@ -60,6 +60,34 @@ velune
 
 Get a free Groq key at <https://console.groq.com/keys> — no credit card.
 
+### Installing the `velune` command
+
+```bash
+pip install velune-cli
+velune --version
+```
+
+If your shell reports **`velune: command not found`** (or, on Windows,
+*"'velune' is not recognized…"*), the install succeeded but your Python
+scripts directory is not on `PATH`. Two reliable fixes:
+
+- **Recommended — install with [pipx](https://pipx.pypa.io/)** (isolated env, auto-managed PATH):
+
+  ```bash
+  pipx install velune-cli
+  ```
+
+- **Or run it as a module** (always works, no PATH changes needed):
+
+  ```bash
+  python -m velune --version
+  python -m velune            # start the REPL
+  ```
+
+On Windows, a plain `pip install` puts the launcher in a per-user
+`…\PythonXX\Scripts` folder; re-running the Python installer with **“Add
+Python to PATH”** checked (or using `pipx`) resolves it permanently.
+
 ---
 
 ## Hardware requirements
@@ -337,20 +365,33 @@ Velune runs natively on Windows (supporting native command execution sandboxing,
 
 ## Optional extras
 
-| Extra | Installs | Notes |
+The default install is intentionally lean and pure-python-friendly so it
+resolves fast and cleanly on every platform. Heavy or feature-specific
+dependencies live in extras — every feature that needs one **degrades
+gracefully** when it is absent (e.g. semantic search becomes a no-op, but
+lexical search and chat keep working).
+
+| Extra | Installs | Enables |
 | --- | --- | --- |
-| `[gguf]` | `gguf` library | GGUF file metadata reading — safe, no transitive risk |
-| `[llamacpp]` | `llama-cpp-python` | In-process GGUF inference. **Security advisory**: pulls in `diskcache ≤ 5.6.3` (unsafe pickle deserialization, no patched version). Only install in trusted, single-user environments. |
+| `[rag]` | `lancedb`, `pyarrow`, `qdrant-client` | Semantic memory + vector retrieval (large compiled wheels) |
+| `[parsing]` | `tree-sitter` + grammars | Tree-sitter source parsing for deep repository cognition |
+| `[telemetry]` | `opentelemetry-*` | Export spans/metrics to an OTLP collector |
+| `[git]` | `gitpython` | Git provider tools (push / PR / issue) and richer git context |
+| `[gguf]` | `gguf` | GGUF file metadata reading — safe, no transitive risk |
 | `[docker]` | `docker` | Docker sandbox for isolated code execution |
-| `[all]` | `[gguf,docker]` | Full install — deliberately excludes `[llamacpp]` due to the advisory above |
+| `[all]` | everything above | Full-featured install |
 | `[dev]` | Test/lint tools | For contributors |
 
 ```bash
-pip install velune-cli           # base install (Ollama, cloud providers)
-pip install 'velune-cli[gguf]'   # + GGUF metadata reading
-pip install 'velune-cli[all]'    # + GGUF + Docker sandbox
-pip install 'velune-cli[llamacpp]'  # + in-process GGUF inference (see advisory)
+pip install velune-cli            # lean base (Ollama, cloud providers, chat, lexical search)
+pip install 'velune-cli[rag]'     # + semantic memory & vector retrieval
+pip install 'velune-cli[all]'     # + every optional feature
 ```
+
+> The former `[llamacpp]` extra has been **permanently removed**:
+> `llama-cpp-python` pulls in `diskcache ≤ 5.6.3` (unsafe pickle
+> deserialization, no patched version). Install `llama-cpp-python` manually,
+> in a trusted single-user environment only, if you accept that risk.
 
 ---
 

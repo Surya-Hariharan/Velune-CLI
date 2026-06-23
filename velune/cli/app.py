@@ -117,6 +117,15 @@ def create_app() -> typer.Typer:
                 )
             raise typer.Exit()
 
+        # Rendering help text never touches the runtime. When the user asks for
+        # help on any subcommand (`velune <cmd> --help`), Typer still runs this
+        # root callback first — skip the expensive full-subsystem bootstrap so
+        # help stays fast (~1.5s instead of ~4s). The subcommand then prints its
+        # own help and exits without ever reading ctx.obj.
+        if any(arg in ("--help", "-h") for arg in sys.argv[1:]):
+            ctx.obj = None
+            return
+
         # Developers can opt into full internal logs with --verbose/-v.
         if verbose:
             logging.getLogger("velune").setLevel(logging.DEBUG)
@@ -188,6 +197,18 @@ def create_app() -> typer.Typer:
                             border_style=design.WARN,
                         )
                     )
+                    # In a non-interactive context (piped stdin, CI, cron) there is
+                    # no TTY to read a confirmation from and the REPL cannot run.
+                    # Print the actionable hint and exit cleanly instead of
+                    # blocking on `typer.confirm` (which would hit EOF) or dropping
+                    # into a doomed REPL.
+                    if not sys.stdin.isatty():
+                        runtime.console.print(
+                            f"[{design.INFO}]→ Run `velune setup` to configure a provider, "
+                            f"then start Velune again.[/{design.INFO}]"
+                        )
+                        raise typer.Exit()
+
                     run_now = typer.confirm("Run setup now?", default=True)
                     if run_now:
                         from velune.cli.commands.setup import run_setup_wizard
@@ -210,4 +231,20 @@ def create_app() -> typer.Typer:
     return app
 
 
-app = create_app()
+_app_singleton: typer.Typer | None = None
+
+
+def __getattr__(name: str) -> typer.Typer:
+    """Build the Typer app on first attribute access, not at import time.
+
+    Importing this module used to eagerly call ``create_app()`` — which imports
+    every command module and the runtime — even for ``velune --version``. The
+    app is now constructed lazily and cached so ``from velune.cli.app import app``
+    still works for backward compatibility while cheap entry paths pay nothing.
+    """
+    global _app_singleton
+    if name == "app":
+        if _app_singleton is None:
+            _app_singleton = create_app()
+        return _app_singleton
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
