@@ -619,9 +619,7 @@ class VeluneREPL:
                 table.add_row(f"/{cmd.name}", aliases, cmd.description)
             self.console.print(table)
 
-        self.console.print(
-            "[dim]Tip: press [bold]Tab[/bold] to fuzzy-complete any command.[/dim]"
-        )
+        self.console.print("[dim]Tip: press [bold]Tab[/bold] to fuzzy-complete any command.[/dim]")
 
     async def _cmd_exit(self, args: str) -> None:
         # Teardown (session archive, episodic close, task cancellation) is
@@ -1394,9 +1392,7 @@ class VeluneREPL:
             return
         jobs = [j for j in self._job_registry.all_jobs() if j.name.startswith("cognition")]
         if not jobs:
-            self.console.print(
-                "[dim]No index jobs yet. Run [bold]/index standard[/bold].[/dim]"
-            )
+            self.console.print("[dim]No index jobs yet. Run [bold]/index standard[/bold].[/dim]")
             return
         styles = {
             "running": "yellow",
