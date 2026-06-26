@@ -1,15 +1,15 @@
 """Central design tokens for the Velune CLI.
 
-Organic/Natural earth-tone palette emphasizing orchestration, privacy, speed, and
-intelligence. The design language celebrates multi-agent coordination with soft
-tones and natural gradients — inspired by symphony orchestration and local-first
-data privacy.
+Pink/White brand palette — a soft, modern, high-contrast look built around hot
+pink accents on clean white text. The design language pairs a vivid magenta
+brand hue with rose and blush tints for secondary elements, keeping warnings and
+errors functionally distinct for readability.
 
 Palette:
-- Deep teals (orchestration, control)
-- Forest greens (local-first, privacy)
-- Warm oranges (speed, energy)
-- Muted earth tones (balance, stability)
+- Hot pink (primary brand, logo, prompt prefix)
+- Blush / rose (secondary elements, active states)
+- Deep magenta (emphasis, highlights)
+- White & soft mauve neutrals (body text, separators)
 
 Nothing here probes the terminal at import time; :func:`color_enabled` is
 evaluated lazily so the palette degrades gracefully under ``NO_COLOR`` and on
@@ -21,35 +21,38 @@ from __future__ import annotations
 import os
 import sys
 
-# --- Brand palette: Organic/Natural Earth Tones ----------------------------
-# Primary: Teal — represents orchestration, coordination, calm intelligence
-ACCENT = "#2db8a4"  # deep teal (logo, primary brand, prompt prefix)
-ACCENT_SOFT = "#4dd4c8"  # soft teal (secondary elements, arrows)
+# --- Brand palette: Pink & White -------------------------------------------
+# Primary: Hot Pink — the signature brand hue (logo, prompt prefix, headings)
+ACCENT = "#ff5fa2"  # hot pink (logo, primary brand, prompt prefix)
+ACCENT_SOFT = "#ffa6cf"  # soft blush pink (secondary elements, arrows)
 
-# Secondary: Forest Green — represents local-first, privacy, grounded security
-PRIMARY_GREEN = "#1f8659"  # deep forest green (emphasis, highlights)
-GREEN = "#2fb86a"  # vibrant forest green (accents, active states)
+# Secondary: Deep Magenta — emphasis and strong highlights
+PRIMARY_GREEN = "#e91e8c"  # deep magenta-pink (emphasis, highlights)
+GREEN = "#ff7fb6"  # rose pink (accents, active states, success)
 
-# Tertiary: Warm Orange — represents speed, energy, forward motion
-HIGHLIGHT = "#d97e35"  # warm orange-brown (modes, speed indicators)
-ENERGY = "#f5a94b"  # golden orange (active processes, speed)
+# Tertiary: Vivid Pink — modes, energy, forward motion
+HIGHLIGHT = "#ff2d95"  # vivid magenta-pink (modes, indicators)
+ENERGY = "#ffb3d9"  # light pink (active processes)
 
 # Info & feedback
-INFO = "#5eb8d4"  # cooler teal for informational text
-SUBTLE = "#3a9b7f"  # muted teal for subtle elements
+INFO = "#ff9ec7"  # soft pink for informational text
+SUBTLE = "#c97a9c"  # muted mauve for subtle elements
 
-# Semantic state colors (shared by status bar, badges, diffs).
-OK = "#2fb86a"  # forest green — success
-WARN = "#f5a94b"  # warm orange — warning
-DANGER = "#d94d4d"  # muted red — danger
+# Semantic state colors (shared by status bar, badges, diffs). Warnings/errors
+# stay functionally legible while sitting comfortably inside the pink theme.
+OK = "#ff7fb6"  # rose pink — success
+WARN = "#ffb86b"  # warm peach — warning (kept distinct for legibility)
+DANGER = "#ff4d6d"  # hot red-pink — danger
 
 # Neutrals.
-MUTED = "#7a9999"  # secondary text (warm gray-teal)
-FAINT = "#5a7979"  # frame glyphs, separators (cooler)
-SURFACE = "#0f1817"  # dark forest background
-LIGHT_BG = "#1a2422"  # slightly lighter panels
+WHITE = "#ffffff"  # primary body text
+MUTED = "#d9a8c0"  # secondary text (soft mauve-pink)
+FAINT = "#9a6f82"  # frame glyphs, separators (dim mauve)
+SURFACE = "#1a0d14"  # very dark plum background
+LIGHT_BG = "#2a1520"  # slightly lighter plum panels
 
 # --- Semantic role aliases -------------------------------------------------
+PINK = ACCENT
 SUCCESS = OK
 ERROR = DANGER
 ACCENT_TEXT = ACCENT

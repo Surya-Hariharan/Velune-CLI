@@ -6,19 +6,11 @@ import asyncio
 import logging
 
 from velune.core.types.model import ModelDescriptor
-from velune.providers.discovery.anthropic import AnthropicDiscovery
-from velune.providers.discovery.fireworks import FireworksDiscovery
-from velune.providers.discovery.gguf import GGUFDiscovery
-from velune.providers.discovery.google import GoogleDiscovery
-from velune.providers.discovery.groq import GroqDiscovery
-from velune.providers.discovery.huggingface import HuggingFaceDiscovery
-from velune.providers.discovery.lmstudio import LMStudioDiscovery
-from velune.providers.discovery.ollama import OllamaDiscovery
-from velune.providers.discovery.openai import OpenAIDiscovery
-from velune.providers.discovery.openai_compat import OpenAICompatDiscovery
-from velune.providers.discovery.openrouter import OpenRouterDiscovery
-from velune.providers.discovery.together import TogetherDiscovery
-from velune.providers.discovery.xai import XAIDiscovery
+
+# The concrete discovery classes are imported lazily in ``_build_discoverers``
+# (and where used) so that merely importing this module — which happens during
+# the Tier-0 model registry bootstrap — does not pull in ``httpx`` × 13 + every
+# discovery backend.
 
 logger = logging.getLogger("velune.providers.discovery.scanner")
 
@@ -37,7 +29,32 @@ class ModelDiscoveryScanner:
     """
 
     def __init__(self) -> None:
-        self.discoverers = [
+        # Discoverers are built lazily on first scan. Constructing them eagerly
+        # imports ``httpx`` × 13 and runs a keystore ``get_key()`` lookup plus an
+        # Ollama ``GPUDetector()`` per discoverer — ~0.4s that every Tier-0
+        # bootstrap (and the first REPL prompt) paid for work nothing on the
+        # startup path actually uses. Nothing scans until a discovery command
+        # runs, so defer it.
+        self._discoverers: list | None = None
+
+    @staticmethod
+    def _build_discoverers() -> list:
+        """Import and instantiate every discovery backend (first-use only)."""
+        from velune.providers.discovery.anthropic import AnthropicDiscovery
+        from velune.providers.discovery.fireworks import FireworksDiscovery
+        from velune.providers.discovery.gguf import GGUFDiscovery
+        from velune.providers.discovery.google import GoogleDiscovery
+        from velune.providers.discovery.groq import GroqDiscovery
+        from velune.providers.discovery.huggingface import HuggingFaceDiscovery
+        from velune.providers.discovery.lmstudio import LMStudioDiscovery
+        from velune.providers.discovery.ollama import OllamaDiscovery
+        from velune.providers.discovery.openai import OpenAIDiscovery
+        from velune.providers.discovery.openai_compat import OpenAICompatDiscovery
+        from velune.providers.discovery.openrouter import OpenRouterDiscovery
+        from velune.providers.discovery.together import TogetherDiscovery
+        from velune.providers.discovery.xai import XAIDiscovery
+
+        return [
             OllamaDiscovery(),
             LMStudioDiscovery(),
             OpenAICompatDiscovery(),
@@ -52,6 +69,13 @@ class ModelDiscoveryScanner:
             TogetherDiscovery(),
             FireworksDiscovery(),
         ]
+
+    @property
+    def discoverers(self) -> list:
+        """The discovery backends, built on first access and cached."""
+        if self._discoverers is None:
+            self._discoverers = self._build_discoverers()
+        return self._discoverers
 
     def _should_run(self, discoverer) -> bool:
         """Return True if this discoverer should be queried."""
@@ -75,6 +99,9 @@ class ModelDiscoveryScanner:
         # gated here: its discoverer also reads on-disk manifest stores, so it
         # must run even when the daemon is down (to surface models on external
         # drives or an offline daemon) — it returns [] cheaply if nothing exists.
+        from velune.providers.discovery.lmstudio import LMStudioDiscovery
+        from velune.providers.discovery.openai_compat import OpenAICompatDiscovery
+
         lmstudio_ok, openai_compat_ok = await asyncio.gather(
             LMStudioDiscovery.is_running(),
             OpenAICompatDiscovery.is_running(),

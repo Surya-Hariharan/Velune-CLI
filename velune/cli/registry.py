@@ -48,6 +48,13 @@ class CommandSpec:
     panel: str
     help: str
     hidden: bool = False
+    # How much of the runtime this command needs at dispatch:
+    #   "full"  — Tier-0 + Tier-1 bootstrapped synchronously (default; required
+    #             by commands that read memory/retrieval/cognition/orchestration).
+    #   "light" — Tier-0 only; the expensive Tier-1 subsystems are skipped
+    #             entirely. For read-only/diagnostic commands that consume just
+    #             config + providers/models/console. Cuts ~2.2s off startup.
+    bootstrap: str = "full"
 
 
 # Single source of truth for the built-in command tree. Order within a panel is
@@ -144,6 +151,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "config_cmd",
         _SETUP,
         "Read and write velune.toml settings.",
+        bootstrap="light",
     ),
     # ── Analytics & Monitoring ────────────────────────────────────────────
     CommandSpec(
@@ -153,6 +161,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "usage_command",
         _ANALYTICS,
         "Show token usage and cost.",
+        bootstrap="light",
     ),
     CommandSpec(
         "quota",
@@ -161,6 +170,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "quota_command",
         _ANALYTICS,
         "Show provider quota status.",
+        bootstrap="light",
     ),
     CommandSpec(
         "health",
@@ -169,6 +179,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "health_command",
         _ANALYTICS,
         "Show provider health.",
+        bootstrap="light",
     ),
     # ── Diagnostics ───────────────────────────────────────────────────────
     CommandSpec(
@@ -178,6 +189,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "doctor_cmd",
         _DIAG,
         "Check that providers, models, and paths are healthy.",
+        bootstrap="light",
     ),
     CommandSpec(
         "logs",
@@ -186,6 +198,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "trace_cmd",
         _DIAG,
         "View recent execution events (alias of `trace`).",
+        bootstrap="light",
     ),
     CommandSpec(
         "daemon",
@@ -218,6 +231,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "context_cmd",
         _DIAG,
         "Show index freshness, file counts, and workspace health.",
+        bootstrap="light",
     ),
     CommandSpec(
         "pipeline",
@@ -230,6 +244,18 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
 )
 
 _SPECS_BY_NAME: dict[str, CommandSpec] = {spec.name: spec for spec in COMMAND_SPECS}
+
+
+def bootstrap_level(command: str | None) -> str:
+    """Return the runtime bootstrap level for an invoked subcommand.
+
+    ``"light"`` for read-only/diagnostic commands that need only Tier-0, else
+    ``"full"``. Unknown commands (and ``None``) default to ``"full"`` so a
+    misclassification can never silently starve a command of a subsystem.
+    """
+    spec = _SPECS_BY_NAME.get(command) if command else None
+    return spec.bootstrap if spec is not None else "full"
+
 
 PANEL_ORDER: tuple[str, ...] = (_CORE, _WORKSPACE, _SETUP, _ANALYTICS, _DIAG)
 

@@ -6,7 +6,7 @@ and last-response latency/throughput. All values are read from a small
 mutable state object the REPL updates as it works — rendering never probes
 hardware or providers.
 
-Uses the organic/natural design palette with earth tones.
+Uses the Pink/White brand palette from ``velune.cli.design``.
 """
 
 from __future__ import annotations
@@ -15,19 +15,23 @@ from dataclasses import dataclass
 
 from prompt_toolkit.formatted_text import FormattedText
 
-# Status bar color scheme: dark forest background with teal/green accents
+from velune.cli import design
+
+# Status bar color scheme: dark plum background with pink/white accents. Built
+# from the canonical design tokens so the bar stays in sync with the brand.
+_BG = design.SURFACE  # dark plum background
 STATUS_BAR_STYLES: dict[str, str] = {
-    "bottom-toolbar": "noinherit bg:#0f1817 #7a9999",  # dark forest bg, warm gray-teal text
-    "bottom-toolbar.key": "bg:#0f1817 #5a7979",  # subtle separator
-    "bottom-toolbar.model": "bg:#0f1817 #2db8a4 bold",  # teal for model (orchestration)
-    "bottom-toolbar.mode": "bg:#0f1817 #d97e35",  # warm orange for modes (energy)
-    "bottom-toolbar.ok": "bg:#0f1817 #2fb86a",  # forest green for success
-    "bottom-toolbar.warn": "bg:#0f1817 #f5a94b",  # warm orange for warnings
-    "bottom-toolbar.danger": "bg:#0f1817 #d94d4d",  # muted red for errors
-    "bottom-toolbar.project": "bg:#0f1817 #5eb8d4",  # cooler teal for workspace info
-    "bottom-toolbar.hint": "bg:#0f1817 #f5a94b bold",  # warm orange for exit hint
-    "bottom-toolbar.privacy": "bg:#0f1817 #1f8659",  # deep forest green for privacy
-    "bottom-toolbar.speed": "bg:#0f1817 #f5a94b",  # warm orange for speed
+    "bottom-toolbar": f"noinherit bg:{_BG} {design.MUTED}",  # dark plum bg, soft mauve text
+    "bottom-toolbar.key": f"bg:{_BG} {design.FAINT}",  # subtle separator
+    "bottom-toolbar.model": f"bg:{_BG} {design.ACCENT} bold",  # hot pink for model
+    "bottom-toolbar.mode": f"bg:{_BG} {design.HIGHLIGHT}",  # vivid pink for modes
+    "bottom-toolbar.ok": f"bg:{_BG} {design.OK}",  # rose pink for success
+    "bottom-toolbar.warn": f"bg:{_BG} {design.WARN}",  # peach for warnings
+    "bottom-toolbar.danger": f"bg:{_BG} {design.DANGER}",  # hot red-pink for errors
+    "bottom-toolbar.project": f"bg:{_BG} {design.INFO}",  # soft pink for workspace info
+    "bottom-toolbar.hint": f"bg:{_BG} {design.HIGHLIGHT} bold",  # vivid pink for exit hint
+    "bottom-toolbar.privacy": f"bg:{_BG} {design.PRIMARY_GREEN}",  # deep magenta for privacy
+    "bottom-toolbar.speed": f"bg:{_BG} {design.ENERGY}",  # light pink for speed
 }
 
 _SEP = ("class:bottom-toolbar.key", "  ◆  ")

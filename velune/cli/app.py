@@ -37,7 +37,7 @@ from rich.text import Text
 from velune import __version__
 from velune.cli import design
 from velune.cli.context import CLIContext
-from velune.cli.registry import register_commands
+from velune.cli.registry import bootstrap_level, register_commands
 from velune.core.startup_profiler import mark as _startup_mark
 from velune.kernel.registry import ServiceContainer
 
@@ -177,9 +177,14 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
 
         # The interactive session (no subcommand) defers the expensive Tier-1
         # subsystems to a background warm-up so the prompt appears instantly.
-        # Subcommands need a fully-initialized container, so they bootstrap
+        # Read-only/diagnostic subcommands tagged ``bootstrap="light"`` (config,
+        # doctor, usage, quota, health, logs, status) likewise skip Tier-1 — they
+        # consume only Tier-0 (config + providers/models/console), so building
+        # memory/retrieval/cognition/orchestration is ~2.2s of pure waste. Every
+        # other subcommand needs a fully-initialized container and bootstraps
         # everything synchronously.
-        defer_background = ctx.invoked_subcommand is None and not json_mode
+        is_light = bootstrap_level(ctx.invoked_subcommand) == "light"
+        defer_background = (ctx.invoked_subcommand is None or is_light) and not json_mode
 
         try:
             from velune.core.runtime import build_runtime
