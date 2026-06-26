@@ -54,61 +54,186 @@ class CommandSpec:
 # preserved in help output.
 COMMAND_SPECS: tuple[CommandSpec, ...] = (
     # ── Core — what you use every day ────────────────────────────────────
-    CommandSpec("chat", "command", "velune.cli.commands.chat", "chat_command", _CORE,
-                "Start an interactive chat session."),
-    CommandSpec("run", "command", "velune.cli.commands.run", "run_command", _CORE,
-                "Run an autonomous, multi-step task."),
-    CommandSpec("ask", "command", "velune.cli.commands.ask", "ask_command", _CORE,
-                "Ask a single one-off question."),
-    CommandSpec("init", "command", "velune.cli.commands.init", "init_command", _CORE,
-                "Initialize Velune in the current workspace."),
+    CommandSpec(
+        "chat",
+        "command",
+        "velune.cli.commands.chat",
+        "chat_command",
+        _CORE,
+        "Start an interactive chat session.",
+    ),
+    CommandSpec(
+        "run",
+        "command",
+        "velune.cli.commands.run",
+        "run_command",
+        _CORE,
+        "Run an autonomous, multi-step task.",
+    ),
+    CommandSpec(
+        "ask",
+        "command",
+        "velune.cli.commands.ask",
+        "ask_command",
+        _CORE,
+        "Ask a single one-off question.",
+    ),
+    CommandSpec(
+        "init",
+        "command",
+        "velune.cli.commands.init",
+        "init_command",
+        _CORE,
+        "Initialize Velune in the current workspace.",
+    ),
     # ── Workspace & Sessions ──────────────────────────────────────────────
-    CommandSpec("project", "typer", "velune.cli.commands.workspace", "workspace_cmd", _WORKSPACE,
-                "Open, index, and switch projects."),
-    CommandSpec("workspace", "typer", "velune.cli.commands.workspace", "workspace_cmd", _WORKSPACE,
-                "Alias of `project`.", hidden=True),
-    CommandSpec("session", "typer", "velune.cli.commands.session", "session_cmd", _WORKSPACE,
-                "List, resume, or delete chat sessions."),
+    CommandSpec(
+        "project",
+        "typer",
+        "velune.cli.commands.workspace",
+        "workspace_cmd",
+        _WORKSPACE,
+        "Open, index, and switch projects.",
+    ),
+    CommandSpec(
+        "workspace",
+        "typer",
+        "velune.cli.commands.workspace",
+        "workspace_cmd",
+        _WORKSPACE,
+        "Alias of `project`.",
+        hidden=True,
+    ),
+    CommandSpec(
+        "session",
+        "typer",
+        "velune.cli.commands.session",
+        "session_cmd",
+        _WORKSPACE,
+        "List, resume, or delete chat sessions.",
+    ),
     # ── Setup & Models ────────────────────────────────────────────────────
-    CommandSpec("setup", "command", "velune.cli.commands.setup", "setup_command", _SETUP,
-                "Configure providers and models interactively."),
-    CommandSpec("models", "typer", "velune.cli.commands.models", "models_cmd", _SETUP,
-                "Scan, list, and assign AI models."),
-    CommandSpec("provider", "typer", "velune.cli.commands.providers", "provider_cmd", _SETUP,
-                "Manage AI providers — add, remove, test, list, and check status."),
-    CommandSpec("config", "typer", "velune.cli.commands.config", "config_cmd", _SETUP,
-                "Read and write velune.toml settings."),
+    CommandSpec(
+        "setup",
+        "command",
+        "velune.cli.commands.setup",
+        "setup_command",
+        _SETUP,
+        "Configure providers and models interactively.",
+    ),
+    CommandSpec(
+        "models",
+        "typer",
+        "velune.cli.commands.models",
+        "models_cmd",
+        _SETUP,
+        "Scan, list, and assign AI models.",
+    ),
+    CommandSpec(
+        "provider",
+        "typer",
+        "velune.cli.commands.providers",
+        "provider_cmd",
+        _SETUP,
+        "Manage AI providers — add, remove, test, list, and check status.",
+    ),
+    CommandSpec(
+        "config",
+        "typer",
+        "velune.cli.commands.config",
+        "config_cmd",
+        _SETUP,
+        "Read and write velune.toml settings.",
+    ),
     # ── Analytics & Monitoring ────────────────────────────────────────────
-    CommandSpec("usage", "command", "velune.cli.commands.usage", "usage_command", _ANALYTICS,
-                "Show token usage and cost."),
-    CommandSpec("quota", "command", "velune.cli.commands.usage", "quota_command", _ANALYTICS,
-                "Show provider quota status."),
-    CommandSpec("health", "command", "velune.cli.commands.usage", "health_command", _ANALYTICS,
-                "Show provider health."),
+    CommandSpec(
+        "usage",
+        "command",
+        "velune.cli.commands.usage",
+        "usage_command",
+        _ANALYTICS,
+        "Show token usage and cost.",
+    ),
+    CommandSpec(
+        "quota",
+        "command",
+        "velune.cli.commands.usage",
+        "quota_command",
+        _ANALYTICS,
+        "Show provider quota status.",
+    ),
+    CommandSpec(
+        "health",
+        "command",
+        "velune.cli.commands.usage",
+        "health_command",
+        _ANALYTICS,
+        "Show provider health.",
+    ),
     # ── Diagnostics ───────────────────────────────────────────────────────
-    CommandSpec("doctor", "typer", "velune.cli.commands.doctor", "doctor_cmd", _DIAG,
-                "Check that providers, models, and paths are healthy."),
-    CommandSpec("logs", "typer", "velune.cli.commands.trace", "trace_cmd", _DIAG,
-                "View recent execution events (alias of `trace`)."),
-    CommandSpec("daemon", "typer", "velune.cli.commands.daemon", "daemon_cmd", _DIAG,
-                "Start, stop, or check the background Velune service."),
-    CommandSpec("mcp", "typer", "velune.cli.commands.mcp", "mcp_cmd", _DIAG,
-                "Connect to or expose an MCP server."),
-    CommandSpec("memory", "typer", "velune.cli.commands.memory", "memory_cmd", _DIAG,
-                "Inspect, clear, or compact AI memory tiers."),
-    CommandSpec("status", "typer", "velune.cli.commands.context", "context_cmd", _DIAG,
-                "Show index freshness, file counts, and workspace health."),
-    CommandSpec("pipeline", "typer", "velune.cli.commands.retrieval", "retrieval_cmd", _DIAG,
-                "Trace a retrieval query through the search pipeline."),
+    CommandSpec(
+        "doctor",
+        "typer",
+        "velune.cli.commands.doctor",
+        "doctor_cmd",
+        _DIAG,
+        "Check that providers, models, and paths are healthy.",
+    ),
+    CommandSpec(
+        "logs",
+        "typer",
+        "velune.cli.commands.trace",
+        "trace_cmd",
+        _DIAG,
+        "View recent execution events (alias of `trace`).",
+    ),
+    CommandSpec(
+        "daemon",
+        "typer",
+        "velune.cli.commands.daemon",
+        "daemon_cmd",
+        _DIAG,
+        "Start, stop, or check the background Velune service.",
+    ),
+    CommandSpec(
+        "mcp",
+        "typer",
+        "velune.cli.commands.mcp",
+        "mcp_cmd",
+        _DIAG,
+        "Connect to or expose an MCP server.",
+    ),
+    CommandSpec(
+        "memory",
+        "typer",
+        "velune.cli.commands.memory",
+        "memory_cmd",
+        _DIAG,
+        "Inspect, clear, or compact AI memory tiers.",
+    ),
+    CommandSpec(
+        "status",
+        "typer",
+        "velune.cli.commands.context",
+        "context_cmd",
+        _DIAG,
+        "Show index freshness, file counts, and workspace health.",
+    ),
+    CommandSpec(
+        "pipeline",
+        "typer",
+        "velune.cli.commands.retrieval",
+        "retrieval_cmd",
+        _DIAG,
+        "Trace a retrieval query through the search pipeline.",
+    ),
 )
 
 _SPECS_BY_NAME: dict[str, CommandSpec] = {spec.name: spec for spec in COMMAND_SPECS}
 
 PANEL_ORDER: tuple[str, ...] = (_CORE, _WORKSPACE, _SETUP, _ANALYTICS, _DIAG)
 
-BUILTIN_COMMAND_MODULES: Sequence[str] = tuple(
-    dict.fromkeys(spec.module for spec in COMMAND_SPECS)
-)
+BUILTIN_COMMAND_MODULES: Sequence[str] = tuple(dict.fromkeys(spec.module for spec in COMMAND_SPECS))
 
 
 def discover_builtin_modules() -> list[ModuleType]:
@@ -229,6 +354,4 @@ def render_root_help() -> None:
         console.print(f"[bold {design.INFO}]{panel}[/bold {design.INFO}]")
         console.print(table)
         console.print()
-    console.print(
-        "[dim]Run [bold]velune COMMAND --help[/bold] for details on a command.[/dim]"
-    )
+    console.print("[dim]Run [bold]velune COMMAND --help[/bold] for details on a command.[/dim]")

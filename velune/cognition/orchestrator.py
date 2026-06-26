@@ -937,9 +937,7 @@ class CouncilOrchestrator:
             # Only the deliberative tiers (>=3) draw multiple candidates; instant
             # and minimal stay single-shot for latency.
             n_samples = (
-                coder_sample_count(coder_low_resource, degraded_diversity)
-                if tier_level >= 3
-                else 1
+                coder_sample_count(coder_low_resource, degraded_diversity) if tier_level >= 3 else 1
             )
 
             candidate_pool = await self._diverge_candidates(

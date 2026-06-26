@@ -148,8 +148,7 @@ class OllamaLocationRegistry:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
                 "locations": [
-                    {"path": loc.path, "label": loc.label, "kind": loc.kind}
-                    for loc in locations
+                    {"path": loc.path, "label": loc.label, "kind": loc.kind} for loc in locations
                 ]
             }
             tmp = self._path.with_suffix(".json.tmp")
@@ -232,9 +231,7 @@ class OllamaLocationRegistry:
     def active_stores(self) -> list[OllamaModelStore]:
         """Stores for every currently-reachable, valid root (discovery input)."""
         return [
-            OllamaModelStore(rr.path)
-            for rr in self.resolve_roots()
-            if rr.exists and rr.is_valid
+            OllamaModelStore(rr.path) for rr in self.resolve_roots() if rr.exists and rr.is_valid
         ]
 
     def disconnected(self) -> list[ResolvedRoot]:

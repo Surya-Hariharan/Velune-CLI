@@ -154,10 +154,7 @@ class SlashCompleter(Completer):
             self._entries = list(commands)
         else:
             pairs = SLASH_COMMANDS + (extra_commands or [])
-            self._entries = [
-                CommandEntry(name=name, description=desc)
-                for name, desc in pairs
-            ]
+            self._entries = [CommandEntry(name=name, description=desc) for name, desc in pairs]
         self._model_ids: list[str] = model_ids or []
         self._symbol_names: list[str] = symbol_names or []
         self._max_results = max_results

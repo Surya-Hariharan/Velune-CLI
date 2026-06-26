@@ -159,7 +159,9 @@ class OllamaDiscovery:
                 "to use it."
             )
         else:
-            reason = "Ollama daemon is not running - start it with `ollama serve` to use this model."
+            reason = (
+                "Ollama daemon is not running - start it with `ollama serve` to use this model."
+            )
 
         return ModelDescriptor(
             model_id=stored.name,

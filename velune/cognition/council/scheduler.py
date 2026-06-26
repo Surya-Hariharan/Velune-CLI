@@ -110,9 +110,7 @@ class CouncilScheduler:
             results.append(await self._run_one(job, timeout))
         return results
 
-    async def run(
-        self, jobs: list[CouncilJob], timeout: float | None = None
-    ) -> list[JobResult]:
+    async def run(self, jobs: list[CouncilJob], timeout: float | None = None) -> list[JobResult]:
         """Execute *jobs* and return results in the original input order.
 
         Results preserve the order of ``jobs`` regardless of execution mode so

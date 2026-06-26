@@ -115,9 +115,7 @@ def measure_agreement(
 
     n_judges = len(scores)
     score_mean = sum(scores) / n_judges if n_judges else 0.5
-    score_variance = (
-        sum((s - score_mean) ** 2 for s in scores) / n_judges if n_judges else 0.0
-    )
+    score_variance = sum((s - score_mean) ** 2 for s in scores) / n_judges if n_judges else 0.0
     critic_pass_rate = (
         sum(1 for p in passed_flags if p) / len(passed_flags) if passed_flags else 1.0
     )

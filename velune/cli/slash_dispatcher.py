@@ -29,28 +29,57 @@ _log = logging.getLogger("velune.cli.slash_dispatcher")
 # command name appears here (no silent "General" fallback for built-ins).
 _BUILTIN_CATEGORIES: dict[str, str] = {
     # Session
-    "help": "Session", "exit": "Session", "clear": "Session", "new": "Session",
-    "history": "Session", "stats": "Session", "session": "Session", "context": "Session",
+    "help": "Session",
+    "exit": "Session",
+    "clear": "Session",
+    "new": "Session",
+    "history": "Session",
+    "stats": "Session",
+    "session": "Session",
+    "context": "Session",
     # Workspace
-    "project": "Workspace", "index": "Workspace", "diff": "Workspace",
-    "undo": "Workspace", "hunk": "Workspace",
+    "project": "Workspace",
+    "index": "Workspace",
+    "diff": "Workspace",
+    "undo": "Workspace",
+    "hunk": "Workspace",
     # Models
-    "model": "Models", "models": "Models", "pull": "Models", "delete": "Models",
-    "bench": "Models", "councilmodel": "Models",
+    "model": "Models",
+    "models": "Models",
+    "pull": "Models",
+    "delete": "Models",
+    "bench": "Models",
+    "councilmodel": "Models",
     # Council
-    "run": "Council", "council": "Council", "jobs": "Council", "dashboard": "Council",
+    "run": "Council",
+    "council": "Council",
+    "jobs": "Council",
+    "dashboard": "Council",
     # Modes
-    "optimus": "Modes", "godly": "Modes", "normal": "Modes", "mode": "Modes",
+    "optimus": "Modes",
+    "godly": "Modes",
+    "normal": "Modes",
+    "mode": "Modes",
     # Memory
-    "memory": "Memory", "graph": "Memory",
+    "memory": "Memory",
+    "graph": "Memory",
     # Code
-    "lint": "Code", "refactor": "Code", "typify": "Code",
+    "lint": "Code",
+    "refactor": "Code",
+    "typify": "Code",
     # Git
-    "push": "Git", "pr": "Git", "issue": "Git", "sandbox": "Git",
+    "push": "Git",
+    "pr": "Git",
+    "issue": "Git",
+    "sandbox": "Git",
     # Extend
-    "mcp": "Extend", "plugin": "Extend",
+    "mcp": "Extend",
+    "plugin": "Extend",
     # System
-    "doctor": "System", "config": "System", "hooks": "System", "approve": "System",
+    "doctor": "System",
+    "config": "System",
+    "hooks": "System",
+    "approve": "System",
 }
 
 
