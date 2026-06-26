@@ -81,7 +81,7 @@ def _render_logo() -> Text:
     logo = Text()
     rows = len(_LOGO_ART[0])
     for row in range(rows):
-        for letter, color in zip(_LOGO_ART, colors):
+        for letter, color in zip(_LOGO_ART, colors, strict=False):
             logo.append(letter[row], style=color)
         if row < rows - 1:
             logo.append("\n")
