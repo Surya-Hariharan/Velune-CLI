@@ -122,6 +122,53 @@ class VeluneREPL:
         self._prev_ctx_pct: float = 0.0
 
     # ------------------------------------------------------------------
+    # workspace trust
+    # ------------------------------------------------------------------
+
+    def _ensure_workspace_trust(self) -> bool:
+        """Return whether the current workspace is trusted, prompting once.
+
+        Project-level ``.mcp.json`` / ``velune.toml`` can run code and redirect
+        provider traffic. If the workspace is unknown *and* contains such files,
+        prompt the user once; remember the decision for future sessions.
+        """
+        from velune.core import trust
+
+        workspace = self._mcp_registry.workspace
+        if trust.is_trusted(workspace):
+            return True
+
+        has_project_config = (workspace / ".mcp.json").exists() or (
+            workspace / "velune.toml"
+        ).exists()
+        if not has_project_config:
+            # Nothing project-controlled to gate; no need to prompt.
+            return False
+
+        from rich.prompt import Confirm
+
+        self.console.print(
+            f"[yellow]This workspace ({workspace}) is not trusted.[/yellow]\n"
+            "[dim]It contains project-level MCP / provider config that can run "
+            "local commands and redirect API traffic.[/dim]"
+        )
+        try:
+            decision = Confirm.ask("  Trust this directory?", default=False)
+        except Exception:
+            decision = False
+
+        if decision:
+            trust.trust(workspace)
+            self.console.print("[dim]Workspace trusted. Use [bold]/trust forget[/bold] to revoke.[/dim]")
+            return True
+
+        self.console.print(
+            "[dim]Continuing untrusted — project MCP servers and base_url "
+            "overrides are disabled.[/dim]"
+        )
+        return False
+
+    # ------------------------------------------------------------------
     # prompt_toolkit session
     # ------------------------------------------------------------------
 
@@ -335,9 +382,13 @@ class VeluneREPL:
         if _hook_start.system_message:
             self.console.print(f"[dim]{_hook_start.system_message}[/dim]")
 
-        # Load and connect MCP servers from .mcp.json / velune.toml
+        # Load and connect MCP servers from .mcp.json / velune.toml.
+        # Project-level config can spawn arbitrary local processes (stdio MCP
+        # servers) and redirect provider traffic, so it is only honored once the
+        # user has explicitly trusted this workspace.
         try:
-            self._mcp_registry.load_config()
+            trusted = self._ensure_workspace_trust()
+            self._mcp_registry.load_config(trusted=trusted)
             if self._mcp_registry._entries:
                 server_count = len(self._mcp_registry._entries)
                 self.console.print(f"[dim]Connecting {server_count} MCP server(s)...[/dim]")
@@ -3679,26 +3730,29 @@ class VeluneREPL:
             )
             return
 
-        # Inject project-aware system prompt on the very first turn
-        if not self._conversation and self._project_profile:
-            try:
-                from velune.repository.project_type import PROJECT_SYSTEM_PROMPTS, ProjectType
+        # Inject the base system prompt (+ project-aware addon) on the very first turn.
+        if not self._conversation:
+            from velune.cognition.prompts import CHAT_INTERACTIVE, get_prompt
 
-                pt_value = (
-                    self._project_profile.get("project_type")
-                    if isinstance(self._project_profile, dict)
-                    else self._project_profile.project_type.value
-                )
-                addon = PROJECT_SYSTEM_PROMPTS.get(ProjectType(pt_value), "")
-                if addon:
-                    self._conversation.append(
-                        {
-                            "role": "system",
-                            "content": f"You are a coding assistant. {addon}",
-                        }
+            base_prompt = get_prompt(CHAT_INTERACTIVE)
+            addon = ""
+            if self._project_profile:
+                try:
+                    from velune.repository.project_type import (
+                        PROJECT_SYSTEM_PROMPTS,
+                        ProjectType,
                     )
-            except Exception:
-                pass
+
+                    pt_value = (
+                        self._project_profile.get("project_type")
+                        if isinstance(self._project_profile, dict)
+                        else self._project_profile.project_type.value
+                    )
+                    addon = PROJECT_SYSTEM_PROMPTS.get(ProjectType(pt_value), "")
+                except Exception:
+                    addon = ""
+            content = f"{base_prompt}\n\nProject context: {addon}" if addon else base_prompt
+            self._conversation.append({"role": "system", "content": content})
 
         # Inject plugin skills matching this turn's user text
         try:

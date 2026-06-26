@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 
 from velune.execution.path_guard import PathGuard
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 
 
 def _open_repo(path: Path):  # type: ignore[return]
@@ -30,6 +30,9 @@ class GitStatus(BaseTool):
 
     def get_name(self) -> str:
         return "git_status"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.GIT_READ}
 
     def get_description(self) -> str:
         return "View git repository status"
@@ -89,6 +92,9 @@ class GitBranch(BaseTool):
 
     def get_name(self) -> str:
         return "git_branch"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.GIT_READ}
 
     def get_description(self) -> str:
         return "View git branches"

@@ -115,6 +115,9 @@ class VeluneMCPServer:
         allowed_workspaces: list[str | Path] | None = None,
         config: VeluneConfig | None = None,
         calls_per_minute: int = 60,
+        *,
+        allow_mutations: bool = False,
+        auth_token: str | None = None,
     ):
         self.tool_registry = tool_registry
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
@@ -123,6 +126,25 @@ class VeluneMCPServer:
         self.server = Server("velune")
         self._rate_limiter = RateLimiter(calls_per_minute=calls_per_minute)
         self._validator = WorkspaceValidator(self.allowed_workspaces)
+
+        # Registry tools are read-only over MCP unless mutations are explicitly
+        # enabled — an external client must not be able to write files or run
+        # commands by default. ``VELUNE_MCP_ALLOW_MUTATIONS=1`` opts in.
+        import os
+
+        self.allow_mutations = allow_mutations or os.environ.get(
+            "VELUNE_MCP_ALLOW_MUTATIONS", ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+
+        # Bearer token for network transports. Generated if not supplied; stdio
+        # (local, already-trusted) does not require it.
+        import secrets
+
+        self.auth_token = (
+            auth_token
+            or os.environ.get("VELUNE_MCP_AUTH_TOKEN", "").strip()
+            or secrets.token_urlsafe(32)
+        )
 
         # Lazy-load Velune components
         self._council_orchestrator = None
@@ -177,6 +199,34 @@ class VeluneMCPServer:
             except Exception:
                 pass
         return self._repository_cognition
+
+    def _granted_permissions(self):
+        """Permissions granted to external MCP clients calling registry tools."""
+        from velune.tools.base.tool import ToolPermission
+
+        perms = {
+            ToolPermission.FILESYSTEM_READ,
+            ToolPermission.GIT_READ,
+            ToolPermission.NETWORK_ACCESS,
+        }
+        if self.allow_mutations:
+            perms |= {
+                ToolPermission.FILESYSTEM_WRITE,
+                ToolPermission.GIT_WRITE,
+                ToolPermission.TERMINAL_EXECUTE,
+            }
+        return perms
+
+    def _tool_context(self):
+        """Build a scoped execution context for a registry tool call."""
+        from velune.tools.base.tool import ToolCallContext
+
+        return ToolCallContext(
+            run_id="mcp-server",
+            actor="mcp-client",
+            workspace=self.workspace_path,
+            permissions=self._granted_permissions(),
+        )
 
     def _register_handlers(self) -> None:
         @self.server.list_tools()
@@ -286,11 +336,13 @@ class VeluneMCPServer:
                     arguments.get("file_path"),
                 )
             elif self.tool_registry:
-                # Fall back to registry
+                # Fall back to registry — enforce the permission model.
+                from velune.tools.base.tool import authorize_and_execute
+
                 tool = self.tool_registry.get(name)
                 if not tool:
                     raise ValueError(f"Tool not found: {name}")
-                result = await tool.execute(**arguments)
+                result = await authorize_and_execute(tool, self._tool_context(), **arguments)
             else:
                 raise ValueError(f"Tool not found: {name}")
 
@@ -575,9 +627,11 @@ class VeluneMCPServer:
             )
             return {"jsonrpc": "2.0", "id": req_id, "result": res}
         elif self.tool_registry and self.tool_registry.get(method):
+            from velune.tools.base.tool import authorize_and_execute
+
             tool = self.tool_registry.get(method)
             try:
-                res = await tool.execute(**params)
+                res = await authorize_and_execute(tool, self._tool_context(), **params)
                 return {"jsonrpc": "2.0", "id": req_id, "result": res}
             except Exception as e:
                 return {
@@ -610,14 +664,56 @@ class VeluneMCPServer:
                 ),
             )
 
-    async def run_http(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
-        """Run MCP server over HTTP/SSE (for VS Code, browsers)."""
+    @staticmethod
+    def _host_is_loopback(host: str) -> bool:
+        import ipaddress
+
+        h = (host or "").strip("[]").lower()
+        if h == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(h).is_loopback
+        except ValueError:
+            return False
+
+    async def run_http(
+        self,
+        host: str = DEFAULT_HOST,
+        port: int = DEFAULT_PORT,
+        *,
+        allow_remote: bool = False,
+    ) -> None:
+        """Run MCP server over HTTP/SSE (for VS Code, browsers).
+
+        Binds to loopback only unless *allow_remote* is set, and requires every
+        request to present the server's bearer token via ``Authorization:
+        Bearer <token>`` (or ``X-Velune-Token``).
+        """
+        if not self._host_is_loopback(host) and not allow_remote:
+            raise ValueError(
+                f"Refusing to bind MCP server to non-loopback host {host!r} without "
+                "allow_remote=True (set --allow-remote to override)."
+            )
+
         logger.info(f"Starting Velune MCP server (HTTP on {host}:{port})")
+        logger.info("MCP HTTP auth token: %s", self.auth_token)
         try:
             from aiohttp import web
 
+            def _authorized(request) -> bool:
+                header = request.headers.get("Authorization", "")
+                token = ""
+                if header.startswith("Bearer "):
+                    token = header[len("Bearer ") :].strip()
+                token = token or request.headers.get("X-Velune-Token", "").strip()
+                import secrets as _secrets
+
+                return bool(token) and _secrets.compare_digest(token, self.auth_token)
+
             async def handle_sse(request):
                 """Handle SSE transport."""
+                if not _authorized(request):
+                    return web.json_response({"error": "unauthorized"}, status=401)
                 response = web.StreamResponse()
                 response.headers["Content-Type"] = "text/event-stream"
                 response.headers["Cache-Control"] = "no-cache"
@@ -632,6 +728,8 @@ class VeluneMCPServer:
 
             async def handle_tools(request):
                 """Handle tool listing."""
+                if not _authorized(request):
+                    return web.json_response({"error": "unauthorized"}, status=401)
                 tools = await self.server.list_tools()
                 return web.json_response(
                     [{"name": t.name, "description": t.description} for t in tools]

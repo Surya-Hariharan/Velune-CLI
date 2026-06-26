@@ -58,6 +58,11 @@ Thumbs.db
 # Velune runtime/cache
 .velune/
 
+# Velune private "house" system prompts — tuned prompts ship with builds but are
+# never committed. The committed _baseline.py guarantees a working fallback, and
+# _premium.example.py documents the contract. (See velune/cognition/prompts/.)
+velune/cognition/prompts/_premium.py
+
 # Dev container
 .devcontainer/
 

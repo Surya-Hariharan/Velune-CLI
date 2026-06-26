@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from velune.execution.sandbox import SubprocessSandbox
 
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 from velune.tools.safety import ApprovalMode, classify_command
 
 
@@ -30,6 +30,9 @@ class ExecuteCommand(BaseTool):
 
     def get_name(self) -> str:
         return "execute_command"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.TERMINAL_EXECUTE}
 
     def get_description(self) -> str:
         return "Execute a terminal command"

@@ -1,6 +1,6 @@
 """Web fetch tools."""
 
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 from velune.tools.web.validator import validate_url
 
 
@@ -9,6 +9,9 @@ class WebFetch(BaseTool):
 
     def get_name(self) -> str:
         return "web_fetch"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.NETWORK_ACCESS}
 
     def get_description(self) -> str:
         return "Fetch content from a URL"

@@ -90,22 +90,12 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
     from velune.cli.sessions import SessionStore
 
     store = SessionStore()
+    from velune.cognition.prompts import CHAT_CONVERSATIONAL, get_prompt
+
     _system_messages = [
         {
             "role": "system",
-            "content": (
-                "You are the Lead Coder for the Velune Reasoning Council, serving in low-latency conversational mode.\n"
-                "Your objective is to answer questions, explain code, and assist with natural language tasks concisely and directly.\n"
-                "You have access to the user's workspace context below.\n\n"
-                "WORKSPACE FILE ACCESS: The user can inject file content directly into this conversation.\n"
-                "When you need to read a file, list a directory, or search for code, ask them to run:\n"
-                "  !read <file_path>      — to inject a file's contents\n"
-                "  !ls [dir]              — to list a directory\n"
-                "  !grep <pattern> [dir]  — to search for a pattern in source files\n"
-                "  !tree [depth]          — to see the workspace directory structure\n"
-                "Once they run the command, the output will appear in the conversation and you can work with it.\n"
-                "Keep responses focused and do not use verbose pleasantries."
-            ),
+            "content": get_prompt(CHAT_CONVERSATIONAL),
         },
         {
             "role": "system",

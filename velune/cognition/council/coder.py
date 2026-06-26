@@ -6,21 +6,14 @@ import logging
 from typing import Any
 
 from velune.cognition.council.base import BaseCouncilAgent
+from velune.cognition.prompts import COUNCIL_CODER, get_prompt
 from velune.core.types.model import ModelDescriptor
 from velune.models.specializations import CouncilRole
 from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.coder")
 
-CODER_SYSTEM_PROMPT = """You are the Lead Coder for the Velune Reasoning Council.
-Your sole mission is to write robust, elegant, production-grade source code.
-
-Follow these strict rules:
-1. Always write complete implementations, avoiding placeholders, TODOs, or truncation.
-2. Follow professional styling: add thorough docstrings, standard PEP8 formatting (for Python), and type safety definitions.
-3. Write clean, self-contained scripts or class files that solve the user's targeted task.
-4. Output your proposed changes, file contents, or script blocks clearly, explaining the code's logic and design decisions.
-"""
+CODER_SYSTEM_PROMPT = get_prompt(COUNCIL_CODER)
 
 
 class CoderAgent(BaseCouncilAgent):

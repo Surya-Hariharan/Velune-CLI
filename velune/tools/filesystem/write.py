@@ -8,7 +8,7 @@ from pathlib import Path
 from rich.console import Console
 
 from velune.execution.path_guard import resolve_in_workspace
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 
 
 class WriteFile(BaseTool):
@@ -24,6 +24,9 @@ class WriteFile(BaseTool):
 
     def get_name(self) -> str:
         return "write_file"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.FILESYSTEM_WRITE}
 
     def get_description(self) -> str:
         return "Write content to a file (shows diff preview before writing)"
@@ -81,6 +84,9 @@ class CreateFile(BaseTool):
     def get_name(self) -> str:
         return "create_file"
 
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.FILESYSTEM_WRITE}
+
     def get_description(self) -> str:
         return "Create an empty file (shows preview before creating)"
 
@@ -126,6 +132,9 @@ class DeleteFile(BaseTool):
 
     def get_name(self) -> str:
         return "delete_file"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.FILESYSTEM_WRITE}
 
     def get_description(self) -> str:
         return "Delete a file (shows preview before deleting)"

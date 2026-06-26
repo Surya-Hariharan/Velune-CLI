@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from velune.execution.path_guard import resolve_in_workspace
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 from velune.tools.filesystem.ignore import load_ignore
 
 
@@ -15,6 +15,9 @@ class ReadFile(BaseTool):
 
     def get_name(self) -> str:
         return "read_file"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.FILESYSTEM_READ}
 
     def get_description(self) -> str:
         return "Read the contents of a file"
@@ -50,6 +53,9 @@ class ReadDirectory(BaseTool):
 
     def get_name(self) -> str:
         return "read_directory"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.FILESYSTEM_READ}
 
     def get_description(self) -> str:
         return "List the contents of a directory"

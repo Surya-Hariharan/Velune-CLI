@@ -153,6 +153,15 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "Read and write velune.toml settings.",
         bootstrap="light",
     ),
+    CommandSpec(
+        "trust",
+        "typer",
+        "velune.cli.commands.trust",
+        "trust_cmd",
+        _SETUP,
+        "Trust, list, or revoke workspace directories.",
+        bootstrap="light",
+    ),
     # ── Analytics & Monitoring ────────────────────────────────────────────
     CommandSpec(
         "usage",

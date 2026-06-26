@@ -91,23 +91,44 @@ class MCPServerRegistry:
     # Configuration loading
     # ------------------------------------------------------------------
 
-    def load_config(self, extra_configs: list[ServerConfig] | None = None) -> None:
+    def load_config(
+        self,
+        extra_configs: list[ServerConfig] | None = None,
+        *,
+        trusted: bool = True,
+    ) -> None:
         """Load server configs from ``.mcp.json`` (and optionally extras).
 
         Merges: ``.mcp.json`` in workspace > user home ``~/.mcp.json`` > extras.
         Already-registered server names are updated (not duplicated).
+
+        When *trusted* is False the workspace is treated as untrusted: project-
+        level sources (``<workspace>/.mcp.json`` and ``velune.toml
+        [mcp.servers]``) are skipped entirely so a cloned/downloaded repository
+        cannot auto-spawn MCP servers. User-level (``~/.mcp.json``) and
+        caller-provided configs are always honored.
         """
         configs: list[ServerConfig] = []
 
-        # Project-level .mcp.json
-        for path in (
-            self.workspace / ".mcp.json",
-            Path.home() / ".mcp.json",
-        ):
+        # User-level .mcp.json is always trusted. The project-level file is only
+        # loaded when the workspace has been explicitly trusted.
+        mcp_json_paths = [Path.home() / ".mcp.json"]
+        if trusted:
+            mcp_json_paths.insert(0, self.workspace / ".mcp.json")
+        for path in mcp_json_paths:
             configs.extend(_load_mcp_json(path))
 
-        # velune.toml [mcp.servers] entries
-        configs.extend(_load_toml_mcp(self.workspace))
+        # velune.toml [mcp.servers] entries are project-controlled — trusted only.
+        if trusted:
+            configs.extend(_load_toml_mcp(self.workspace))
+        elif (self.workspace / ".mcp.json").exists() or (
+            self.workspace / "velune.toml"
+        ).exists():
+            logger.info(
+                "Skipping project-level MCP config in untrusted workspace %s; "
+                "run 'velune trust' to enable it.",
+                self.workspace,
+            )
 
         # Caller-provided extras (e.g. from CLI --mcp-server flag)
         if extra_configs:

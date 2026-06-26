@@ -16,7 +16,7 @@ import asyncio
 from pathlib import Path
 
 from velune.execution.path_guard import PathGuard
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 
 
 def _open_repo(path: Path):  # type: ignore[return]
@@ -37,6 +37,9 @@ class GitLog(BaseTool):
 
     def get_name(self) -> str:
         return "git_log"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.GIT_READ}
 
     def get_description(self) -> str:
         return "View git commit history"
@@ -84,6 +87,9 @@ class GitDiff(BaseTool):
     def get_name(self) -> str:
         return "git_diff"
 
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.GIT_READ}
+
     def get_description(self) -> str:
         return "View git diff"
 
@@ -129,6 +135,9 @@ class GitBlame(BaseTool):
 
     def get_name(self) -> str:
         return "git_blame"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.GIT_READ}
 
     def get_description(self) -> str:
         return "View git blame for a file"

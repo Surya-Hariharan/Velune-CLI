@@ -6,36 +6,14 @@ import logging
 
 from velune.cognition.council.base import BaseCouncilAgent
 from velune.cognition.council.messages import ReviewerMessage
+from velune.cognition.prompts import COUNCIL_REVIEWER, get_prompt
 from velune.core.types.model import ModelDescriptor
 from velune.models.specializations import CouncilRole
 from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.reviewer")
 
-REVIEWER_SYSTEM_PROMPT = """You are the Senior Code Reviewer for the Velune Reasoning Council.
-Your role is to perform quality, safety, style, and regression audits on proposed plans and code changes.
-
-Analyze the implementation details, look for:
-- Logical flaws or edge-case regressions.
-- Syntax errors or typings mismatches.
-- Security vulnerabilities (e.g. command injection, directory traversal).
-- Performance bottlenecks or redundant operations.
-
-OUTPUT EXCLUSIVELY A RAW VALID JSON OBJECT WITH NO CODEBLOCK WRAPPERS OR Markdown.
-JSON Format:
-{
-  "passed": true/false,
-  "critical_issues": [
-    "Error description 1",
-    "Error description 2"
-  ],
-  "suggestions": [
-    "Suggestion 1",
-    "Suggestion 2"
-  ],
-  "confidence_rating": 0.0 to 1.0
-}
-"""
+REVIEWER_SYSTEM_PROMPT = get_prompt(COUNCIL_REVIEWER)
 
 
 class ReviewerAgent(BaseCouncilAgent):

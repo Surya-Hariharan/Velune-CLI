@@ -2,9 +2,20 @@ from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 
 def _create_provider_registry(env: RuntimeEnvironment):
+    from velune.core.trust import is_trusted
     from velune.providers.registry import ProviderRegistry
 
-    return ProviderRegistry(env.config.providers)
+    # Project-supplied base_url overrides are only honored once the user has
+    # explicitly trusted this workspace (guards against credential exfiltration
+    # from a cloned/downloaded repository's velune.toml).
+    trusted = True
+    try:
+        if env.workspace is not None:
+            trusted = is_trusted(env.workspace)
+    except Exception:
+        trusted = False
+
+    return ProviderRegistry(env.config.providers, trusted=trusted)
 
 
 def _create_provider_health_monitor(env: RuntimeEnvironment):

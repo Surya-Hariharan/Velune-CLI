@@ -6,6 +6,7 @@ import logging
 
 from velune.cognition.council.base import BaseCouncilAgent
 from velune.cognition.council.messages import PlannerMessage
+from velune.cognition.prompts import COUNCIL_PLANNER, get_prompt
 from velune.core.types.model import ModelDescriptor
 from velune.core.types.task import TaskPlan, TaskStatus, TaskStep
 from velune.models.specializations import CouncilRole
@@ -13,42 +14,7 @@ from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.planner")
 
-PLANNER_SYSTEM_PROMPT = """You are the Lead Planner for the Velune Reasoning Council.
-Your role is to translate the user request and repository context into a strictly structured ExecutionPlan DAG.
-
-Decompose complex workflows into small, sequential execution steps.
-Each step should specify:
-1. 'id': Unique lowercase alpha-numeric string (e.g. 'setup_env', 'write_code', 'run_tests').
-2. 'description': Concise summary of what the step achieves.
-3. 'agent_role': Council agent executing this ('coder', 'reviewer', etc).
-4. 'dependencies': List of step IDs that MUST complete before this step can begin.
-5. 'metadata': A dictionary containing execution detail:
-   - 'command': The exact command string to run in the isolated subprocess sandbox.
-   - 'expected_files': List of file paths relative to workspace that must be created or modified.
-   - 'syntax_check_files': List of file paths to run language-specific syntax compiler checks against.
-    - 'test_command': Optional validation command to run for local checks.
-   - 'timeout': Max seconds to allow this command to run before failing (default 60.0).
-
-OUTPUT EXCLUSIVELY A RAW VALID JSON OBJECT WITH NO CODEBLOCK WRAPPERS OR Markdown.
-JSON Format:
-{
-  "task_id": "<alphanumeric_id>",
-  "steps": [
-    {
-      "id": "step_1",
-      "description": "Create hello.py",
-      "agent_role": "coder",
-      "dependencies": [],
-      "metadata": {
-        "command": "echo print('Hello') > hello.py",
-        "expected_files": ["hello.py"],
-        "syntax_check_files": ["hello.py"],
-        "timeout": 30.0
-      }
-    }
-  ]
-}
-"""
+PLANNER_SYSTEM_PROMPT = get_prompt(COUNCIL_PLANNER)
 
 
 class PlannerAgent(BaseCouncilAgent):

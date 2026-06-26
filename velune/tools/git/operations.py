@@ -14,7 +14,7 @@ import asyncio
 from pathlib import Path
 
 from velune.execution.path_guard import PathGuard
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 
 
 def _open_repo(path: Path):  # type: ignore[return]
@@ -40,6 +40,9 @@ class GitCommit(BaseTool):
 
     def get_name(self) -> str:
         return "git_commit"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.GIT_WRITE}
 
     def get_description(self) -> str:
         return "Commit changes to git"
@@ -82,6 +85,9 @@ class GitCheckout(BaseTool):
 
     def get_name(self) -> str:
         return "git_checkout"
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        return {ToolPermission.GIT_WRITE}
 
     def get_description(self) -> str:
         return "Checkout a git branch"

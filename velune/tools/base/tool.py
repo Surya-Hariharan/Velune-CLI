@@ -139,3 +139,39 @@ class BaseTool(ABC):
     def validate_input(self, payload: dict[str, Any]) -> None:
         """Validate tool input before execution."""
         return None
+
+
+class ToolPermissionError(PermissionError):
+    """Raised when a tool's required permissions are not granted by the context."""
+
+    def __init__(self, tool_name: str, missing: set[ToolPermission]) -> None:
+        scopes = ", ".join(sorted(p.value for p in missing))
+        super().__init__(f"Tool '{tool_name}' denied — missing permission(s): {scopes}")
+        self.tool_name = tool_name
+        self.missing = missing
+
+
+async def authorize_and_execute(
+    tool: BaseTool,
+    ctx: ToolCallContext | None,
+    /,
+    **kwargs: Any,
+) -> Any:
+    """Single enforced entry point for running a tool.
+
+    Enforces the declared permission model — comparing the tool's
+    ``get_required_permissions()`` against the scopes granted in *ctx* — and then
+    runs the tool through :meth:`BaseTool.guarded_execute` so PreToolUse /
+    PostToolUse hooks fire. Callers that previously invoked ``tool.execute(...)``
+    directly bypassed both the permission check and the hooks.
+
+    Raises:
+        ToolPermissionError: when a required scope is not granted.
+        ToolBlockedError:     when a PreToolUse hook blocks the call.
+    """
+    required = tool.get_required_permissions()
+    granted = ctx.permissions if ctx is not None else set()
+    missing = required - granted
+    if missing:
+        raise ToolPermissionError(tool.get_name(), missing)
+    return await tool.guarded_execute(ctx, **kwargs)

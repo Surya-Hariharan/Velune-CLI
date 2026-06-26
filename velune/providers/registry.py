@@ -3,19 +3,59 @@
 from __future__ import annotations
 
 import importlib
+import ipaddress
+import logging
 from collections.abc import Callable
+from urllib.parse import urlparse
 
 from velune.core.errors import ProviderNotFoundError
 from velune.kernel.config import ProvidersConfig
 from velune.providers.base import ModelProvider
 
+logger = logging.getLogger("velune.providers.registry")
+
+
+def _host_is_loopback(host: str) -> bool:
+    """True if *host* is localhost or a loopback IP literal."""
+    if not host:
+        return False
+    h = host.strip("[]").lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def base_url_is_safe(url: str) -> bool:
+    """Egress policy: only ``https`` endpoints, or ``http`` to a loopback host.
+
+    Provider clients attach the user's API key to every request, so a plaintext
+    ``http://`` endpoint pointed at a non-loopback host would leak the key on
+    the wire. Such URLs are rejected regardless of workspace trust.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme == "https":
+        return True
+    if parsed.scheme == "http":
+        return _host_is_loopback(parsed.hostname or "")
+    return False
+
 
 class ProviderRegistry:
     """Registry for model providers."""
 
-    def __init__(self, config: ProvidersConfig | None = None):
+    def __init__(self, config: ProvidersConfig | None = None, *, trusted: bool = True):
         self._providers: dict[str, ModelProvider] = {}
         self._factories: dict[str, Callable[[], ModelProvider]] = {}
+        # When False the workspace is untrusted: project-supplied ``base_url``
+        # overrides are ignored so a cloned repo cannot redirect authenticated
+        # provider traffic. Built-in defaults are always used in that case.
+        self._trusted = trusted
 
         self._config = config
         if (
@@ -30,6 +70,34 @@ class ProviderRegistry:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _resolve_base_url(self, configured: str | None, default: str, *, provider_id: str) -> str:
+        """Resolve a provider base URL under trust + egress policy.
+
+        Project-supplied overrides are honored only in a trusted workspace, and
+        every resulting URL must satisfy :func:`base_url_is_safe`.
+        """
+        override = (configured or "").strip()
+        candidate = override or default
+
+        if override and override != default and not self._trusted:
+            logger.warning(
+                "Ignoring project base_url override for '%s' in untrusted workspace; "
+                "run 'velune trust' to enable it.",
+                provider_id,
+            )
+            candidate = default
+
+        if not base_url_is_safe(candidate):
+            logger.warning(
+                "Rejected unsafe base_url %r for '%s' (must be https, or http to "
+                "loopback); falling back to the built-in default.",
+                candidate,
+                provider_id,
+            )
+            candidate = default
+
+        return candidate
 
     def _provider_factory(
         self, module_path: str, class_name: str, **kwargs
@@ -69,9 +137,11 @@ class ProviderRegistry:
         cfg = self._config
 
         # ── Local / self-hosted ────────────────────────────────────────
-        ollama_url = (
-            cfg.ollama.base_url if cfg and cfg.ollama and cfg.ollama.base_url else None
-        ) or "http://localhost:11434"
+        ollama_url = self._resolve_base_url(
+            cfg.ollama.base_url if cfg and cfg.ollama else None,
+            "http://localhost:11434",
+            provider_id="ollama",
+        )
         self.register_factory(
             "ollama",
             self._provider_factory(
@@ -79,9 +149,11 @@ class ProviderRegistry:
             ),
         )
 
-        lmstudio_url = (
-            cfg.lmstudio.base_url if cfg and cfg.lmstudio and cfg.lmstudio.base_url else None
-        ) or "http://localhost:1234/v1"
+        lmstudio_url = self._resolve_base_url(
+            cfg.lmstudio.base_url if cfg and cfg.lmstudio else None,
+            "http://localhost:1234/v1",
+            provider_id="lmstudio",
+        )
         self.register_factory(
             "lmstudio",
             self._provider_factory(
@@ -89,11 +161,11 @@ class ProviderRegistry:
             ),
         )
 
-        openai_compat_url = (
-            cfg.openai_compat.base_url
-            if cfg and cfg.openai_compat and cfg.openai_compat.base_url
-            else None
-        ) or "http://localhost:8000/v1"
+        openai_compat_url = self._resolve_base_url(
+            cfg.openai_compat.base_url if cfg and cfg.openai_compat else None,
+            "http://localhost:8000/v1",
+            provider_id="openai-compat",
+        )
         self.register_factory(
             "openai-compat",
             self._provider_factory(
@@ -109,9 +181,11 @@ class ProviderRegistry:
         )
 
         # ── Cloud — key resolved via keystore at instantiation time ───
-        openai_url = (
-            cfg.openai.base_url if cfg and cfg.openai and cfg.openai.base_url else None
-        ) or "https://api.openai.com/v1"
+        openai_url = self._resolve_base_url(
+            cfg.openai.base_url if cfg and cfg.openai else None,
+            "https://api.openai.com/v1",
+            provider_id="openai",
+        )
         self.register_factory(
             "openai",
             self._keyed_factory(
@@ -119,9 +193,11 @@ class ProviderRegistry:
             ),
         )
 
-        anthropic_url = (
-            cfg.anthropic.base_url if cfg and cfg.anthropic and cfg.anthropic.base_url else None
-        ) or "https://api.anthropic.com"
+        anthropic_url = self._resolve_base_url(
+            cfg.anthropic.base_url if cfg and cfg.anthropic else None,
+            "https://api.anthropic.com",
+            provider_id="anthropic",
+        )
         self.register_factory(
             "anthropic",
             self._keyed_factory(
@@ -132,11 +208,11 @@ class ProviderRegistry:
             ),
         )
 
-        hf_url = (
-            cfg.huggingface.base_url
-            if cfg and cfg.huggingface and cfg.huggingface.base_url
-            else None
-        ) or "https://api-inference.huggingface.co"
+        hf_url = self._resolve_base_url(
+            cfg.huggingface.base_url if cfg and cfg.huggingface else None,
+            "https://api-inference.huggingface.co",
+            provider_id="huggingface",
+        )
         self.register_factory(
             "huggingface",
             self._keyed_factory(

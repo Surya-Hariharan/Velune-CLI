@@ -6,27 +6,14 @@ import logging
 from typing import Any
 
 from velune.cognition.council.base import BaseCouncilAgent
+from velune.cognition.prompts import COUNCIL_SYNTHESIZER, get_prompt
 from velune.core.types.model import ModelDescriptor
 from velune.models.specializations import CouncilRole
 from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.cognition.council.synthesizer")
 
-SYNTHESIZER_SYSTEM_PROMPT = """You are the Lead Synthesizer for the Velune Reasoning Council.
-Your role is to compile all agent findings, reviews, and challenges into a single, cohesive, premium final response.
-
-Examine the:
-1. Original user task.
-2. Winning claims and decisions.
-3. Reviewer quality checks and Challenger failure warnings.
-4. Proposed plan and codebase modifications.
-
-Produce a clear, detailed, and highly professional markdown response:
-- Acknowledge any critical risks highlighted by the Reviewer or Challenger.
-- Summarize the structural solution precisely.
-- Output the finalized code changes, patches, or execution steps clearly.
-- Provide a clear explanation of how the changes work and how to run or test them.
-"""
+SYNTHESIZER_SYSTEM_PROMPT = get_prompt(COUNCIL_SYNTHESIZER)
 
 
 class SynthesizerAgent(BaseCouncilAgent):
