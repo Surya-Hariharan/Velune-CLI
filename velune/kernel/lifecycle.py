@@ -34,6 +34,7 @@ class LifecycleCoordinator:
         self._components: dict[str, Subsystem] = {}
         self._states: dict[str, ComponentStatus] = {}
         self._started = False
+        self._config_validated = False
         self.container: Any = None
         self._config: VeluneConfig | None = None
 
@@ -58,16 +59,21 @@ class LifecycleCoordinator:
             logger.debug("Component '%s' transitioned to state: %s", name, status.value)
 
     async def startup(self) -> None:
-        """Initialize all registered subsystems sequentially.
+        """Initialize any not-yet-started registered subsystems.
+
+        This is **incremental and idempotent**: it may be called more than once
+        as subsystems register across startup tiers (Tier-0 synchronously, then
+        Tier-1 in the background warm-up). Each call initializes only the
+        components still in ``UNINITIALIZED`` state, so a later call picks up the
+        background subsystems registered after the first call.
 
         If a :class:`~velune.kernel.config.VeluneConfig` was attached via
-        :meth:`set_config`, it is validated first.  Any ``CRITICAL`` validation
-        errors abort startup immediately with a descriptive exception.
+        :meth:`set_config`, it is validated once, on the first call. Any
+        ``CRITICAL`` validation errors abort startup immediately with a
+        descriptive exception.
         """
-        if self._started:
-            return
-
-        if self._config is not None:
+        if self._config is not None and not self._config_validated:
+            self._config_validated = True
             from velune.kernel.config import ConfigValidationError  # noqa: F401
 
             errors = self._config.validate()
@@ -96,8 +102,11 @@ class LifecycleCoordinator:
 
         self._started = True
         logger.info("Initializing Velune systems...")
-        for name, comp in self._components.items():
-            if self._states[name] != ComponentStatus.UNINITIALIZED:
+        # Snapshot: the background warm-up may register further subsystems while
+        # this coroutine awaits an initialize(); a later startup() call picks
+        # those up. Iterating a snapshot avoids "dict changed size" errors.
+        for name, comp in list(self._components.items()):
+            if self._states.get(name) != ComponentStatus.UNINITIALIZED:
                 continue
 
             self._states[name] = ComponentStatus.INITIALIZING

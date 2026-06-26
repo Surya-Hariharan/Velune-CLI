@@ -33,6 +33,7 @@ PROVIDER_MODULES = [
         factory=_create_provider_registry,
         container_key="runtime.provider_registry",
         lifecycle_key="providers",
+        tier=0,
     ),
     SubsystemModule(
         name="provider_health_monitor",
@@ -40,6 +41,7 @@ PROVIDER_MODULES = [
         container_key="runtime.provider_health_monitor",
         lifecycle_key=None,  # Optional module
         dependencies=["runtime.provider_registry"],
+        tier=0,
     ),
     SubsystemModule(
         name="provider_router",
@@ -47,5 +49,6 @@ PROVIDER_MODULES = [
         container_key="runtime.provider_router",
         lifecycle_key=None,
         dependencies=["runtime.provider_registry", "runtime.provider_health_monitor"],
+        tier=0,
     ),
 ]

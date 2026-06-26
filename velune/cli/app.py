@@ -107,8 +107,14 @@ def _show_welcome_guide(console: Console) -> None:
     )
 
 
-def create_app() -> typer.Typer:
-    """Create the root Typer application."""
+def create_app(register: str | None = "__all__") -> typer.Typer:
+    """Create the root Typer application.
+
+    ``register`` is forwarded to :func:`register_commands` to control how many
+    command modules are imported: ``"__all__"`` (every command, the default for
+    the back-compat singleton, completion, and tests), ``None`` (none — the bare
+    REPL path), or a single command name (lazy-import just that one).
+    """
 
     app = typer.Typer(
         name="velune",
@@ -169,10 +175,21 @@ def create_app() -> typer.Typer:
 
             _configure_diff(auto_accept=True)
 
+        # The interactive session (no subcommand) defers the expensive Tier-1
+        # subsystems to a background warm-up so the prompt appears instantly.
+        # Subcommands need a fully-initialized container, so they bootstrap
+        # everything synchronously.
+        defer_background = ctx.invoked_subcommand is None and not json_mode
+
         try:
             from velune.core.runtime import build_runtime
 
-            runtime = build_runtime(workspace=workspace, config_path=config_path, verbose=verbose)
+            runtime = build_runtime(
+                workspace=workspace,
+                config_path=config_path,
+                verbose=verbose,
+                defer_background=defer_background,
+            )
         except Exception as e:
             if json_mode:
                 import json
@@ -217,6 +234,11 @@ def create_app() -> typer.Typer:
                     )
                 )
             else:
+                # Render the welcome surface *first* so it appears instantly,
+                # before any provider/keyring probe. Perceived speed comes from
+                # the banner being on screen while cheap checks finish.
+                _show_startup_banner(runtime.console, workspace, config_path)
+
                 from velune.providers.keystore import list_configured_providers
 
                 # list_configured_providers already includes a (short, deduped)
@@ -255,8 +277,6 @@ def create_app() -> typer.Typer:
                     # NO EXIT HERE — fall through to REPL regardless. The only
                     # ways out of Velune are /exit, /quit, or Ctrl+C twice.
 
-                _show_startup_banner(runtime.console, workspace, config_path)
-
                 # First-launch guidance (no model yet) — never processes the repo.
                 if not configured:
                     _show_welcome_guide(runtime.console)
@@ -276,7 +296,7 @@ def create_app() -> typer.Typer:
 
                 launch(runtime)
 
-    register_commands(app, ServiceContainer())
+    register_commands(app, ServiceContainer(), only=register)
     return app
 
 

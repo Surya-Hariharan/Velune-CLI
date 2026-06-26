@@ -10,7 +10,20 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
-OLLAMA_BASE = "http://localhost:11434"
+
+def _ollama_base() -> str:
+    """Resolve the Ollama base URL, honouring ``OLLAMA_HOST``."""
+    import os
+
+    host = os.environ.get("OLLAMA_HOST", "").strip()
+    if not host:
+        return "http://localhost:11434"
+    if host.startswith(("http://", "https://")):
+        return host.rstrip("/")
+    return f"http://{host}"
+
+
+OLLAMA_BASE = _ollama_base()
 
 RECOMMENDED_MODELS: list[dict] = [
     {

@@ -70,6 +70,9 @@ async def _async_main(runtime: Any) -> None:
     lifecycle = None
     try:
         lifecycle = runtime.container.get("runtime.lifecycle")
+        # First pass initializes the Tier-0 lifecycle subsystems (bus, providers,
+        # models, trace sink) — all cheap. Tier-1 subsystems are initialized by
+        # the background warm-up's second startup() pass once they register.
         await lifecycle.startup()
     except Exception as exc:
         _logger.warning("Subsystem startup incomplete, continuing degraded: %s", exc)
@@ -98,8 +101,31 @@ async def _async_main(runtime: Any) -> None:
     except Exception as exc:
         _logger.warning("ProactiveWatcher failed to start, continuing without it: %s", exc)
 
+    repl = VeluneREPL(runtime)
+
+    # Warm the expensive Tier-1 subsystems in the background so the prompt is
+    # interactive immediately. When they finish, initialize their lifecycle and
+    # let the REPL pick up the now-available orchestrator/models.
+    async def _warm_and_finalize() -> None:
+        from velune.core.runtime import warm_background
+
+        await warm_background(runtime)
+        if lifecycle is not None:
+            try:
+                await lifecycle.startup()  # init Tier-1 lifecycle subsystems
+            except Exception as exc:
+                _logger.warning("Tier-1 lifecycle startup incomplete: %s", exc)
+        try:
+            repl.on_warm_complete()
+        except Exception as exc:
+            _logger.debug("REPL warm-complete hook failed: %s", exc)
+
+    if getattr(runtime, "env", None) is not None:
+        from velune.core.task_registry import track
+
+        track(asyncio.create_task(_warm_and_finalize(), name="velune.warm_background"))
+
     try:
-        repl = VeluneREPL(runtime)
         await repl.run()
     finally:
         if watcher is not None:

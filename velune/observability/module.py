@@ -55,5 +55,6 @@ OBSERVABILITY_MODULES = [
         container_key="runtime.trace_sink",
         lifecycle_key="trace_sink",
         dependencies=["runtime.bus"],
+        tier=0,
     )
 ]

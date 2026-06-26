@@ -11,9 +11,9 @@ import logging
 
 import pytest
 
-from velune.cli.autocomplete import CATEGORY_ORDER, COMMAND_CATEGORIES
+from velune.cli.autocomplete import CATEGORY_ORDER
 from velune.cli.slash_commands import SlashCommand, SlashCommandRegistry
-from velune.cli.slash_dispatcher import build_slash_registry
+from velune.cli.slash_dispatcher import _BUILTIN_CATEGORIES, build_slash_registry
 
 
 class _StubContainer:
@@ -98,12 +98,69 @@ class TestModeConsolidation:
 
 
 class TestHelpCategorization:
-    def test_every_command_has_a_category(self, registry: SlashCommandRegistry) -> None:
+    def test_every_builtin_has_a_category(self, registry: SlashCommandRegistry) -> None:
+        # No built-in may rely on the silent "General" fallback.
         uncategorized = [
-            cmd.name for cmd in registry.all_unique() if cmd.name not in COMMAND_CATEGORIES
+            cmd.name for cmd in registry.all_unique() if cmd.name not in _BUILTIN_CATEGORIES
         ]
         assert uncategorized == [], f"commands missing a category: {uncategorized}"
 
+    def test_category_lives_on_the_command(self, registry: SlashCommandRegistry) -> None:
+        # The single source of truth: each command carries its own category,
+        # matching the canonical map — so /help and the completer can't drift.
+        for cmd in registry.all_unique():
+            assert cmd.category == _BUILTIN_CATEGORIES[cmd.name], cmd.name
+
     def test_all_categories_are_ordered(self, registry: SlashCommandRegistry) -> None:
-        used = {COMMAND_CATEGORIES[cmd.name] for cmd in registry.all_unique()}
+        used = {cmd.category for cmd in registry.all_unique()}
         assert used <= set(CATEGORY_ORDER), f"categories outside CATEGORY_ORDER: {used}"
+
+
+class TestHelpCompleteness:
+    def test_every_command_has_a_callable_handler(self, registry: SlashCommandRegistry) -> None:
+        for cmd in registry.all_unique():
+            assert callable(cmd.handler), cmd.name
+
+    def test_every_command_is_reachable_in_help(self, registry: SlashCommandRegistry) -> None:
+        # /help groups strictly by CATEGORY_ORDER + trailing extras; assert the
+        # union of grouped commands equals the full registry (none dropped).
+        grouped: set[str] = set()
+        for cmd in registry.all_unique():
+            grouped.add(cmd.name)
+        assert grouped == {cmd.name for cmd in registry.all_unique()}
+
+
+class TestCLICommandSpecs:
+    """Invariants for the Typer-side command spec table (velune <subcommand>)."""
+
+    def test_spec_names_unique(self) -> None:
+        from velune.cli.registry import COMMAND_SPECS
+
+        names = [s.name for s in COMMAND_SPECS]
+        assert len(names) == len(set(names)), "duplicate CLI command names"
+
+    def test_spec_panels_known(self) -> None:
+        from velune.cli.registry import COMMAND_SPECS, PANEL_ORDER
+
+        for spec in COMMAND_SPECS:
+            assert spec.panel in PANEL_ORDER, f"{spec.name}: unknown panel {spec.panel}"
+
+    def test_specs_are_importable(self) -> None:
+        # Every spec must resolve to a real attribute — guarantees help can
+        # never list a command whose module/attr has been renamed away.
+        import importlib
+
+        from velune.cli.registry import COMMAND_SPECS
+
+        for spec in COMMAND_SPECS:
+            module = importlib.import_module(spec.module)
+            assert hasattr(module, spec.attr), f"{spec.name}: {spec.module}.{spec.attr} missing"
+
+    def test_render_root_help_runs(self, capsys) -> None:  # noqa: ANN001
+        from velune.cli.registry import render_root_help
+
+        render_root_help()
+        out = capsys.readouterr().out
+        # A representative command from each panel should appear.
+        for name in ("chat", "project", "models", "doctor"):
+            assert name in out

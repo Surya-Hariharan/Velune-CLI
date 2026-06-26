@@ -16,5 +16,6 @@ MODEL_MODULES = [
         factory=_create_model_registry,
         container_key="runtime.model_registry",
         lifecycle_key="models",
+        tier=0,
     )
 ]

@@ -16,6 +16,12 @@ class SlashCommand:
     description: str
     usage: str
     handler: Callable[..., Awaitable[None]]
+    # Category drives grouping in /help and the completion menu. It lives on the
+    # command itself (not a separate dict) so the two can never drift. Defaults
+    # to "General"; built-ins are assigned in slash_dispatcher.
+    category: str = "General"
+    # Hidden developer commands are omitted from /help unless `/help --all`.
+    hidden: bool = False
 
 
 class SlashCommandRegistry:

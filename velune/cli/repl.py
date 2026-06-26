@@ -132,7 +132,7 @@ class VeluneREPL:
         from prompt_toolkit.styles import Style
 
         from velune.cli import design
-        from velune.cli.autocomplete import COMMAND_CATEGORIES, CommandEntry, SlashCompleter
+        from velune.cli.autocomplete import CommandEntry, SlashCompleter
         from velune.cli.statusbar import STATUS_BAR_STYLES
         from velune.cli.validators import InlineSyntaxValidator
 
@@ -165,10 +165,11 @@ class VeluneREPL:
             CommandEntry(
                 name=cmd.name,
                 description=cmd.description,
-                category=COMMAND_CATEGORIES.get(cmd.name, "General"),
+                category=cmd.category,
                 aliases=tuple(cmd.aliases),
             )
             for cmd in self._registry.all_unique()
+            if not cmd.hidden
         ]
         completer = SlashCompleter(commands=entries, model_ids=model_ids)
         self._completer = completer
@@ -592,14 +593,19 @@ class VeluneREPL:
     async def _cmd_help(self, args: str) -> None:
         from rich.table import Table
 
-        from velune.cli.autocomplete import CATEGORY_ORDER, COMMAND_CATEGORIES
+        from velune.cli.autocomplete import CATEGORY_ORDER
 
-        # Group commands by their shared category so the 40+ command surface
-        # reads as a handful of scannable sections instead of one flat wall.
+        # `/help --all` (or `-a`) also reveals hidden developer commands.
+        show_hidden = any(tok in ("--all", "-a", "all") for tok in args.split())
+
+        # Group commands by their own category (set on each SlashCommand) so the
+        # 40+ command surface reads as a handful of scannable sections, and so
+        # help can never advertise a category the registry doesn't actually use.
         grouped: dict[str, list] = {}
         for cmd in self._registry.all_unique():
-            category = COMMAND_CATEGORIES.get(cmd.name, "Other")
-            grouped.setdefault(category, []).append(cmd)
+            if cmd.hidden and not show_hidden:
+                continue
+            grouped.setdefault(cmd.category, []).append(cmd)
 
         ordered = [c for c in CATEGORY_ORDER if c in grouped]
         ordered += sorted(c for c in grouped if c not in CATEGORY_ORDER)
@@ -615,12 +621,21 @@ class VeluneREPL:
             table.add_column("Command", style="cyan", width=16)
             table.add_column("Aliases", style="dim white", width=14)
             table.add_column("Description")
-            for cmd in grouped[category]:
+            for cmd in sorted(grouped[category], key=lambda c: c.name):
                 aliases = ", ".join(f"/{a}" for a in cmd.aliases) if cmd.aliases else ""
-                table.add_row(f"/{cmd.name}", aliases, cmd.description)
+                name = f"/{cmd.name}" + (" [dim](dev)[/dim]" if cmd.hidden else "")
+                table.add_row(name, aliases, cmd.description)
             self.console.print(table)
 
-        self.console.print("[dim]Tip: press [bold]Tab[/bold] to fuzzy-complete any command.[/dim]")
+        tips = (
+            "[dim]Tip: press [bold]Tab[/bold] to fuzzy-complete any command · "
+            "[bold]/help --all[/bold] shows developer commands · "
+            "type [bold]/<cmd>[/bold] with no args for its usage.[/dim]\n"
+            "[dim]Troubleshooting: models not showing? → [bold]/model discover[/bold] "
+            "or [bold]/model locate[/bold] (custom drive). "
+            "Something stuck warming up? → [bold]/doctor[/bold].[/dim]"
+        )
+        self.console.print(tips)
 
     async def _cmd_exit(self, args: str) -> None:
         # Teardown (session archive, episodic close, task cancellation) is
@@ -741,6 +756,32 @@ class VeluneREPL:
         else:
             self.console.print("[green]All checks passed.[/green]")
 
+    def _require(self, key: str, label: str | None = None):
+        """Return a container service, or print a friendly message and None.
+
+        Core registries (model/provider) are Tier-0 and registered before the
+        prompt, so this normally never fails. It guards the genuine
+        bootstrap-failure case with an actionable message instead of a raw
+        ``KeyError`` traceback, and gives background-warmed services a clear
+        "still starting" message rather than crashing a command.
+        """
+        service = self.container.get_optional(key)
+        if service is not None:
+            return service
+        name = label or key.split(".")[-1].replace("_", " ")
+        if self.container.is_ready("runtime.warm"):
+            self.console.print(
+                f"[red]The {name} is unavailable.[/red] "
+                "[dim]This usually means startup did not complete — try "
+                "[bold]/doctor[/bold], or restart Velune.[/dim]"
+            )
+        else:
+            self.console.print(
+                f"[yellow]The {name} is still starting up.[/yellow] "
+                "[dim]Give it a moment and try again.[/dim]"
+            )
+        return None
+
     async def _cmd_model(self, args: str) -> None:
         # Subcommand router — discover/connect/use/list/status/remove. Anything
         # else (a bare model id, or no args) falls through to the legacy
@@ -760,9 +801,17 @@ class VeluneREPL:
             return await self._model_status()
         if sub == "remove":
             return await self._model_remove(rest)
+        if sub == "locate":
+            return await self._model_locate()
+        if sub == "locations":
+            return await self._model_locations(rest)
 
-        model_registry = self.container.get("runtime.model_registry")
-        provider_registry = self.container.get("runtime.provider_registry")
+        model_registry = self._require("runtime.model_registry", "model registry")
+        if model_registry is None:
+            return
+        provider_registry = self._require("runtime.provider_registry", "provider registry")
+        if provider_registry is None:
+            return
 
         # Direct switch when model ID supplied as argument
         if args.strip():
@@ -941,7 +990,9 @@ class VeluneREPL:
 
         from velune.core.types.model import CapabilityLevel
 
-        model_registry = self.container.get("runtime.model_registry")
+        model_registry = self._require("runtime.model_registry", "model registry")
+        if model_registry is None:
+            return
         all_models = model_registry.list_all()
 
         if not all_models:
@@ -1037,7 +1088,9 @@ class VeluneREPL:
             "OpenAI-compatible servers (:8000/:8080/:3000), "
             "and configured cloud providers...[/dim]"
         )
-        registry = self.container.get("runtime.model_registry")
+        registry = self._require("runtime.model_registry", "model registry")
+        if registry is None:
+            return
         try:
             await registry.refresh()
         except Exception as exc:
@@ -1066,7 +1119,9 @@ class VeluneREPL:
         """Register a named model as default; discover first if unknown."""
         if not name:
             return await self._model_discover()
-        registry = self.container.get("runtime.model_registry")
+        registry = self._require("runtime.model_registry", "model registry")
+        if registry is None:
+            return
         model = registry.get(name)
         if model is None:
             self.console.print(f"[dim]'{name}' not in registry — discovering...[/dim]")
@@ -1088,7 +1143,9 @@ class VeluneREPL:
         if not name:
             self.console.print("[yellow]Usage: /model use <model-id>[/yellow]")
             return
-        registry = self.container.get("runtime.model_registry")
+        registry = self._require("runtime.model_registry", "model registry")
+        if registry is None:
+            return
         model = registry.get(name)
         if model is None:
             from velune.cli.rendering.error_panel import render_error
@@ -1138,7 +1195,9 @@ class VeluneREPL:
         if not name:
             self.console.print("[yellow]Usage: /model remove <model-id>[/yellow]")
             return
-        registry = self.container.get("runtime.model_registry")
+        registry = self._require("runtime.model_registry", "model registry")
+        if registry is None:
+            return
         removed = registry.remove(name) if hasattr(registry, "remove") else False
         from velune.cli.model_prefs import clear_active_model, load_active_model
 
@@ -1153,6 +1212,127 @@ class VeluneREPL:
             self.console.print(
                 f"[yellow]'{name}' was not in the registry.[/yellow] "
                 "[dim](Use [bold]/delete[/bold] to remove an installed Ollama model.)[/dim]"
+            )
+
+    async def _model_locate(self) -> None:
+        """Browse to and register a custom Ollama model storage location."""
+        from velune.cli.dir_browser import browse_for_directory
+        from velune.providers.ollama_locations import OllamaLocationRegistry
+        from velune.providers.ollama_store import OllamaModelStore
+
+        self.console.print(
+            "[dim]Browse to the folder that contains your Ollama models "
+            "(the one with [bold]manifests/[/bold] and [bold]blobs/[/bold]). "
+            "Use ← to go up to drives/volumes.[/dim]"
+        )
+        try:
+            chosen = await browse_for_directory(
+                title="Locate your Ollama model store",
+                validate=OllamaModelStore.is_valid_root,
+            )
+        except Exception as exc:
+            self.console.print(f"[red]Could not open the browser:[/red] {exc}")
+            return
+        if chosen is None:
+            self.console.print("[dim]Cancelled.[/dim]")
+            return
+
+        result = OllamaLocationRegistry().add(chosen)
+        if not result.ok:
+            self.console.print(f"[red]✗ {result.message}[/red]")
+            self.console.print(
+                "[dim]Tip: pick the directory that directly contains "
+                "[bold]manifests/[/bold] and [bold]blobs/[/bold].[/dim]"
+            )
+            return
+
+        self.console.print(f"[green]✓ {result.message}[/green]")
+        # Show what we found there immediately, then refresh discovery.
+        try:
+            found = OllamaModelStore(chosen).list_models()
+            if found:
+                names = ", ".join(m.name for m in found[:8])
+                more = f" (+{len(found) - 8} more)" if len(found) > 8 else ""
+                self.console.print(f"[dim]Models here: {names}{more}[/dim]")
+        except Exception:
+            pass
+
+        registry = self._require("runtime.model_registry", "model registry")
+        if registry is not None:
+            self.console.print("[dim]Refreshing model registry...[/dim]")
+            try:
+                await registry.refresh()
+            except Exception as exc:
+                self.console.print(f"[yellow]Discovery refresh failed:[/yellow] {exc}")
+                return
+            if self._completer is not None:
+                self._completer.set_model_ids([m.model_id for m in registry.list_all()])
+            self.console.print(
+                "[dim]→ Run [bold]/models[/bold] to see them, or [bold]/model[/bold] to switch.[/dim]"
+            )
+
+    async def _model_locations(self, args: str) -> None:
+        """List, add, or remove registered Ollama model locations."""
+        from rich.table import Table
+
+        from velune.providers.ollama_locations import OllamaLocationRegistry
+
+        reg = OllamaLocationRegistry()
+        parts = args.split(None, 1)
+        sub = parts[0].lower() if parts else "list"
+        rest = parts[1].strip() if len(parts) > 1 else ""
+
+        if sub == "add":
+            if not rest:
+                self.console.print("[yellow]Usage: /model locations add <path>[/yellow]")
+                return
+            result = reg.add(rest)
+            style = "green" if result.ok else "red"
+            mark = "✓" if result.ok else "✗"
+            self.console.print(f"[{style}]{mark} {result.message}[/{style}]")
+            return
+
+        if sub in ("remove", "rm", "delete"):
+            if not rest:
+                self.console.print("[yellow]Usage: /model locations remove <path>[/yellow]")
+                return
+            ok = reg.remove(rest)
+            if ok:
+                self.console.print(f"[green]✓ Removed location:[/green] {rest}")
+            else:
+                self.console.print(f"[yellow]Not a registered location:[/yellow] {rest}")
+            return
+
+        # Default: list all resolved roots with live status.
+        roots = reg.resolve_roots()
+        if not roots:
+            self.console.print(
+                "[dim]No model locations resolved. Run [bold]/model locate[/bold] "
+                "to register one.[/dim]"
+            )
+            return
+
+        table = Table(border_style="dim", padding=(0, 1))
+        table.add_column("Location", style="cyan")
+        table.add_column("Source", style="dim")
+        table.add_column("Status")
+        for rr in roots:
+            if rr.disconnected:
+                status = "[yellow]disconnected (device unavailable)[/yellow]"
+            elif not rr.exists:
+                status = "[dim]not present[/dim]"
+            elif rr.is_valid:
+                status = "[green]connected[/green]"
+            else:
+                status = "[red]not an Ollama store[/red]"
+            table.add_row(str(rr.path), rr.source, status)
+        self.console.print(table)
+
+        disconnected = [rr for rr in roots if rr.disconnected]
+        if disconnected:
+            self.console.print(
+                "[dim]Reconnect the drive(s) above and the models reappear "
+                "automatically — no re-setup needed.[/dim]"
             )
 
     # ------------------------------------------------------------------
@@ -2540,8 +2720,8 @@ class VeluneREPL:
 
         config = self._mode_manager.set_mode(SessionMode.OPTIMUS)
         selector = ModeAwareModelSelector(
-            self.container.get("runtime.model_registry"),
-            self.container.get("runtime.provider_registry"),
+            self.container.get_optional("runtime.model_registry"),
+            self.container.get_optional("runtime.provider_registry"),
             runtime_profile=self._runtime_profile,
         )
         auto_model = selector.select_for_mode(config, self.active_model)
@@ -2560,8 +2740,8 @@ class VeluneREPL:
 
         config = self._mode_manager.set_mode(SessionMode.GODLY)
         selector = ModeAwareModelSelector(
-            self.container.get("runtime.model_registry"),
-            self.container.get("runtime.provider_registry"),
+            self.container.get_optional("runtime.model_registry"),
+            self.container.get_optional("runtime.provider_registry"),
             runtime_profile=self._runtime_profile,
         )
         auto_model = selector.select_for_mode(config, self.active_model)
@@ -2640,6 +2820,41 @@ class VeluneREPL:
                     pass  # skip roles not in CouncilRole enum (e.g. "embedding")
             if hasattr(orchestrator, "agent_factory"):
                 orchestrator.agent_factory.clear_cache()
+        except Exception:
+            pass
+
+    def on_warm_complete(self) -> None:
+        """Called once the background Tier-1 warm-up finishes.
+
+        Picks up subsystems that weren't available when the REPL was first
+        constructed: re-applies council role overrides now the orchestrator
+        exists, and refreshes the completer's model-id list in case discovery
+        registered additional models. Best-effort and silent.
+        """
+        try:
+            self._apply_role_overrides_to_orchestrator()
+        except Exception:
+            pass
+        try:
+            if self._completer is not None:
+                registry = self.container.get_optional("runtime.model_registry")
+                if registry is not None:
+                    self._completer.set_model_ids([m.model_id for m in registry.list_all()])
+        except Exception:
+            pass
+        # Notify if a previously-registered model store is currently offline so
+        # the user knows *why* models are missing (e.g. external drive unplugged)
+        # rather than seeing a silent empty list. Reconnecting is automatic.
+        try:
+            from velune.providers.ollama_locations import OllamaLocationRegistry
+
+            offline = OllamaLocationRegistry().disconnected()
+            for rr in offline:
+                self.console.print(
+                    f"[yellow]⚠ Model store unavailable:[/yellow] [dim]{rr.path}[/dim] "
+                    "[dim]— storage device disconnected. Reconnect it and the models "
+                    "reappear automatically.[/dim]"
+                )
         except Exception:
             pass
 
@@ -3980,20 +4195,22 @@ class VeluneREPL:
                         description=f"{cmd.description}  {cmd.help_label}",
                         usage=cmd.usage,
                         handler=_make_handler(),
+                        category="Extend",
                     )
                 )
         # Rebuild completer entries to include new commands
         if self._completer is not None:
-            from velune.cli.autocomplete import COMMAND_CATEGORIES, CommandEntry
+            from velune.cli.autocomplete import CommandEntry
 
             entries = [
                 CommandEntry(
                     name=c.name,
                     description=c.description,
-                    category=COMMAND_CATEGORIES.get(c.name, "Plugin"),
+                    category=c.category,
                     aliases=tuple(c.aliases),
                 )
                 for c in self._registry.all_unique()
+                if not c.hidden
             ]
             self._completer.commands = entries
 

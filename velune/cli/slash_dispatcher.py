@@ -23,6 +23,37 @@ if TYPE_CHECKING:
 _log = logging.getLogger("velune.cli.slash_dispatcher")
 
 
+# Canonical category for every built-in slash command, co-located with the
+# registrations below. Applied onto each command's ``category`` field so /help
+# and the completer share one source of truth. A test asserts every registered
+# command name appears here (no silent "General" fallback for built-ins).
+_BUILTIN_CATEGORIES: dict[str, str] = {
+    # Session
+    "help": "Session", "exit": "Session", "clear": "Session", "new": "Session",
+    "history": "Session", "stats": "Session", "session": "Session", "context": "Session",
+    # Workspace
+    "project": "Workspace", "index": "Workspace", "diff": "Workspace",
+    "undo": "Workspace", "hunk": "Workspace",
+    # Models
+    "model": "Models", "models": "Models", "pull": "Models", "delete": "Models",
+    "bench": "Models", "councilmodel": "Models",
+    # Council
+    "run": "Council", "council": "Council", "jobs": "Council", "dashboard": "Council",
+    # Modes
+    "optimus": "Modes", "godly": "Modes", "normal": "Modes", "mode": "Modes",
+    # Memory
+    "memory": "Memory", "graph": "Memory",
+    # Code
+    "lint": "Code", "refactor": "Code", "typify": "Code",
+    # Git
+    "push": "Git", "pr": "Git", "issue": "Git", "sandbox": "Git",
+    # Extend
+    "mcp": "Extend", "plugin": "Extend",
+    # System
+    "doctor": "System", "config": "System", "hooks": "System", "approve": "System",
+}
+
+
 def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     """Build and return the full SlashCommandRegistry bound to *repl*'s handlers.
 
@@ -143,8 +174,11 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="model",
             aliases=["m"],
-            description="Discover, connect, switch, or inspect models",
-            usage="/model [model-id|discover|connect <id>|use <id>|list|status|remove <id>]",
+            description="Discover, connect, switch, inspect, or locate models",
+            usage=(
+                "/model [model-id|discover|connect <id>|use <id>|list|status|"
+                "remove <id>|locate|locations]"
+            ),
             handler=repl._cmd_model,
         )
     )
@@ -443,8 +477,14 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         )
     )
 
-    # ── TOML-defined user / workspace commands ────────────────────────────────
+    # Assign the canonical category onto each built-in command so /help and the
+    # completer derive grouping from the command itself — never a parallel dict.
+    for cmd in registry.all_unique():
+        cmd.category = _BUILTIN_CATEGORIES.get(cmd.name, cmd.category)
 
+    # ── TOML-defined user / workspace commands ────────────────────────────────
+    # Registered after categorisation so they keep their own category (default
+    # "General", surfaced under a trailing group in /help).
     _load_file_commands(repl, registry)
 
     return registry

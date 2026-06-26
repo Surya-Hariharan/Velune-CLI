@@ -71,17 +71,17 @@ class ModelDiscoveryScanner:
 
     async def scan_all(self) -> list[ModelDescriptor]:
         """Scan all providers for models in parallel."""
-        # Gate server-dependent local providers on reachability
-        ollama_ok, lmstudio_ok, openai_compat_ok = await asyncio.gather(
-            OllamaDiscovery.is_running(),
+        # Gate server-dependent local providers on reachability. Ollama is NOT
+        # gated here: its discoverer also reads on-disk manifest stores, so it
+        # must run even when the daemon is down (to surface models on external
+        # drives or an offline daemon) — it returns [] cheaply if nothing exists.
+        lmstudio_ok, openai_compat_ok = await asyncio.gather(
             LMStudioDiscovery.is_running(),
             OpenAICompatDiscovery.is_running(),
         )
 
         tasks = []
         for d in self.discoverers:
-            if d.provider_id == "ollama" and not ollama_ok:
-                continue
             if d.provider_id == "lmstudio" and not lmstudio_ok:
                 continue
             if d.provider_id == "openai-compat" and not openai_compat_ok:

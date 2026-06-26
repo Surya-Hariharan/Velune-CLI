@@ -21,7 +21,19 @@ logger = logging.getLogger("velune.providers.adapters.ollama")
 class OllamaProvider(ModelProvider):
     """Ollama provider for local models."""
 
-    def __init__(self, base_url: str = "http://localhost:11434") -> None:
+    def __init__(self, base_url: str | None = None) -> None:
+        # Honour OLLAMA_HOST when no explicit URL is configured, so a daemon on
+        # a non-default host/port (or a relocated setup) works out of the box.
+        if base_url is None:
+            import os
+
+            host = os.environ.get("OLLAMA_HOST", "").strip()
+            if not host:
+                base_url = "http://localhost:11434"
+            elif host.startswith(("http://", "https://")):
+                base_url = host.rstrip("/")
+            else:
+                base_url = f"http://{host}"
         self._base_url = base_url
         self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(

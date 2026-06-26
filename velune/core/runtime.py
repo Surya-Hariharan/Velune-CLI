@@ -25,14 +25,30 @@ class RuntimeContext:
     console: Console
     logger_name: str
     container: ServiceContainer
+    # The bootstrap environment, retained so the interactive session can warm
+    # the Tier-1 subsystems in the background once the prompt is interactive.
+    # None for non-interactive command invocations that bootstrap everything
+    # synchronously.
+    env: object | None = None
 
 
 def build_runtime(
     workspace: Path,
     config_path: Path | None = None,
     verbose: bool = False,
+    *,
+    defer_background: bool = False,
 ) -> RuntimeContext:
-    """Create and register the shared runtime services using the declarative bootstrapper."""
+    """Create and register the shared runtime services.
+
+    When ``defer_background`` is True only the Tier-0 (synchronous, instant)
+    subsystems are bootstrapped — enough to render an interactive prompt and
+    serve lightweight commands. The expensive Tier-1 subsystems (memory tiers,
+    retrieval, repository cognition, orchestration) plus the hardware/GPU probe
+    are left for :func:`warm_background` to initialize in a supervised task once
+    the prompt is interactive. Non-interactive command invocations leave it
+    False and bootstrap everything synchronously.
+    """
     from velune.core.startup_profiler import mark
 
     mark("build_runtime: enter")
@@ -68,26 +84,14 @@ def build_runtime(
     container.register_instance("runtime.config_path", config_path)
     container.register_instance("runtime.lifecycle", lifecycle)
 
-    # Detect and persist GPU info
-    try:
-        from velune.providers.discovery.gpu import GPUDetector
-
-        gpu_info = GPUDetector().detect()
-    except Exception as e:
-        logger.warning("GPU detection failed, using safe defaults: %s", e)
-        gpu_info = {
-            "has_gpu": False,
-            "gpu_type": None,
-            "vram_total_gb": None,
-            "vram_free_gb": None,
-            "cuda_available": False,
-        }
-    container.register_instance("runtime.gpu_info", gpu_info)
-    mark("gpu detected")
-
-    # 3. Initialize and bootstrap declarative subsystems in dependency order
-    from velune.kernel.bootstrap import RuntimeBootstrapper, RuntimeEnvironment
-    from velune.kernel.modules import ALL_MODULES
+    # 3. Bootstrap subsystems. Tier-0 modules always run synchronously here.
+    from velune.kernel.bootstrap import (
+        RuntimeBootstrapper,
+        RuntimeEnvironment,
+        detect_hardware_profile,
+        register_core_primitives,
+    )
+    from velune.kernel.modules import CORE_MODULES
 
     env = RuntimeEnvironment(
         workspace=workspace,
@@ -97,11 +101,26 @@ def build_runtime(
         verbose=verbose,
     )
 
+    register_core_primitives(env)
+    mark("core primitives registered")
+
     bootstrapper = RuntimeBootstrapper()
-    for module in ALL_MODULES:
+    for module in CORE_MODULES:
         bootstrapper.register_module(module)
     bootstrapper.bootstrap(env)
-    mark("subsystems bootstrapped")
+    mark("tier-0 subsystems bootstrapped")
+
+    if not defer_background:
+        # Non-interactive path: bring up hardware + every Tier-1 subsystem now
+        # so the caller sees a fully-initialized container.
+        detect_hardware_profile(env)
+        bg = RuntimeBootstrapper()
+        from velune.kernel.modules import load_background_modules
+
+        for module in load_background_modules():
+            bg.register_module(module)
+        bg.bootstrap(env)
+        mark("tier-1 subsystems bootstrapped")
 
     return RuntimeContext(
         workspace=workspace,
@@ -110,4 +129,55 @@ def build_runtime(
         console=console,
         logger_name=logger_name,
         container=container,
+        env=env,
     )
+
+
+async def warm_background(runtime: RuntimeContext) -> None:
+    """Initialize the hardware probe and Tier-1 subsystems off the prompt path.
+
+    Called from the interactive session's event loop after the prompt is drawn.
+    Detects hardware/GPU, bootstraps every Tier-1 module, and runs lifecycle
+    startup for the subsystems registered along the way. Best-effort: a failure
+    in any optional subsystem is logged and skipped so the session stays usable.
+    """
+    import asyncio
+
+    from velune.kernel.bootstrap import (
+        RuntimeBootstrapper,
+        detect_hardware_profile,
+    )
+    from velune.kernel.modules import load_background_modules
+
+    env = runtime.env
+    if env is None:
+        return
+
+    logger = logging.getLogger("velune")
+
+    # Hardware/GPU probe (~0.5s) — run in a thread so it never blocks the loop.
+    try:
+        await asyncio.to_thread(detect_hardware_profile, env)
+    except Exception as exc:
+        logger.warning("Background hardware detection failed: %s", exc)
+
+    # Importing + instantiating the Tier-1 modules is CPU/IO heavy; do it in a
+    # worker thread, then register results back on the loop thread is
+    # unnecessary because the container is plain dict access. Factories may do
+    # blocking IO (SQLite, file reads), so a thread keeps the prompt responsive.
+    def _bootstrap_tier1() -> None:
+        bg = RuntimeBootstrapper()
+        for module in load_background_modules():
+            bg.register_module(module)
+        bg.bootstrap(env)
+
+    try:
+        await asyncio.to_thread(_bootstrap_tier1)
+    except Exception as exc:
+        logger.warning("Background subsystem warm-up incomplete: %s", exc)
+
+    # Mark the aggregate warm-up complete for any waiters.
+    try:
+        env.container.mark_ready("runtime.warm")
+    except Exception:
+        pass

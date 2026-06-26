@@ -67,6 +67,38 @@ def main() -> None:
             print(f"velune v{__version__}")
         raise SystemExit(0)
 
+    # Identify the first positional token (the subcommand, if any) so we can
+    # import *only* what this invocation needs. Skip options and the values of
+    # the known value-taking root options (``-w/--workspace``, ``-c/--config``)
+    # so ``velune -w /some/path`` is correctly seen as the bare REPL, not a
+    # subcommand. An unknown positional simply falls back to full registration.
+    value_opts = {"-w", "--workspace", "-c", "--config"}
+    subcommand = None
+    skip_next = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in value_opts:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        subcommand = arg
+        break
+    help_requested = any(a in ("--help", "-h") for a in argv)
+
+    # Top-level help (``velune --help`` / ``velune -h`` with no subcommand) is
+    # rendered straight from the spec table — it imports no command modules and
+    # is therefore near-instant.
+    if help_requested and subcommand is None:
+        try:
+            from velune.cli.registry import render_root_help
+        except ImportError as exc:
+            _fatal_environment_error(exc)
+        render_root_help()
+        raise SystemExit(0)
+
     try:
         from velune.cli.app import create_app
     except ImportError as exc:
@@ -76,7 +108,9 @@ def main() -> None:
         # are raised later by Typer and are intentionally not caught here.
         _fatal_environment_error(exc)
 
-    create_app()()
+    # No subcommand → the bare interactive REPL, which needs zero subcommand
+    # modules imported. Otherwise register just the invoked command.
+    create_app(register=subcommand)()
 
 
 def __getattr__(name: str):

@@ -38,63 +38,11 @@ CATEGORY_ORDER: list[str] = [
     "System",
 ]
 
-# Category assignments for the built-in REPL commands. Keyed by canonical
-# command name (not alias). Commands not listed here fall back to "General".
-# This is the single source of truth shared by the completer and /help.
-COMMAND_CATEGORIES: dict[str, str] = {
-    # Session
-    "help": "Session",
-    "exit": "Session",
-    "clear": "Session",
-    "new": "Session",
-    "session": "Session",
-    "history": "Session",
-    "context": "Session",
-    "stats": "Session",
-    # Workspace
-    "project": "Workspace",
-    "index": "Workspace",
-    "diff": "Workspace",
-    "undo": "Workspace",
-    "hunk": "Workspace",
-    # Models
-    "model": "Models",
-    "models": "Models",
-    "pull": "Models",
-    "delete": "Models",
-    "bench": "Models",
-    # Council
-    "run": "Council",
-    "council": "Council",
-    "councilmodel": "Council",
-    "jobs": "Council",
-    "dashboard": "Council",
-    # Modes
-    "mode": "Modes",
-    "optimus": "Modes",
-    "godly": "Modes",
-    "normal": "Modes",
-    # Memory
-    "memory": "Memory",
-    "graph": "Memory",
-    # Code
-    "lint": "Code",
-    "refactor": "Code",
-    "typify": "Code",
-    # Git
-    "push": "Git",
-    "pr": "Git",
-    "issue": "Git",
-    "sandbox": "Git",
-    # Extend
-    "mcp": "Extend",
-    "plugin": "Extend",
-    # System
-    "doctor": "System",
-    "config": "System",
-    "hooks": "System",
-    "approve": "System",
-}
+# NOTE: Category assignments now live on each ``SlashCommand`` (set in
+# velune.cli.slash_dispatcher) so /help and this completer share one source of
+# truth and can never drift. The live REPL always passes ``commands=`` built
+# from that registry; the static ``SLASH_COMMANDS`` fallback below defaults
+# unlisted commands to "General".
 
 # Static fallback used when no live registry is supplied (kept in sync with
 # velune.cli.slash_dispatcher.build_slash_registry). Prefer passing
@@ -207,11 +155,7 @@ class SlashCompleter(Completer):
         else:
             pairs = SLASH_COMMANDS + (extra_commands or [])
             self._entries = [
-                CommandEntry(
-                    name=name,
-                    description=desc,
-                    category=COMMAND_CATEGORIES.get(name, "General"),
-                )
+                CommandEntry(name=name, description=desc)
                 for name, desc in pairs
             ]
         self._model_ids: list[str] = model_ids or []

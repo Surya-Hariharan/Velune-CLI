@@ -13,5 +13,6 @@ KERNEL_MODULES = [
         factory=_create_cognitive_bus,
         container_key="runtime.bus",
         lifecycle_key="bus",
+        tier=0,
     )
 ]
