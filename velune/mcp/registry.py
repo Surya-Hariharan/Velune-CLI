@@ -26,10 +26,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from velune._compat import StrEnum
 from velune.mcp.transports.base import (
     MCPConnection,
     MCPTransportError,

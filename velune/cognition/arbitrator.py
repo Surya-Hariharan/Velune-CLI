@@ -47,7 +47,12 @@ class CouncilArbitrator:
         agreement_rate: float,
         logic_score: float,
     ) -> float:
-        """Calculate calibrated confidence score to minimize overstatement bias."""
+        """Calculate calibrated confidence score to minimize overstatement bias.
+
+        Retained for backward compatibility; the live path now delegates to
+        :func:`velune.cognition.consensus.calibrated_confidence` with *measured*
+        signals rather than the hardcoded inputs this method used to receive.
+        """
         calibrated_confidence = (
             self_reported * 0.20  # models overstate — low weight
             + agreement_rate * 0.40  # cross-agent agreement is strong signal
@@ -68,6 +73,7 @@ class CouncilArbitrator:
         maintainability_report: Any | None = None,
         critic_weights: dict[str, float] | None = None,
         shi: float | None = None,
+        candidates: list[str] | None = None,
     ) -> ArbitrationResult:
         """Arbitrate the deliberations of the planner, coder, reviewer, challenger, and specialized critics."""
         logger.info("Council Arbitrator analyzing agent deliberations...")
@@ -78,15 +84,12 @@ class CouncilArbitrator:
         # 1. Claim Extraction and Synthesis Instructions
         if isinstance(reviewer_report, dict):
             passed = reviewer_report.get("passed", True)
-            reviewer_confidence = reviewer_report.get("confidence_rating", 0.7)
             reviewer_issues = reviewer_report.get("critical_issues", [])
         elif reviewer_report is not None:
             passed = reviewer_report.passed
-            reviewer_confidence = reviewer_report.confidence_rating
             reviewer_issues = reviewer_report.critical_issues
         else:
             passed = True
-            reviewer_confidence = 0.5
             reviewer_issues = ["Reviewer unavailable"]
 
         if isinstance(challenger_report, dict):
@@ -134,50 +137,47 @@ class CouncilArbitrator:
             or len(failed_critics) > 0
         )
 
-        # Calculate agreement rate
-        # If reviewer and all active critics passed, agreement is high.
+        # Measure agreement and confidence from the agents' ACTUAL outputs
+        # (no hardcoded agreement/logic constants). See velune.cognition.consensus.
+        from velune.cognition.consensus import calibrated_confidence, measure_agreement
+
         all_passed = passed and (len(failed_critics) == 0)
 
+        signals = measure_agreement(
+            reviewer_report=reviewer_report,
+            challenger_report=challenger_report,
+            critic_reports=[report for _, report in critic_reports],
+            candidates=candidates or [coder_proposal],
+        )
+        overall_confidence = calibrated_confidence(signals, self.historical_accuracy)
+
+        # The if/elif/else now drives only the qualitative narrative (winning
+        # claims + flags), not the numeric confidence.
         if all_passed and challenger_severity < 0.3:
-            agreement_rate = 0.95
-            logic_score = 0.9
             winning_claims.append("Coder solution is syntactically sound and logical.")
             if critic_reports:
                 winning_claims.append(
                     "All specialized critics approved the proposed implementation."
                 )
         elif not all_passed and challenger_severity > 0.6:
-            agreement_rate = 0.9  # General agreement that there are bugs/objections
-            logic_score = 0.4  # High issues means poor internal logical consistency
             flags.append("CRITICAL_BUGS_DETECTED")
             winning_claims.append("Coder proposal contains bugs and architectural violations.")
         else:
-            agreement_rate = 0.5  # Contradiction detected
-            logic_score = 0.6
             flags.append("CONTRADICTION_DETECTED")
             winning_claims.append("Proposed edits are partially sound but require refactoring.")
 
-        # Calculate calibrated confidence using formula with dynamic critic weights
-        sum_weighted_critic_scores = 0.0
-        sum_critic_weights = 0.0
-        weights_dict = critic_weights or {}
+        if critic_weights:
+            logger.debug("Critic weights supplied (informational): %s", critic_weights)
 
-        for name, report in critic_reports:
-            role = name.lower()
-            w_critic = weights_dict.get(role, 1.0)
-            if isinstance(report, dict):
-                c_score = report.get("score", report.get("confidence_rating", 0.7))
-            else:
-                c_score = report.score
-            sum_weighted_critic_scores += c_score * w_critic
-            sum_critic_weights += w_critic
-
-        self_reported = (
-            sum_weighted_critic_scores + reviewer_confidence + (1.0 - challenger_severity)
-        ) / (sum_critic_weights + 2.0)
-
-        overall_confidence = self.calculate_calibrated_confidence(
-            self_reported=self_reported, agreement_rate=agreement_rate, logic_score=logic_score
+        logger.info(
+            "Measured agreement: pass_rate=%.2f score_mean=%.2f variance=%.3f "
+            "agreement=%.2f logic=%.2f over %d judges",
+            signals.critic_pass_rate,
+            signals.score_mean,
+            signals.score_variance,
+            signals.agreement_rate,
+            signals.logic_score,
+            signals.n_judges,
         )
 
         # Calculate variable passing thresholds scaled by subsystem risk (SHI)

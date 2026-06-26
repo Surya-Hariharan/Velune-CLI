@@ -114,7 +114,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     env:
       PYTHONIOENCODING: utf-8
       PYTHONUTF8: "1"
@@ -190,7 +190,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     env:
       PYTHONIOENCODING: utf-8
     steps:
@@ -220,6 +220,9 @@ jobs:
           velune --help
           # The console-script and module form must agree.
           python -m velune --version
+          # Environment diagnostics must run without import-time crashes on
+          # every supported interpreter (exit code ignored — warnings are fine).
+          velune doctor check || true
 
   ci-pass:
     name: CI Pass

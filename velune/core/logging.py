@@ -7,7 +7,7 @@ import logging
 import os
 import warnings
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from rich.logging import RichHandler
 
@@ -23,7 +23,7 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             exc_info = redact_secrets(self.formatException(record.exc_info))
 
-        ts = datetime.now(UTC).isoformat().replace("+00:00", "")
+        ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "")
 
         log_data = {
             "ts": ts,

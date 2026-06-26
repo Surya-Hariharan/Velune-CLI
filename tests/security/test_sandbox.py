@@ -152,9 +152,7 @@ class TestExecution:
         result = sandbox.execute(
             script_spec(
                 workspace,
-                "import sys\n"
-                "sys.stdout.write('O' * 500_000)\n"
-                "sys.stderr.write('E' * 500_000)\n",
+                "import sys\nsys.stdout.write('O' * 500_000)\nsys.stderr.write('E' * 500_000)\n",
                 timeout=30.0,
             )
         )

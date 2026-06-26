@@ -1,10 +1,11 @@
 """Strictly-typed schemas for repository cognition."""
 
 import hashlib
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+from velune._compat import StrEnum
 
 
 def build_qualified_name(file_path: str, name: str, parent: str | None = None) -> str:

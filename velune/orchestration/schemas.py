@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from velune._compat import StrEnum
 from velune.core.types.task import TaskPlan
 
 
@@ -29,7 +29,7 @@ class AgentMessage(BaseModel):
     sender: str
     receiver: str
     content: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -37,7 +37,7 @@ class ExecutionAttempt(BaseModel):
     """An attempt record for autonomous retry loops."""
 
     attempt: int = 1
-    started_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     completed_at: datetime | None = None
     success: bool = False
     issues: list[str] = Field(default_factory=list)
@@ -68,8 +68,8 @@ class OrchestrationState(BaseModel):
     coder_proposal: str | None = None
     error: str | None = None
     validation_issues: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
 class OrchestrationResult(BaseModel):
@@ -93,7 +93,7 @@ class StreamProgress(BaseModel):
     run_id: str
     phase: str
     message: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     elapsed_ms: float | None = None
 
     def __str__(self) -> str:

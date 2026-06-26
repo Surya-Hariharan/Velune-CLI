@@ -1,10 +1,11 @@
 """Strictly-typed schemas for the Cognitive Kernel."""
 
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from velune._compat import StrEnum
 
 
 class ComponentStatus(StrEnum):
@@ -25,4 +26,4 @@ class HealthReport(BaseModel):
     status: ComponentStatus
     latency_ms: float = 0.0
     details: dict[str, Any] = Field(default_factory=dict)
-    last_check: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    last_check: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))

@@ -1,6 +1,9 @@
 """GPU/VRAM detection."""
 
+import json
 import subprocess
+import time
+from pathlib import Path
 from typing import Any
 
 # Process-wide cache: GPU topology does not change during a run, and the probe
@@ -11,15 +14,62 @@ _GPU_CACHE: dict[str, Any] | None = None
 # Subprocess probes must never block startup if a GPU driver is wedged.
 _PROBE_TIMEOUT = 3.0
 
+# Disk cache. ``nvidia-smi`` can take ~2s to spawn on a laptop, and a process
+# memo only helps within a single run — every cold CLI launch paid that cost.
+# GPU topology is effectively static between reboots, so we persist the result
+# and only re-probe when the cache is missing or older than the TTL. VRAM *free*
+# is the only volatile field; callers that need a live free-VRAM reading should
+# probe directly rather than rely on this startup cache.
+_DISK_CACHE_PATH = Path.home() / ".velune" / "hardware.json"
+_DISK_CACHE_TTL = 24 * 60 * 60  # 24h
+
+
+def _read_disk_cache() -> dict[str, Any] | None:
+    try:
+        raw = json.loads(_DISK_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    ts = raw.get("_cached_at")
+    if not isinstance(ts, (int, float)) or (time.time() - ts) > _DISK_CACHE_TTL:
+        return None
+    info = raw.get("info")
+    return info if isinstance(info, dict) else None
+
+
+def _write_disk_cache(info: dict[str, Any]) -> None:
+    try:
+        _DISK_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _DISK_CACHE_PATH.write_text(
+            json.dumps({"_cached_at": time.time(), "info": info}),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
 
 class GPUDetector:
     """Detects GPU capabilities and VRAM."""
 
-    def detect(self) -> dict[str, Any]:
-        """Detect GPU information (memoized for the process lifetime)."""
+    def detect(self, *, use_cache: bool = True) -> dict[str, Any]:
+        """Detect GPU information.
+
+        Memoized for the process lifetime and, when *use_cache* is set, backed
+        by a short-lived on-disk cache so repeated cold launches skip the slow
+        ``nvidia-smi`` subprocess. Pass ``use_cache=False`` to force a fresh
+        probe (e.g. for an accurate free-VRAM reading).
+        """
         global _GPU_CACHE
-        if _GPU_CACHE is not None:
+        if use_cache and _GPU_CACHE is not None:
             return dict(_GPU_CACHE)
+
+        if use_cache:
+            cached = _read_disk_cache()
+            if cached is not None:
+                _GPU_CACHE = dict(cached)
+                return dict(cached)
+
         info = {
             "has_gpu": False,
             "gpu_type": None,
@@ -36,6 +86,8 @@ class GPUDetector:
                 break
 
         _GPU_CACHE = dict(info)
+        if use_cache:
+            _write_disk_cache(info)
         return info
 
     def _detect_nvidia(self) -> dict[str, Any] | None:

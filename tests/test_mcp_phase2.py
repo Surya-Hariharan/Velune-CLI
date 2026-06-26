@@ -40,7 +40,11 @@ class TestServerConfig:
     def test_headers_preserved(self):
         cfg = ServerConfig.from_dict(
             "api",
-            {"type": "http", "url": "https://x.com/mcp", "headers": {"Authorization": "Bearer tok"}},
+            {
+                "type": "http",
+                "url": "https://x.com/mcp",
+                "headers": {"Authorization": "Bearer tok"},
+            },
         )
         assert cfg.headers["Authorization"] == "Bearer tok"
 
@@ -108,16 +112,18 @@ class TestRegistryConfigLoading:
     def test_load_mcp_json(self, tmp_path: Path):
         mcp_json = tmp_path / ".mcp.json"
         mcp_json.write_text(
-            json.dumps({
-                "filesystem": {
-                    "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-filesystem", str(tmp_path)],
-                },
-                "github": {
-                    "type": "sse",
-                    "url": "https://mcp.github.com/sse",
-                },
-            }),
+            json.dumps(
+                {
+                    "filesystem": {
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem", str(tmp_path)],
+                    },
+                    "github": {
+                        "type": "sse",
+                        "url": "https://mcp.github.com/sse",
+                    },
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -134,10 +140,12 @@ class TestRegistryConfigLoading:
     def test_load_ignores_invalid_entries(self, tmp_path: Path):
         mcp_json = tmp_path / ".mcp.json"
         mcp_json.write_text(
-            json.dumps({
-                "good": {"command": "echo"},
-                "bad": "not-a-dict",
-            }),
+            json.dumps(
+                {
+                    "good": {"command": "echo"},
+                    "bad": "not-a-dict",
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -292,7 +300,9 @@ class TestRegistryConnect:
 
         registry = MCPServerRegistry(workspace=tmp_path)
         for name in ("a", "b", "c"):
-            registry.register(ServerConfig(name=name, transport=TransportType.STDIO, command="echo"))
+            registry.register(
+                ServerConfig(name=name, transport=TransportType.STDIO, command="echo")
+            )
 
         mock_conn = _make_mock_conn("any")
         with patch("velune.mcp.registry.make_connection", return_value=mock_conn):

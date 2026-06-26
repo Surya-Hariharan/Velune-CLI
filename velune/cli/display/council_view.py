@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.box import ROUNDED
 from rich.console import Console
@@ -11,8 +11,10 @@ from rich.table import Table
 from rich.text import Text
 
 from velune.cli import design
-from velune.cognition.council.planner import TaskPlan
-from velune.models.specializations import CouncilRole
+
+if TYPE_CHECKING:
+    from velune.cognition.council.planner import TaskPlan
+    from velune.models.specializations import CouncilRole
 
 
 class CouncilDisplayView:

@@ -22,18 +22,21 @@ import pytest
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tmp_plugin(tmp_path: Path) -> Path:
     """Create a minimal valid plugin directory."""
     root = tmp_path / "my-plugin"
     root.mkdir()
     (root / "plugin.json").write_text(
-        json.dumps({
-            "name": "my-plugin",
-            "version": "1.2.3",
-            "description": "A test plugin",
-            "author": {"name": "Test Author", "email": "test@example.com"},
-        }),
+        json.dumps(
+            {
+                "name": "my-plugin",
+                "version": "1.2.3",
+                "description": "A test plugin",
+                "author": {"name": "Test Author", "email": "test@example.com"},
+            }
+        ),
         encoding="utf-8",
     )
     return root
@@ -110,18 +113,18 @@ def plugin_with_hooks(tmp_plugin: Path) -> Path:
     hooks_dir = tmp_plugin / "hooks"
     hooks_dir.mkdir()
     (hooks_dir / "hooks.json").write_text(
-        json.dumps({
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash",
-                        "hooks": [
-                            {"type": "command", "command": "echo pre", "timeout": 5}
-                        ],
-                    }
-                ]
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "echo pre", "timeout": 5}],
+                        }
+                    ]
+                }
             }
-        }),
+        ),
         encoding="utf-8",
     )
     return tmp_plugin
@@ -130,12 +133,18 @@ def plugin_with_hooks(tmp_plugin: Path) -> Path:
 @pytest.fixture
 def plugin_with_mcp(tmp_plugin: Path) -> Path:
     (tmp_plugin / ".mcp.json").write_text(
-        json.dumps({
-            "filesystem": {
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-filesystem", "${VELUNE_PLUGIN_ROOT}"],
+        json.dumps(
+            {
+                "filesystem": {
+                    "command": "npx",
+                    "args": [
+                        "-y",
+                        "@modelcontextprotocol/server-filesystem",
+                        "${VELUNE_PLUGIN_ROOT}",
+                    ],
+                }
             }
-        }),
+        ),
         encoding="utf-8",
     )
     return tmp_plugin
@@ -144,6 +153,7 @@ def plugin_with_mcp(tmp_plugin: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Manifest tests
 # ---------------------------------------------------------------------------
+
 
 class TestDeclarativePluginManifest:
     def test_loads_from_flat_plugin_json(self, tmp_plugin: Path) -> None:
@@ -246,6 +256,7 @@ class TestDeclarativePluginManifest:
 # Command parser tests
 # ---------------------------------------------------------------------------
 
+
 class TestPluginCommand:
     def test_parse_command_file(self, plugin_with_commands: Path) -> None:
         from velune.plugins.declarative.command import parse_command_file
@@ -332,6 +343,7 @@ class TestPluginCommand:
 # Skill parser tests
 # ---------------------------------------------------------------------------
 
+
 class TestPluginSkill:
     def test_parse_skill_file_always(self, plugin_with_skills: Path) -> None:
         from velune.plugins.declarative.skill import parse_skill_file
@@ -389,6 +401,7 @@ class TestPluginSkill:
 # ---------------------------------------------------------------------------
 # Scanner tests
 # ---------------------------------------------------------------------------
+
 
 class TestPluginScanner:
     def test_discovers_valid_plugin(self, tmp_path: Path, tmp_plugin: Path) -> None:
@@ -459,6 +472,7 @@ class TestPluginScanner:
 # PluginManager tests
 # ---------------------------------------------------------------------------
 
+
 class TestPluginManager:
     def test_load_discovers_plugins(self, tmp_path: Path, tmp_plugin: Path) -> None:
         from velune.plugins.manager import PluginManager
@@ -520,9 +534,7 @@ class TestPluginManager:
         mgr.disable("my-plugin")
         assert mgr.all_commands() == []
 
-    def test_matching_skills(
-        self, tmp_path: Path, plugin_with_skills: Path
-    ) -> None:
+    def test_matching_skills(self, tmp_path: Path, plugin_with_skills: Path) -> None:
         from velune.plugins.manager import PluginManager
 
         mgr = PluginManager()
@@ -532,9 +544,7 @@ class TestPluginManager:
         # Both skills should match: always-on always matches, code-review matches trigger
         assert len(blocks) == 2
 
-    def test_matching_skills_no_match(
-        self, tmp_path: Path, plugin_with_skills: Path
-    ) -> None:
+    def test_matching_skills_no_match(self, tmp_path: Path, plugin_with_skills: Path) -> None:
         from velune.plugins.manager import PluginManager
 
         mgr = PluginManager()
@@ -545,9 +555,7 @@ class TestPluginManager:
         assert len(blocks) == 1
         assert "Always On Skill" in blocks[0]
 
-    def test_reload_clears_and_reloads(
-        self, tmp_path: Path, tmp_plugin: Path
-    ) -> None:
+    def test_reload_clears_and_reloads(self, tmp_path: Path, tmp_plugin: Path) -> None:
         from velune.plugins.manager import PluginManager
 
         mgr = PluginManager()
@@ -576,10 +584,9 @@ class TestPluginManager:
 # Hook wiring tests
 # ---------------------------------------------------------------------------
 
+
 class TestWireHooks:
-    def test_wire_hooks_injects_bindings(
-        self, tmp_path: Path, plugin_with_hooks: Path
-    ) -> None:
+    def test_wire_hooks_injects_bindings(self, tmp_path: Path, plugin_with_hooks: Path) -> None:
         from velune.hooks.dispatcher import HookDispatcher
         from velune.plugins.manager import PluginManager
 
@@ -596,9 +603,7 @@ class TestWireHooks:
         assert count == 1  # one binding wired
         assert after == before + 1
 
-    def test_wire_hooks_skips_missing_file(
-        self, tmp_path: Path, tmp_plugin: Path
-    ) -> None:
+    def test_wire_hooks_skips_missing_file(self, tmp_path: Path, tmp_plugin: Path) -> None:
         from velune.hooks.dispatcher import HookDispatcher
         from velune.plugins.manager import PluginManager
 
@@ -616,10 +621,9 @@ class TestWireHooks:
 # MCP wiring tests
 # ---------------------------------------------------------------------------
 
+
 class TestWireMcp:
-    def test_wire_mcp_registers_server(
-        self, tmp_path: Path, plugin_with_mcp: Path
-    ) -> None:
+    def test_wire_mcp_registers_server(self, tmp_path: Path, plugin_with_mcp: Path) -> None:
         from velune.mcp.registry import MCPServerRegistry
         from velune.plugins.manager import PluginManager
 
@@ -634,9 +638,7 @@ class TestWireMcp:
         # Server is namespaced as "my-plugin:filesystem"
         assert "my-plugin:filesystem" in mcp_reg._entries
 
-    def test_wire_mcp_substitutes_plugin_root(
-        self, tmp_path: Path, plugin_with_mcp: Path
-    ) -> None:
+    def test_wire_mcp_substitutes_plugin_root(self, tmp_path: Path, plugin_with_mcp: Path) -> None:
         from velune.mcp.registry import MCPServerRegistry
         from velune.plugins.manager import PluginManager
 
@@ -652,9 +654,7 @@ class TestWireMcp:
         # ${VELUNE_PLUGIN_ROOT} in args should be substituted
         assert any(root_str in a for a in entry.config.args)
 
-    def test_wire_mcp_skips_missing_file(
-        self, tmp_path: Path, tmp_plugin: Path
-    ) -> None:
+    def test_wire_mcp_skips_missing_file(self, tmp_path: Path, tmp_plugin: Path) -> None:
         from velune.mcp.registry import MCPServerRegistry
         from velune.plugins.manager import PluginManager
 
@@ -670,6 +670,7 @@ class TestWireMcp:
 # ---------------------------------------------------------------------------
 # YAML parser edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestSimpleYamlParser:
     def test_string_scalar(self) -> None:

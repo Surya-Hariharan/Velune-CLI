@@ -64,7 +64,7 @@ class ReviewerAgent(BaseCouncilAgent):
             }
         ]
 
-        result = await self.typed_deliberate(user_messages, ReviewerMessage, temperature=0.1)
+        result = await self.typed_deliberate(user_messages, ReviewerMessage)
         if result.parse_error:
             logger.warning("Reviewer parse failed, using degraded default: %s", result.parse_error)
             # Re-construct suggestions to contain a useful note

@@ -121,7 +121,7 @@ class InterruptController:
             except asyncio.CancelledError:
                 if not controller.consume_user_cancelled():
                     raise  # real shutdown — propagate
-                asyncio.current_task().uncancel()
+                uncancel_task(asyncio.current_task())
         """
         self._foreground_task = asyncio.current_task()
         self._user_cancelled = False

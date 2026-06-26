@@ -390,8 +390,10 @@ For breaking changes add `!` after the type: `feat!: rename /run to /exec`
 
 ## Code style
 
-- **Python 3.11+** — use `X | Y` not `Optional[X]`, `list[str]` not
-  `List[str]`
+- **Python 3.10+** — use `X | Y` not `Optional[X]`, `list[str]` not
+  `List[str]`. Files must keep `from __future__ import annotations` so PEP 604
+  unions stay valid on 3.10. Import `StrEnum` from `velune._compat`, never from
+  `enum` directly (stdlib `enum.StrEnum` is 3.11+).
 - **async/await throughout** — no blocking I/O inside `async` functions;
   use `asyncio.to_thread()` for CPU-bound work if needed
 - **All user-facing output** goes through `self.console.print()` (Rich);

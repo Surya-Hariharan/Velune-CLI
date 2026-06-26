@@ -1,9 +1,10 @@
 """Core context type definitions."""
 
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from velune._compat import StrEnum
 
 
 class ContextPriority(StrEnum):

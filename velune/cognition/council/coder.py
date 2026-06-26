@@ -41,8 +41,13 @@ class CoderAgent(BaseCouncilAgent):
         plan_context: str,
         style_profile: dict[str, Any] | None = None,
         format_instructions: str = "",
+        temperature: float | None = None,
     ) -> str:
-        """Emits concrete code implementations aligned with codebase styling conventions."""
+        """Emits concrete code implementations aligned with codebase styling conventions.
+
+        ``temperature`` overrides the role default so the orchestrator can draw
+        several divergent candidate solutions (multi-solver self-consistency).
+        """
         logger.info("Coder generating code changes...")
 
         style_block = ""
@@ -83,4 +88,4 @@ class CoderAgent(BaseCouncilAgent):
             }
         ]
 
-        return await self.deliberate(user_messages, temperature=0.3)
+        return await self.deliberate(user_messages, temperature=temperature)

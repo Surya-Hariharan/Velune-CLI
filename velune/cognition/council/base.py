@@ -45,13 +45,28 @@ class BaseCouncilAgent(ABC):
     async def deliberate(
         self,
         context_history: list[dict[str, str]],
-        temperature: float = 0.5,
+        temperature: float | None = None,
         max_tokens: int | None = None,
+        top_p: float | None = None,
     ) -> str:
-        """Runs the deliberation round using the assigned LLM model provider."""
+        """Runs the deliberation round using the assigned LLM model provider.
+
+        When ``temperature``/``top_p``/``max_tokens`` are left as ``None`` they are
+        resolved from this role's :class:`RoleSamplingProfile`, so each council
+        seat samples with its own named profile instead of a shared literal.
+        """
         import asyncio
 
+        from velune.cognition.council.sampling import get_sampling_profile
         from velune.core.trace import TraceContext, _run_id
+
+        profile = get_sampling_profile(self.role)
+        if temperature is None:
+            temperature = profile.temperature
+        if top_p is None:
+            top_p = profile.top_p
+        if max_tokens is None:
+            max_tokens = profile.max_tokens
 
         with TraceContext(
             run_id=_run_id.get() or "unknown",
@@ -71,6 +86,7 @@ class BaseCouncilAgent(ABC):
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                top_p=top_p,
             )
 
             agent_timeouts = {
@@ -203,6 +219,7 @@ class BaseCouncilAgent(ABC):
                             messages=messages,
                             temperature=temperature,
                             max_tokens=max_tokens,
+                            top_p=top_p,
                         )
                         fb_response = await asyncio.wait_for(
                             fb_provider.infer(fb_request),
@@ -226,13 +243,14 @@ class BaseCouncilAgent(ABC):
         self,
         context_history: list[dict[str, str]],
         response_type: type[T],
-        temperature: float = 0.5,
+        temperature: float | None = None,
         max_tokens: int | None = None,
+        top_p: float | None = None,
     ) -> T:
         """Runs deliberation and parses the output into a strongly-typed Pydantic model."""
         from pydantic import ValidationError
 
-        raw = await self.deliberate(context_history, temperature, max_tokens)
+        raw = await self.deliberate(context_history, temperature, max_tokens, top_p)
         cleaned = raw.strip()
         for prefix in ("```json", "```"):
             if cleaned.startswith(prefix):

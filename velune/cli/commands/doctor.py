@@ -12,7 +12,6 @@ from rich.console import Console
 from rich.table import Table
 
 from velune.providers.keystore import get_key
-from velune.telemetry import print_provider_health_report
 
 console = Console()
 doctor_cmd = typer.Typer(help="Check that providers, models, and paths are healthy.")
@@ -56,6 +55,8 @@ def doctor_main(
 @doctor_cmd.command(name="providers")
 def show_providers() -> None:
     """Show provider health and capability status."""
+    from velune.telemetry import print_provider_health_report
+
     print_provider_health_report(console)
 
 
@@ -106,6 +107,9 @@ def check(
 
     checks = [
         _check_python_version,
+        _check_console_launcher,
+        _check_scripts_on_path,
+        _check_pip,
         _check_core_dependencies,
         _check_internet_connectivity,
         _check_ollama_connectivity,
@@ -164,13 +168,114 @@ def check(
 def _check_python_version() -> dict:
     version = sys.version_info
     clean_version = sys.version.replace("\n", " ")
-    if version >= (3, 11):
+    if version >= (3, 10):
         return {"name": "Python Version", "status": "ok", "message": f"{clean_version}"}
     return {
         "name": "Python Version",
         "status": "fail",
-        "message": f"Python {version.major}.{version.minor} < 3.11. Install Python 3.11+. Details: {clean_version}",
+        "message": f"Python {version.major}.{version.minor} < 3.10. Install Python 3.10+. Details: {clean_version}",
     }
+
+
+def _check_console_launcher() -> dict:
+    """Verify the generated ``velune`` launcher resolves and points at *this*
+    interpreter.
+
+    On Windows the ``velune.exe`` launcher embeds the absolute path of the
+    interpreter present at install time. If that interpreter is later upgraded,
+    moved, or uninstalled, the launcher fails with "cannot locate pythonXY.dll
+    (126)". We can't run the broken launcher safely, but we *can* detect that
+    the command on PATH belongs to a different interpreter than the one running
+    ``doctor`` — the strongest in-process signal that a reinstall is needed.
+    """
+    launcher = shutil.which("velune")
+    if not launcher:
+        return {
+            "name": "Console Launcher",
+            "status": "warn",
+            "message": (
+                "'velune' is not on PATH. Use 'python -m velune' or add the "
+                "Python Scripts directory to PATH. (Reinstall with "
+                "'python -m pip install --force-reinstall velune-cli'.)"
+            ),
+        }
+
+    scripts_dir = Path(sys.executable).parent
+    # The launcher for the running interpreter lives next to python.exe (in
+    # Scripts/ or bin/). If the resolved launcher is elsewhere, PATH is pointing
+    # at a different (possibly stale) install.
+    launcher_parent = Path(launcher).resolve().parent
+    expected_dirs = {
+        scripts_dir.resolve(),
+        (scripts_dir / "Scripts").resolve(),
+        (scripts_dir.parent / "Scripts").resolve(),
+        (scripts_dir.parent / "bin").resolve(),
+    }
+    if launcher_parent not in expected_dirs:
+        return {
+            "name": "Console Launcher",
+            "status": "warn",
+            "message": (
+                f"'velune' on PATH ({launcher}) is not the launcher for the "
+                f"running interpreter ({sys.executable}). If it errors, run "
+                f"'python -m velune' or reinstall."
+            ),
+        }
+    return {
+        "name": "Console Launcher",
+        "status": "ok",
+        "message": f"Resolves to {launcher}",
+    }
+
+
+def _check_scripts_on_path() -> dict:
+    """Check that the interpreter's Scripts/bin directory is on PATH so that
+    console entry points (``velune``) are runnable as bare commands."""
+    import os
+
+    base = Path(sys.executable).parent
+    scripts_dir = base / "Scripts" if sys.platform == "win32" else base
+    if not scripts_dir.exists():
+        # Fall back to the base dir (venvs put scripts beside python on *nix).
+        scripts_dir = base
+    path_entries = {Path(p).resolve() for p in os.environ.get("PATH", "").split(os.pathsep) if p}
+    if scripts_dir.resolve() in path_entries:
+        return {
+            "name": "Scripts on PATH",
+            "status": "ok",
+            "message": f"{scripts_dir} is on PATH",
+        }
+    return {
+        "name": "Scripts on PATH",
+        "status": "warn",
+        "message": (
+            f"{scripts_dir} is not on PATH — bare 'velune' may not be found. "
+            f"Add it to PATH, or always use 'python -m velune'."
+        ),
+    }
+
+
+def _check_pip() -> dict:
+    """Confirm pip is importable for the running interpreter (needed for
+    self-repair / reinstall guidance to be actionable)."""
+    try:
+        import importlib.metadata as _md
+
+        pip_version = _md.version("pip")
+        return {
+            "name": "pip Available",
+            "status": "ok",
+            "message": f"pip {pip_version} (use 'python -m pip')",
+        }
+    except Exception:
+        return {
+            "name": "pip Available",
+            "status": "warn",
+            "message": (
+                "pip not found for this interpreter. Run "
+                "'python -m ensurepip --upgrade' to restore it."
+            ),
+        }
 
 
 def _check_core_dependencies() -> dict:
@@ -525,7 +630,9 @@ def _check_vram() -> dict:
     from velune.providers.discovery.gpu import GPUDetector
 
     try:
-        gpu_info = GPUDetector().detect()
+        # Free VRAM is volatile — bypass the startup disk cache so doctor
+        # reports a live reading rather than a stale snapshot.
+        gpu_info = GPUDetector().detect(use_cache=False)
         if gpu_info.get("has_gpu") and gpu_info.get("vram_total_gb") is not None:
             total = gpu_info.get("vram_total_gb", 0)
             free = gpu_info.get("vram_free_gb", 0)
@@ -778,6 +885,9 @@ def _render_results(results: list) -> None:
         "Google Gemini": "Security",
         "Runtime Path Safety": "Security",
         "Python Version": "Performance",
+        "Console Launcher": "Performance",
+        "Scripts on PATH": "Performance",
+        "pip Available": "Performance",
         "Core Dependencies": "Performance",
         "Git in PATH": "Performance",
         "Tree-sitter Grammars": "Performance",

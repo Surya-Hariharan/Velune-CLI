@@ -19,9 +19,7 @@ def _make_project(root: Path) -> Path:
     (project / "pyproject.toml").write_text(
         "[project]\nname = 'demo'\nversion = '0.1.0'\n", encoding="utf-8"
     )
-    (project / "main.py").write_text(
-        "def hello() -> str:\n    return 'hi'\n", encoding="utf-8"
-    )
+    (project / "main.py").write_text("def hello() -> str:\n    return 'hi'\n", encoding="utf-8")
     (project / "util.py").write_text("X = 1\n", encoding="utf-8")
     return project
 

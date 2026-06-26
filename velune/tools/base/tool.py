@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from velune._compat import StrEnum
 
 if TYPE_CHECKING:
     from velune.hooks import HookDispatcher

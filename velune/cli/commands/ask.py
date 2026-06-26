@@ -11,8 +11,9 @@ if TYPE_CHECKING:
 from rich.console import Console
 
 from velune.cli.context import CLIContext
-from velune.cli.display.council_view import CouncilDisplayView
-from velune.repository.schemas import RepositorySnapshot
+
+if TYPE_CHECKING:
+    from velune.repository.schemas import RepositorySnapshot
 
 console = Console()
 ask_cmd = typer.Typer(help="Interactive prompt entry point")
@@ -86,6 +87,8 @@ async def _ask_command_async(
         return
 
     if not cli_context.json_mode:
+        from velune.cli.display.council_view import CouncilDisplayView
+
         display = CouncilDisplayView(console)
         display.render_header(prompt)
 

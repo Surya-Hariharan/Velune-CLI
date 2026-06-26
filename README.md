@@ -5,7 +5,7 @@
 > No cloud required. No quota. No lock-in.
 
 [![PyPI](https://img.shields.io/pypi/v/velune-cli)](https://pypi.org/project/velune-cli/)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
 

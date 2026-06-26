@@ -16,6 +16,38 @@ import sys
 __all__ = ["main"]
 
 
+def _fatal_environment_error(exc: BaseException) -> None:
+    """Print an actionable message for a broken Python/runtime, then exit.
+
+    Reached when a top-level import fails — almost always because the Python
+    installation or one of its compiled dependency DLLs is missing or
+    corrupted (e.g. ``ImportError: DLL load failed while importing _ctypes``
+    on Windows after a Python upgrade/uninstall). We deliberately do *not*
+    show a raw traceback: it confuses non-developers and buries the fix.
+
+    Note: this cannot catch the ``velune.exe`` launcher failing to locate
+    ``pythonXY.dll`` (Windows error 126) — that happens in the C launcher
+    *before* any Python runs. The remedy for that case is the same and is
+    printed here so it is discoverable via ``python -m velune``.
+    """
+    msg = (
+        "Velune could not start because the Python installation appears to be "
+        "missing or corrupted.\n\n"
+        f"  Underlying error: {type(exc).__name__}: {exc}\n\n"
+        "How to fix:\n"
+        "  1. Reinstall Python 3.10+ from https://www.python.org/downloads/\n"
+        '     (tick "Add python.exe to PATH" in the installer).\n'
+        "  2. Reinstall Velune into that interpreter:\n"
+        "       python -m pip install --force-reinstall velune-cli\n"
+        "  3. If the 'velune' command itself is broken, run Velune via the\n"
+        "     module form, which never depends on the generated launcher:\n"
+        "       python -m velune --help\n"
+    )
+    # Use a bare stderr write so this path has zero further import dependencies.
+    sys.stderr.write("\n" + msg + "\n")
+    raise SystemExit(1)
+
+
 def main() -> None:
     """Console-script entry point.
 
@@ -35,7 +67,14 @@ def main() -> None:
             print(f"velune v{__version__}")
         raise SystemExit(0)
 
-    from velune.cli.app import create_app
+    try:
+        from velune.cli.app import create_app
+    except ImportError as exc:
+        # A failed *top-level* import means the interpreter or a compiled
+        # dependency DLL is unusable. Surface an actionable message instead of
+        # a cryptic traceback / Windows DLL popup. Real command-level errors
+        # are raised later by Typer and are intentionally not caught here.
+        _fatal_environment_error(exc)
 
     create_app()()
 

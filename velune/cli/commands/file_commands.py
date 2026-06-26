@@ -36,12 +36,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from velune.cli.slash_commands import SlashCommand
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # Python 3.10 — backport exposes the same API
+    import tomli as tomllib
 
 _log = logging.getLogger("velune.cli.commands.file_commands")
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -112,7 +112,7 @@ class CognitivePerformanceAnalytics:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
-            datetime.now(tz=UTC).isoformat(),
+            datetime.now(tz=timezone.utc).isoformat(),
             model_id,
             task_type,
             language,
@@ -203,7 +203,7 @@ class CognitivePerformanceAnalytics:
             VALUES (?, ?, ?, ?, ?, ?)
         """
         params = (
-            datetime.now(tz=UTC).isoformat(),
+            datetime.now(tz=timezone.utc).isoformat(),
             turns_required,
             initial_objection_count,
             final_objection_count,
@@ -234,7 +234,7 @@ class CognitivePerformanceAnalytics:
             VALUES (?, ?, ?, ?, ?)
         """
         params = (
-            datetime.now(tz=UTC).isoformat(),
+            datetime.now(tz=timezone.utc).isoformat(),
             original_tokens,
             compressed_tokens,
             method,
@@ -255,7 +255,7 @@ class CognitivePerformanceAnalytics:
             VALUES (?, ?, ?)
         """
         params = (
-            datetime.now(tz=UTC).isoformat(),
+            datetime.now(tz=timezone.utc).isoformat(),
             source,
             pattern,
         )

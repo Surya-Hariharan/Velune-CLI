@@ -14,7 +14,8 @@ Different families respond better to different prompt structures:
 from __future__ import annotations
 
 import logging
-from enum import StrEnum
+
+from velune._compat import StrEnum
 
 logger = logging.getLogger("velune.models.family")
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from enum import StrEnum
 
+from velune._compat import StrEnum
 from velune.core.types.model import ModelDescriptor
 from velune.models.profiler import ModelProfiler
 from velune.models.registry import ModelCapabilityRegistry
@@ -154,6 +154,20 @@ class ModelSpecializationMapper:
                 assignments[role] = descriptor
 
         return assignments
+
+
+def detect_model_collapse(
+    role_mapping: dict[CouncilRole, ModelDescriptor],
+) -> bool:
+    """Return ``True`` when every role resolved to the same physical model.
+
+    On a single local GPU only one model fits in VRAM, so the mapper assigns it
+    to all roles — "one model wearing different hats". Callers surface this as
+    ``degraded_diversity`` to the UI and compensate by drawing more Coder
+    samples (see :func:`velune.cognition.council.sampling.coder_sample_count`).
+    """
+    model_ids = {desc.model_id for desc in role_mapping.values()}
+    return len(model_ids) <= 1 and len(role_mapping) > 1
 
     def _select_best_model(
         self,

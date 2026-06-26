@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from enum import IntEnum, StrEnum
+from enum import IntEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from velune._compat import StrEnum
 
 
 class ModelCapability(StrEnum):

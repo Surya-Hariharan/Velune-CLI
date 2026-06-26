@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import enum
 import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
+
+from velune._compat import StrEnum
 
 T = TypeVar("T")
 logger = logging.getLogger("velune.core.task_registry")
@@ -161,7 +162,7 @@ class BackgroundTaskRegistry:
 # ---------------------------------------------------------------------------
 
 
-class JobStatus(enum.StrEnum):
+class JobStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"

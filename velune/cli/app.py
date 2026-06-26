@@ -38,7 +38,6 @@ from velune import __version__
 from velune.cli import design
 from velune.cli.context import CLIContext
 from velune.cli.registry import register_commands
-from velune.core.runtime import build_runtime
 from velune.core.startup_profiler import mark as _startup_mark
 from velune.kernel.registry import ServiceContainer
 
@@ -171,6 +170,8 @@ def create_app() -> typer.Typer:
             _configure_diff(auto_accept=True)
 
         try:
+            from velune.core.runtime import build_runtime
+
             runtime = build_runtime(workspace=workspace, config_path=config_path, verbose=verbose)
         except Exception as e:
             if json_mode:

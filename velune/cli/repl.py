@@ -13,6 +13,7 @@ _log = logging.getLogger("velune.cli.repl")
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import FormattedText
 
+from velune._compat import uncancel_task
 from velune.cli.slash_commands import SlashCommand, SlashCommandRegistry
 from velune.core.runtime import RuntimeContext
 from velune.core.types.model import ModelDescriptor
@@ -407,7 +408,7 @@ class VeluneREPL:
                         raise
                     task = asyncio.current_task()
                     if task is not None:
-                        task.uncancel()
+                        uncancel_task(task)
                     self._print_interrupted_frame()
                 except Exception as e:
                     from velune.cli.rendering.error_panel import (
@@ -1621,7 +1622,7 @@ class VeluneREPL:
                     raise
                 task = asyncio.current_task()
                 if task is not None:
-                    task.uncancel()
+                    uncancel_task(task)
 
     def _poll_and_render_alerts(self) -> None:
         """Drain unread proactive alerts and print them above the prompt."""
@@ -1761,7 +1762,7 @@ class VeluneREPL:
                 raise
             task_obj = asyncio.current_task()
             if task_obj is not None:
-                task_obj.uncancel()
+                uncancel_task(task_obj)
             if active_live:
                 active_live.stop()
             self.console.print("\n[yellow]Council run interrupted.[/yellow]")

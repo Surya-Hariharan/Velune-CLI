@@ -8,7 +8,7 @@ import logging
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,7 +23,7 @@ class Event(BaseModel):
 
     event_id: str = Field(default_factory=lambda: f"evt-{uuid.uuid4().hex[:12]}")
     event_type: str
-    timestamp: float = Field(default_factory=lambda: datetime.now(tz=UTC).timestamp())
+    timestamp: float = Field(default_factory=lambda: datetime.now(tz=timezone.utc).timestamp())
     source: str
     data: dict[str, Any] = Field(default_factory=dict)
     correlation_id: str | None = None

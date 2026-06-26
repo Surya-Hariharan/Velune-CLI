@@ -18,9 +18,7 @@ from velune.repository.schemas import (
 
 
 def _file(path: str) -> RepositoryFile:
-    return RepositoryFile(
-        path=path, language=RepositoryLanguage.PYTHON, size_bytes=10, sha256="x"
-    )
+    return RepositoryFile(path=path, language=RepositoryLanguage.PYTHON, size_bytes=10, sha256="x")
 
 
 def _snapshot(files, edges) -> RepositorySnapshot:
@@ -28,9 +26,7 @@ def _snapshot(files, edges) -> RepositorySnapshot:
         root_path="/repo",
         files=[_file(f) for f in files],
         symbols=[],
-        edges=[
-            RepositoryEdge(source=s, target=t, edge_type=et) for s, t, et in edges
-        ],
+        edges=[RepositoryEdge(source=s, target=t, edge_type=et) for s, t, et in edges],
     )
 
 

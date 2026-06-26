@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from enum import StrEnum
+
+from velune._compat import StrEnum
 
 
 class ValidationStatus(StrEnum):

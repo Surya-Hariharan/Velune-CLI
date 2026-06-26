@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
+from velune._compat import StrEnum
 from velune.cognition.budget import CouncilExecutionBudget
 from velune.core.types.task import TaskPlan
 

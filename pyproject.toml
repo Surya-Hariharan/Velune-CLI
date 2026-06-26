@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [
   { name = "Surya HA", email = "suryahariharan2006@gmail.com" }
 ]
@@ -23,6 +23,7 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -42,6 +43,8 @@ dependencies = [
     "pydantic>=2.5.0",
     "pydantic-settings>=2.14.2",
     "toml>=0.10.2",
+    # stdlib `tomllib` only exists on 3.11+; backport for 3.10.
+    "tomli>=2.0.1; python_version < '3.11'",
     "typer>=0.9.0",
     "rich>=13.7.0",
     "platformdirs>=4.2.0",
@@ -171,11 +174,11 @@ markers = [
 
 [tool.black]
 line-length = 100
-target-version = ["py311", "py312"]
+target-version = ["py310", "py311", "py312"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]
@@ -208,7 +211,7 @@ known-first-party = ["velune"]
 known-third-party = ["pydantic", "typer", "rich"]
 
 [tool.pyright]
-pythonVersion = "3.11"
+pythonVersion = "3.10"
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "basic"

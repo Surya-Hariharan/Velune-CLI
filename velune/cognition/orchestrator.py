@@ -76,6 +76,12 @@ class CouncilOrchestrator:
         self._states: dict[str, Any] = {}
         self._live_lock = asyncio.Lock()
 
+        # Owns all concurrency decisions for council rounds (honest sequential on
+        # a shared backend, concurrent across distinct providers).
+        from velune.cognition.council.scheduler import CouncilScheduler
+
+        self.scheduler = CouncilScheduler()
+
         # Extracted Subsystems
         self.agent_factory = CouncilAgentFactory(
             provider_registry=self.provider_registry, mapper=self.mapper, live_lock=self._live_lock
@@ -140,6 +146,56 @@ class CouncilOrchestrator:
     def get_state(self, run_id: str) -> Any | None:
         """Get the cached OrchestrationState by run_id."""
         return self._states.get(run_id)
+
+    async def _diverge_candidates(
+        self,
+        coder: Any,
+        *,
+        prompt: str,
+        current_code: str,
+        plan_context: str,
+        style_profile: Any,
+        format_instructions: str,
+        n_samples: int,
+        timeout: float,
+        progress_callback: Any | None = None,
+    ) -> list[str]:
+        """Round 1 (Diverge): draw *n_samples* independent Coder candidates.
+
+        Samples use staggered temperatures from the Coder's sampling profile so
+        the solutions genuinely diverge (self-consistency). All samples share the
+        Coder's single backend, so the scheduler runs them sequentially and says
+        so — no fake parallelism. Failed/timed-out samples are dropped; the
+        surviving candidates feed the self-consistency vote.
+        """
+        from velune.cognition.council.sampling import get_sampling_profile
+        from velune.cognition.council.scheduler import CouncilJob
+        from velune.models.specializations import CouncilRole
+
+        n_samples = max(1, n_samples)
+        temps = get_sampling_profile(CouncilRole.CODER).sample_temperatures(n_samples)
+        provider_id = coder.model.provider_id
+
+        def _make_job(idx: int, temp: float) -> CouncilJob:
+            async def _run() -> str:
+                return await coder.write_code(
+                    prompt=prompt,
+                    current_code=current_code,
+                    plan_context=plan_context,
+                    style_profile=style_profile,
+                    format_instructions=format_instructions,
+                    temperature=temp,
+                )
+
+            return CouncilJob(name=f"coder#{idx}", provider_id=provider_id, run=_run)
+
+        jobs = [_make_job(i, t) for i, t in enumerate(temps)]
+        if progress_callback and n_samples > 1:
+            progress_callback(f"[Coder] Diverge round: {n_samples} candidate solutions...")
+
+        results = await self.scheduler.run(jobs, timeout=timeout)
+        candidates = [r.value for r in results if r.ok and isinstance(r.value, str) and r.value]
+        return candidates
 
     async def stream(self, prompt: str) -> AsyncIterator[StreamProgress]:
         """Runs the Reasoning Council task execution and streams milestones."""
@@ -858,24 +914,63 @@ class CouncilOrchestrator:
                     else "Direct implementation (Planner timed out)."
                 )
 
-            # 2. Coder Phase
+            # 2. Coder Phase (Round 1 — Diverge: multi-solver self-consistency)
             logger.info("Council Phase: Coder")
             if progress_callback:
                 progress_callback("[Coder] Designing code implementation...")
+
+            from velune.cognition.consensus import medoid_index
+            from velune.cognition.council.sampling import coder_sample_count
+            from velune.models.specializations import detect_model_collapse
+
+            coder_low_resource = (
+                self.config and self.config.execution.low_resource_mode
+            ) or os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
+
+            degraded_diversity = False
             try:
-                coder_proposal = await asyncio.wait_for(
-                    coder.write_code(
-                        prompt=prompt,
-                        current_code=enriched_repo_context,
-                        plan_context=plan_desc,
-                        style_profile=style_profile,
-                        format_instructions=_coder_format_instructions,
-                    ),
-                    timeout=budget.coder_timeout_seconds,
-                )
-            except TimeoutError:
-                logger.error("Coder timed out after %ds", budget.coder_timeout_seconds)
+                role_mapping = self.agent_factory.get_role_mapping(run_id)
+                degraded_diversity = detect_model_collapse(role_mapping)
+            except Exception:
+                pass
+
+            # Only the deliberative tiers (>=3) draw multiple candidates; instant
+            # and minimal stay single-shot for latency.
+            n_samples = (
+                coder_sample_count(coder_low_resource, degraded_diversity)
+                if tier_level >= 3
+                else 1
+            )
+
+            candidate_pool = await self._diverge_candidates(
+                coder,
+                prompt=prompt,
+                current_code=enriched_repo_context,
+                plan_context=plan_desc,
+                style_profile=style_profile,
+                format_instructions=_coder_format_instructions,
+                n_samples=n_samples,
+                timeout=budget.coder_timeout_seconds,
+                progress_callback=progress_callback,
+            )
+            if not candidate_pool:
+                logger.error("Coder produced no usable candidates (all failed/timed out)")
                 return self._build_timeout_result(tier, start_time)
+
+            winner_idx = medoid_index(candidate_pool) if len(candidate_pool) > 1 else 0
+            coder_proposal = candidate_pool[winner_idx]
+            if len(candidate_pool) > 1:
+                logger.info(
+                    "Coder diverge round: %d candidates, self-consistency winner #%d (degraded_diversity=%s, mode=%s)",
+                    len(candidate_pool),
+                    winner_idx + 1,
+                    degraded_diversity,
+                    self.scheduler.last_mode,
+                )
+                if progress_callback:
+                    progress_callback(
+                        f"[Coder] Self-consistency vote: selected candidate {winner_idx + 1}/{len(candidate_pool)}"
+                    )
 
             # Early Return for Instant/Minimal
             if tier_level < 3:
@@ -1253,6 +1348,7 @@ class CouncilOrchestrator:
                 performance_report=performance_report if tier_level == 4 else None,
                 maintainability_report=maintainability_report if tier_level == 4 else None,
                 shi=shi,
+                candidates=candidate_pool,
             )
 
             # 6. Synthesis Phase

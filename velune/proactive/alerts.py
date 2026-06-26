@@ -6,7 +6,8 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from enum import StrEnum
+
+from velune._compat import StrEnum
 
 
 class AlertSeverity(StrEnum):

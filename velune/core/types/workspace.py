@@ -1,10 +1,11 @@
 """Core workspace type definitions."""
 
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from velune._compat import StrEnum
 
 
 class WorkspaceState(StrEnum):

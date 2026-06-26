@@ -98,11 +98,7 @@ class TestPipelineDiagnostics:
 
         retriever = HybridRetriever(location=":memory:")
         retriever.add_documents(
-            [
-                RetrievalDocument(
-                    id="d1", content="alpha beta gamma", embedding=[0.1, 0.2, 0.3]
-                )
-            ]
+            [RetrievalDocument(id="d1", content="alpha beta gamma", embedding=[0.1, 0.2, 0.3])]
         )
         query = RetrievalQuery(
             text="alpha",
@@ -217,9 +213,7 @@ class TestReportBuilder:
             metadata={"path": "config.py"},
         )
         hit = RetrievalHit(document=doc, score=0.9, source=RetrievalSource.LEXICAL, rank=1)
-        report = build_retrieval_trace(
-            self._result(hits=[hit], diagnostics={"total_ms": 1.0})
-        )
+        report = build_retrieval_trace(self._result(hits=[hit], diagnostics={"total_ms": 1.0}))
         snippet = report.hits[0].snippet
         assert secret not in snippet
         assert "***REDACTED***" in snippet
@@ -228,9 +222,7 @@ class TestReportBuilder:
     def test_label_falls_back_to_doc_id(self):
         doc = RetrievalDocument(id="bare-id", content="hello", metadata={})
         hit = RetrievalHit(document=doc, score=0.5, source=RetrievalSource.MEMORY)
-        report = build_retrieval_trace(
-            self._result(hits=[hit], diagnostics={"total_ms": 0.0})
-        )
+        report = build_retrieval_trace(self._result(hits=[hit], diagnostics={"total_ms": 0.0}))
         assert report.hits[0].label == "bare-id"
 
     def test_empty_hits_note(self):

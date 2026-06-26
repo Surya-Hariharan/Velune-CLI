@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 from rich.console import Console
 
 from velune.cli.context import CLIContext
-from velune.cognition.firewall import CognitiveFirewall
-from velune.models.specializations import CouncilRole
-from velune.repository.schemas import RepositorySnapshot
+
+if TYPE_CHECKING:
+    from velune.cognition.firewall import CognitiveFirewall
+    from velune.repository.schemas import RepositorySnapshot
 
 console = Console()
 
@@ -53,6 +56,8 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
         return
 
     # 3. Map Coder role to get fast, single-model access
+    from velune.models.specializations import CouncilRole
+
     roles = model_specialization.map_roles()
     coder_model = roles.get(CouncilRole.CODER)
     if not coder_model:
@@ -75,6 +80,8 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
     # 4. Ingest and Scan AST Snapshot
     with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]"):
         snapshot = repo_cognition.index()
+
+    from velune.cognition.firewall import CognitiveFirewall
 
     firewall = CognitiveFirewall()
     formatted_snap = _format_snapshot_context_safe(snapshot, firewall)

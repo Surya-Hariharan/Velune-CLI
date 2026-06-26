@@ -94,18 +94,25 @@ def has_key(provider_id: str) -> bool:
     return get_key(provider_id) is not None
 
 
-def is_ollama_live(timeout: float = 1.0) -> bool:
+def is_ollama_live(timeout: float = 0.25) -> bool:
     """Return True if a local Ollama server is reachable.
 
-    Kept deliberately short (1s) — the startup path should not block multiple
-    seconds probing an optional local service.
-    """
-    try:
-        import httpx
+    Uses a raw TCP connect to ``127.0.0.1:11434`` rather than an HTTP GET:
 
-        r = httpx.get("http://localhost:11434/api/tags", timeout=timeout)
-        return r.status_code == 200
-    except Exception:
+    * It avoids importing ``httpx`` on the hot startup path.
+    * It targets ``127.0.0.1`` explicitly. Resolving ``localhost`` makes the
+      client try IPv6 (``::1``) first, and when nothing is listening that
+      attempt burns the *full* timeout before falling back to IPv4 — doubling
+      the cost for the common "Ollama not running" case.
+    * A closed port refuses the connection immediately, so when Ollama is down
+      this returns in microseconds instead of blocking for seconds.
+    """
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", 11434), timeout=timeout):
+            return True
+    except OSError:
         return False
 
 

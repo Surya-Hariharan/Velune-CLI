@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from velune._compat import uncancel_task
+
 _log = logging.getLogger("velune.cli.stream_renderer")
 
 if TYPE_CHECKING:
@@ -122,7 +124,7 @@ class StreamRenderer:
                 raise
             task = asyncio.current_task()
             if task is not None:
-                task.uncancel()
+                uncancel_task(task)
             result.interrupted = True
         except KeyboardInterrupt:
             result.interrupted = True

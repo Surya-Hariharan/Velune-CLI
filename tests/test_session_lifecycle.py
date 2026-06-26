@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from velune._compat import uncancel_task
 from velune.cli.interrupts import InterruptController
 from velune.cli.sessions import SessionStore, auto_title
 from velune.cli.workspaces import WorkspaceRegistry
@@ -65,7 +66,7 @@ class TestInterruptController:
                     raise
                 task = asyncio.current_task()
                 if task is not None:
-                    task.uncancel()
+                    uncancel_task(task)
                 return "interrupted"
             return "finished"
 

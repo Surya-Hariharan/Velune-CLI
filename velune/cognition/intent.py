@@ -8,7 +8,8 @@ it can run on every REPL turn.
 from __future__ import annotations
 
 import re
-from enum import StrEnum
+
+from velune._compat import StrEnum
 
 _WORD_BOUNDARY = re.compile(r"\b")  # used in _score word-boundary checks
 

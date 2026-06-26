@@ -34,6 +34,20 @@ class HardwareProfile:
 
 _PROFILE_CACHE: HardwareProfile | None = None
 
+# Common nominal RAM capacities (GB). Usable RAM always reports a little under
+# the nominal figure, so we snap a measured value up to the nearest capacity
+# when it falls within tolerance.
+_NOMINAL_RAM_STEPS = (4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256)
+_RAM_TOLERANCE_GB = 0.8
+
+
+def _nominal_ram_gb(measured_gb: float) -> float:
+    """Snap *measured_gb* up to its nominal capacity (e.g. 15.8 -> 16)."""
+    for step in _NOMINAL_RAM_STEPS:
+        if measured_gb >= step - _RAM_TOLERANCE_GB and measured_gb < step:
+            return float(step)
+    return measured_gb
+
 
 class HardwareDetector:
     def detect(self) -> HardwareProfile:
@@ -55,7 +69,9 @@ class HardwareDetector:
 
         gpu_name, vram_gb = self._detect_gpu()
         tier, rec_model, can_run = self._classify(total_ram, vram_gb, is_apple_silicon)
-        warnings, suggestions = self._build_advice(total_ram, vram_gb, is_apple_silicon, tier)
+        warnings, suggestions = self._build_advice(
+            total_ram, vram_gb, gpu_name, is_apple_silicon, tier
+        )
 
         _PROFILE_CACHE = HardwareProfile(
             total_ram_gb=round(total_ram, 1),
@@ -143,19 +159,27 @@ class HardwareDetector:
     ) -> tuple[HardwareTier, str, bool]:
         effective_vram = vram_gb or 0.0
 
-        if is_apple and ram_gb >= 36:
+        # Physical RAM never reports as its nominal capacity — a "16 GB" machine
+        # shows ~15.6-15.9 GB usable once firmware/iGPU reservations are taken
+        # out. Comparing against the round number (>= 16) silently demotes every
+        # 16 GB box to the LOW tier, which then prints a "no discrete GPU"
+        # warning even on a machine with a dedicated GPU. Bucket to the nearest
+        # nominal capacity with a ~0.7 GB tolerance before classifying.
+        nominal_ram = _nominal_ram_gb(ram_gb)
+
+        if is_apple and nominal_ram >= 36:
             return HardwareTier.ELITE, "70B", True
-        if is_apple and ram_gb >= 16:
+        if is_apple and nominal_ram >= 16:
             return HardwareTier.POWERFUL, "13B", True
-        if ram_gb >= 64 and effective_vram >= 24:
+        if nominal_ram >= 64 and effective_vram >= 24:
             return HardwareTier.ELITE, "70B", True
-        if ram_gb >= 32 and effective_vram >= 12:
+        if nominal_ram >= 32 and effective_vram >= 12:
             return HardwareTier.POWERFUL, "13B", True
-        if ram_gb >= 16 and effective_vram >= 6:
+        if nominal_ram >= 16 and effective_vram >= 6:
             return HardwareTier.CAPABLE, "7B", True
-        if ram_gb >= 16:
+        if nominal_ram >= 16:
             return HardwareTier.MARGINAL, "3B", True
-        if ram_gb >= 8:
+        if nominal_ram >= 8:
             return HardwareTier.LOW, "3B", True
         return HardwareTier.CRITICAL, "none", False
 
@@ -163,28 +187,34 @@ class HardwareDetector:
         self,
         ram_gb: float,
         vram_gb: float | None,
+        gpu_name: str | None,
         is_apple: bool,
         tier: HardwareTier,
     ) -> tuple[list[str], list[str]]:
         warnings: list[str] = []
         suggestions: list[str] = []
+        # Describe the *actual* accelerator rather than assuming one based on the
+        # tier — a 16 GB laptop with a real dGPU must not be told it has none.
+        has_dgpu = bool(vram_gb) and not is_apple
+        nominal = int(round(_nominal_ram_gb(ram_gb)))
 
         if tier == HardwareTier.CRITICAL:
-            warnings.append(f"Only {ram_gb:.0f} GB RAM detected — cannot run any local LLM")
+            warnings.append(f"Only {nominal} GB RAM detected — cannot run any local LLM")
             suggestions.append("Configure a cloud provider (Groq free tier recommended)")
             suggestions.append("Run: velune init --provider groq")
 
         elif tier == HardwareTier.LOW:
+            gpu_phrase = f"{gpu_name} ({vram_gb:.0f} GB)" if has_dgpu else "no discrete GPU"
             warnings.append(
-                f"{ram_gb:.0f} GB RAM with no discrete GPU — "
-                "local inference will be very slow (3–8 tok/s)"
+                f"{nominal} GB RAM with {gpu_phrase} — "
+                "local inference will be slow; prefer small models"
             )
             suggestions.append("Use Groq free tier for fast cloud inference")
             suggestions.append("For local: stick to 3B models (phi3-mini, gemma2:2b)")
 
         elif tier == HardwareTier.MARGINAL:
             warnings.append(
-                f"{ram_gb:.0f} GB RAM, integrated GPU only — "
+                f"{nominal} GB RAM, integrated GPU only — "
                 "7B models will run at CPU speed (~5–10 tok/s)"
             )
             suggestions.append("Use Groq for council tasks, local 3B for quick queries")
