@@ -9,6 +9,43 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.3.4] - 2026-06-26
+
+A **startup-performance** and **visual-refresh** release. Lightweight commands now
+start in a fraction of the time, the model-discovery path is fully lazy, and the
+CLI ships a new pink/white brand identity with a Claude Code–style welcome screen.
+`pip install --upgrade velune-cli` is a safe, drop-in update — no breaking changes.
+
+### Performance
+
+- **Lightweight commands skip the Tier-1 bootstrap.** `config`, `doctor`, `usage`,
+  `quota`, `health`, `logs`, and `status` previously paid the full synchronous
+  Tier-1 bring-up (repository cognition, council, memory, retrieval, orchestration)
+  even though they never use it. Each command now declares a `bootstrap` level on
+  its `CommandSpec`; the read-only/diagnostic set is tagged `"light"` and only
+  bootstraps Tier-0. `velune config` internal startup drops from ~3.0s to ~0.1s
+  (~5–8× faster wall-clock). (`velune/cli/registry.py`, `velune/cli/app.py`)
+- **Lazy provider-discovery scanner.** Importing the model registry used to eagerly
+  import 13 discovery backends (each pulling `httpx`) and instantiate every
+  discoverer — a keystore lookup and GPU probe apiece — on every command and the
+  first REPL prompt. The 13 backends and the package barrel are now imported lazily
+  (PEP 562) and discoverers are built on first scan only, collapsing the Tier-0
+  `model_registry` step from ~0.46s to ~0.015s.
+  (`velune/providers/discovery/scanner.py`, `velune/providers/discovery/__init__.py`)
+
+### Changed
+
+- **New pink/white brand palette.** `velune/cli/design.py` now centers on a hot-pink
+  accent with blush/rose/magenta tints and white body text. Because the prompt,
+  status bar, panels, and Rich theme all read these tokens, the whole CLI is
+  re-skinned at once. Warnings/errors stay functionally distinct for legibility.
+- **Claude Code–style welcome screen.** The interactive banner is now a stylish pink
+  `VELUNE` wordmark above a single rounded box with a two-column layout: greeting +
+  active model/folder on the left, getting-started tips and a "What's new" feed on
+  the right. (`velune/cli/banner.py`)
+- The bottom status bar now derives its styles from the design tokens instead of
+  hardcoded colors, so it always tracks the brand. (`velune/cli/statusbar.py`)
+
 ## [0.9.1] - 2026-06-14
 
 This is a **stabilization and trust-recovery** release. It cuts the runtime-hardening
