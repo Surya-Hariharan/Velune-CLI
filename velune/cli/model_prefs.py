@@ -33,9 +33,24 @@ def save_active_model(provider_id: str, model_id: str, path: Path | None = None)
     target = path or DEFAULT_PREFS_PATH
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"provider_id": provider_id, "model_id": model_id}
+        data = {}
+        if target.exists():
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        data["provider_id"] = provider_id
+        data["model_id"] = model_id
+        
+        # Add to recents automatically
+        recents = data.setdefault("recents", [])
+        if model_id in recents:
+            recents.remove(model_id)
+        recents.insert(0, model_id)
+        data["recents"] = recents[:10]  # Keep last 10
+        
         tmp = target.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(target)
     except Exception as exc:
         _log.warning("Could not persist active model: %s", exc)
@@ -64,3 +79,80 @@ def clear_active_model(path: Path | None = None) -> None:
         target.unlink(missing_ok=True)
     except Exception as exc:
         _log.warning("Could not clear active model preference: %s", exc)
+
+
+def load_favorites(path: Path | None = None) -> list[str]:
+    """Load favorited model IDs."""
+    target = path or DEFAULT_PREFS_PATH
+    if not target.exists():
+        return []
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+        return data.get("favorites", [])
+    except Exception:
+        return []
+
+
+def toggle_favorite(model_id: str, path: Path | None = None) -> bool:
+    """Toggle a model ID in the favorites list. Returns the new favorite state."""
+    target = path or DEFAULT_PREFS_PATH
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if target.exists():
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        favorites = data.setdefault("favorites", [])
+        if model_id in favorites:
+            favorites.remove(model_id)
+            is_fav = False
+        else:
+            favorites.append(model_id)
+            is_fav = True
+        
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(target)
+        return is_fav
+    except Exception as exc:
+        _log.warning("Could not toggle favorite: %s", exc)
+        return False
+
+
+def load_recents(path: Path | None = None) -> list[str]:
+    """Load recently used model IDs."""
+    target = path or DEFAULT_PREFS_PATH
+    if not target.exists():
+        return []
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+        return data.get("recents", [])
+    except Exception:
+        return []
+
+
+def add_recent(model_id: str, path: Path | None = None) -> None:
+    """Add a model ID to the recently used list."""
+    target = path or DEFAULT_PREFS_PATH
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if target.exists():
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        recents = data.setdefault("recents", [])
+        if model_id in recents:
+            recents.remove(model_id)
+        recents.insert(0, model_id)
+        data["recents"] = recents[:10]
+        
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(target)
+    except Exception as exc:
+        _log.warning("Could not add recent model: %s", exc)
+

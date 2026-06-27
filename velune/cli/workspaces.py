@@ -190,8 +190,8 @@ async def switch_workspace(container: Any, new_workspace: Path) -> list[str]:
     # 3. Rebuild workspace-scoped modules with the same factories used at
     #    bootstrap, in their declared dependency order.
     from velune.kernel.bootstrap import RuntimeEnvironment
-    from velune.memory.module import MEMORY_MODULES
-    from velune.repository.module import REPOSITORY_MODULES
+    from velune.memory.subsystems import MEMORY_MODULES
+    from velune.repository.subsystems import REPOSITORY_MODULES
 
     env = RuntimeEnvironment(
         workspace=new_workspace,

@@ -11,10 +11,10 @@ what made the first prompt slow.
 from __future__ import annotations
 
 from velune.kernel.bootstrap import SubsystemModule
-from velune.kernel.module import KERNEL_MODULES
-from velune.models.module import MODEL_MODULES
-from velune.observability.module import OBSERVABILITY_MODULES
-from velune.providers.module import PROVIDER_MODULES
+from velune.kernel.subsystems import KERNEL_MODULES
+from velune.models.subsystems import MODEL_MODULES
+from velune.observability.subsystems import OBSERVABILITY_MODULES
+from velune.providers.subsystems import PROVIDER_MODULES
 
 # Tier 0 — cheap, synchronous, required to render an interactive prompt and to
 # serve lightweight commands (/model, /models, /help, /mode). All have trivial
@@ -31,13 +31,13 @@ def load_background_modules() -> list[SubsystemModule]:
     startup path. Called from the REPL's background bootstrap task once the
     prompt is already interactive.
     """
-    from velune.cognition.module import COGNITION_MODULES
-    from velune.execution.module import EXECUTION_MODULES
-    from velune.memory.module import MEMORY_MODULES
-    from velune.orchestration.module import ORCHESTRATION_MODULES
-    from velune.repository.module import REPOSITORY_MODULES
-    from velune.retrieval.module import RETRIEVAL_MODULES
-    from velune.tools.module import TOOL_MODULES
+    from velune.cognition.subsystems import COGNITION_MODULES
+    from velune.execution.subsystems import EXECUTION_MODULES
+    from velune.memory.subsystems import MEMORY_MODULES
+    from velune.orchestration.subsystems import ORCHESTRATION_MODULES
+    from velune.repository.subsystems import REPOSITORY_MODULES
+    from velune.retrieval.subsystems import RETRIEVAL_MODULES
+    from velune.tools.subsystems import TOOL_MODULES
 
     return list(
         REPOSITORY_MODULES
