@@ -4542,6 +4542,28 @@ class VeluneREPL:
         else:
             self.console.print("[dim]No changes made.[/dim]")
 
+    # ------------------------------------------------------------------
+    # Provider management
+    # ------------------------------------------------------------------
+
+    async def _cmd_providers(self, args: str) -> None:
+        """Open the interactive provider management palette.
+
+        Sub-commands (all optional):
+          /providers                — open the interactive palette
+          /providers add [id]       — connect a cloud provider
+          /providers manage [id]    — view / update / remove a provider
+          /providers test [id]      — test connection(s)
+          /providers discover       — re-scan models from all providers
+          /providers refresh        — alias for discover
+          /providers remove <id>    — remove a provider's API key
+          /providers status         — print a status table for every provider
+        """
+        from velune.cli.provider_ui import ProviderPalette
+
+        palette = ProviderPalette(console=self.console, container=self.container)
+        await palette.run(args)
+
 
 async def run_repl(runtime: RuntimeContext) -> None:
     """Coroutine entry point for the REPL session.

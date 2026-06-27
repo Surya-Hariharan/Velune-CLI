@@ -75,6 +75,8 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     # Extend
     "mcp": "Extend",
     "plugin": "Extend",
+    # Providers
+    "providers": "Providers",
     # System
     "doctor": "System",
     "config": "System",
@@ -151,6 +153,15 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
 
     # ── Environment / diagnostics ─────────────────────────────────────────────
 
+    registry.register(
+        SlashCommand(
+            name="providers",
+            aliases=["provider", "prov"],
+            description="Add, manage, test, and discover models from cloud AI providers",
+            usage="/providers [add|manage|test|discover|refresh|remove|status] [provider-id]",
+            handler=repl._cmd_providers,
+        )
+    )
     registry.register(
         SlashCommand(
             name="doctor",
