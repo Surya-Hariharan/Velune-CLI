@@ -1,18 +1,23 @@
+"""Velune startup banner — minimal workspace summary.
+
+Default mode: a compact 8-line surface showing wordmark + key-value pairs.
+Splash mode:  set ``VELUNE_SPLASH=1`` to prepend the full ASCII wordmark.
+"""
+
+from __future__ import annotations
+
+import os
 from pathlib import Path
 
-from rich import box
-from rich.align import Align
-from rich.console import Console, Group
-from rich.panel import Panel
-from rich.table import Table
+from rich.console import Console
 from rich.text import Text
 
 from velune import __version__
 
 # Big "VELUNE" wordmark in the ANSI Shadow figlet font. Each entry is one
 # letter as six equal-height rows; a per-letter color list (built lazily in
-# ``_render_logo`` from the brand palette) paints a left-to-right
-# teal → green → orange gradient across the word.
+# ``_render_logo`` from the brand palette) paints a left-to-right gradient
+# across the word.  Only shown when VELUNE_SPLASH=1.
 _LOGO_ART: list[list[str]] = [
     [  # V
         "██╗   ██╗",
@@ -69,15 +74,13 @@ def _render_logo() -> Text:
     """Build the colored multi-line VELUNE wordmark as a single rich ``Text``."""
     from velune.cli import design
 
-    # One hue per letter — a left-to-right pink gradient from hot pink through
-    # blush and rose into vivid magenta.
     colors = [
-        design.ACCENT,  # V — hot pink
-        design.ACCENT_SOFT,  # E — soft blush
-        design.GREEN,  # L — rose
-        design.GREEN,  # U — rose
-        design.HIGHLIGHT,  # N — vivid magenta
-        design.PRIMARY_GREEN,  # E — deep magenta
+        design.ACCENT,        # V — hot pink
+        design.ACCENT_SOFT,   # E — soft blush
+        design.GREEN,         # L — rose
+        design.GREEN,         # U — rose
+        design.HIGHLIGHT,     # N — vivid magenta
+        design.PRIMARY_GREEN, # E — deep magenta
     ]
     logo = Text()
     rows = len(_LOGO_ART[0])
@@ -89,37 +92,8 @@ def _render_logo() -> Text:
     return logo
 
 
-def _user_name() -> str:
-    """Best-effort display name for the welcome line.
-
-    Prefers the configured git author name, then the OS login name. Falls back
-    to a friendly generic so the banner never looks broken.
-    """
-    import getpass
-    import subprocess
-
-    try:
-        name = subprocess.run(
-            ["git", "config", "user.name"],
-            capture_output=True,
-            text=True,
-            timeout=1.0,
-        ).stdout.strip()
-        if name:
-            return name
-    except Exception:
-        pass
-    try:
-        return getpass.getuser()
-    except Exception:
-        return "there"
-
-
 def _short_gpu_name(name: str) -> str:
-    """Trim vendor/marketing noise so the GPU fits on one line.
-
-    ``NVIDIA GeForce RTX 4060 Laptop GPU`` -> ``RTX 4060``.
-    """
+    """Trim vendor/marketing noise so the GPU fits on one line."""
     cleaned = name
     for token in ("NVIDIA", "GeForce", "Laptop GPU", "Laptop", "GPU", "(R)", "(TM)"):
         cleaned = cleaned.replace(token, " ")
@@ -128,7 +102,7 @@ def _short_gpu_name(name: str) -> str:
 
 
 def _display_path(workspace_path: str) -> str:
-    """Abbreviate the user's home directory to ``~`` for a tidier folder line."""
+    """Abbreviate the home directory to ``~`` for a tidier workspace line."""
     try:
         return "~/" + str(Path(workspace_path).resolve().relative_to(Path.home())).replace(
             "\\", "/"
@@ -148,122 +122,84 @@ def render_startup_banner(
     project_type_name: str | None = None,
     runtime_profile_label: str | None = None,
 ) -> None:
-    """Render the Velune welcome surface in the Claude Code template style.
+    """Render the Velune welcome surface.
 
-    A big pink ``VELUNE`` wordmark sits above one rounded, pink-bordered box.
-    Inside, the box is split into two columns: the left shows the greeting,
-    active model/profile and working folder; the right lists getting-started
-    tips and a short "What's new" feed — exactly mirroring Claude Code's layout,
-    re-skinned in the pink/white brand palette.
+    Default: an 8-line minimal block — wordmark, tagline, then four key-value
+    rows for workspace / provider / model / status.  Set ``VELUNE_SPLASH=1`` to
+    prepend the full ASCII wordmark before the summary.
     """
-    from rich.rule import Rule
+    from rich.align import Align
 
     from velune.cli import design
 
-    # --- Machine summary -------------------------------------------------
-    vram_gb = hardware_profile.vram_total_gb
-    if hardware_profile.gpu_name and vram_gb is not None:
-        gpu_part = f"{_short_gpu_name(hardware_profile.gpu_name)} {vram_gb:.0f}GB"
-    elif hardware_profile.gpu_name:
-        gpu_part = _short_gpu_name(hardware_profile.gpu_name)
-    else:
-        gpu_part = "CPU only"
-    machine_bits = [f"{hardware_profile.total_ram_gb:.0f}GB RAM", gpu_part]
+    # --- Optional full-logo splash (VELUNE_SPLASH=1) --------------------------
+    if os.environ.get("VELUNE_SPLASH") in ("1", "true", "yes"):
+        panel_width = min(console.width, 88)
+        console.print()
+        console.print(Align.center(_render_logo(), width=panel_width))
+        console.print()
 
-    # --- Provider summary ------------------------------------------------
-    active_providers = list(configured_providers)
-    if active_providers:
-        providers_value = f"{len(active_providers)} provider" + (
-            "s" if len(active_providers) != 1 else ""
-        )
-    else:
-        providers_value = "no providers"
-
-    # --- Account / model line (Claude's "Opus 4.8 · Plan · email" row) ----
-    model_label = active_model_id if active_model_id else "no model selected"
-    profile_label = (runtime_profile_label or "auto").lower()
-    account_line = f"[{design.MUTED}]{model_label}[/{design.MUTED}]"
-    account_line += f" [dim]·[/dim] [{design.MUTED}]{profile_label}[/{design.MUTED}]"
-    account_line += f" [dim]·[/dim] [{design.MUTED}]{providers_value}[/{design.MUTED}]"
-
-    # --- Folder line -----------------------------------------------------
-    folder_value = _display_path(workspace_path)
-    if project_type_name and project_type_name != "Unknown":
-        folder_value += f"  [dim]({project_type_name})[/dim]"
-
-    # --- Left column: greeting + identity --------------------------------
-    left = Group(
-        Text.from_markup(f"[bold {design.ACCENT}]Welcome back, {_user_name()}![/]"),
-        Text(""),
-        Text.from_markup(account_line),
-        Text(""),
-        Text.from_markup(f"[{design.INFO}]{folder_value}[/{design.INFO}]"),
-        Text.from_markup(f"[dim]{'  ·  '.join(machine_bits)}[/dim]"),
-    )
-
-    # --- Right column: tips + what's new ---------------------------------
-    right = Group(
-        Text.from_markup(f"[bold {design.WHITE}]Tips for getting started[/]"),
-        Text.from_markup(
-            f"[{design.MUTED}]1.[/] [{design.ACCENT}]/setup[/] "
-            f"[{design.MUTED}]— configure providers & models[/]"
-        ),
-        Text.from_markup(
-            f"[{design.MUTED}]2.[/] [{design.ACCENT}]/model connect[/] "
-            f"[{design.MUTED}]— pick your default model[/]"
-        ),
-        Text.from_markup(
-            f"[{design.MUTED}]3.[/] [{design.ACCENT}]/help[/] "
-            f"[{design.MUTED}]— see every command[/]"
-        ),
-        Rule(style=design.FAINT),
-        Text.from_markup(f"[bold {design.WHITE}]What's new[/]"),
-        Text.from_markup(
-            f"[{design.ACCENT_SOFT}]✦[/] [{design.MUTED}]Faster startup — "
-            f"config & doctor are ~5–8× quicker[/]"
-        ),
-        Text.from_markup(
-            f"[{design.ACCENT_SOFT}]✦[/] [{design.MUTED}]Lazy model discovery "
-            f"trims the cold-start path[/]"
-        ),
-        Text.from_markup("[dim]/help for more[/dim]"),
-    )
-
-    # --- Two-column layout inside one rounded, pink-bordered box ----------
-    grid = Table.grid(padding=(0, 4))
-    grid.add_column(justify="left")  # identity
-    grid.add_column(justify="left")  # tips / news
-    grid.add_row(left, right)
-
-    title = Text.from_markup(f"[bold {design.ACCENT}]✦ Velune CLI[/] [dim]v{version}[/dim]")
-
-    panel_width = min(console.width, 88)
-    subtitle = Text.from_markup(
-        f"[{design.MUTED}]Local-first AI orchestration[/{design.MUTED}]"
-        f"   [dim]·[/dim]   [{design.ACCENT_SOFT}]pink & white[/{design.ACCENT_SOFT}]"
-    )
-
-    # Big stylish pink VELUNE wordmark, centered above the welcome box.
-    console.print()
-    console.print(Align.center(_render_logo(), width=panel_width))
-    console.print(Align.center(subtitle, width=panel_width))
+    # --- Wordmark line --------------------------------------------------------
     console.print(
-        Panel(
-            grid,
-            title=title,
-            title_align="left",
-            border_style=design.ACCENT,
-            box=box.ROUNDED,
-            padding=(1, 3),
-            width=panel_width,
+        Text.from_markup(
+            f"[bold {design.ACCENT}]Velune[/bold {design.ACCENT}]"
+            f"  [{design.FAINT}]v{version}[/{design.FAINT}]"
         )
     )
+    console.print(
+        Text.from_markup(f"[{design.FAINT}]Local-first AI orchestration[/{design.FAINT}]")
+    )
+    console.print()
 
-    # Warnings/suggestions live *outside* the box so the header stays clean and
-    # they only appear when the machine actually needs guidance.
-    if hardware_profile.warnings or hardware_profile.suggestions:
+    # --- Provider summary -----------------------------------------------------
+    if configured_providers:
+        primary = configured_providers[0].title()
+        if len(configured_providers) > 1:
+            provider_label = f"{primary}  [dim]+{len(configured_providers) - 1} more[/dim]"
+        else:
+            provider_label = primary
+    else:
+        provider_label = f"[{design.WARN}]none configured[/{design.WARN}]"
+
+    # --- Workspace display ----------------------------------------------------
+    folder = _display_path(workspace_path)
+    if project_type_name and project_type_name != "Unknown":
+        folder += f"  [dim]({project_type_name})[/dim]"
+
+    # --- Status ---------------------------------------------------------------
+    if configured_providers and active_model_id:
+        status_text = f"[{design.OK}]Ready[/{design.OK}]"
+    elif configured_providers:
+        status_text = f"[{design.WARN}]No model selected[/{design.WARN}]"
+    else:
+        status_text = f"[{design.WARN}]Setup required[/{design.WARN}]"
+
+    # --- Key-value block ------------------------------------------------------
+    rows: list[tuple[str, str]] = [
+        ("Workspace", folder),
+        ("Provider",  provider_label),
+        ("Model",     active_model_id if active_model_id else f"[{design.FAINT}]none[/{design.FAINT}]"),
+        ("Status",    status_text),
+    ]
+
+    label_w = max(len(k) for k, _ in rows)
+    for label, value in rows:
+        console.print(
+            Text.from_markup(
+                f"  [{design.FAINT}]{label:<{label_w}}[/{design.FAINT}]"
+                f"  [{design.MUTED}]{value}[/{design.MUTED}]"
+            )
+        )
+
+    # --- Hardware warnings (only when present; suggestions live in /doctor) ---
+    if hardware_profile.warnings:
+        console.print()
         for warning in hardware_profile.warnings:
-            console.print(f"  [{design.WARN}]⚠ {warning}[/{design.WARN}]")
-        for suggestion in hardware_profile.suggestions:
-            console.print(f"  [{design.INFO}]→ {suggestion}[/{design.INFO}]")
+            console.print(Text.from_markup(f"  [{design.WARN}]Warning: {warning}[/{design.WARN}]"))
+        console.print(
+            Text.from_markup(
+                f"  [{design.FAINT}]Run [bold]/doctor[/bold] for full diagnostics[/{design.FAINT}]"
+            )
+        )
+
     console.print()

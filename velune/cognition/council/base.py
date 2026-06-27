@@ -41,6 +41,10 @@ class BaseCouncilAgent(ABC):
         self._fallback_providers: list[tuple[ModelProvider, ModelDescriptor]] = (
             fallback_providers or []
         )
+        # Cache manager — one per agent instance so fingerprint history is
+        # preserved across consecutive deliberations within the same run.
+        from velune.context.cache.manager import make_cache_manager
+        self._cache_manager = make_cache_manager(provider.provider_id)
 
     async def deliberate(
         self,
@@ -88,6 +92,9 @@ class BaseCouncilAgent(ABC):
                 max_tokens=max_tokens,
                 top_p=top_p,
             )
+
+            # Annotate request with cache hints for providers that support caching.
+            request = self._cache_manager.prepare(request)
 
             agent_timeouts = {
                 CouncilRole.PLANNER: 120.0,
@@ -147,7 +154,7 @@ class BaseCouncilAgent(ABC):
                                 CouncilRole.SYNTHESIZER: "cyan",
                             }
                             color = agent_colors.get(self.role, "cyan")
-                            panel_title = f"[bold {color}]🧠 {role_name} Agent Deliberating...[/bold {color}] ([dim]{self.model.model_id}[/dim])"
+                            panel_title = f"[bold {color}]{role_name} Agent Deliberating...[/bold {color}] ([dim]{self.model.model_id}[/dim])"
 
                             if acquired:
                                 panel = Panel(
@@ -191,6 +198,7 @@ class BaseCouncilAgent(ABC):
                         self.provider.infer(request),
                         timeout=timeout,
                     )
+                    self._cache_manager.record(response.metadata)
                     content = response.content
 
                 elapsed = time.perf_counter() - start

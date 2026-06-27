@@ -7,7 +7,7 @@ At the top it lists mounted drives / volumes so users can hop to an external
 SSD, USB stick, or secondary disk where their models actually live.
 
 Used by ``/model locate`` to register a custom Ollama model store. The optional
-``validate`` callback annotates each directory (e.g. "✓ Ollama store") so the
+``validate`` callback annotates each directory (e.g. "Ollama store") so the
 user gets feedback *before* committing, and the chosen path is returned to the
 caller for verification + persistence.
 """
@@ -104,7 +104,7 @@ async def browse_for_directory(
         meta = ""
         if validate is not None:
             try:
-                meta = "✓ valid Ollama store" if validate(cur) else "not an Ollama store"
+                meta = "valid Ollama store" if validate(cur) else "not an Ollama store"
             except Exception:
                 meta = ""
         rows.append((_USE, "[ Use this folder ]", meta))
@@ -114,7 +114,7 @@ async def browse_for_directory(
             if validate is not None:
                 try:
                     if validate(child):
-                        ann = "✓ Ollama store"
+                        ann = "Ollama store"
                 except Exception:
                     ann = ""
             rows.append((str(child), child.name + "/", ann))
@@ -157,7 +157,7 @@ async def browse_for_directory(
                 style = "bold fg:ansigreen" if is_sel else "fg:ansigreen"
             lines.append((style, f"  {prefix}{label:<40}"))
             if meta:
-                color = "fg:ansigreen" if meta.startswith("✓") else "fg:ansibrightblack"
+                color = "fg:ansigreen" if meta.startswith("valid") else "fg:ansibrightblack"
                 lines.append((color, f"  {meta}"))
             lines.append(("", "\n"))
         return FormattedText(lines)

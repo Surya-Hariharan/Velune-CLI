@@ -40,7 +40,7 @@ def mcp_connect(
     async def _connect_and_list():
         try:
             tools = await client.connect()
-            console.print(f"[green]✓ Connected to {name} successfully![/green]")
+            console.print(f"[green]Connected to {name} successfully.[/green]")
             console.print(f"[bold]Exposed Tools ({len(tools)}):[/bold]")
             for tool in tools:
                 desc = tool.get("description", "No description")

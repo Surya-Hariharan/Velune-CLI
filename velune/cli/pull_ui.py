@@ -61,7 +61,7 @@ async def run_pull_ui(
             skill_style = _SKILL_STYLES.get(skill, "fg:ansibrightblack")
 
             if is_local:
-                status = "  ✓ installed"
+                status = "  installed"
                 status_style = "fg:ansigreen"
             elif not fits:
                 status = "  needs more RAM"

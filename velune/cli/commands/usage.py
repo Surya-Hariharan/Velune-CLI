@@ -410,7 +410,7 @@ def health_overview(
 
         if result.ok:
             healthy += 1
-            status_str = f"[{design.OK}]✓ Healthy[/{design.OK}]"
+            status_str = f"[{design.OK}]Healthy[/{design.OK}]"
             model_count = str(len(result.models)) if result.models else "—"
             detail = "OK"
         else:
@@ -418,15 +418,15 @@ def health_overview(
 
             if result.status == ValidationStatus.RATE_LIMITED:
                 degraded += 1
-                status_str = f"[{design.WARN}]⚠ Rate Limited[/{design.WARN}]"
+                status_str = f"[{design.WARN}]Rate Limited[/{design.WARN}]"
                 detail = "Rate limit exceeded"
             elif result.status == ValidationStatus.NETWORK_ERROR:
                 degraded += 1
-                status_str = f"[{design.WARN}]⚠ Network Error[/{design.WARN}]"
+                status_str = f"[{design.WARN}]Network Error[/{design.WARN}]"
                 detail = "Cannot reach provider"
             else:
                 unavailable += 1
-                status_str = f"[red]✗ {result.status.value.replace('_', ' ').title()}[/red]"
+                status_str = f"[red]{result.status.value.replace('_', ' ').title()}[/red]"
                 detail = result.message[:50]
             model_count = "—"
 
@@ -441,9 +441,9 @@ def health_overview(
     total = healthy + degraded + unavailable
     console.print()
     console.print(
-        f"  [{design.OK}]✓ {healthy} healthy[/{design.OK}]  "
-        f"[{design.WARN}]⚠ {degraded} degraded[/{design.WARN}]  "
-        f"[red]✗ {unavailable} unavailable[/red]  "
+        f"  [{design.OK}]{healthy} healthy[/{design.OK}]  "
+        f"[{design.WARN}]{degraded} degraded[/{design.WARN}]  "
+        f"[red]{unavailable} unavailable[/red]  "
         f"[{design.MUTED}]({total} total)[/{design.MUTED}]"
     )
 

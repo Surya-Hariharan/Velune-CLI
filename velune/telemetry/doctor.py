@@ -62,11 +62,11 @@ def print_provider_health_report(console: Console | None = None) -> dict[str, An
 
         # Format status with icon
         if manifest.health == ProviderHealth.HEALTHY:
-            status_str = "[green]✓ HEALTHY[/green]"
+            status_str = "[green]HEALTHY[/green]"
         elif manifest.health == ProviderHealth.DEGRADED:
-            status_str = "[yellow]⚠ DEGRADED[/yellow]"
+            status_str = "[yellow]DEGRADED[/yellow]"
         elif manifest.health == ProviderHealth.UNAVAILABLE:
-            status_str = "[red]✗ OFFLINE[/red]"
+            status_str = "[red]OFFLINE[/red]"
         else:
             status_str = "[dim]? UNKNOWN[/dim]"
 
@@ -128,7 +128,7 @@ def print_telemetry_report(console: Console | None = None) -> dict[str, Any]:
     # Print header
     console.print(
         Panel(
-            "[bold cyan]📊 Telemetry & Usage (Last 7 Days)[/bold cyan]",
+            "[bold cyan]Telemetry & Usage (Last 7 Days)[/bold cyan]",
             expand=False,
         )
     )

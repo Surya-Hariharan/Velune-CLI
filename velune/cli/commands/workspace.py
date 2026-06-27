@@ -52,7 +52,7 @@ def workspace_init(
     (velune_dir / "snapshots").mkdir(exist_ok=True)
 
     if not cli_context.json_mode:
-        console.print("[green]✓[/green] Created .velune configuration directory structure.")
+        console.print("[green]Created .velune configuration directory structure.[/green]")
 
     # 2. Write default .veluneignore if one doesn't already exist
     veluneignore_path = path / ".veluneignore"
@@ -62,7 +62,7 @@ def workspace_init(
         veluneignore_path.write_text(DEFAULT_VELUNEIGNORE, encoding="utf-8")
         if not cli_context.json_mode:
             console.print(
-                "[green]✓[/green] Created default .veluneignore (edit to customise index exclusions)."
+                "[green]Created default .veluneignore (edit to customise index exclusions).[/green]"
             )
 
     # Register in the global workspace registry so `velune workspace list` can
@@ -94,10 +94,10 @@ async def _workspace_init_async(
 
     if not cli_context.json_mode:
         console.print(
-            "[bold cyan]⠋[/bold cyan] Building Tree-sitter compiler AST indices and scanning imports..."
+            "[bold cyan]Building Tree-sitter compiler AST indices and scanning imports...[/bold cyan]"
         )
         with console.status(
-            "[bold magenta]⚡ Parsing symbols, dependencies, and git Authorship...[/bold magenta]"
+            "[bold magenta]Parsing symbols, dependencies, and git authorship...[/bold magenta]"
         ):
             snapshot = repo_cognition.index(force=force)
     else:
@@ -148,7 +148,7 @@ async def _workspace_init_async(
         console.print(
             Panel(
                 Text.assemble(
-                    ("[bold green]✓ VELUNE WORKSPACE SUCCESSFULLY INDEXED[/bold green]\n\n"),
+                    ("[bold green]VELUNE WORKSPACE SUCCESSFULLY INDEXED[/bold green]\n\n"),
                     (f"[bold]Workspace path:[/bold] {path}\n"),
                     (f"[bold]Caches directory:[/bold] {velune_dir}\n"),
                     (
@@ -169,7 +169,7 @@ async def _workspace_init_async(
 
         if excluded_file_paths:
             secret_lines = "\n".join(
-                f"  [bold yellow]•[/bold yellow] {p}" for p in excluded_file_paths
+                f"  [{design.WARN}]{p}[/{design.WARN}]" for p in excluded_file_paths
             )
             console.print(
                 Panel(
@@ -180,7 +180,7 @@ async def _workspace_init_async(
                         "Add them to [bold].veluneignore[/bold] to silence this notice, "
                         "or ensure they are listed in [bold].gitignore[/bold].[/dim]"
                     ),
-                    title="[bold yellow]🔒 Secrets Protected[/bold yellow]",
+                    title="[bold yellow]Secrets Protected[/bold yellow]",
                     border_style="yellow",
                     box=ROUNDED,
                     padding=(1, 2),
@@ -403,7 +403,7 @@ def _render_graph(console: Console, report: DependencyGraphReport) -> None:
     if report.focus_candidates:
         console.print(f"[{design.WARN}]Ambiguous focus — multiple files match. Candidates:[/]")
         for cand in report.focus_candidates:
-            console.print(f"  [{design.MUTED}]•[/] {cand}")
+            console.print(f"  [{design.MUTED}]{cand}[/{design.MUTED}]")
         return
 
     # --- Hotspot tables ---
@@ -426,7 +426,7 @@ def _render_graph(console: Console, report: DependencyGraphReport) -> None:
             Panel(cyc, border_style=design.WARN, box=ROUNDED, title="[bold]Import Cycles[/bold]")
         )
     else:
-        console.print(f"[{design.OK}]✓ No import cycles detected.[/]")
+        console.print(f"[{design.OK}]No import cycles detected.[/]")
 
 
 def _hotspot_table(title: str, stats: list[GraphNodeStat], key: str) -> Table:
@@ -616,20 +616,20 @@ def workspace_list(ctx: typer.Context) -> None:
 
     for w in workspaces:
         is_active = w.path.lower() == current
-        marker = Text("▶", style=design.OK) if is_active else Text("")
+        marker = Text("*", style=design.OK) if is_active else Text("")
         table.add_row(
             marker,
             w.name,
             w.path,
             w.project_type or "—",
-            "✓" if w.is_git else "—",
+            "yes" if w.is_git else "—",
             w.last_opened[:16].replace("T", " "),
         )
 
     console.print(table)
     console.print()
     console.print(
-        f"[{design.MUTED}]▶ = current workspace  ·  "
+        f"[{design.MUTED}]* = current workspace  ·  "
         f"Switch with:[/] [bold]velune workspace open <path>[/bold]"
     )
 
@@ -879,6 +879,6 @@ def workspace_remove(
 
     registry.remove(name)
     console.print(
-        f"[{design.OK}]✓[/] Workspace [bold]{name}[/bold] removed from registry.\n"
+        f"[{design.OK}]Workspace [bold]{name}[/bold] removed from registry.[/{design.OK}]\n"
         f"[{design.MUTED}]Project files at {info.path} were not touched.[/]"
     )

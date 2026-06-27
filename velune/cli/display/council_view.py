@@ -40,7 +40,7 @@ class CouncilDisplayView:
                 ),
                 border_style=design.ACCENT,
                 box=ROUNDED,
-                title="[bold white]🧠 Cognitive Deliberation[/bold white]",
+                title="[bold white]Cognitive Deliberation[/bold white]",
                 title_align="left",
             )
         )
@@ -76,11 +76,12 @@ class CouncilDisplayView:
         self.console.print(table)
         self.console.print()
 
-    def render_step_header(self, step_name: str, agent_emoji: str = "🤖") -> None:
+    def render_step_header(self, step_name: str, agent_emoji: str = "") -> None:
         """Draw an elegant boundary indicating a change in agent active deliberation."""
+        label = f"{agent_emoji} {step_name}".strip() if agent_emoji else step_name
         self.console.print(
-            f"\n[bold {design.ACCENT}]●[/bold {design.ACCENT}]"
-            f" [bold white]{agent_emoji} {step_name}[/bold white] is deliberating..."
+            f"\n[bold {design.ACCENT}]>[/bold {design.ACCENT}]"
+            f" [bold white]{label}[/bold white] is deliberating..."
         )
 
     def render_planner_dag(self, plan: TaskPlan) -> None:
@@ -108,7 +109,7 @@ class CouncilDisplayView:
         self.console.print(
             Panel(
                 Text(code_proposal, style=design.OK),
-                title=f"[bold {design.OK}]💻 Coder Proposed Patch[/bold {design.OK}]",
+                title=f"[bold {design.OK}]Coder Proposed Patch[/bold {design.OK}]",
                 border_style=design.OK,
                 box=ROUNDED,
                 expand=True,
@@ -140,18 +141,18 @@ class CouncilDisplayView:
         content.append(f"[bold]Confidence Rating:[/bold] {confidence:.2f}")
 
         if issues:
-            content.append(f"\n[bold {err_c}]⚠️ Critical Issues Detected:[/bold {err_c}]")
+            content.append(f"\n[bold {err_c}]Critical Issues Detected:[/bold {err_c}]")
             for issue in issues:
-                content.append(f"  [{err_c}]•[/{err_c}] {issue}")
+                content.append(f"  [{err_c}]{issue}[/{err_c}]")
         else:
             content.append(
-                f"\n[{ok_c}]✓ Static checks passed. No syntactical or safety concerns raised.[/{ok_c}]"
+                f"\n[{ok_c}]Static checks passed. No syntactical or safety concerns raised.[/{ok_c}]"
             )
 
         self.console.print(
             Panel(
                 "\n".join(content),
-                title="[bold]🔍 Reviewer Audit[/bold]",
+                title="[bold]Reviewer Audit[/bold]",
                 border_style=border_style,
                 box=ROUNDED,
                 expand=True,
@@ -176,9 +177,9 @@ class CouncilDisplayView:
         )
 
         if vectors:
-            content.append(f"\n[bold {warn_c}]⚡ Failure Vectors Simulated:[/bold {warn_c}]")
+            content.append(f"\n[bold {warn_c}]Failure Vectors Simulated:[/bold {warn_c}]")
             for vec in vectors:
-                content.append(f"  [{warn_c}]•[/{warn_c}] {vec}")
+                content.append(f"  [{warn_c}]{vec}[/{warn_c}]")
         else:
             content.append(
                 f"\n[{design.MUTED}]No significant failure vectors or edge-case gaps simulated.[/{design.MUTED}]"
@@ -187,7 +188,7 @@ class CouncilDisplayView:
         self.console.print(
             Panel(
                 "\n".join(content),
-                title="[bold]⚡ Challenger Adversarial Check[/bold]",
+                title="[bold]Challenger Adversarial Check[/bold]",
                 border_style=border_style,
                 box=ROUNDED,
                 expand=True,
@@ -240,7 +241,7 @@ class CouncilDisplayView:
                 f"\n[bold {design.INFO}]Winning Claims & Arbitration Compromise:[/bold {design.INFO}]"
             )
             for claim in winning_claims:
-                content.append(f"  [{design.INFO}]✓[/{design.INFO}] {claim}")
+                content.append(f"  [{design.INFO}]{claim}[/{design.INFO}]")
 
         if synthesis_inst:
             content.append(
@@ -251,7 +252,7 @@ class CouncilDisplayView:
         self.console.print(
             Panel(
                 "\n".join(content),
-                title="[bold white]⚖️ Council Arbitration Engine[/bold white]",
+                title="[bold white]Council Arbitration Engine[/bold white]",
                 border_style=border_style,
                 box=ROUNDED,
                 expand=True,
@@ -263,7 +264,7 @@ class CouncilDisplayView:
         self.console.print(
             Panel(
                 Text(text, style="white"),
-                title=f"[bold {design.ACCENT}]🚀 Deliberated Walkthrough & Accomplishments[/bold {design.ACCENT}]",
+                title=f"[bold {design.ACCENT}]Deliberated Walkthrough & Accomplishments[/bold {design.ACCENT}]",
                 border_style=design.ACCENT,
                 box=ROUNDED,
                 expand=True,

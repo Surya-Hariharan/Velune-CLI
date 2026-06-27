@@ -101,7 +101,7 @@ def session_delete(
         typer.confirm(f"Delete session '{meta.title}' ({session_id})?", default=False, abort=True)
 
     store.delete(session_id)
-    console.print(f"[{design.OK}]✓[/] Session [bold]{session_id}[/bold] deleted.")
+    console.print(f"[{design.OK}]Session [bold]{session_id}[/bold] deleted.[/{design.OK}]")
 
 
 @session_cmd.command("export")
@@ -123,6 +123,6 @@ def session_export(
 
     if output:
         output.write_text(md, encoding="utf-8")
-        console.print(f"[{design.OK}]✓[/] Exported to {output}")
+        console.print(f"[{design.OK}]Exported to {output}[/{design.OK}]")
     else:
         console.print(md)

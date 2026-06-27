@@ -26,7 +26,7 @@ def render_error(error: VeluneError) -> Panel:
     if error.fix:
         body.append("\nFix\n", style="bold white")
         for step in error.fix:
-            body.append(f"  • {step}\n", style="dim white")
+            body.append(f"  {step}\n", style="dim white")
 
     if error.docs_url:
         body.append(f"\n  docs → {error.docs_url}", style="blue underline")
@@ -57,9 +57,9 @@ def render_unexpected_error(exc: Exception) -> Panel:
     body.append(f"{exc}\n", style="white")
 
     body.append("\nWhat to do\n", style="bold white")
-    body.append("  • Use --verbose to see the full stack trace\n", style="dim white")
-    body.append(f"  • Report the issue at {_BUG_REPORT_URL}\n", style="dim white")
-    body.append("  • Include the --verbose output in your report\n", style="dim white")
+    body.append("  Use --verbose to see the full stack trace\n", style="dim white")
+    body.append(f"  Report the issue at {_BUG_REPORT_URL}\n", style="dim white")
+    body.append("  Include the --verbose output in your report\n", style="dim white")
 
     return Panel(
         body,

@@ -74,9 +74,9 @@ def check(
         if not velune_dir.exists():
             try:
                 velune_dir.mkdir(parents=True, exist_ok=True)
-                console.print("[green]✓ Created .velune/ directory.[/green]")
+                console.print("[green]Created .velune/ directory.[/green]")
             except Exception as e:
-                console.print(f"[red]✗ Failed to create .velune/: {e}[/red]")
+                console.print(f"[red]Failed to create .velune/: {e}[/red]")
 
         # Fix 2: Create default velune.toml if missing
         config_file = Path.cwd() / "velune.toml"
@@ -89,9 +89,9 @@ def check(
                 default_config = get_default_config()
                 with open(config_file, "w") as f:
                     toml.dump(default_config.model_dump(), f)
-                console.print("[green]✓ Created default velune.toml config file.[/green]")
+                console.print("[green]Created default velune.toml config file.[/green]")
             except Exception as e:
-                console.print(f"[red]✗ Failed to create default velune.toml: {e}[/red]")
+                console.print(f"[red]Failed to create default velune.toml: {e}[/red]")
 
         # Fix 3: Initialize databases
         db_file = velune_dir / "velune_cognitive_core.db"
@@ -99,9 +99,9 @@ def check(
             from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
             CognitivePerformanceAnalytics(db_path=db_file)
-            console.print("[green]✓ SQLite database successfully initialized.[/green]")
+            console.print("[green]SQLite database successfully initialized.[/green]")
         except Exception as e:
-            console.print(f"[red]✗ Failed to initialize SQLite database: {e}[/red]")
+            console.print(f"[red]Failed to initialize SQLite database: {e}[/red]")
 
         console.print("[yellow]Re-running checks after fixes...[/yellow]\n")
 
@@ -158,11 +158,11 @@ def check(
 
     failures = [r for r in results if r["status"] == "fail"]
     if failures:
-        console.print(f"\n[red]✗ {len(failures)} check(s) failed.[/red]")
+        console.print(f"\n[red]{len(failures)} check(s) failed.[/red]")
         console.print("[dim]Run 'velune doctor --fix' to attempt automatic fixes.[/dim]")
         raise typer.Exit(1)
     else:
-        console.print("\n[green]✓ All checks passed. Velune is ready.[/green]")
+        console.print("\n[green]All checks passed. Velune is ready.[/green]")
 
 
 def _check_python_version() -> dict:
@@ -910,7 +910,7 @@ def _render_results(results: list) -> None:
 
     if fails:
         summary_color = design.DANGER
-        summary_icon = "✗"
+        summary_icon = "FAIL"
         summary_tail = f"  [{design.DANGER}]{fails} failed[/{design.DANGER}]"
         if warns:
             summary_tail += (
@@ -918,11 +918,11 @@ def _render_results(results: list) -> None:
             )
     elif warns:
         summary_color = design.WARN
-        summary_icon = "⚠"
+        summary_icon = "WARN"
         summary_tail = f"  [{design.WARN}]{warns} warning{'s' if warns > 1 else ''}[/{design.WARN}]"
     else:
         summary_color = design.OK
-        summary_icon = "✓"
+        summary_icon = "OK"
         summary_tail = f"  [{design.OK}]all clear[/{design.OK}]"
 
     console.print()
@@ -937,10 +937,10 @@ def _render_results(results: list) -> None:
 
     # --- Per-category panels ---
     status_icons = {
-        "ok": (f"[{design.OK}]✓[/{design.OK}]", design.OK),
-        "warn": (f"[{design.WARN}]⚠[/{design.WARN}]", design.WARN),
-        "fail": (f"[{design.DANGER}]✗[/{design.DANGER}]", design.DANGER),
-        "error": (f"[{design.DANGER}]✗[/{design.DANGER}]", design.DANGER),
+        "ok": (f"[{design.OK}]ok[/{design.OK}]", design.OK),
+        "warn": (f"[{design.WARN}]warn[/{design.WARN}]", design.WARN),
+        "fail": (f"[{design.DANGER}]fail[/{design.DANGER}]", design.DANGER),
+        "error": (f"[{design.DANGER}]fail[/{design.DANGER}]", design.DANGER),
     }
 
     for cat in categories:

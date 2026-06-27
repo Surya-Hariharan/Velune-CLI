@@ -111,9 +111,9 @@ def models_scan(
         if validated is None:
             status = "[dim]cached[/dim]"
         elif validated:
-            status = "[green]●[/green]"
+            status = "[green]online[/green]"
         else:
-            status = "[red]✗ offline[/red]"
+            status = "[red]offline[/red]"
 
         table.add_row(
             record.provider_id,
@@ -157,7 +157,7 @@ async def _models_scan_async(cli_context: CLIContext, provider_id: str | None, p
             fast_probe = FastProbe()
 
             if not cli_context.json_mode:
-                console.print("[bold cyan]⠋[/bold cyan] Probing discovered models synchronously...")
+                console.print("[bold cyan]Probing discovered models...[/bold cyan]")
 
             probe_tasks = []
             valid_records = []
@@ -189,7 +189,7 @@ async def _models_scan_async(cli_context: CLIContext, provider_id: str | None, p
                 if empirical_probe_tasks:
                     if not cli_context.json_mode:
                         console.print(
-                            f"[bold magenta]⚡ Running empirical capability probes for {len(empirical_probe_tasks)} active model(s)...[/bold magenta]"
+                            f"[bold magenta]Running empirical capability probes for {len(empirical_probe_tasks)} active model(s)...[/bold magenta]"
                         )
                     results = await asyncio.gather(*empirical_probe_tasks, return_exceptions=True)
 
@@ -200,7 +200,7 @@ async def _models_scan_async(cli_context: CLIContext, provider_id: str | None, p
                         if isinstance(result, BaseException):
                             if not cli_context.json_mode:
                                 console.print(
-                                    f"[red]✗[/red] Probe failed for {record.model_id}: {result}"
+                                    f"[red]Probe failed for {record.model_id}: {result}[/red]"
                                 )
                             continue
 
@@ -212,9 +212,7 @@ async def _models_scan_async(cli_context: CLIContext, provider_id: str | None, p
                             registry.register(record)
 
             if not cli_context.json_mode:
-                console.print(
-                    "[bold green]✓[/bold green] Empirical benchmarks completed and cached."
-                )
+                console.print("[bold green]Empirical benchmarks completed and cached.[/bold green]")
 
         return records
     finally:
@@ -313,7 +311,7 @@ def models_list(ctx: typer.Context) -> None:
                 m for m in records if m.vram_required_gb and m.vram_required_gb > free_gb
             ]
             if over_budget:
-                console.print(f"[yellow]⚠ {len(over_budget)} models exceed available VRAM[/yellow]")
+                console.print(f"[yellow]{len(over_budget)} models exceed available VRAM[/yellow]")
 
 
 @models_cmd.command("assign")
@@ -651,7 +649,7 @@ def _auto_assign_models(cli_context: Any, registry: Any, benchmark_results: list
                 best_reasoning["model"].model_id,
                 best_speed["model"].model_id,
             )
-            console.print("[green]✓[/green] Model assignments saved.")
+            console.print("[green]Model assignments saved.[/green]")
         else:
             console.print("[dim]Assignments not applied.[/dim]")
     except (EOFError, KeyboardInterrupt):

@@ -238,6 +238,16 @@ class VeluneREPL:
             else:
                 event.app.invalidate()  # redraw toolbar with the exit hint
 
+        @kb.add("escape", "enter")  # Alt+Enter on most terminals
+        def _insert_newline_meta(event):
+            """Insert a literal newline without submitting the prompt."""
+            event.app.current_buffer.insert_text("\n")
+
+        @kb.add("c-j")  # Ctrl+J — secondary newline shortcut
+        def _insert_newline_ctrl_j(event):
+            """Insert a literal newline without submitting the prompt."""
+            event.app.current_buffer.insert_text("\n")
+
         return PromptSession(
             history=FileHistory(str(self._history_file)),
             auto_suggest=AutoSuggestFromHistory(),
@@ -284,15 +294,15 @@ class VeluneREPL:
             active_branch = "non-git"
 
         tokens: list[tuple[str, str]] = [
-            ("class:prompt.frame", "╭─ "),
+            ("class:prompt.frame", "╭ "),
             ("class:prompt.prefix", folder_name),
         ]
 
-        # Show Git active branch if available
+        # Git branch
         if active_branch and active_branch not in ("non-git", "unknown"):
             tokens.append(("class:prompt.branch", f" ({active_branch})"))
 
-        # Show mode if not default
+        # Mode — only when not the default NORMAL
         if not self._mode_manager.is_normal():
             label = self._mode_manager.current.value.upper()
             if self._mode_manager.current == SessionMode.GODLY:
@@ -302,7 +312,7 @@ class VeluneREPL:
             else:
                 tokens.append(("class:prompt.mode", f" [{label}]"))
 
-        # Show active model if selected
+        # Active model + compact context percentage
         if self.active_model:
             tokens.append(("class:prompt.model", f" · {self.active_model.model_id}"))
 
@@ -310,7 +320,6 @@ class VeluneREPL:
             self._context_tracker.update(self._conversation)
 
             pct = self._context_tracker.percentage
-            badge = self._context_tracker.formatted_badge
 
             if pct < design.CTX_WARN_PCT:
                 bar_style = "class:ctx.ok"
@@ -318,9 +327,9 @@ class VeluneREPL:
                 bar_style = "class:ctx.warn"
             else:
                 bar_style = "class:ctx.danger"
-            tokens.append((bar_style, f" {badge}"))
+            tokens.append((bar_style, f" · {pct:.0f}%"))
 
-        tokens.append(("class:prompt.frame", "\n╰─"))
+        tokens.append(("class:prompt.frame", "\n╰"))
         tokens.append(("class:prompt.arrow", "❯ "))
 
         # Keep the bottom status bar in sync with the session state.
@@ -738,7 +747,7 @@ class VeluneREPL:
         self._context_tracker.update(self._conversation)
         await self._start_episodic_session()
         self.console.print(
-            f"[green]✦ New session started[/green] — project memory preserved.{archived_note}"
+            f"[green]New session started[/green] — project memory preserved.{archived_note}"
         )
 
     async def _cmd_doctor(self, args: str) -> None:
@@ -901,7 +910,7 @@ class VeluneREPL:
         if selected:
             self.active_model = selected
             self.console.print(
-                f"[green]✓ Active model:[/green] [cyan]{selected.model_id}[/cyan] "
+                f"[green]Active model:[/green] [cyan]{selected.model_id}[/cyan] "
                 f"[dim]{selected.provider_id} · "
                 f"ctx {selected.context_length:,} · "
                 f"{'local' if selected.is_local else 'cloud'}[/dim]"
@@ -978,7 +987,7 @@ class VeluneREPL:
                 row_style = "bold fg:cyan" if is_sel else ""
                 lines.append((row_style, f"  {prefix}{_model_row(m)}"))
                 if m.is_local and not fits_hardware(m, self._runtime_profile):
-                    lines.append(("fg:ansiyellow", " ⚠ heavy for this machine"))
+                    lines.append(("fg:ansiyellow", " heavy for this machine"))
                 if is_cur:
                     lines.append(("fg:ansigreen", " (active)"))
                 lines.append(("", "\n"))
@@ -1072,7 +1081,7 @@ class VeluneREPL:
                         top_skill = attr
                         break
             is_active = self.active_model is not None and m.model_id == self.active_model.model_id
-            name_col = f"{m.model_id} [green]✓[/green]" if is_active else m.model_id
+            name_col = f"{m.model_id} [green](active)[/green]" if is_active else m.model_id
             table.add_row(
                 name_col,
                 m.provider_id,
@@ -1095,7 +1104,7 @@ class VeluneREPL:
         save_active_model(model.provider_id, model.model_id)
         self._persist_default_provider(model.provider_id)
         self.console.print(
-            f"[green]✓ Active model:[/green] [cyan]{model.model_id}[/cyan] "
+            f"[green]Active model:[/green] [cyan]{model.model_id}[/cyan] "
             f"[dim]{model.provider_id} · ctx {model.context_length:,} · "
             f"{'local' if model.is_local else 'cloud'}[/dim]"
         )
@@ -1258,7 +1267,7 @@ class VeluneREPL:
             if self.active_model and self.active_model.model_id == name:
                 self.active_model = None
         if removed:
-            self.console.print(f"[green]✓ Removed [cyan]{name}[/cyan] from the registry.[/green]")
+            self.console.print(f"[green]Removed [cyan]{name}[/cyan] from the registry.[/green]")
         else:
             self.console.print(
                 f"[yellow]'{name}' was not in the registry.[/yellow] "
@@ -1290,14 +1299,14 @@ class VeluneREPL:
 
         result = OllamaLocationRegistry().add(chosen)
         if not result.ok:
-            self.console.print(f"[red]✗ {result.message}[/red]")
+            self.console.print(f"[red]{result.message}[/red]")
             self.console.print(
                 "[dim]Tip: pick the directory that directly contains "
                 "[bold]manifests/[/bold] and [bold]blobs/[/bold].[/dim]"
             )
             return
 
-        self.console.print(f"[green]✓ {result.message}[/green]")
+        self.console.print(f"[green]{result.message}[/green]")
         # Show what we found there immediately, then refresh discovery.
         try:
             found = OllamaModelStore(chosen).list_models()
@@ -1339,8 +1348,7 @@ class VeluneREPL:
                 return
             result = reg.add(rest)
             style = "green" if result.ok else "red"
-            mark = "✓" if result.ok else "✗"
-            self.console.print(f"[{style}]{mark} {result.message}[/{style}]")
+            self.console.print(f"[{style}]{result.message}[/{style}]")
             return
 
         if sub in ("remove", "rm", "delete"):
@@ -1349,7 +1357,7 @@ class VeluneREPL:
                 return
             ok = reg.remove(rest)
             if ok:
-                self.console.print(f"[green]✓ Removed location:[/green] {rest}")
+                self.console.print(f"[green]Removed location:[/green] {rest}")
             else:
                 self.console.print(f"[yellow]Not a registered location:[/yellow] {rest}")
             return
@@ -1445,7 +1453,7 @@ class VeluneREPL:
             return
         reason = cog.unsafe_reason()
         if reason:
-            self.console.print(f"[yellow]⚠ Cannot analyze — workspace is {reason}.[/yellow]")
+            self.console.print(f"[yellow]Cannot analyze — workspace is {reason}.[/yellow]")
             return
         with self.console.status("[dim]Quick scan (manifests only)...[/dim]"):
             summary = await asyncio.to_thread(cog.quick_summary)
@@ -1486,7 +1494,7 @@ class VeluneREPL:
         reason = cog.unsafe_reason()
         if reason:
             self.console.print(
-                f"[yellow]⚠ Refusing to index — workspace is {reason}.[/yellow] "
+                f"[yellow]Refusing to index — workspace is {reason}.[/yellow] "
                 "[dim]Open a project with [bold]/project open <path>[/bold] first.[/dim]"
             )
             return
@@ -1563,7 +1571,7 @@ class VeluneREPL:
                 except Exception as exc:
                     self.console.print(f"[red]Cognition failed:[/red] {exc}")
                     return
-            self.console.print(f"[green]✓ Cognition complete ({mode}).[/green]")
+            self.console.print(f"[green]Cognition complete ({mode}).[/green]")
             return
 
         job_id = self._job_registry.new_id()
@@ -1609,7 +1617,7 @@ class VeluneREPL:
         self._job_registry.update(job_id, task=task_obj)
         track(task_obj)
         self.console.print(
-            f"[green]✓ Cognition job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
+            f"[green]Cognition job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
         )
         self.console.print(
             "[dim]Track with [bold]/index status[/bold], [bold]/jobs[/bold], "
@@ -1760,7 +1768,7 @@ class VeluneREPL:
         track(task_obj)
 
         self.console.print(
-            f"[green]✓ Job submitted:[/green] [cyan]{job_id}[/cyan]  [dim]{task[:60]}[/dim]"
+            f"[green]Job submitted:[/green] [cyan]{job_id}[/cyan]  [dim]{task[:60]}[/dim]"
         )
         self.console.print(
             "[dim]Use [bold]/jobs[/bold] to track progress, "
@@ -1933,7 +1941,7 @@ class VeluneREPL:
         def make_panel(phase_name: str, messages: list[str]) -> Panel:
             color = _phase_colors.get(phase_name.lower(), "dim")
             label = phase_name.capitalize()
-            body = "\n".join(f"  [bold {color}]•[/bold {color}] {msg}" for msg in messages)
+            body = "\n".join(f"  [{color}]{msg}[/{color}]" for msg in messages)
             return Panel(
                 body,
                 title=f"[bold {color}]{label} Phase[/bold {color}]",
@@ -2070,7 +2078,7 @@ class VeluneREPL:
             return
 
         self.console.print(
-            f"\n[bold cyan]✦ {len(resolved)} file change(s) proposed by the Council[/bold cyan]"
+            f"\n[bold cyan]{len(resolved)} file change(s) proposed by the Council[/bold cyan]"
         )
 
         preview = MultiDiffPreview(self.console)
@@ -2105,7 +2113,7 @@ class VeluneREPL:
             self.console.print("[dim]No changes applied.[/dim]")
             return
 
-        self.console.print(f"[green]✓ Applied {len(accepted_paths)} file(s).[/green]")
+        self.console.print(f"[green]Applied {len(accepted_paths)} file(s).[/green]")
 
         # Auto-commit accepted writes
         committed = await self._auto_commit_edits(accepted_paths, task, workspace)
@@ -2264,7 +2272,7 @@ class VeluneREPL:
 
         if sub == "clear":
             working.clear()
-            self.console.print("[green]✓ Working memory cleared.[/green]")
+            self.console.print("[green]Working memory cleared.[/green]")
             return
 
         # Default: stats view
@@ -2322,7 +2330,7 @@ class VeluneREPL:
 
         elif sub == "save":
             session_id = save_session(self._conversation, model_id, workspace)
-            self.console.print(f"[green]✓ Session saved:[/green] [cyan]{session_id}[/cyan]")
+            self.console.print(f"[green]Session saved:[/green] [cyan]{session_id}[/cyan]")
 
         elif sub == "list":
             await self._cmd_session_list(workspace)
@@ -2349,7 +2357,7 @@ class VeluneREPL:
                 return
             out_path = _Path.cwd() / f"velune-session-{target}.md"
             out_path.write_text(md, encoding="utf-8")
-            self.console.print(f"[green]✓ Exported to:[/green] {out_path}")
+            self.console.print(f"[green]Exported to:[/green] {out_path}")
 
         else:
             self.console.print(
@@ -2404,7 +2412,7 @@ class VeluneREPL:
         self.session_tokens = meta.total_tokens
         await self._start_episodic_session()
         self.console.print(
-            f"[green]✓ Resumed[/green] [cyan]{meta.title}[/cyan] "
+            f"[green]Resumed[/green] [cyan]{meta.title}[/cyan] "
             f"[dim]({meta.turn_count} turns · {meta.model_id})[/dim]"
         )
         return True
@@ -2460,7 +2468,7 @@ class VeluneREPL:
 
         self._conversation = [{"role": t.role, "content": t.content} for t in turns]
         self.console.print(
-            f"[green]✓ Resumed[/green] [cyan]{session_id}[/cyan] "
+            f"[green]Resumed[/green] [cyan]{session_id}[/cyan] "
             f"[dim]({len(self._conversation)} turns loaded into context)[/dim]"
         )
 
@@ -2558,7 +2566,7 @@ class VeluneREPL:
             info = self._workspace_registry.register(target)
             kind = info.project_type or ("git repo" if info.is_git else "folder")
             self.console.print(
-                f"[green]✓ Registered workspace:[/green] [cyan]{info.name}[/cyan] [dim]({kind})[/dim]"
+                f"[green]Registered workspace:[/green] [cyan]{info.name}[/cyan] [dim]({kind})[/dim]"
             )
             return
 
@@ -2640,7 +2648,7 @@ class VeluneREPL:
         table.add_column("Last Opened", style="dim")
         table.add_column("Path", style="dim")
         for w in workspaces:
-            name = f"{w.name} [green]✓[/green]" if w.path == current else w.name
+            name = f"{w.name} [green](current)[/green]" if w.path == current else w.name
             table.add_row(
                 name,
                 w.project_type or ("git" if w.is_git else "—"),
@@ -2735,7 +2743,7 @@ class VeluneREPL:
                 kind = getattr(self._project_profile, "display_name", None)
         detail = f" [dim]({kind})[/dim]" if kind else ""
         self.console.print(
-            f"[green]✓ Workspace:[/green] [cyan]{new_path.name}[/cyan]{detail}  "
+            f"[green]Workspace:[/green] [cyan]{new_path.name}[/cyan]{detail}  "
             f"[dim]{notes[0] if notes else ''}[/dim]"
         )
         for note in notes[1:]:
@@ -2758,7 +2766,7 @@ class VeluneREPL:
         )
         if pct > 85:
             self.console.print(
-                "[yellow]⚠ Context window nearly full. Type /clear to reset conversation.[/yellow]"
+                "[yellow]Context window nearly full. Type /clear to reset conversation.[/yellow]"
             )
 
     # ------------------------------------------------------------------
@@ -2779,7 +2787,7 @@ class VeluneREPL:
         if auto_model:
             self.active_model = auto_model
         self.console.print(
-            f"[yellow]⚡ OPTIMUS MODE[/yellow] — {config.description}\n"
+            f"[yellow]OPTIMUS MODE[/yellow] — {config.description}\n"
             f"[dim]Model: {self.active_model.model_id if self.active_model else 'none'} · "
             f"Context cap: {config.max_context_tokens:,} tokens · "
             f"Council: {config.council_tier}[/dim]"
@@ -2799,7 +2807,7 @@ class VeluneREPL:
         if auto_model:
             self.active_model = auto_model
         self.console.print(
-            f"[magenta]🔮 GODLY MODE[/magenta] — {config.description}\n"
+            f"[magenta]GODLY MODE[/magenta] — {config.description}\n"
             f"[dim]Model: {self.active_model.model_id if self.active_model else 'none'} · "
             f"Context: unlimited · "
             f"Council: {config.council_tier} · "
@@ -2810,7 +2818,7 @@ class VeluneREPL:
         from velune.cli.modes import SessionMode
 
         config = self._mode_manager.set_mode(SessionMode.NORMAL)
-        self.console.print(f"[cyan]● NORMAL MODE[/cyan] — {config.description}")
+        self.console.print(f"[cyan]NORMAL MODE[/cyan] — {config.description}")
 
     async def _cmd_mode(self, args: str) -> None:
         # `/mode` doubles as a switcher: `/mode fast|max|normal` change the
@@ -2902,7 +2910,7 @@ class VeluneREPL:
             offline = OllamaLocationRegistry().disconnected()
             for rr in offline:
                 self.console.print(
-                    f"[yellow]⚠ Model store unavailable:[/yellow] [dim]{rr.path}[/dim] "
+                    f"[yellow]Model store unavailable:[/yellow] [dim]{rr.path}[/dim] "
                     "[dim]— storage device disconnected. Reconnect it and the models "
                     "reappear automatically.[/dim]"
                 )
@@ -2918,7 +2926,7 @@ class VeluneREPL:
             self._role_map.clear_all()
             self._role_map.save(self._assignments_path)
             self._apply_role_overrides_to_orchestrator()
-            self.console.print("[yellow]✓ All council role assignments cleared.[/yellow]")
+            self.console.print("[yellow]All council role assignments cleared.[/yellow]")
             return
 
         model_registry = self.container.get("runtime.model_registry")
@@ -3016,7 +3024,7 @@ class VeluneREPL:
             return
         manager = OllamaManager()
         if await manager.delete_model(model_id):
-            self.console.print(f"[green]✓ Deleted: {model_id}[/green]")
+            self.console.print(f"[green]Deleted: {model_id}[/green]")
             await self._refresh_model_registry()
         else:
             self.console.print(f"[red]Failed to delete {model_id}[/red]")
@@ -3320,7 +3328,7 @@ class VeluneREPL:
         self._approval_mode = new_mode
         style = {"safe": "green", "ask": "yellow", "block": "red"}.get(new_mode.value, "white")
         self.console.print(
-            f"[{style}]✓ Approval mode set to:[/{style}] [bold]{new_mode.value}[/bold]"
+            f"[{style}]Approval mode set to:[/{style}] [bold]{new_mode.value}[/bold]"
         )
 
     async def _cmd_hooks(self, args: str) -> None:
@@ -3385,13 +3393,13 @@ class VeluneREPL:
             if ok:
                 tools = self._mcp_registry.tools_for_server(rest)
                 self.console.print(
-                    f"[green]✓[/green] Connected to [bold]{rest}[/bold] ({len(tools)} tool(s))."
+                    f"[green]Connected to [bold]{rest}[/bold] ({len(tools)} tool(s)).[/green]"
                 )
             else:
                 status = next((s for s in self._mcp_registry.status() if s["name"] == rest), {})
                 self.console.print(
-                    f"[red]✗[/red] Failed to connect to [bold]{rest}[/bold]: "
-                    f"{status.get('error', 'unknown error')}"
+                    f"[red]Failed to connect to [bold]{rest}[/bold]: "
+                    f"{status.get('error', 'unknown error')}[/red]"
                 )
         elif sub == "disconnect":
             if not rest:
@@ -3407,7 +3415,7 @@ class VeluneREPL:
             if ok:
                 tools = self._mcp_registry.tools_for_server(rest)
                 self.console.print(
-                    f"[green]✓[/green] Refreshed [bold]{rest}[/bold] ({len(tools)} tool(s))."
+                    f"[green]Refreshed [bold]{rest}[/bold] ({len(tools)} tool(s)).[/green]"
                 )
             else:
                 self.console.print(
@@ -3683,7 +3691,7 @@ class VeluneREPL:
             ]
             for m in memories:
                 preview = m.content[:200].replace("\n", " ")
-                lines.append(f"• ({m.attribution}): {preview}")
+                lines.append(f"- ({m.attribution}): {preview}")
             lines.append("[END RETRIEVED CONTEXT]")
             return "\n".join(lines)
         except TimeoutError:
@@ -3973,7 +3981,7 @@ class VeluneREPL:
             tool = GitPushTool(workspace=workspace)
             with self.console.status("[cyan]Pushing branch to remote…[/cyan]"):
                 result = await tool.execute(force=force)
-            self.console.print(f"[green]✓[/green] {result}")
+            self.console.print(f"[green]{result}[/green]")
         except Exception as exc:
             self.console.print(f"[red]Push failed:[/red] {exc}")
 
@@ -4033,7 +4041,7 @@ class VeluneREPL:
 
             badge = "[dim][DRAFT][/dim] " if pr.get("draft") else ""
             self.console.print(
-                f"\n[green]✓ PR #{pr['pr_number']} created[/green] {badge}on {pr.get('provider', 'remote')}\n"
+                f"\n[green]PR #{pr['pr_number']} created[/green] {badge}on {pr.get('provider', 'remote')}\n"
                 f"  [bold]{pr['title']}[/bold]\n"
                 f"  [link={pr['url']}]{pr['url']}[/link]"
             )
@@ -4067,7 +4075,7 @@ class VeluneREPL:
             state_color = "green" if issue["state"] == "open" else "red"
             labels = "  ".join(f"[dim][{lbl}][/dim]" for lbl in issue.get("labels", []))
             self.console.print(
-                f"\n[{state_color}]●[/{state_color}] [bold]#{issue['number']} {issue['title']}[/bold]  {labels}\n"
+                f"\n[{state_color}][bold]#{issue['number']} {issue['title']}[/bold][/{state_color}]  {labels}\n"
                 f"[link={issue['url']}]{issue['url']}[/link]\n"
             )
             if issue.get("body"):
@@ -4134,7 +4142,7 @@ class VeluneREPL:
         )
         if reset.returncode == 0:
             self.console.print(
-                "[green]✓ Undo successful.[/green] "
+                "[green]Undo successful.[/green] "
                 "[dim]Last Velune commit reverted — changes kept staged.[/dim]"
             )
         else:
@@ -4164,7 +4172,7 @@ class VeluneREPL:
                 with self.console.status("[cyan]Starting Docker sandbox…[/cyan]"):
                     sb.start()
                 self.console.print(
-                    f"[green]✓ Docker sandbox started[/green]\n"
+                    f"[green]Docker sandbox started[/green]\n"
                     f"  Container: [bold]{sb.session_id}[/bold]\n"
                     f"  Image:     [dim]{sb.image}[/dim]\n"
                     f"  Workspace: [dim]{workspace} → /workspace[/dim]\n\n"
@@ -4431,9 +4439,9 @@ class VeluneREPL:
                 any_issues = True
                 render_lint_panel(self.console, path.name, diags)
             else:
-                self.console.print(f"[green]✓ {path.name}[/green] [dim]No issues found.[/dim]")
+                self.console.print(f"[green]{path.name}[/green] [dim]No issues found.[/dim]")
         if not any_issues and len(paths) > 1:
-            self.console.print("[green]✓ All files clean.[/green]")
+            self.console.print("[green]All files clean.[/green]")
 
     async def _cmd_refactor(self, args: str) -> None:
         from rich.table import Table
@@ -4455,7 +4463,7 @@ class VeluneREPL:
         hints = await asyncio.to_thread(analyzer.analyze_file, path)
 
         if not hints:
-            self.console.print(f"[green]✓ {path.name}[/green] [dim]No smells detected.[/dim]")
+            self.console.print(f"[green]{path.name}[/green] [dim]No smells detected.[/dim]")
             return
 
         tbl = Table(
@@ -4503,7 +4511,7 @@ class VeluneREPL:
 
         if not suggestions:
             self.console.print(
-                f"[green]✓ {path.name}[/green] [dim]All functions already annotated.[/dim]"
+                f"[green]{path.name}[/green] [dim]All functions already annotated.[/dim]"
             )
             return
 
@@ -4530,7 +4538,7 @@ class VeluneREPL:
                 suggestions,
             )
             path.write_text(patched, encoding="utf-8")
-            self.console.print(f"[green]✓ Annotations written to {path.name}[/green]")
+            self.console.print(f"[green]Annotations written to {path.name}[/green]")
         else:
             self.console.print("[dim]No changes made.[/dim]")
 

@@ -170,17 +170,18 @@ class TestStatusBar:
         state = StatusBarState(
             model_id="qwen2.5-coder-7b",
             mode_label="NORMAL",
-            profile_label="BALANCED",
+            profile_label="BALANCED",  # profile_label is kept for compat but not rendered
             context_pct=42.0,
         )
         text = self._text(state)
         assert "qwen2.5-coder-7b" in text
         assert "NORMAL" in text
-        assert "BALANCED" in text
         assert "ctx 42%" in text
+        # profile_label is no longer shown in the status bar (use /stats)
+        assert "BALANCED" not in text
 
     def test_latency_formats_ms_and_seconds(self):
-        # The status bar renders latency as "⚡ 250ms" / "⚡ 1.5s".
+        # Latency renders as "250ms" / "1.5s" (no ⚡ prefix in new design)
         assert "250ms" in self._text(StatusBarState(last_latency_ms=250.0))
         assert "1.5s" in self._text(StatusBarState(last_latency_ms=1500.0))
 
@@ -201,15 +202,18 @@ class TestStatusBar:
         assert "ctx 10%" in text
         assert "/" not in text.split("ctx 10%")[1].split("│")[0]
 
-    def test_session_cost_only_when_nonzero(self):
+    def test_session_cost_not_in_status_bar(self):
+        # Cost is visible via /stats, not the always-on status bar
         assert "$" not in self._text(StatusBarState(session_cost=0.0))
-        assert "$0.42" in self._text(StatusBarState(session_cost=0.42))
+        assert "$" not in self._text(StatusBarState(session_cost=0.42))
 
     def test_provider_health_states(self):
-        assert "provider ok" in self._text(StatusBarState(provider_health="ok"))
+        # "ok" is the normal (silent) state — not rendered to reduce noise
+        assert "provider" not in self._text(StatusBarState(provider_health="ok"))
+        assert "provider" not in self._text(StatusBarState(provider_health=None))
+        # Only degraded and down are surfaced
         assert "provider degraded" in self._text(StatusBarState(provider_health="degraded"))
         assert "provider down" in self._text(StatusBarState(provider_health="down"))
-        assert "provider" not in self._text(StatusBarState(provider_health=None))
 
 
 class TestPipelineTracker:
@@ -223,7 +227,7 @@ class TestPipelineTracker:
         plain = self._plain(tracker)
         assert "Planner" in plain and "Synthesis" in plain
         assert "◆" not in plain  # nothing active yet
-        assert "✓" not in plain  # nothing done yet
+        assert "+" not in plain  # nothing done yet
 
     def test_advance_completes_earlier_stages(self):
         from velune.cli.display.pipeline import PipelineTracker
@@ -251,7 +255,7 @@ class TestPipelineTracker:
         tracker.advance("coder")
         tracker.fail()
         assert tracker.state_of("coder") == "failed"
-        assert "✗" in self._plain(tracker)
+        assert "!" in self._plain(tracker)
 
     def test_complete_finishes_active_stage(self):
         from velune.cli.display.pipeline import PipelineTracker

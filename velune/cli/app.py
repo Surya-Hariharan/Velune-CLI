@@ -31,7 +31,6 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.panel import Panel
 from rich.text import Text
 
 from velune import __version__
@@ -42,36 +41,6 @@ from velune.core.startup_profiler import mark as _startup_mark
 from velune.kernel.registry import ServiceContainer
 
 _startup_mark("cli.app imported (typer/rich/runtime ready)")
-
-
-def _startup_frames(workspace: Path, config_path: Path | None) -> list[Panel]:
-    body = (
-        f"[bold {design.ACCENT}]✦ Velune[/bold {design.ACCENT}]"
-        f" [{design.MUTED}]v{__version__}[/{design.MUTED}] · "
-        f"[{design.INFO}]Orchestrating your local AI[/{design.INFO}]"
-    )
-    frame = Panel(
-        Text.from_markup(body),
-        border_style=design.GREEN,
-        padding=(0, 2),
-    )
-    return [frame]
-
-
-def _show_startup_banner(console: Console, workspace: Path, config_path: Path | None) -> None:
-    """Render the welcome banner once, instantly.
-
-    The previous implementation animated the banner frame-by-frame with a
-    ``time.sleep(0.08)`` per line — ~0.6-1.2s of pure blocking delay on every
-    interactive launch. Modern AI terminals show their surface immediately;
-    perceived speed comes from an instant prompt, not a reveal animation.
-    """
-    import sys
-
-    if not sys.stdout.isatty():
-        return  # Skip banner in CI, piped output, --quiet mode
-
-    console.print(_startup_frames(workspace, config_path)[-1])
 
 
 # Repository markers that indicate *workspace* is (probably) a project root.
@@ -88,23 +57,6 @@ def _detect_repo_marker(path: Path) -> str | None:
     except Exception:
         pass
     return None
-
-
-def _show_welcome_guide(console: Console) -> None:
-    """First-launch guidance — next steps only, no repository processing (Rule 13)."""
-    console.print(
-        Panel(
-            f"[bold {design.ACCENT}]Welcome to Velune[/bold {design.ACCENT}]\n\n"
-            f"[{design.INFO}]Next steps[/{design.INFO}]\n"
-            "  [bold]1.[/bold] [bold]/model discover[/bold]      [dim]find local + cloud models[/dim]\n"
-            "  [bold]2.[/bold] [bold]/model connect[/bold]       [dim]set your default model[/dim]\n"
-            "  [bold]3.[/bold] [bold]/project open <path>[/bold] [dim]choose a workspace[/dim]\n"
-            "  [bold]4.[/bold] [bold]/index[/bold]               [dim]index the workspace[/dim]\n\n"
-            "[dim]Type [bold]/help[/bold] for all commands.[/dim]",
-            border_style=design.ACCENT,
-            padding=(0, 2),
-        )
-    )
 
 
 def create_app(register: str | None = "__all__") -> typer.Typer:
@@ -239,62 +191,51 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                     )
                 )
             else:
-                # Render the welcome surface *first* so it appears instantly,
-                # before any provider/keyring probe. Perceived speed comes from
-                # the banner being on screen while cheap checks finish.
-                _show_startup_banner(runtime.console, workspace, config_path)
+                if not sys.stdin.isatty():
+                    # Non-interactive (piped stdin, CI, cron): check providers and exit if none.
+                    from velune.providers.keystore import list_configured_providers
 
-                from velune.providers.keystore import list_configured_providers
-
-                # list_configured_providers already includes a (short, deduped)
-                # Ollama reachability probe, so a single call suffices.
-                configured = list_configured_providers()
-
-                if not configured:
-                    runtime.console.print(
-                        Panel(
-                            f"[{design.WARN}]⚠ No AI providers configured[/{design.WARN}]\n"
-                            f"[{design.INFO}]Velune needs at least one provider to orchestrate.[/{design.INFO}]",
-                            border_style=design.WARN,
-                        )
-                    )
-                    # In a non-interactive context (piped stdin, CI, cron) there is
-                    # no TTY to read a confirmation from and the REPL cannot run.
-                    # Print the actionable hint and exit cleanly instead of
-                    # blocking on `typer.confirm` (which would hit EOF) or dropping
-                    # into a doomed REPL.
-                    if not sys.stdin.isatty():
+                    if not list_configured_providers():
                         runtime.console.print(
-                            f"[{design.INFO}]→ Run `velune setup` to configure a provider, "
-                            f"then start Velune again.[/{design.INFO}]"
+                            Text.from_markup(
+                                f"[{design.WARN}]No AI providers configured.[/{design.WARN}]  "
+                                f"[{design.MUTED}]Run velune setup to configure a provider.[/{design.MUTED}]"
+                            )
                         )
                         raise typer.Exit()
-
-                    run_now = typer.confirm("Run setup now?", default=True)
-                    if run_now:
-                        from velune.cli.commands.setup import run_setup_wizard
-
-                        run_setup_wizard()
-                    else:
-                        runtime.console.print(
-                            f"[{design.INFO}]→ Run `velune setup` any time to configure providers[/{design.INFO}]"
-                        )
-                    # NO EXIT HERE — fall through to REPL regardless. The only
-                    # ways out of Velune are /exit, /quit, or Ctrl+C twice.
-
-                # First-launch guidance (no model yet) — never processes the repo.
-                if not configured:
-                    _show_welcome_guide(runtime.console)
-
-                # Advisory repo detection (Rule 12): hint, never auto-cognition.
-                repo_name = _detect_repo_marker(workspace)
-                if repo_name:
-                    runtime.console.print(
-                        f"[{design.INFO}]Repository detected:[/{design.INFO}] "
-                        f"[cyan]{repo_name}[/cyan]  "
-                        f"[dim]→ run [bold]/project open .[/bold], then "
-                        f"[bold]/index[/bold][/dim]"
+                else:
+                    # Interactive: run state-machine onboarding.
+                    from velune.cli.onboarding import (
+                        onboarding_state,
+                        run_onboarding,
+                        show_returning_summary,
                     )
+
+                    state = onboarding_state()
+
+                    if state == "returning":
+                        from velune.cli.model_prefs import load_active_model
+                        from velune.providers.keystore import list_configured_providers
+
+                        configured = list_configured_providers()
+                        model_pref = load_active_model()
+                        show_returning_summary(runtime.console, configured, model_pref)
+                        # Advisory repo detection for returning users — hint only (Rule 12).
+                        repo_name = _detect_repo_marker(workspace)
+                        if repo_name:
+                            runtime.console.print(
+                                Text.from_markup(
+                                    f"[{design.FAINT}]→  Detected project"
+                                    f" [{design.MUTED}]{repo_name}[/{design.MUTED}]"
+                                    f" · run /project open . then /index[/{design.FAINT}]"
+                                )
+                            )
+                    elif state == "partial":
+                        # Providers configured but no model selected — jump to model discovery.
+                        run_onboarding(runtime, skip_to="model_discovery")
+                    else:
+                        # Fresh install — run the full guided wizard.
+                        run_onboarding(runtime, skip_to=None)
 
                 _startup_mark("REPL handoff (prompt visible)")
                 from velune.kernel.entrypoint import launch

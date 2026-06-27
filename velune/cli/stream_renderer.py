@@ -85,12 +85,18 @@ class StreamRenderer:
                 supports_stream = getattr(capabilities, "supports_streaming", False)
 
                 if supports_stream:
+                    from rich.text import Text as _Text
+
                     stream_buffer = MarkdownStreamBuffer()
                     stats = StreamStats()
                     last_update = 0.0
 
+                    # Show "Thinking…" until the first token arrives so the
+                    # user always has immediate visual feedback.
+                    _thinking = _Text("Thinking…", style="dim")
+
                     with Live(
-                        "",
+                        _thinking,
                         console=self._console,
                         refresh_per_second=12,
                         vertical_overflow="visible",
@@ -111,7 +117,7 @@ class StreamRenderer:
 
                 else:
                     t0 = time.perf_counter()
-                    with self._console.status("[cyan]Thinking...[/cyan]"):
+                    with self._console.status("[dim]Thinking…[/dim]"):
                         response = await provider.infer(request)
                     self._status_state.last_latency_ms = (time.perf_counter() - t0) * 1000.0
                     self._status_state.last_tokens_per_sec = None

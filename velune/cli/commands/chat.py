@@ -44,7 +44,7 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
     repo_cognition = container.get("runtime.repository_cognition")
 
     # 2. Boot subsystems
-    console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
+    console.print("[bold cyan]Bootstrapping Cognitive Operating System kernel...[/bold cyan]")
     await lifecycle.startup()
     await model_registry.refresh()
 
@@ -78,7 +78,7 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
     provider = provider_registry.get_or_raise(coder_model.provider_id)
 
     # 4. Ingest and Scan AST Snapshot
-    with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]"):
+    with console.status("[bold magenta]Scanning codebase AST structure...[/bold magenta]"):
         snapshot = repo_cognition.index()
 
     from velune.cognition.firewall import CognitiveFirewall
@@ -418,7 +418,7 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
             try:
                 milestones = []
                 async for milestone in orchestration_engine.stream(task):
-                    console.print(f"  [bold cyan]•[/bold cyan] {milestone}")
+                    console.print(f"  [bold cyan]{milestone}[/bold cyan]")
                     milestones.append(milestone)
 
                 run_id = None
@@ -436,7 +436,7 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
                     success = state.status == ExecutionStatus.COMPLETED
                     if success:
                         console.print(
-                            f"[bold green]✓ Execution completed successfully: {state.output or 'Done'}[/bold green]"
+                            f"[bold green]Execution completed successfully: {state.output or 'Done'}[/bold green]"
                         )
                     else:
                         from velune.cli.rendering.error_panel import render_unexpected_error
@@ -530,7 +530,7 @@ def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: Cognit
     lines = [f"Repository Root: {snapshot.root_path}"]
     lines.append("Codebase Files:")
     for f in snapshot.files[:25]:
-        risk_marker = " [⚠ injection-risk]" if f.metadata.get("injection_risk") else ""
+        risk_marker = " [injection-risk]" if f.metadata.get("injection_risk") else ""
         lines.append(f"  - {f.path} ({f.language.value}){risk_marker}")
         if f.symbols:
             safe_syms = [s.name for s in f.symbols[:3] if s.name.isidentifier()]

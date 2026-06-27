@@ -15,6 +15,10 @@ class InferenceRequest(BaseModel):
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     stop_sequences: list[str] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Cache hints: maps message index → cache type string.
+    # -1 = system message, 0+ = non-system messages[index].
+    # None means no caching requested (default, fully backward-compatible).
+    cache_hints: dict[int, str] | None = None
 
 
 class StreamChunk(BaseModel):
@@ -36,3 +40,7 @@ class InferenceResponse(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Cache token counts — populated by providers that support prompt caching.
+    # Defaults to 0 for all providers that do not support caching (backward-compatible).
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0

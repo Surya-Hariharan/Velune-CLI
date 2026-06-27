@@ -32,16 +32,16 @@ console = Console()
 context_cmd = typer.Typer(help="Show index freshness, file counts, and workspace health.")
 
 _FRESHNESS_STYLE = {
-    "synced": (design.OK, "● synced"),
-    "stale": (design.WARN, "● stale"),
-    "unknown": (design.MUTED, "● unknown"),
-    "no-index": (design.DANGER, "● not indexed"),
+    "synced": (design.OK, "synced"),
+    "stale": (design.WARN, "stale"),
+    "unknown": (design.MUTED, "unknown"),
+    "no-index": (design.DANGER, "not indexed"),
 }
 
 _STATE_GLYPH = {
-    "ok": (design.OK, "✓"),
+    "ok": (design.OK, "ok"),
     "warn": (design.WARN, "!"),
-    "danger": (design.DANGER, "✗"),
+    "danger": (design.DANGER, "fail"),
 }
 
 

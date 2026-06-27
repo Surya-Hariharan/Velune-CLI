@@ -130,9 +130,9 @@ def _render(console: Console, report: RetrievalTraceReport) -> None:
     table.add_column("Note", style=design.MUTED)
     for s in report.stages:
         if not s.enabled:
-            state = Text("○ off", style=design.MUTED)
+            state = Text("off", style=design.MUTED)
         else:
-            state = Text("● on", style=design.OK)
+            state = Text("on", style=design.OK)
         table.add_row(s.name, state, str(s.hits), f"{s.ms:.1f} ms", s.note or "")
     console.print()
     console.print(table)

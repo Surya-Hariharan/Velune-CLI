@@ -58,13 +58,13 @@ async def _run_command_async(
     orchestration_engine = container.get("runtime.orchestration_engine")
     # 2. Boot up Cognitive OS Subsystems
     if not cli_context.json_mode:
-        console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
+        console.print("[bold cyan]Bootstrapping Cognitive Operating System kernel...[/bold cyan]")
     await lifecycle.startup()
 
     # 3. Refresh model catalog scan to assign specialized seats
     if not cli_context.json_mode:
         console.print(
-            "[bold cyan]⠋[/bold cyan] Probing system hardware and local/remote providers..."
+            "[bold cyan]Probing system hardware and local/remote providers...[/bold cyan]"
         )
     await model_registry.refresh()
 
@@ -96,7 +96,7 @@ async def _run_command_async(
         )
         # 4. Stream Multi-Agent Council Deliberation & Execution Graph
         console.print(
-            "[bold magenta]🧠 Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n"
+            "[bold magenta]Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n"
         )
 
     # --- Pre-operation cost estimation gate ---
@@ -109,7 +109,7 @@ async def _run_command_async(
         milestones = []
         async for milestone in orchestration_engine.stream(task):
             if not cli_context.json_mode:
-                console.print(f"  [bold cyan]•[/bold cyan] {milestone}")
+                console.print(f"  [bold cyan]{milestone}[/bold cyan]")
             milestones.append(milestone)
 
         # Parse run_id from milestones (format: "[run_id] milestone_name")
@@ -134,7 +134,7 @@ async def _run_command_async(
 
             print(json.dumps({"error": "Pipeline failed to initialize state."}))
         else:
-            console.print("[bold red]✗ Pipeline failed to initialize state.[/bold red]")
+            console.print("[bold red]Pipeline failed to initialize state.[/bold red]")
         await lifecycle.shutdown()
         return
 
@@ -165,7 +165,7 @@ async def _run_command_async(
             console.print(
                 Panel(
                     Text.assemble(
-                        ("[bold green]✓ STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"),
+                        ("[bold green]STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"),
                         (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
                         (f"Plan Steps: [bold white]{plan_steps}[/bold white] steps processed\n"),
                         (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
@@ -181,7 +181,7 @@ async def _run_command_async(
             console.print(
                 Panel(
                     Text.assemble(
-                        ("[bold red]✗ AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"),
+                        ("[bold red]AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"),
                         (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
                         (
                             f"Failure Reason: [bold red]{state.error or 'Validation/Execution mismatch'}[/bold red]\n"
@@ -260,7 +260,7 @@ def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: Cognit
     lines.append("Codebase Files:")
     for f in snapshot.files[:25]:
         # Only expose path and language — no raw symbol names or content
-        risk_marker = " [⚠ injection-risk]" if f.metadata.get("injection_risk") else ""
+        risk_marker = " [injection-risk]" if f.metadata.get("injection_risk") else ""
         lines.append(f"  - {f.path} ({f.language.value}){risk_marker}")
         # Symbol names are safe to expose (identifiers, not content)
         if f.symbols:

@@ -126,7 +126,7 @@ def run_setup_wizard() -> None:
             f"[bold {design.ACCENT}]Velune Provider Setup[/bold {design.ACCENT}]\n"
             f"[{design.MUTED}]Configure which AI providers you want to use.[/{design.MUTED}]\n"
             f"[{design.MUTED}]Keys are stored securely in your OS keychain.[/{design.MUTED}]\n\n"
-            f"🔒 [bold {design.OK}]Privacy Notice:[/bold {design.OK}] "
+            f"[bold {design.OK}]Privacy Notice:[/bold {design.OK}] "
             f"[{design.MUTED}]Your code and conversations stay on this machine "
             f"unless you configure a cloud provider.[/{design.MUTED}]",
             border_style=design.ACCENT,
@@ -156,7 +156,7 @@ def run_setup_wizard() -> None:
         with console.status(f"  [{design.MUTED}]Checking {pid} server...[/{design.MUTED}]"):
             result = _validate_sync(pid, "")
         if result.ok:
-            console.print(f"  [{design.OK}]✓ {result.human_message()}[/{design.OK}]")
+            console.print(f"  [{design.OK}]{result.human_message()}[/{design.OK}]")
             configured.append(pid)
         else:
             console.print(f"  [{design.WARN}]{result.human_message()}[/{design.WARN}]")
@@ -201,7 +201,7 @@ def run_setup_wizard() -> None:
 
         if result.ok:
             save_key(pid, key)
-            console.print(f"  [{design.OK}]✓ {result.human_message()}[/{design.OK}]")
+            console.print(f"  [{design.OK}]{result.human_message()}[/{design.OK}]")
             if result.models:
                 _show_models_preview(result.models[:8])
             configured.append(pid)
@@ -216,7 +216,7 @@ def run_setup_wizard() -> None:
                 if retry:
                     save_key(pid, key)
                     console.print(
-                        f"  [{design.WARN}]⚠ Key saved without validation.[/{design.WARN}]"
+                        f"  [{design.WARN}]Key saved without validation.[/{design.WARN}]"
                     )
                     configured.append(pid)
                 else:
@@ -228,14 +228,14 @@ def run_setup_wizard() -> None:
                 if save_anyway:
                     save_key(pid, key)
                     console.print(
-                        f"  [{design.WARN}]⚠ Key saved (not validated — check network).[/{design.WARN}]"
+                        f"  [{design.WARN}]Key saved (not validated — check network).[/{design.WARN}]"
                     )
                     configured.append(pid)
 
     console.print()
     if configured:
         console.print(
-            f"[bold {design.OK}]✓ Configured providers:[/bold {design.OK}] {', '.join(configured)}"
+            f"[bold {design.OK}]Configured providers:[/bold {design.OK}] {', '.join(configured)}"
         )
         console.print(
             f"[{design.MUTED}]Run `velune doctor` to verify connectivity.[/{design.MUTED}]"
@@ -275,7 +275,7 @@ def _select_providers() -> list[str]:
             else f"[{design.MUTED}]paid[/{design.MUTED}]"
         )
         status = (
-            f"[{design.OK}]✓ configured[/{design.OK}]"
+            f"[{design.OK}]configured[/{design.OK}]"
             if has_key(pid)
             else f"[{design.MUTED}]not set[/{design.MUTED}]"
         )

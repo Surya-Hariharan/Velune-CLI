@@ -65,7 +65,7 @@ async def _ask_command_async(
 
     # 2. Boot subsystems
     if not cli_context.json_mode:
-        console.print("[bold cyan]⠋[/bold cyan] Bootstrapping Cognitive Operating System kernel...")
+        console.print("[bold cyan]Bootstrapping Cognitive Operating System kernel...[/bold cyan]")
     await lifecycle.startup()
     await model_registry.refresh()
 
@@ -104,7 +104,7 @@ async def _ask_command_async(
     # 4. Ingest and Scan AST Snapshot
     snapshot: RepositorySnapshot | None = None
     if not cli_context.json_mode:
-        with console.status("[bold magenta]⚡ Scanning codebase AST structure...[/bold magenta]"):
+        with console.status("[bold magenta]Scanning codebase AST structure...[/bold magenta]"):
             snapshot = repo_cognition.index()
     else:
         snapshot = repo_cognition.index()
@@ -115,7 +115,7 @@ async def _ask_command_async(
     council_res = None
     if not cli_context.json_mode:
         with console.status(
-            "[bold magenta]🧠 Deliberating Reasoning Council debate...[/bold magenta]"
+            "[bold magenta]Deliberating Reasoning Council debate...[/bold magenta]"
         ):
             council_res = await orchestrator.execute_task(
                 prompt, formatted_snap, council_tier=council_tier
@@ -146,16 +146,16 @@ async def _ask_command_async(
         )
     else:
         # 6. Render reports
-        display.render_step_header("Council Reviewer", "🔍")
+        display.render_step_header("Council Reviewer")
         display.render_reviewer_report(council_res["reviewer_report"])
 
-        display.render_step_header("Council Challenger", "⚡")
+        display.render_step_header("Council Challenger")
         display.render_challenger_report(council_res["challenger_report"])
 
-        display.render_step_header("Arbitration Engine", "⚖️")
+        display.render_step_header("Arbitration Engine")
         display.render_arbitration_result(arbitration)
 
-        display.render_step_header("Council Synthesizer", "🚀")
+        display.render_step_header("Council Synthesizer")
         display.render_synthesized_response(final_summary)
 
     # 7. Shutdown
@@ -168,7 +168,7 @@ def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: Cognit
     lines.append("Codebase Files:")
     for f in snapshot.files[:25]:
         # Only expose path and language — no raw symbol names or content
-        risk_marker = " [⚠ injection-risk]" if f.metadata.get("injection_risk") else ""
+        risk_marker = " [injection-risk]" if f.metadata.get("injection_risk") else ""
         lines.append(f"  - {f.path} ({f.language.value}){risk_marker}")
         # Symbol names are safe to expose (identifiers, not content)
         if f.symbols:

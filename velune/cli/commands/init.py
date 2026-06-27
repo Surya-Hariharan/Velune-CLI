@@ -54,7 +54,7 @@ def init_command(
     velune_dir.mkdir(exist_ok=True)
     (velune_dir / "sessions").mkdir(exist_ok=True)
     (velune_dir / "index").mkdir(exist_ok=True)
-    console.print("[green]✓[/green] Created .velune/ directory")
+    console.print("[green]Created .velune/ directory[/green]")
 
     # Project type detection
     try:
@@ -78,7 +78,7 @@ def init_command(
             )
         )
         console.print(
-            f"[green]✓[/green] Detected project type: [cyan]{_profile.display_name}[/cyan]"
+            f"[green]Detected project type:[/green] [cyan]{_profile.display_name}[/cyan]"
         )
         if _profile.detected_frameworks:
             console.print(f"  [dim]Frameworks: {', '.join(_profile.detected_frameworks)}[/dim]")
@@ -91,7 +91,7 @@ def init_command(
         from velune.repository.scanner import DEFAULT_VELUNEIGNORE
 
         ignore_file.write_text(DEFAULT_VELUNEIGNORE)
-        console.print("[green]✓[/green] Created .veluneignore")
+        console.print("[green]Created .veluneignore[/green]")
 
     # config.toml
     config_path = velune_dir / "config.toml"
@@ -113,7 +113,7 @@ enabled = true
 """
         config_path.write_text(config_content)
         console.print(
-            f"[green]✓[/green] Created .velune/config.toml (provider: {default_provider})"
+            f"[green]Created .velune/config.toml[/green] (provider: {default_provider})"
         )
 
     # .gitignore
@@ -123,10 +123,10 @@ enabled = true
         if ".velune/" not in content:
             with open(gitignore, "a") as f:
                 f.write("\n# Velune\n.velune/\n")
-            console.print("[green]✓[/green] Added .velune/ to .gitignore")
+            console.print("[green]Added .velune/ to .gitignore[/green]")
 
     console.print()
-    console.print("[bold green]✓ Velune initialized.[/bold green]")
+    console.print("[bold green]Velune initialized.[/bold green]")
     console.print("[dim]Next steps:[/dim]")
     console.print("  [cyan]velune[/cyan]          — start the REPL")
     console.print("  [cyan]velune doctor[/cyan]   — verify configuration")
@@ -153,7 +153,7 @@ def _run_hardware_check() -> None:
     console.print(table)
 
     for w in profile.warnings:
-        console.print(f"  [yellow]⚠[/yellow] {w}")
+        console.print(f"  [yellow]{w}[/yellow]")
     for s in profile.suggestions:
         console.print(f"  [dim]→ {s}[/dim]")
 

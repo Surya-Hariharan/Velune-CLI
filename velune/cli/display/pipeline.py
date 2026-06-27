@@ -4,7 +4,7 @@ Renders a council/orchestration run as a horizontal pipeline so the operator
 can see, at a glance, which stage owns the work right now and what has already
 completed:
 
-    Planner ✓ → Coder ◆ → Reviewer · → Synthesis ·
+    Planner + → Coder ◆ → Reviewer · → Synthesis ·
 
 This is deliberately *infrastructure-grade*, not decorative: one stable line,
 no animation, semantic glyphs/colors only. It complements (does not replace)
@@ -39,8 +39,8 @@ _CANONICAL_STAGES: tuple[str, ...] = (
 _GLYPHS: dict[str, tuple[str, str]] = {
     "waiting": ("·", design.FAINT),
     "active": ("◆", design.ACCENT_SOFT),
-    "done": ("✓", design.OK),
-    "failed": ("✗", design.DANGER),
+    "done": ("+", design.OK),
+    "failed": ("!", design.DANGER),
 }
 
 

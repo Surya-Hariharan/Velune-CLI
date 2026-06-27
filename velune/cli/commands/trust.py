@@ -32,10 +32,10 @@ def _default(ctx: typer.Context) -> None:
         return
     cwd = Path.cwd()
     if trust.is_trusted(cwd):
-        _console.print(f"[{design.OK}]✓ trusted[/{design.OK}] [dim]{cwd}[/dim]")
+        _console.print(f"[{design.OK}]trusted[/{design.OK}] [dim]{cwd}[/dim]")
     else:
         _console.print(
-            f"[{design.WARN}]✗ not trusted[/{design.WARN}] [dim]{cwd}[/dim]\n"
+            f"[{design.WARN}]not trusted[/{design.WARN}] [dim]{cwd}[/dim]\n"
             "[dim]Run [bold]velune trust add[/bold] to allow project-level MCP / config.[/dim]"
         )
 
@@ -47,7 +47,7 @@ def add(
     """Trust a directory so its project-level MCP / config is honored."""
     target = (path or Path.cwd()).expanduser()
     trust.trust(target)
-    _console.print(f"[{design.OK}]✓ trusted[/{design.OK}] [dim]{target.resolve()}[/dim]")
+    _console.print(f"[{design.OK}]trusted[/{design.OK}] [dim]{target.resolve()}[/dim]")
 
 
 @trust_cmd.command("forget")
@@ -70,4 +70,4 @@ def list_() -> None:
         _console.print("[dim]No trusted directories.[/dim]")
         return
     for entry in entries:
-        _console.print(f"[{design.OK}]✓[/{design.OK}] [dim]{entry}[/dim]")
+        _console.print(f"[{design.OK}][dim]{entry}[/dim]")

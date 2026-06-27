@@ -37,7 +37,7 @@ async def run_preflight_check(container: ServiceContainer, console: Console | No
                         "This doesn't look like a code project yet. Navigate to your project\n"
                         "folder and run [bold green]velune workspace init[/bold green] first."
                     ),
-                    title="[bold yellow]⚠️  Not a Project Directory[/bold yellow]",
+                    title="[bold yellow]Not a Project Directory[/bold yellow]",
                     border_style="yellow",
                     box=ROUNDED,
                     padding=(1, 2),
@@ -83,7 +83,7 @@ async def run_preflight_check(container: ServiceContainer, console: Console | No
             console.print(
                 Panel(
                     panel_content,
-                    title="[bold red]⚠️ Preflight Check Blocked[/bold red]",
+                    title="[bold red]Preflight Check Blocked[/bold red]",
                     border_style="red",
                     box=ROUNDED,
                     padding=(1, 2),

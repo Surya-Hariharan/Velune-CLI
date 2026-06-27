@@ -187,11 +187,11 @@ async def run_councilmodel_ui(
     chosen_model = model_result[0]
     if chosen_model is None:
         role_map.clear_role(selected_role)
-        console.print(f"[yellow]✓ Cleared assignment for [{selected_role}][/yellow]")
+        console.print(f"[yellow]Cleared assignment for [{selected_role}][/yellow]")
     else:
         role_map.assign(selected_role, chosen_model.model_id, chosen_model.provider_id)
         console.print(
-            f"[green]✓ [{selected_role}][/green] → "
+            f"[green][{selected_role}][/green] → "
             f"[cyan]{chosen_model.model_id}[/cyan] "
             f"[dim]({chosen_model.provider_id})[/dim]"
         )

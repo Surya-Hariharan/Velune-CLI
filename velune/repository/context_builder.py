@@ -156,7 +156,7 @@ class WorkspaceContextBuilder:
         total_files = snapshot.summary.get("total_files", len(snapshot.files))
         total_symbols = snapshot.summary.get("total_symbols", len(snapshot.symbols))
         violations_count = arch.get("violations_count", 0)
-        viol_badge = f"  ⚠ {violations_count} layer violations" if violations_count else ""
+        viol_badge = f"  ({violations_count} layer violations)" if violations_count else ""
         lines.append(f"Files: {total_files}  Symbols: {total_symbols}{viol_badge}")
 
         # Recent commits
@@ -289,9 +289,9 @@ class WorkspaceContextBuilder:
                 src = v.get("from", v.get("source", "?"))
                 tgt = v.get("to", v.get("target", "?"))
                 reason = v.get("reason", v.get("rule", v.get("message", "layer boundary crossed")))
-                lines.append(f"  ⚠ {src} → {tgt}: {reason}")
+                lines.append(f"  violation: {src} → {tgt}: {reason}")
             elif isinstance(v, str):
-                lines.append(f"  ⚠ {v}")
+                lines.append(f"  violation: {v}")
 
         if len(violations) > _MAX_VIOLATIONS:
             lines.append(

@@ -88,7 +88,7 @@ class SecretFileDetector:
         return False
 
     def get_warning(self, file_path: str) -> str:
-        return f"⚠️  SECURITY: '{file_path}' looks like a secrets file and was not indexed."
+        return f"SECURITY: '{file_path}' looks like a secrets file and was not indexed."
 
 
 class RepositoryIndexer:

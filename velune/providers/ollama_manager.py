@@ -185,11 +185,11 @@ class OllamaManager:
         await pull_task
 
         if error_msg[0]:
-            console.print(f"[red]✗ Pull failed: {error_msg[0]}[/red]")
+            console.print(f"[red]Pull failed: {error_msg[0]}[/red]")
             return False
 
         if completed[0]:
-            console.print(f"\n[green]✓ {model_id} downloaded successfully.[/green]")
+            console.print(f"\n[green]{model_id} downloaded successfully.[/green]")
             return True
 
         console.print("[yellow]Pull completed with unknown status.[/yellow]")

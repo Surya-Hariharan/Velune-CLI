@@ -102,7 +102,7 @@ def config_set(
             )
         else:
             console.print(
-                f"[green]✓ Successfully set [bold]{key}[/bold] to [bold]{typed_val}[/bold] in {config_path}[/green]"
+                f"[green]Successfully set [bold]{key}[/bold] to [bold]{typed_val}[/bold] in {config_path}[/green]"
             )
     except Exception as e:
         if cli_context.json_mode:

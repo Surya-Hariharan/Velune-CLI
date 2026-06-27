@@ -43,19 +43,9 @@ class ValidationResult:
         if self.ok:
             n = len(self.models)
             return (
-                f"✓ {self.provider_id} — authenticated ({n} model{'s' if n != 1 else ''} available)"
+                f"{self.provider_id} — authenticated ({n} model{'s' if n != 1 else ''} available)"
             )
-        icons = {
-            ValidationStatus.INVALID_KEY: "✗",
-            ValidationStatus.EXPIRED_KEY: "✗",
-            ValidationStatus.REVOKED_KEY: "✗",
-            ValidationStatus.RATE_LIMITED: "⚠",
-            ValidationStatus.NETWORK_ERROR: "✗",
-            ValidationStatus.MALFORMED_KEY: "✗",
-            ValidationStatus.PERMISSION_DENIED: "✗",
-            ValidationStatus.UNKNOWN_ERROR: "✗",
-        }
-        return f"{icons.get(self.status, '✗')} {self.message}"
+        return self.message
 
 
 # ---------------------------------------------------------------------------

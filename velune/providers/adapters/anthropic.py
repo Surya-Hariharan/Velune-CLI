@@ -52,6 +52,9 @@ class AnthropicProvider(ModelProvider):
             headers = {
                 "x-api-key": self._api_key,
                 "anthropic-version": "2023-06-01",
+                # Enable prompt-caching beta. Harmless when no cache_control blocks
+                # are present in the payload — activates automatically when they are.
+                "anthropic-beta": "prompt-caching-2024-07-31",
                 "content-type": "application/json",
             }
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
@@ -117,26 +120,7 @@ class AnthropicProvider(ModelProvider):
         assert self.client is not None
         start = time.perf_counter()
         try:
-            # Map standard messages to Anthropic format (system role is parsed out if present)
-            system_prompt = ""
-            anth_messages = []
-            for msg in request.messages:
-                if msg.get("role") == "system":
-                    system_prompt = msg.get("content", "")
-                else:
-                    anth_messages.append({"role": msg.get("role"), "content": msg.get("content")})
-
-            payload = {
-                "model": request.model_id,
-                "messages": anth_messages,
-                "max_tokens": request.max_tokens or 4096,
-                "temperature": request.temperature,
-                "top_p": request.top_p,
-            }
-            if system_prompt:
-                payload["system"] = system_prompt
-            if request.stop_sequences:
-                payload["stop_sequences"] = request.stop_sequences
+            payload = self._build_payload(request)
 
             response = await self.client.post("/v1/messages", json=payload)
             response.raise_for_status()
@@ -150,12 +134,16 @@ class AnthropicProvider(ModelProvider):
             # Record latency in health monitor if available
             self._record_latency_to_monitor(latency)
 
+            usage = data.get("usage", {})
             return InferenceResponse(
                 content=content,
                 model_id=request.model_id,
                 finish_reason=data.get("stop_reason") or "end_turn",
-                tokens_used=data.get("usage", {}).get("total_tokens", 0),
+                tokens_used=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
                 latency_ms=latency,
+                cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+                cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+                metadata={"raw_usage": usage},
             )
         except httpx.HTTPError as e:
             raise InferenceError(f"Anthropic message completion failed: {e}")
@@ -167,26 +155,8 @@ class AnthropicProvider(ModelProvider):
         start = time.perf_counter()
         first_token = True
         try:
-            system_prompt = ""
-            anth_messages = []
-            for msg in request.messages:
-                if msg.get("role") == "system":
-                    system_prompt = msg.get("content", "")
-                else:
-                    anth_messages.append({"role": msg.get("role"), "content": msg.get("content")})
-
-            payload = {
-                "model": request.model_id,
-                "messages": anth_messages,
-                "max_tokens": request.max_tokens or 4096,
-                "temperature": request.temperature,
-                "top_p": request.top_p,
-                "stream": True,
-            }
-            if system_prompt:
-                payload["system"] = system_prompt
-            if request.stop_sequences:
-                payload["stop_sequences"] = request.stop_sequences
+            payload = self._build_payload(request)
+            payload["stream"] = True
 
             async with self.client.stream("POST", "/v1/messages", json=payload) as response:
                 response.raise_for_status()
@@ -214,6 +184,48 @@ class AnthropicProvider(ModelProvider):
                             continue
         except httpx.HTTPError as e:
             raise InferenceError(f"Anthropic stream failed: {e}")
+
+    def _build_payload(self, request: InferenceRequest) -> dict:
+        """Build the Anthropic API payload for *request*.
+
+        When the cache manager has pre-transformed the messages into
+        cache_control block format (stored in metadata), use that directly.
+        Otherwise fall back to plain string extraction.
+        """
+        from velune.context.cache.providers import ANTHROPIC_CACHE_PAYLOAD_KEY
+
+        cache_payload = request.metadata.get(ANTHROPIC_CACHE_PAYLOAD_KEY)
+        if cache_payload:
+            payload: dict = {
+                "model": request.model_id,
+                "max_tokens": request.max_tokens or 4096,
+                "temperature": request.temperature,
+                "top_p": request.top_p,
+                "messages": cache_payload["messages"],
+            }
+            if "system" in cache_payload:
+                payload["system"] = cache_payload["system"]
+        else:
+            system_prompt = ""
+            anth_messages = []
+            for msg in request.messages:
+                if msg.get("role") == "system":
+                    system_prompt = msg.get("content", "")
+                else:
+                    anth_messages.append({"role": msg.get("role"), "content": msg.get("content")})
+            payload = {
+                "model": request.model_id,
+                "messages": anth_messages,
+                "max_tokens": request.max_tokens or 4096,
+                "temperature": request.temperature,
+                "top_p": request.top_p,
+            }
+            if system_prompt:
+                payload["system"] = system_prompt
+
+        if request.stop_sequences:
+            payload["stop_sequences"] = request.stop_sequences
+        return payload
 
     async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         raise NotImplementedError("Anthropic provider does not support embeddings.")

@@ -116,7 +116,7 @@ async def _memory_inspect_async(
                     )
         except Exception as exc:
             if not cli_context.json_mode:
-                console.print(f"[yellow]⚠ Could not read working memory: {exc}[/yellow]")
+                console.print(f"[yellow]Could not read working memory: {exc}[/yellow]")
 
     # --- Episodic memory (SQLite) ---
     if tier.lower() in ("episodic", "all"):
@@ -141,7 +141,7 @@ async def _memory_inspect_async(
                     )
         except Exception as exc:
             if not cli_context.json_mode:
-                console.print(f"[yellow]⚠ Could not read episodic memory: {exc}[/yellow]")
+                console.print(f"[yellow]Could not read episodic memory: {exc}[/yellow]")
 
     if cli_context.json_mode:
         import json
@@ -223,9 +223,9 @@ async def _memory_clear_async(cli_context: CLIContext, tier: str, session_id: st
         print(json.dumps({"success": not errors, "cleared": cleared, "errors": errors}))
     else:
         for c in cleared:
-            console.print(f"[green]✓ Cleared {c} memory.[/green]")
+            console.print(f"[green]Cleared {c} memory.[/green]")
         for e in errors:
-            console.print(f"[red]✗ Error clearing {e}[/red]")
+            console.print(f"[red]Error clearing {e}[/red]")
         if not cleared and not errors:
             console.print("[dim]Nothing to clear.[/dim]")
 
@@ -257,13 +257,13 @@ async def _memory_compact_async(cli_context: CLIContext) -> None:
     # flush working memory turns → episodic SQLite.
     # Semantic distillation and graph consolidation are planned for a later phase.
     if not cli_context.json_mode:
-        console.print("[bold cyan]⠋[/bold cyan] Flushing working memory to episodic store...")
+        console.print("[bold cyan]Flushing working memory to episodic store...[/bold cyan]")
 
     try:
         # shutdown() now handles the flush
         await lifecycle.shutdown()
         if not cli_context.json_mode:
-            console.print("[green]✓[/green] Working memory flushed to episodic SQLite.")
+            console.print("[green]Working memory flushed to episodic SQLite.[/green]")
             console.print(
                 "[dim]Note: semantic distillation (vector + graph consolidation) "
                 "is planned for a future phase and is not yet active.[/dim]"
@@ -271,7 +271,7 @@ async def _memory_compact_async(cli_context: CLIContext) -> None:
     except Exception as exc:
         await lifecycle.shutdown()
         if not cli_context.json_mode:
-            console.print(f"[red]✗ Compaction error: {exc}[/red]")
+            console.print(f"[red]Compaction error: {exc}[/red]")
         if cli_context.json_mode:
             import json
 

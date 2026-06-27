@@ -48,7 +48,7 @@ class WriteFile(BaseTool):
         if decision == DiffDecision.ACCEPT:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
-            self.console.print(f"[green]✓ Written:[/green] {path}")
+            self.console.print(f"[green]Written:[/green] {path}")
             return f"Successfully wrote to {path}"
         self.console.print(f"[yellow]Skipped:[/yellow] {path}")
         return f"Skipped (rejected by user): {path}"
@@ -101,7 +101,7 @@ class CreateFile(BaseTool):
         if decision == DiffDecision.ACCEPT:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
-            self.console.print(f"[green]✓ Created:[/green] {path}")
+            self.console.print(f"[green]Created:[/green] {path}")
             return f"Successfully created {file_path}"
         self.console.print(f"[yellow]Skipped:[/yellow] {path}")
         return f"Skipped (rejected by user): {path}"
@@ -151,7 +151,7 @@ class DeleteFile(BaseTool):
         decision = await preview.preview_and_confirm(path, "", auto_accept=False)
         if decision == DiffDecision.ACCEPT:
             path.unlink()
-            self.console.print(f"[red]✓ Deleted:[/red] {path}")
+            self.console.print(f"[red]Deleted:[/red] {path}")
             return f"Successfully deleted {file_path}"
         self.console.print(f"[yellow]Skipped:[/yellow] {path}")
         return f"Skipped (rejected by user): {path}"

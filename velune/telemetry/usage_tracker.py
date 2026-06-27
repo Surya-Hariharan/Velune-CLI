@@ -240,7 +240,7 @@ def _estimate_cost(
 class SessionUsageTracker:
     """Tracks token and cost usage per session with full provider attribution."""
 
-    _SCHEMA_VERSION = 2
+    _SCHEMA_VERSION = 3
 
     def __init__(self, db_path: Path | None = None) -> None:
         if db_path is None:
@@ -268,17 +268,21 @@ class SessionUsageTracker:
                     success       INTEGER NOT NULL DEFAULT 1,
                     error_code    TEXT,
                     estimated_cost REAL,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
                     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
-            # Migrate v1 → v2: add missing columns if absent
+            # Migrate v1/v2 → v3: add missing columns if absent
             existing = {row[1] for row in conn.execute("PRAGMA table_info(usage_records)")}
             for col, defn in [
                 ("provider_id", "TEXT NOT NULL DEFAULT ''"),
                 ("latency_ms", "REAL NOT NULL DEFAULT 0"),
                 ("success", "INTEGER NOT NULL DEFAULT 1"),
                 ("error_code", "TEXT"),
+                ("cache_creation_tokens", "INTEGER NOT NULL DEFAULT 0"),
+                ("cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"),
             ]:
                 if col not in existing:
                     conn.execute(f"ALTER TABLE usage_records ADD COLUMN {col} {defn}")
@@ -302,8 +306,9 @@ class SessionUsageTracker:
                     INSERT INTO usage_records
                     (session_id, timestamp, provider_id, model,
                      input_tokens, output_tokens, total_tokens,
-                     latency_ms, success, error_code, estimated_cost)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     latency_ms, success, error_code, estimated_cost,
+                     cache_creation_tokens, cache_read_tokens)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event.session_id,
@@ -317,6 +322,8 @@ class SessionUsageTracker:
                         1 if event.success else 0,
                         event.error_code,
                         event.cost_usd,
+                        getattr(event, "cache_creation_tokens", 0),
+                        getattr(event, "cache_read_tokens", 0),
                     ),
                 )
                 conn.commit()
@@ -338,6 +345,8 @@ class SessionUsageTracker:
         latency_ms: float = 0.0,
         success: bool = True,
         error_code: str | None = None,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0,
     ) -> None:
         """Record a model completion (backwards-compatible API)."""
         total_tokens = input_tokens + output_tokens
@@ -350,8 +359,9 @@ class SessionUsageTracker:
                     INSERT INTO usage_records
                     (session_id, timestamp, provider_id, model,
                      input_tokens, output_tokens, total_tokens,
-                     latency_ms, success, error_code, estimated_cost)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     latency_ms, success, error_code, estimated_cost,
+                     cache_creation_tokens, cache_read_tokens)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -365,6 +375,8 @@ class SessionUsageTracker:
                         1 if success else 0,
                         error_code,
                         estimated_cost,
+                        cache_creation_tokens,
+                        cache_read_tokens,
                     ),
                 )
                 conn.commit()
@@ -528,6 +540,30 @@ class SessionUsageTracker:
             ).fetchone()
         return row[0] or 0.0
 
+    def get_cache_stats(self, days: int = 30) -> dict:
+        """Return aggregated cache token statistics over *days* days."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    SUM(cache_creation_tokens) AS creation_tokens,
+                    SUM(cache_read_tokens)     AS read_tokens,
+                    COUNT(CASE WHEN cache_creation_tokens > 0 THEN 1 END) AS cache_writes,
+                    COUNT(CASE WHEN cache_read_tokens > 0 THEN 1 END)     AS cache_hits
+                FROM usage_records
+                WHERE timestamp > ?
+                """,
+                (cutoff,),
+            ).fetchone()
+        return {
+            "days": days,
+            "cache_creation_tokens": row[0] or 0,
+            "cache_read_tokens": row[1] or 0,
+            "cache_writes": row[2] or 0,
+            "cache_hits": row[3] or 0,
+        }
+
     # ------------------------------------------------------------------
     # Historical queries (kept from v1)
     # ------------------------------------------------------------------
@@ -609,6 +645,8 @@ def record_usage(
     latency_ms: float = 0.0,
     success: bool = True,
     error_code: str | None = None,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
 ) -> None:
     """Convenience one-liner for the runtime to record a completion."""
     get_tracker().record_completion(
@@ -620,4 +658,6 @@ def record_usage(
         latency_ms=latency_ms,
         success=success,
         error_code=error_code,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
     )

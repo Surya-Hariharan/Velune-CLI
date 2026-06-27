@@ -53,7 +53,7 @@ class MemoryDisplayView:
                         "[bold red]Tier 5: Archive Storage[/bold red]  ──► Long-term zstd-compressed cold files"
                     ),
                 ),
-                title="[bold white]🧠 Memory Architecture Map[/bold white]",
+                title="[bold white]Memory Architecture Map[/bold white]",
                 border_style="magenta",
                 box=ROUNDED,
                 title_align="left",
@@ -91,7 +91,7 @@ class MemoryDisplayView:
         self, entities: list[dict[str, Any]], relations: list[dict[str, Any]]
     ) -> None:
         """Render a beautiful hierarchical tree of knowledge graph entities and their relational links."""
-        root = Tree("[bold cyan]🌐 Graphiti Knowledge Graph Root[/bold cyan]")
+        root = Tree("[bold cyan]Graphiti Knowledge Graph Root[/bold cyan]")
 
         # Index entities by type for rendering
         by_type: dict[str, list[dict[str, Any]]] = {}
@@ -102,7 +102,7 @@ class MemoryDisplayView:
             by_type[etype].append(ent)
 
         for etype, items in by_type.items():
-            type_node = root.add(f"[bold yellow]🏷️ {etype}[/bold yellow]")
+            type_node = root.add(f"[bold yellow]{etype}[/bold yellow]")
             for item in items:
                 name = item.get("name", item.get("id", "Unknown"))
                 importance = item.get("importance", 1.0)

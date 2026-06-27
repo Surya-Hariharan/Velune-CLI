@@ -161,17 +161,17 @@ def list_providers() -> None:
 
         if meta.get("local"):
             status_str = (
-                f"[{design.OK}]✓ running[/{design.OK}]"
+                f"[{design.OK}]running[/{design.OK}]"
                 if configured
-                else f"[{design.WARN}]○ not running[/{design.WARN}]"
+                else f"[{design.WARN}]not running[/{design.WARN}]"
             )
             ptype = "local"
             env_str = "—"
         else:
             status_str = (
-                f"[{design.OK}]✓ key set[/{design.OK}]"
+                f"[{design.OK}]key set[/{design.OK}]"
                 if configured
-                else f"[{design.MUTED}]✗ not set[/{design.MUTED}]"
+                else f"[{design.MUTED}]not set[/{design.MUTED}]"
             )
             ptype = "cloud"
             env_str = meta.get("env") or "—"
@@ -235,7 +235,7 @@ def add_provider(
     if no_validate:
         save_key(pid, api_key)
         console.print(
-            f"[{design.WARN}]⚠ Key saved without validation (--no-validate was set).[/{design.WARN}]"
+            f"[{design.WARN}]Key saved without validation (--no-validate was set).[/{design.WARN}]"
         )
         return
 
@@ -246,7 +246,7 @@ def add_provider(
 
     if result.ok:
         save_key(pid, api_key)
-        console.print(f"[{design.OK}]✓ {result.human_message()}[/{design.OK}]")
+        console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
         if result.models:
             _show_models_preview(console, result.models[:8], len(result.models))
         if result.account_info:
@@ -257,7 +257,7 @@ def add_provider(
             save_q = typer.confirm("Save key anyway (network may be offline)?", default=True)
             if save_q:
                 save_key(pid, api_key)
-                console.print(f"[{design.WARN}]⚠ Key saved without validation.[/{design.WARN}]")
+                console.print(f"[{design.WARN}]Key saved without validation.[/{design.WARN}]")
         raise typer.Exit(1)
 
 
@@ -292,7 +292,7 @@ def remove_provider(
             return
 
     delete_key(pid)
-    console.print(f"[{design.OK}]✓ Key for '{pid}' removed from OS keychain.[/{design.OK}]")
+    console.print(f"[{design.OK}]Key for '{pid}' removed from OS keychain.[/{design.OK}]")
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +329,7 @@ def test_provider(
         result = validate_provider_sync(pid, key)
 
     if result.ok:
-        console.print(f"[{design.OK}]✓ {result.human_message()}[/{design.OK}]")
+        console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
         if result.models:
             _show_models_preview(console, result.models[:10], len(result.models))
         if result.account_info:
@@ -366,12 +366,11 @@ def _test_all() -> None:
             result = validate_provider_sync(pid, key)
 
         if result.ok:
-            status_str = f"[{design.OK}]✓ Healthy[/{design.OK}]"
+            status_str = f"[{design.OK}]Healthy[/{design.OK}]"
             model_str = str(len(result.models))
             msg_str = "OK"
         else:
-            icon = "⚠" if result.status == ValidationStatus.RATE_LIMITED else "✗"
-            status_str = f"[{design.WARN}]{icon} {result.status.value.replace('_', ' ').title()}[/{design.WARN}]"
+            status_str = f"[{design.WARN}]{result.status.value.replace('_', ' ').title()}[/{design.WARN}]"
             model_str = "—"
             msg_str = result.message[:50]
 
@@ -470,22 +469,13 @@ def provider_status(
             result = validate_provider_sync(pid, key)
 
         if result.ok:
-            status_str = f"[{design.OK}]✓ Healthy[/{design.OK}]"
+            status_str = f"[{design.OK}]Healthy[/{design.OK}]"
             model_count = str(len(result.models)) if result.models else "—"
             msg = "Authenticated"
         else:
-            icon = (
-                "⚠"
-                if result.status
-                in (
-                    ValidationStatus.RATE_LIMITED,
-                    ValidationStatus.NETWORK_ERROR,
-                )
-                else "✗"
-            )
             color = design.WARN
             status_str = (
-                f"[{color}]{icon} {result.status.value.replace('_', ' ').title()}[/{color}]"
+                f"[{color}]{result.status.value.replace('_', ' ').title()}[/{color}]"
             )
             model_count = "—"
             msg = result.message[:60]
