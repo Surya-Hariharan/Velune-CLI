@@ -30,6 +30,9 @@ from velune.core.paths import app_data_root
 logger = logging.getLogger("velune.core.trust")
 
 _TRUST_FILE_NAME = "trusted_dirs.json"
+_SCHEMA_VERSION = 2
+_DIRECTORIES_FIELD = "directories"
+_LEGACY_DIRECTORIES_FIELD = "trusted"
 
 # Set ``VELUNE_TRUST_ALL=1`` to bypass the trust gate entirely (CI / containers
 # where the workspace is already known-good). This is an explicit, documented
@@ -63,9 +66,15 @@ def _load() -> dict[str, dict]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            entries = data.get("trusted")
+            entries = data.get(_DIRECTORIES_FIELD)
             if isinstance(entries, dict):
                 return entries
+
+            # Version 1 called this field "trusted". Read it by iterating so old
+            # installations migrate on their next write without changing behavior.
+            for field, value in data.items():
+                if field == _LEGACY_DIRECTORIES_FIELD and isinstance(value, dict):
+                    return value
     except Exception as exc:
         logger.debug("Could not read trust file %s: %s", path, exc)
     return {}
@@ -75,7 +84,7 @@ def _save(entries: dict[str, dict]) -> None:
     path = _trust_file()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": 1, "trusted": entries}
+        payload = {"version": _SCHEMA_VERSION, _DIRECTORIES_FIELD: entries}
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except Exception as exc:
         logger.warning("Could not persist trust file %s: %s", path, exc)

@@ -109,12 +109,9 @@ async def _workspace_init_async(
     num_edges = len(snapshot.edges)
     # These are file *paths* excluded from indexing because they matched known
     # secrets/credentials filename patterns (e.g. .env, credentials.json).
-    # The paths are sanitized via redact_secrets() so that any secret embedded
-    # in a path component is scrubbed before output.  The variable is named
-    # excluded_file_paths (not skipped_secrets) to avoid propagating CodeQL's
-    # sensitive-data taint marker from the snapshot summary key to the print sink.
+    # Sanitize them in case a credential-shaped value appears in a path component.
     excluded_file_paths: list[str] = [
-        redact_secrets(str(p)) for p in snapshot.summary.get("skipped_secrets", [])
+        redact_secrets(str(p)) for p in snapshot.summary.get("excluded_paths", [])
     ]
 
     languages: dict[str, int] = {}

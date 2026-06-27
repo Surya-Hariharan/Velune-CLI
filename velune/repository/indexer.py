@@ -127,7 +127,7 @@ class RepositoryIndexer:
         files: list[RepositoryFile] = []
         all_symbols: list[RepositorySymbol] = []
         new_cache: dict[str, dict] = {}
-        skipped_secrets: list[str] = []
+        excluded_paths: list[str] = []
 
         # Scan code files
         code_files = self.scanner.scan_code_files()
@@ -141,7 +141,7 @@ class RepositoryIndexer:
             # they somehow passed the scanner's .veluneignore filter.
             if self.secret_detector.is_likely_secret(rel_path):
                 logger.warning(self.secret_detector.get_warning(rel_path))
-                skipped_secrets.append(rel_path)
+                excluded_paths.append(rel_path)
                 continue
 
             try:
@@ -226,7 +226,7 @@ class RepositoryIndexer:
             "total_files": len(files),
             "total_symbols": len(all_symbols),
             "languages": self._compile_language_summary(files),
-            "skipped_secrets": skipped_secrets,
+            "excluded_paths": excluded_paths,
         }
 
         return RepositorySnapshot(
