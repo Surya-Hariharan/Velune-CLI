@@ -44,9 +44,9 @@ func getVersion() string {
 	if err != nil {
 		return "unknown"
 	}
-	
+
 	exeDir := filepath.Dir(exePath)
-	
+
 	// Assuming the binary is built and placed in the project root,
 	// or we are running `go run` in the project root.
 	// We check a few common locations for velune/__init__.py

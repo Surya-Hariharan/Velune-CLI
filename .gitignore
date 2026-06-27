@@ -104,6 +104,13 @@ temp/
 RECORD
 installer/
 
+# Native build artifacts
+*.pyd
+ext/go/*.exe
+ext/go/**/*.exe
+ext/go/bin/
+ext/rust/**/target/
+
 # Profiling
 *.prof
 *.lprof

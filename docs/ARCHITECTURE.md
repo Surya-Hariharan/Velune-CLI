@@ -29,6 +29,27 @@ Velune is organized into distinct layers with clear separation of concerns:
 └─────────────────────────────────────────────────┘
 ```
 
+## Native Component Boundaries
+
+Velune can use native components for startup and hot-path performance, but the
+Python runtime remains the owner of orchestration, lifecycle, policy, and trust
+decisions.
+
+| Component | Owns | Must not own |
+|-----------|------|--------------|
+| Go launcher (`ext/go/cmd/velune`) | Fast process startup, trivial command fast-paths, delegation to `python -m velune` | CLI policy, long-running background state, provider/model orchestration |
+| Python engine (`velune/`) | CLI behavior, daemon lifecycle, provider/memory/cognition orchestration, execution policy | Native micro-optimizations that can be isolated behind stable interfaces |
+| Future Go execution worker | Child-process execution primitives spawned and supervised by Python | A standalone daemon, unauthenticated local HTTP execution, independent lifecycle |
+| Rust extension (`ext/rust/velune-native`) | CPU-bound primitives such as parsing, indexing, hashing, or other bounded computations | Process supervision, CLI orchestration, background service ownership |
+
+Native execution helpers must be implementation details of the Python engine:
+Python starts them, passes explicit argv-style requests, enforces workspace and
+policy checks before dispatch, and tears them down. Local HTTP command execution
+is not an accepted IPC boundary for Velune because an unauthenticated listener on
+localhost turns command execution into a local remote-code-execution surface.
+Prefer stdio, named pipes on Windows, or Unix sockets with parent-owned
+lifecycle and an authentication/handshake story.
+
 ## Layer Boundaries
 
 ### CLI Layer (`velune/cli/`)

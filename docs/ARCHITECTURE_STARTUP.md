@@ -4,6 +4,11 @@ This document describes the two-phase model introduced by the startup refactor:
 a **lean, instant launch path** and a separate **explicit, user-driven cognition
 path**. They never overlap — nothing on the cognition path runs at startup.
 
+When the optional Go launcher is installed, it sits in front of this path only
+for process-start fast-paths such as `--version`. All non-trivial commands are
+delegated to `python -m velune`, so the Python runtime remains the owner of
+configuration, lifecycle, daemon startup, and command policy.
+
 ## 1. Startup path (instant, <500ms target)
 
 ```

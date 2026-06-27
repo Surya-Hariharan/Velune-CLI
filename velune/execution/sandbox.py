@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import psutil
-import httpx
 
 from velune.core.errors.execution import SandboxError
 from velune.execution.command_spec import CommandSpec
@@ -371,78 +370,4 @@ class SubprocessSandbox:
             duration_ms=duration_ms,
             peak_memory_mb=peak_memory,
             peak_cpu_pct=peak_cpu,
-        )
-
-
-class DaemonSandbox:
-    """Routes execution to the external Go daemon via JSON-RPC."""
-
-    @classmethod
-    def for_workspace(cls, workspace_path: Path) -> DaemonSandbox:
-        return cls(workspace_path)
-
-    def __init__(
-        self,
-        workspace_path: Path,
-        max_memory_mb: float = 1024.0,
-        max_cpu_percent: float = 90.0,
-        allowed_executables: list[str] | None = None,
-        bus: Any | None = None,
-        max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
-        daemon_url: str = "http://127.0.0.1:48102",
-    ) -> None:
-        self.workspace_path = Path(workspace_path).resolve()
-        self.max_memory_mb = max_memory_mb
-        self.max_cpu_percent = max_cpu_percent
-        self.max_output_bytes = max_output_bytes
-        self.bus = bus
-        self.daemon_url = daemon_url
-        
-        if allowed_executables is not None:
-            self.allowed_executables = frozenset(allowed_executables)
-        else:
-            try:
-                from velune.kernel.config import ConfigLoader
-
-                config = ConfigLoader(self.workspace_path / "velune.toml").load()
-                self.allowed_executables = frozenset(config.execution.allowed_executables)
-            except Exception:
-                from velune.execution.command_spec import ALLOWED_EXECUTABLES
-
-                self.allowed_executables = ALLOWED_EXECUTABLES
-
-    def execute(self, spec: CommandSpec) -> SandboxResult:
-        """Synchronously execute command via Go daemon."""
-        spec.validate(self.allowed_executables)
-
-        if not is_within_workspace(spec.cwd, self.workspace_path):
-            raise SandboxError(f"Working directory outside workspace: {spec.cwd}")
-
-        payload = {
-            "command": spec.executable,
-            "args": spec.args,
-            "dir": str(spec.cwd),
-            "timeout_ms": spec.timeout * 1000,
-        }
-
-        try:
-            with httpx.Client(timeout=httpx.Timeout(spec.timeout + 5.0)) as client:
-                resp = client.post(f"{self.daemon_url}/execute", json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception as e:
-            raise SandboxError(f"Failed to communicate with Go daemon: {e}")
-
-        if "error" in data and data["error"]:
-            raise SandboxError(f"Daemon execution failed: {data['error']}")
-            
-        result = data.get("result", {})
-        
-        return SandboxResult(
-            exit_code=result.get("exit_code", -1),
-            stdout=result.get("stdout", ""),
-            stderr=result.get("stderr", ""),
-            duration_ms=result.get("duration_ms", 0.0),
-            peak_memory_mb=result.get("peak_memory_mb", 0.0),
-            peak_cpu_pct=0.0, # Daemon doesn't report this currently
         )
