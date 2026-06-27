@@ -9,6 +9,101 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.3.5] - 2026-06-27
+
+> Sprint 1 AI Foundation — Repository Knowledge Graph, Intelligence Engine, and
+> Three-Brain Memory Coordinator, plus Go launcher, Rust native extensions,
+> and a fully hardened cross-platform CI/CD pipeline.
+
+### Added — Repository Knowledge Graph (`velune/knowledge/`)
+
+- **SQLite-backed semantic graph** with typed nodes (file, module, class,
+  function, method) and typed edges (imports, contains, inherits, defines).
+  WAL mode + single `asyncio.Lock` write serialization + short-lived read
+  connections keep the store fast and safe under concurrent access.
+- **`KnowledgeGraphBuilder`** — converts a `RepositorySnapshot` into a full
+  graph in a single atomic transaction; partial failures roll back cleanly.
+- **`KnowledgeQuery`** — AI-optimized query layer: `context_for_file`,
+  `find_by_label`, `summary_text`. Output is designed for direct LLM injection
+  without post-processing.
+
+### Added — Repository Intelligence Engine (`velune/intelligence/`)
+
+- **Central coordinator** with event-driven change detection (3 s file-change
+  poll) and git-state tracking (10 s interval). All events ride `CognitiveBus`.
+- **`KnowledgeGraphPatcher`** — surgical incremental node/edge updates via
+  `FK CASCADE`; avoids full graph rebuilds on every file change.
+- **Typed `RepositoryEventType` constants** + factory helpers for subscribers
+  (`repository.files_changed`, `index_updated`, `kg_patched`,
+  `git_state_changed`, `profile_refreshed`, `engine_started/stopped`).
+
+### Added — Three-Brain Memory Coordinator (`velune/memory/three_brain.py`)
+
+- **Brain 1 Hot (Working)** — in-session `MemoryTurn` store.
+- **Brain 2 Warm (Semantic)** — LanceDB ANN search via `SemanticMemory`.
+- **Brain 3 Cold (Episodic)** — SQLite cross-session LIKE search via
+  `EpisodicMemory`.
+- `asyncio.gather` fan-out across all three brains; `KnowledgeQuery` augments
+  warm-brain results with graph context.
+- Subscribes to `repository.files_changed` → annotates `ThreeBrainResult`
+  with `stale_file_count`.
+- `as_context_block()` renders compact, LLM-injectable text; registered as
+  `runtime.three_brain_coordinator`.
+
+### Added — Go Launcher (`ext/go/`)
+
+- Cross-platform Go launcher binary (`velune` executable) that discovers the
+  correct Python interpreter (sibling `.venv` → `VIRTUAL_ENV` → PATH), relays
+  OS signals (SIGINT/SIGTERM) to the child Python process, and manages the
+  Velune daemon lifecycle (`start` / `stop` / `status`).
+- **`velune update`** — queries PyPI (`velune-cli`) for the latest version and
+  upgrades via pip if a newer release exists (`--check` mode for scripts).
+- **`velune --health`** — structured health check: Python binary, Python
+  version, `velune` module importability, launcher version.
+- Full test suite: version parsing, Python discovery, daemon PID file handling,
+  process-alive checks, PyPI mock server tests.
+
+### Added — Rust Native Extensions (`ext/rust/velune-native/`)
+
+- **`sha256_file(path)`** — SHA-256 hex digest of a file; O(1) memory via
+  64 KB streaming buffer; raises `OSError` on unreadable files.
+- **`scan_directory(root, extensions, skip_names)`** — recursive directory
+  walker with extension filtering and directory pruning; returns sorted
+  absolute paths.
+- Pure-Python fallbacks in `velune/repository/_native.py` — all callers use the
+  same API regardless of whether the Rust wheel is installed.
+- Unit tests covering determinism, empty files, missing files, directory
+  skipping, and cross-implementation parity.
+
+### Added — CI/CD
+
+- **Go Launcher** jobs (ubuntu / windows / macos): `go build`, `go test -v`,
+  `go vet` for the full launcher package.
+- **Rust Native** jobs (ubuntu / windows / macos): `cargo fmt --check`,
+  `cargo clippy -D warnings`, `cargo build --lib`, `cargo test --lib`.
+- **Native benchmarks** (`benchmark-native`, `benchmark-scan`): build the
+  Rust wheel via maturin, install it, run sha256 and scan_directory benchmarks,
+  upload JSON results as artifacts (informational — never gates on perf
+  thresholds since CI hardware is shared and variable).
+- **Wheel install + REPL smoke** matrix expanded to 3 OS × 4 Python versions
+  (3.10 – 3.13).
+- **`ci-pass` gate job** — requires all matrix jobs before reporting green.
+
+### Fixed
+
+- Benchmark jobs no longer use `--ci` performance-threshold mode; benchmarks
+  are informational in CI and will never fail due to machine variance.
+- Go setup action no longer references a nonexistent `go.sum` (this project has
+  no external Go dependencies — all imports are stdlib).
+- Rust `crate-type` now includes `rlib` alongside `cdylib` so that
+  `cargo test --lib` can link the Rust test harness without a Python runtime.
+- `velune update` PyPI URL corrected from `/pypi/velune/` to `/pypi/velune-cli/`.
+
+### Tests
+
+- 139 tests passing — 42 new for Three-Brain Memory, 41 for Intelligence Engine,
+  41 for Knowledge Graph, plus cross-platform CI matrix (3 OS × 4 Python).
+
 ## [0.9.3] - 2026-06-24
 
 > Promotes `0.9.3-beta.1` to a stable release and lands a command-architecture

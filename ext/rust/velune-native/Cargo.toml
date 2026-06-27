@@ -7,7 +7,8 @@ license = "MIT"
 
 [lib]
 name = "velune_native"
-crate-type = ["cdylib"]
+# cdylib: Python extension (.so/.pyd); rlib: lets `cargo test --lib` link the test harness.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.20.0", features = ["extension-module"] }

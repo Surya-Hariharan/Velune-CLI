@@ -149,18 +149,32 @@ jobs:
           python3 - "$CLEAN_VERSION" > /tmp/changelog_body.txt << 'PYEOF'
           import re, sys
           from pathlib import Path
+
           version = sys.argv[1]
           changelog = Path("docs/CHANGELOG.md")
           if not changelog.exists():
-              print("Release " + version)
+              print(f"## Velune CLI v{version}\n\nSee the [full changelog](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/CHANGELOG.md) for details.")
               sys.exit(0)
           text = changelog.read_text(encoding="utf-8")
-          pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
+
+          # Match the section for this specific version, stopping at the next ## heading.
+          pattern = rf"## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
           match = re.search(pattern, text, re.DOTALL)
           if match:
-              print(match.group(1).strip())
+              body = match.group(1).strip()
+              # Prepend a header so the GitHub release body is self-contained.
+              header = (
+                  f"## Velune CLI v{version}\n\n"
+                  f"> **[Full changelog](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/CHANGELOG.md)** | "
+                  f"**[PyPI](https://pypi.org/project/velune-cli/{version}/)** | "
+                  f"**[Documentation](https://github.com/Surya-Hariharan/Velune-CLI/tree/main/docs)**\n\n"
+              )
+              print(header + body)
           else:
-              print("Release " + version + " — see docs/CHANGELOG.md for details.")
+              print(
+                  f"## Velune CLI v{version}\n\n"
+                  f"See the [full changelog](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/CHANGELOG.md) for details."
+              )
           PYEOF
           {
             echo "body<<CHANGELOG_EOF"
@@ -171,7 +185,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ steps.get_version.outputs.clean_version }}
+          name: "Velune CLI ${{ steps.get_version.outputs.clean_version }}"
+          tag_name: ${{ steps.get_version.outputs.version }}
           files: dist/*
           body: ${{ steps.changelog.outputs.body }}
           draft: false

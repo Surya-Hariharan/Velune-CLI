@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const pypiURL = "https://pypi.org/pypi/velune/json"
+const pypiURL = "https://pypi.org/pypi/velune-cli/json"
 
 type pypiRelease struct {
 	Info struct {
