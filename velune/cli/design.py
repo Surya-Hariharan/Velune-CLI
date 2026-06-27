@@ -60,9 +60,32 @@ CONTROL = ACCENT  # orchestration/control
 PRIVACY = PRIMARY_GREEN  # local-first, secure
 SPEED = HIGHLIGHT  # performance, energy
 
-# Context-pressure thresholds (percent of context window consumed). Shared by
-# the prompt badge, the bottom status bar, and the /context command so all
-# three agree on what "getting full" means.
+# --- Icons (semantic glyphs) ----------------------------------------------
+# Single-width chars guaranteed to render in any modern terminal.
+ICON_SUCCESS = "✓"
+ICON_ERROR = "✗"
+ICON_WARNING = "⚠"
+ICON_INFO = "·"
+ICON_ARROW = "→"
+ICON_SELECTED = "▶"
+ICON_UNSELECTED = " "
+ICON_BULLET = "•"
+ICON_ELLIPSIS = "…"
+ICON_CURSOR = "█"
+
+# --- Spacing tokens --------------------------------------------------------
+# Rich padding tuples: (top/bottom, left/right)
+PADDING_NONE = (0, 0)
+PADDING_COMPACT = (0, 1)   # tight inline use
+PADDING_DEFAULT = (0, 2)   # standard panels
+PADDING_RELAXED = (1, 2)   # modals, dialogs
+
+# --- Separator glyph -------------------------------------------------------
+SEP = "  ·  "  # metadata separator used in status bar and key hints
+
+# --- Context-pressure thresholds ------------------------------------------
+# Percent of context window consumed. Shared by the prompt badge, bottom
+# status bar, and /context command so all three agree on thresholds.
 CTX_WARN_PCT = 70.0
 CTX_DANGER_PCT = 90.0
 
