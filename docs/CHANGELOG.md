@@ -9,6 +9,34 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-06-28
+
+### New
+
+- Go production launcher improvements for cross-platform startup and health checks.
+- Rust native module foundation for optional hot-path repository operations.
+- Repository Knowledge Graph for structured file, symbol, and relationship context.
+- Repository Intelligence Engine for repository events and incremental graph updates.
+- Native integration layer with pure-Python fallbacks when native wheels are unavailable.
+- Cross-platform CI covering Python, Go, Rust, packaging, install smoke tests, and native benchmarks.
+
+### Improved
+
+- Faster startup paths for lightweight commands and launcher-assisted execution.
+- More reliable native integration across supported operating systems.
+- Stronger security checks, including dependency auditing, Bandit, and Gitleaks coverage.
+- Broader CI/CD validation before release.
+- Expanded tests for knowledge graph, intelligence engine, memory coordination, and native fallbacks.
+- More reproducible build and artifact validation.
+
+### Fixed
+
+- Cross-platform build issues in Go and Rust CI jobs.
+- PyO3 compatibility for Rust unit-test linkage.
+- Native fallback behavior when the Rust extension is not installed.
+- CI failures from synthetic secret-like test fixtures.
+- Release workflow checks for version/tag consistency and artifact validation.
+
 ## [0.9.3.5] - 2026-06-27
 
 > Sprint 1 AI Foundation — Repository Knowledge Graph, Intelligence Engine, and
@@ -789,7 +817,8 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Security sandbox: workspace write guards, network hygiene, secret scrubbing
 - Full pytest suite: unit, integration, async, and benchmark tests
 
-[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.3-beta.1...HEAD
+[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.3.5...v0.9.4
 [0.9.3-beta.1]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.2...v0.9.3-beta.1
 [0.9.2]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.0...v0.9.1

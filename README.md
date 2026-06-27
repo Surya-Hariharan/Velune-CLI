@@ -67,6 +67,11 @@ pip install velune-cli
 velune --version
 ```
 
+The Python package is the authoritative runtime. Optional Go and Rust native
+components live under `ext/` and are validated in CI; Velune keeps pure-Python
+fallbacks for the Rust-backed repository helpers, so the standard PyPI install
+works without compiling native code.
+
 If your shell reports **`velune: command not found`** (or, on Windows,
 *"'velune' is not recognized…"*), the install succeeded but your Python
 scripts directory is not on `PATH`. Two reliable fixes:
@@ -380,7 +385,7 @@ Velune works as both an MCP **server** and an MCP **client**:
   supported. Servers can also be declared in `.mcp.json` and loaded automatically.
 
 Outbound connections to external MCP servers are trust-gated — see
-[MCP trust gating](docs/SECURITY.md#mcp-trust-gating) in the security policy.
+[MCP trust gating](SECURITY.md#mcp-trust-gating) in the security policy.
 
 ---
 
@@ -394,9 +399,10 @@ Velune runs natively on Windows (supporting native command execution sandboxing,
 
 | Doc | What's inside |
 | --- | --- |
-| [docs/SECURITY.md](docs/SECURITY.md) | Security posture, trust boundaries, reporting |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Dev setup and contribution workflow |
+| [SECURITY.md](SECURITY.md) | Security posture, trust boundaries, reporting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup and contribution workflow |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Full version history |
+| [docs/RELEASE_NOTES_v0.9.4.md](docs/RELEASE_NOTES_v0.9.4.md) | v0.9.4 release notes |
 
 ---
 

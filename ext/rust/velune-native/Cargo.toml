@@ -1,6 +1,6 @@
 [package]
 name = "velune-native"
-version = "0.1.0"
+version = "0.9.4"
 edition = "2021"
 description = "CPU-intensive native extensions for Velune CLI (repository indexing, hashing, scanning)"
 license = "MIT"

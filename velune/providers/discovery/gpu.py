@@ -32,7 +32,7 @@ def _read_disk_cache() -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     ts = raw.get("_cached_at")
-    if not isinstance(ts, (int, float)) or (time.time() - ts) > _DISK_CACHE_TTL:
+    if not isinstance(ts, int | float) or (time.time() - ts) > _DISK_CACHE_TTL:
         return None
     info = raw.get("info")
     return info if isinstance(info, dict) else None

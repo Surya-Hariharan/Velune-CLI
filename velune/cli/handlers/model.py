@@ -558,7 +558,6 @@ async def _show_model_picker(
 
 
 async def cmd_models(repl: VeluneREPL, args: str) -> None:
-
     from velune.core.types.model import CapabilityLevel
 
     model_registry = repl._require("runtime.model_registry", "model registry")
@@ -845,7 +844,6 @@ async def _model_locate(repl: VeluneREPL) -> None:
 
 
 async def _model_locations(repl: VeluneREPL, args: str) -> None:
-
     from velune.providers.ollama_locations import OllamaLocationRegistry
 
     reg = OllamaLocationRegistry()

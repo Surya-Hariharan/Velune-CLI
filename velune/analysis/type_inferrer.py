@@ -43,7 +43,7 @@ class TypeInferrer:
 
         suggestions: list[TypeSuggestion] = []
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 sug = self._analyse_function(node)
                 if sug is not None:
                     suggestions.append(sug)
@@ -145,7 +145,7 @@ class TypeInferrer:
 
         # Detect generator functions first
         for child in ast.walk(node):
-            if isinstance(child, (ast.Yield, ast.YieldFrom)):
+            if isinstance(child, ast.Yield | ast.YieldFrom):
                 return "Generator"
 
         # Collect return types from return statements

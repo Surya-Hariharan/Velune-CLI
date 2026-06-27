@@ -22,6 +22,7 @@ from mcp.server import Server
 from mcp.server.models import InitializationOptions
 from mcp.types import TextContent, Tool
 
+from velune import __version__
 from velune.tools.base.registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -660,7 +661,7 @@ class VeluneMCPServer:
                 read_stream,
                 write_stream,
                 InitializationOptions(
-                    server_name="velune", server_version="0.1.0", capabilities={"tools": {}}
+                    server_name="velune", server_version=__version__, capabilities={"tools": {}}
                 ),
             )
 

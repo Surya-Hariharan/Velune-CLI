@@ -91,7 +91,7 @@ def _render_quick_summary(repl: VeluneREPL, summary: dict) -> None:
         for key, val in tech.items():
             if not val:
                 continue
-            if isinstance(val, (list, tuple)):
+            if isinstance(val, list | tuple):
                 val = ", ".join(map(str, val))
             elif isinstance(val, dict):
                 val = ", ".join(f"{k}={v}" for k, v in val.items())
