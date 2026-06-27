@@ -21,61 +21,54 @@ class VeluneTheme:
         return Theme(
             {
                 # ── Semantic state ─────────────────────────────────────────
-                "info":    d.INFO,
+                "info": d.INFO,
                 "warning": d.WARN,
-                "error":   d.DANGER,
+                "error": d.DANGER,
                 "success": d.OK,
-
                 # ── Typography ────────────────────────────────────────────
-                "title":    f"bold {d.WHITE}",
+                "title": f"bold {d.WHITE}",
                 "subtitle": f"dim {d.MUTED}",
-                "label":    f"bold {d.MUTED}",
-                "body":     d.WHITE,
-                "muted":    d.MUTED,
-                "faint":    d.FAINT,
-                "dim":      f"dim {d.MUTED}",
-                "key":      f"dim {d.FAINT}",
-                "value":    d.WHITE,
-
+                "label": f"bold {d.MUTED}",
+                "body": d.WHITE,
+                "muted": d.MUTED,
+                "faint": d.FAINT,
+                "dim": f"dim {d.MUTED}",
+                "key": f"dim {d.FAINT}",
+                "value": d.WHITE,
                 # ── Brand / accent ────────────────────────────────────────
-                "accent":        d.ACCENT,
-                "accent.soft":   d.ACCENT_SOFT,
+                "accent": d.ACCENT,
+                "accent.soft": d.ACCENT_SOFT,
                 "velune.accent": d.ACCENT,
-                "velune.soft":   d.ACCENT_SOFT,
-                "velune.pink":   d.ACCENT,
-
+                "velune.soft": d.ACCENT_SOFT,
+                "velune.pink": d.ACCENT,
                 # ── Structural roles ──────────────────────────────────────
-                "border":        d.FAINT,
-                "separator":     d.FAINT,
-                "highlight":     d.HIGHLIGHT,
-                "selected":      f"bold {d.WHITE}",
-                "selected.bg":   d.ACCENT,
-
+                "border": d.FAINT,
+                "separator": d.FAINT,
+                "highlight": d.HIGHLIGHT,
+                "selected": f"bold {d.WHITE}",
+                "selected.bg": d.ACCENT,
                 # ── Badge / tag colours ───────────────────────────────────
-                "badge.ok":      d.OK,
-                "badge.warn":    d.WARN,
-                "badge.error":   d.DANGER,
-                "badge.info":    d.INFO,
-
+                "badge.ok": d.OK,
+                "badge.warn": d.WARN,
+                "badge.error": d.DANGER,
+                "badge.info": d.INFO,
                 # ── Status bar semantic names (used by statusbar.py) ──────
-                "status.model":    f"bold {d.ACCENT}",
-                "status.mode":     d.HIGHLIGHT,
-                "status.ok":       d.OK,
-                "status.warn":     d.WARN,
-                "status.danger":   d.DANGER,
-                "status.speed":    d.ENERGY,
-                "status.privacy":  d.PRIMARY_GREEN,
-
+                "status.model": f"bold {d.ACCENT}",
+                "status.mode": d.HIGHLIGHT,
+                "status.ok": d.OK,
+                "status.warn": d.WARN,
+                "status.danger": d.DANGER,
+                "status.speed": d.ENERGY,
+                "status.privacy": d.PRIMARY_GREEN,
                 # ── Provider / job state ──────────────────────────────────
-                "state.running":   d.WARN,
+                "state.running": d.WARN,
                 "state.completed": d.OK,
-                "state.failed":    d.DANGER,
+                "state.failed": d.DANGER,
                 "state.cancelled": d.FAINT,
-                "state.pending":   d.INFO,
-
+                "state.pending": d.INFO,
                 # ── Diff / patch ──────────────────────────────────────────
-                "diff.add":    d.OK,
+                "diff.add": d.OK,
                 "diff.remove": d.DANGER,
-                "diff.hunk":   d.INFO,
+                "diff.hunk": d.INFO,
             }
         )

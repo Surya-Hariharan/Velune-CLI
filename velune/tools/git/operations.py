@@ -19,13 +19,8 @@ from velune.tools.base.tool import BaseTool, ToolPermission
 
 def _git_run(cwd: Path, *args: str) -> str:
     import subprocess
-    res = subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False
-    )
+
+    res = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False)
     if res.returncode != 0:
         raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
     return res.stdout.strip()
@@ -74,7 +69,7 @@ class GitCommit(BaseTool):
             if add_all:
                 _git_run(safe_root, "add", "-A")
             _git_run(safe_root, "commit", "-m", message)
-            
+
             # Get the new commit hash
             new_sha = _git_run(safe_root, "rev-parse", "--short", "HEAD")
             return f"Committed: {message} ({new_sha})"

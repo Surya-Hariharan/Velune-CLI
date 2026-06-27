@@ -57,9 +57,7 @@ async def cmd_mcp(repl: VeluneREPL, args: str) -> None:
                 f"[green]Refreshed [bold]{rest}[/bold] ({len(tools)} tool(s)).[/green]"
             )
         else:
-            repl.console.print(
-                f"[yellow]Could not refresh '{rest}' — is it connected?[/yellow]"
-            )
+            repl.console.print(f"[yellow]Could not refresh '{rest}' — is it connected?[/yellow]")
     else:
         repl.console.print(
             "[yellow]Unknown sub-command. "
@@ -76,7 +74,7 @@ async def _mcp_show_servers(repl: VeluneREPL) -> None:
         print_notification(
             repl.console,
             "No MCP servers configured. Create .mcp.json in the workspace to add servers.",
-            type="info"
+            type="info",
         )
         return
 

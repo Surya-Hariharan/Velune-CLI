@@ -57,7 +57,11 @@ def _load_premium_overrides() -> dict[str, str]:
     if not isinstance(overrides, dict):
         return {}
     # Keep only str→str entries; ignore anything malformed defensively.
-    return {k: v for k, v in overrides.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
+    return {
+        k: v
+        for k, v in overrides.items()
+        if isinstance(k, str) and isinstance(v, str) and v.strip()
+    }
 
 
 _OVERRIDES = _load_premium_overrides()
@@ -76,8 +80,7 @@ def get_prompt(key: str) -> str:
         return _baseline.PROMPTS[key]
     except KeyError as exc:  # pragma: no cover - defensive
         raise KeyError(
-            f"Unknown system-prompt key {key!r}. "
-            f"Known keys: {sorted(_baseline.PROMPTS)}"
+            f"Unknown system-prompt key {key!r}. Known keys: {sorted(_baseline.PROMPTS)}"
         ) from exc
 
 

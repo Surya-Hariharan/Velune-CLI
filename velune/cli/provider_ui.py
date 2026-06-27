@@ -20,6 +20,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from velune.cli import design
+from velune.providers.discovery.scanner import ModelDiscoveryScanner
 from velune.providers.keystore import (
     delete_key,
     get_key,
@@ -27,7 +28,6 @@ from velune.providers.keystore import (
     is_ollama_live,
     save_key,
 )
-from velune.providers.discovery.scanner import ModelDiscoveryScanner
 from velune.providers.validation import (
     ValidationStatus,
     validate_provider_sync,
@@ -148,6 +148,7 @@ ALL_PROVIDER_META: dict[str, dict] = {
 # Status helpers
 # ---------------------------------------------------------------------------
 
+
 def provider_status(pid: str) -> str:
     """Return a short human-readable status for a provider."""
     meta = ALL_PROVIDER_META.get(pid, {})
@@ -157,6 +158,7 @@ def provider_status(pid: str) -> str:
         if pid == "lmstudio":
             try:
                 import httpx
+
                 r = httpx.get("http://localhost:1234/v1/models", timeout=0.5)
                 return "running" if r.status_code == 200 else "offline"
             except Exception:
@@ -199,6 +201,7 @@ def validation_status_label(vs: ValidationStatus) -> str:
 # ---------------------------------------------------------------------------
 # ProviderPalette
 # ---------------------------------------------------------------------------
+
 
 class ProviderPalette:
     """Interactive provider management system, designed to run inside the REPL.
@@ -258,12 +261,12 @@ class ProviderPalette:
 
     async def _main_menu(self) -> None:
         choices = [
-            ("add",      "Add Provider",      "Connect a new cloud AI provider with an API key"),
-            ("manage",   "Manage Providers",  "View, update, or remove configured providers"),
-            ("discover", "Discover Models",   "Refresh model catalogue from all connected providers"),
-            ("test",     "Test Connection",   "Validate credentials for configured providers"),
-            ("refresh",  "Refresh Models",    "Re-fetch model list from every provider"),
-            ("status",   "Provider Status",   "Quick status table for all providers"),
+            ("add", "Add Provider", "Connect a new cloud AI provider with an API key"),
+            ("manage", "Manage Providers", "View, update, or remove configured providers"),
+            ("discover", "Discover Models", "Refresh model catalogue from all connected providers"),
+            ("test", "Test Connection", "Validate credentials for configured providers"),
+            ("refresh", "Refresh Models", "Re-fetch model list from every provider"),
+            ("status", "Provider Status", "Quick status table for all providers"),
         ]
         selected = await self._show_menu(
             title="Provider Management",
@@ -317,11 +320,13 @@ class ProviderPalette:
             scored = [
                 (
                     max(fuzzy_score(q, label.lower()), fuzzy_score(q, key.lower())),
-                    key, label, desc,
+                    key,
+                    label,
+                    desc,
                 )
                 for key, label, desc in choices
             ]
-            return [(k, l, d) for s, k, l, d in sorted(scored, key=lambda t: -t[0]) if s > 0]
+            return [(k, lbl, d) for s, k, lbl, d in sorted(scored, key=lambda t: -t[0]) if s > 0]
 
         def _render() -> FormattedText:
             visible = _visible()
@@ -337,15 +342,19 @@ class ProviderPalette:
             if filterable:
                 if query[0]:
                     lines.append((f"fg:{design.INFO}", f"  filter: {query[0]}  "))
-                    lines.append((f"fg:{design.FAINT}", "[↑↓ navigate · Enter select · Esc cancel]\n\n"))
+                    lines.append(
+                        (f"fg:{design.FAINT}", "[↑↓ navigate · Enter select · Esc cancel]\n\n")
+                    )
                 else:
-                    lines.append((f"fg:{design.FAINT}", "  ↑↓ navigate · Enter select · Esc cancel\n\n"))
+                    lines.append(
+                        (f"fg:{design.FAINT}", "  ↑↓ navigate · Enter select · Esc cancel\n\n")
+                    )
 
             if not visible:
                 lines.append((f"fg:{design.WARN}", "  No matches.\n"))
                 return FormattedText(lines)
 
-            for i, (key, label, desc) in enumerate(visible):
+            for i, (_key, label, desc) in enumerate(visible):
                 is_sel = i == selected_idx[0]
                 prefix = "❯ " if is_sel else "  "
                 label_style = f"bold fg:{design.ACCENT}" if is_sel else f"fg:{design.WHITE}"
@@ -411,11 +420,13 @@ class ProviderPalette:
         from prompt_toolkit.formatted_text import FormattedText
 
         session: PromptSession = PromptSession(is_password=True)
-        prompt_text = FormattedText([
-            (f"fg:{design.ACCENT} bold", f"  {provider_label} API key"),
-            (f"fg:{design.FAINT}", " (hidden)"),
-            ("", ": "),
-        ])
+        prompt_text = FormattedText(
+            [
+                (f"fg:{design.ACCENT} bold", f"  {provider_label} API key"),
+                (f"fg:{design.FAINT}", " (hidden)"),
+                ("", ": "),
+            ]
+        )
         try:
             raw: str = await session.prompt_async(prompt_text)
             return raw.strip() or None
@@ -432,7 +443,7 @@ class ProviderPalette:
             title=message,
             subtitle="",
             choices=[
-                ("no",  "No — Cancel",  "Keep the current state"),
+                ("no", "No — Cancel", "Keep the current state"),
                 ("yes", "Yes — Confirm", "Proceed with this action"),
             ],
             filterable=False,
@@ -446,8 +457,7 @@ class ProviderPalette:
     async def _flow_add_provider(self) -> None:
         """Interactive picker: choose a cloud provider then configure it."""
         choices = [
-            (pid, meta["label"], meta["description"])
-            for pid, meta in CLOUD_PROVIDERS.items()
+            (pid, meta["label"], meta["description"]) for pid, meta in CLOUD_PROVIDERS.items()
         ]
         pid = await self._show_menu(
             title="Add Provider",
@@ -491,7 +501,7 @@ class ProviderPalette:
                     title="No key entered",
                     subtitle="What would you like to do?",
                     choices=[
-                        ("retry",  "Retry",  "Enter the API key again"),
+                        ("retry", "Retry", "Enter the API key again"),
                         ("cancel", "Cancel", "Return to the previous menu"),
                     ],
                     filterable=False,
@@ -509,9 +519,7 @@ class ProviderPalette:
             if result.ok:
                 # Step 4 — persist
                 await asyncio.to_thread(save_key, pid, api_key)
-                self.console.print(
-                    f"[{design.OK}]{result.human_message()}[/{design.OK}]"
-                )
+                self.console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
                 self.console.print(
                     f"[{design.OK}]API key saved securely to OS keychain.[/{design.OK}]"
                 )
@@ -539,16 +547,22 @@ class ProviderPalette:
             else:
                 # Validation failed — human-readable diagnosis
                 label = validation_status_label(result.status)
-                self.console.print(f"[{design.WARN}]{label}: {result.human_message()}[/{design.WARN}]")
+                self.console.print(
+                    f"[{design.WARN}]{label}: {result.human_message()}[/{design.WARN}]"
+                )
                 self._print_failure_hint(result.status)
 
                 action = await self._show_menu(
                     title=f"Connection failed — {label}",
                     subtitle="How would you like to proceed?",
                     choices=[
-                        ("retry",       "Retry",       "Enter a different API key"),
-                        ("save_anyway", "Save Anyway", "Store without validation (offline / network issue)"),
-                        ("cancel",      "Cancel",      "Return without saving"),
+                        ("retry", "Retry", "Enter a different API key"),
+                        (
+                            "save_anyway",
+                            "Save Anyway",
+                            "Store without validation (offline / network issue)",
+                        ),
+                        ("cancel", "Cancel", "Return without saving"),
                     ],
                     filterable=False,
                 )
@@ -572,7 +586,7 @@ class ProviderPalette:
             for pid, meta in CLOUD_PROVIDERS.items():
                 st = provider_status(pid)
                 color = status_style(st)
-                desc = f"[{color}]{st}[/{color}]  ·  {meta['description'][:48]}"
+                f"[{color}]{st}[/{color}]  ·  {meta['description'][:48]}"
                 # Strip Rich tags for the plain-text description shown in the menu
                 plain_desc = f"{st}  ·  {meta['description'][:48]}"
                 choices.append((pid, meta["label"], plain_desc))
@@ -623,18 +637,18 @@ class ProviderPalette:
         # Build action list based on provider type / current state
         if is_local:
             choices: list[tuple[str, str, str]] = [
-                ("test",    "Test Connection", "Verify the local server is reachable"),
-                ("refresh", "Refresh Models",  "Re-fetch the model list from this server"),
-                ("back",    "← Back",          "Return to the provider list"),
+                ("test", "Test Connection", "Verify the local server is reachable"),
+                ("refresh", "Refresh Models", "Re-fetch the model list from this server"),
+                ("back", "← Back", "Return to the provider list"),
             ]
         else:
             choices = []
             if has_key(pid):
                 choices += [
-                    ("update",  "Update API Key",    "Replace the stored API key"),
-                    ("remove",  "Remove API Key",    "Delete the key and disconnect this provider"),
-                    ("test",    "Test Connection",   "Validate credentials with a live API call"),
-                    ("refresh", "Refresh Models",    "Re-fetch the model catalogue"),
+                    ("update", "Update API Key", "Replace the stored API key"),
+                    ("remove", "Remove API Key", "Delete the key and disconnect this provider"),
+                    ("test", "Test Connection", "Validate credentials with a live API call"),
+                    ("refresh", "Refresh Models", "Re-fetch the model catalogue"),
                 ]
             else:
                 choices += [
@@ -712,7 +726,9 @@ class ProviderPalette:
 
     async def _flow_test_connection(self) -> None:
         """Pick a provider then test it; or test all configured ones."""
-        configured = [(pid, CLOUD_PROVIDERS[pid]["label"]) for pid in CLOUD_PROVIDERS if has_key(pid)]
+        configured = [
+            (pid, CLOUD_PROVIDERS[pid]["label"]) for pid in CLOUD_PROVIDERS if has_key(pid)
+        ]
         if not configured:
             self.console.print(
                 f"[{design.WARN}]No cloud providers configured. "
@@ -747,9 +763,7 @@ class ProviderPalette:
 
         key = "" if is_local else (get_key(pid) or "")
         if not is_local and not key:
-            self.console.print(
-                f"[{design.WARN}]{label} — no API key configured.[/{design.WARN}]"
-            )
+            self.console.print(f"[{design.WARN}]{label} — no API key configured.[/{design.WARN}]")
             return
 
         self.console.print(f"[{design.MUTED}]Testing {label}...[/{design.MUTED}]")
@@ -839,7 +853,8 @@ class ProviderPalette:
             st = provider_status(pid)
             color = status_style(st)
             table.add_row(
-                meta["label"], "cloud",
+                meta["label"],
+                "cloud",
                 f"[{color}]{st}[/{color}]",
                 meta.get("env") or "—",
             )

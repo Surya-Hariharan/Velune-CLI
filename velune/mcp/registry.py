@@ -121,9 +121,7 @@ class MCPServerRegistry:
         # velune.toml [mcp.servers] entries are project-controlled — trusted only.
         if trusted:
             configs.extend(_load_toml_mcp(self.workspace))
-        elif (self.workspace / ".mcp.json").exists() or (
-            self.workspace / "velune.toml"
-        ).exists():
+        elif (self.workspace / ".mcp.json").exists() or (self.workspace / "velune.toml").exists():
             logger.info(
                 "Skipping project-level MCP config in untrusted workspace %s; "
                 "run 'velune trust' to enable it.",

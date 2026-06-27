@@ -70,9 +70,7 @@ async def _project_open(repl: VeluneREPL, raw_path: str) -> None:
         repl.console.print(f"[dim]Already in this workspace:[/dim] [cyan]{target.name}[/cyan]")
         return
     await switch_workspace(repl, target)
-    repl.console.print(
-        "[dim]→ Workspace registered. Run [bold]/index[/bold] to analyze it.[/dim]"
-    )
+    repl.console.print("[dim]→ Workspace registered. Run [bold]/index[/bold] to analyze it.[/dim]")
 
 
 async def _project_close(repl: VeluneREPL) -> None:
@@ -87,9 +85,8 @@ async def _project_close(repl: VeluneREPL) -> None:
 
 
 async def _project_status(repl: VeluneREPL) -> None:
-    from rich.table import Table
-    from velune.repository.index_state import IndexState
     from velune.providers.keystore import list_configured_providers
+    from velune.repository.index_state import IndexState
 
     workspace = Path(repl.container.get("runtime.workspace")).resolve()
     is_git = (workspace / ".git").exists()
@@ -102,6 +99,7 @@ async def _project_status(repl: VeluneREPL) -> None:
     if not active_branch or active_branch == "unknown":
         if is_git:
             from velune.repository.tracker import GitTracker
+
             try:
                 active_branch = GitTracker(workspace).get_active_branch()
             except Exception:
@@ -115,6 +113,7 @@ async def _project_status(repl: VeluneREPL) -> None:
     if is_git:
         try:
             import subprocess
+
             res = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=workspace,
@@ -176,7 +175,7 @@ async def _project_status(repl: VeluneREPL) -> None:
             graph_nodes = len(nodes)
     except Exception:
         pass
-    
+
     memory_status = (
         f"Working: {working_turns} turns · "
         f"Episodic: {episodic_turns} turns · "
@@ -221,7 +220,7 @@ async def _project_status(repl: VeluneREPL) -> None:
             pending_warnings = [a.title for a in repl._alert_store.all_alerts()]
         except Exception:
             pass
-    
+
     if not is_git:
         pending_warnings.append("Not a git repository")
     if not index_state:
@@ -233,6 +232,7 @@ async def _project_status(repl: VeluneREPL) -> None:
 
     # Clean table layout
     from velune.cli.ui_components import create_table, print_header, print_notification
+
     table = create_table("Key", "Value")
 
     table.add_row("Workspace", ws_name)
@@ -255,8 +255,14 @@ async def _project_status(repl: VeluneREPL) -> None:
     if recent_jobs:
         print_header(repl.console, "Recent Tasks")
         for job in recent_jobs:
-            status_color = "yellow" if job.status.value == "running" else ("green" if job.status.value == "completed" else "red")
-            repl.console.print(f"  [cyan]{job.job_id:<10}[/cyan]  {job.description[:45]:<45}  [{status_color}]{job.status.value}[/{status_color}]")
+            status_color = (
+                "yellow"
+                if job.status.value == "running"
+                else ("green" if job.status.value == "completed" else "red")
+            )
+            repl.console.print(
+                f"  [cyan]{job.job_id:<10}[/cyan]  {job.description[:45]:<45}  [{status_color}]{job.status.value}[/{status_color}]"
+            )
         repl.console.print()
 
     print_header(repl.console, "Pending Warnings")
@@ -270,9 +276,12 @@ async def _project_status(repl: VeluneREPL) -> None:
 
 async def _project_list(repl: VeluneREPL) -> None:
     from velune.cli.ui_components import create_table, print_notification
+
     workspaces = repl._workspace_registry.list()
     if not workspaces:
-        print_notification(repl.console, "No workspaces registered. Use /project add <path>.", type="info")
+        print_notification(
+            repl.console, "No workspaces registered. Use /project add <path>.", type="info"
+        )
         return
     current = str(Path(repl.container.get("runtime.workspace")).resolve())
     table = create_table("Project", "Type", "Last Opened", "Path")

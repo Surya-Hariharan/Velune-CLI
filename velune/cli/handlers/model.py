@@ -76,7 +76,7 @@ RECOMMENDED_MODELS = [
         "context_length": 200000,
         "is_local": False,
         "speed_tier": "medium",
-        "capabilities": ["coding", "reasoning", "planning", "vision", "tool_use"]
+        "capabilities": ["coding", "reasoning", "planning", "vision", "tool_use"],
     },
     {
         "model_id": "gpt-4o",
@@ -85,7 +85,7 @@ RECOMMENDED_MODELS = [
         "context_length": 128000,
         "is_local": False,
         "speed_tier": "fast",
-        "capabilities": ["coding", "reasoning", "planning", "vision", "tool_use"]
+        "capabilities": ["coding", "reasoning", "planning", "vision", "tool_use"],
     },
     {
         "model_id": "gemini-1.5-pro",
@@ -94,7 +94,7 @@ RECOMMENDED_MODELS = [
         "context_length": 1048576,
         "is_local": False,
         "speed_tier": "medium",
-        "capabilities": ["coding", "reasoning", "planning", "vision", "tool_use"]
+        "capabilities": ["coding", "reasoning", "planning", "vision", "tool_use"],
     },
     {
         "model_id": "qwen2.5-coder:7b",
@@ -103,7 +103,7 @@ RECOMMENDED_MODELS = [
         "context_length": 32000,
         "is_local": True,
         "speed_tier": "fast",
-        "capabilities": ["coding", "reasoning", "tool_use"]
+        "capabilities": ["coding", "reasoning", "tool_use"],
     },
     {
         "model_id": "llama3.1:8b",
@@ -112,7 +112,7 @@ RECOMMENDED_MODELS = [
         "context_length": 128000,
         "is_local": True,
         "speed_tier": "fast",
-        "capabilities": ["coding", "tool_use"]
+        "capabilities": ["coding", "tool_use"],
     },
     {
         "model_id": "deepseek-r1:7b",
@@ -121,8 +121,8 @@ RECOMMENDED_MODELS = [
         "context_length": 16384,
         "is_local": True,
         "speed_tier": "fast",
-        "capabilities": ["coding", "reasoning"]
-    }
+        "capabilities": ["coding", "reasoning"],
+    },
 ]
 
 
@@ -137,7 +137,7 @@ async def _show_model_picker(
     from prompt_toolkit.layout.controls import FormattedTextControl
 
     from velune.cli.autocomplete import fuzzy_score
-    from velune.cli.model_prefs import load_favorites, toggle_favorite, load_recents
+    from velune.cli.model_prefs import load_favorites, load_recents, toggle_favorite
     from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
     from velune.providers.ollama_manager import OllamaManager
 
@@ -186,11 +186,21 @@ async def _show_model_picker(
                 caps_list = rec["capabilities"]
                 if isinstance(caps_list, list):
                     caps = ModelCapabilityProfile(
-                        coding=CapabilityLevel.ADVANCED if "coding" in caps_list else CapabilityLevel.NONE,
-                        reasoning=CapabilityLevel.ADVANCED if "reasoning" in caps_list else CapabilityLevel.NONE,
-                        planning=CapabilityLevel.ADVANCED if "planning" in caps_list else CapabilityLevel.NONE,
-                        multimodal=CapabilityLevel.ADVANCED if "vision" in caps_list else CapabilityLevel.NONE,
-                        tool_use=CapabilityLevel.ADVANCED if "tool_use" in caps_list else CapabilityLevel.NONE,
+                        coding=CapabilityLevel.ADVANCED
+                        if "coding" in caps_list
+                        else CapabilityLevel.NONE,
+                        reasoning=CapabilityLevel.ADVANCED
+                        if "reasoning" in caps_list
+                        else CapabilityLevel.NONE,
+                        planning=CapabilityLevel.ADVANCED
+                        if "planning" in caps_list
+                        else CapabilityLevel.NONE,
+                        multimodal=CapabilityLevel.ADVANCED
+                        if "vision" in caps_list
+                        else CapabilityLevel.NONE,
+                        tool_use=CapabilityLevel.ADVANCED
+                        if "tool_use" in caps_list
+                        else CapabilityLevel.NONE,
                     )
                 else:
                     caps = ModelCapabilityProfile()
@@ -254,7 +264,9 @@ async def _show_model_picker(
             if not m.is_local:
                 cloud_group.append(m)
 
-            is_recommended = any(rec["model_id"].lower() == mid.lower() for rec in RECOMMENDED_MODELS)
+            is_recommended = any(
+                rec["model_id"].lower() == mid.lower() for rec in RECOMMENDED_MODELS
+            )
             if is_recommended:
                 rec_group.append(m)
 
@@ -271,28 +283,31 @@ async def _show_model_picker(
             # Skip optional categories like "Recent Models" or "Favorites" if empty and no search
             if not models_in_cat and cat_name in ("Recent Models", "Favorites") and not query:
                 continue
-            flat.append({
-                "type": "header",
-                "category": cat_name,
-                "model": None,
-                "text": FormattedText([("bold fg:ansiyellow", f"\n  — {cat_name} —\n")])
-            })
-            if not models_in_cat:
-                placeholder_text = "     (no favorited models - press 'f' to favorite a highlighted model)\n" if cat_name == "Favorites" else "     (no matching models)\n"
-                flat.append({
-                    "type": "placeholder",
+            flat.append(
+                {
+                    "type": "header",
                     "category": cat_name,
                     "model": None,
-                    "text": FormattedText([("fg:ansidarkgray", placeholder_text)])
-                })
+                    "text": FormattedText([("bold fg:ansiyellow", f"\n  — {cat_name} —\n")]),
+                }
+            )
+            if not models_in_cat:
+                placeholder_text = (
+                    "     (no favorited models - press 'f' to favorite a highlighted model)\n"
+                    if cat_name == "Favorites"
+                    else "     (no matching models)\n"
+                )
+                flat.append(
+                    {
+                        "type": "placeholder",
+                        "category": cat_name,
+                        "model": None,
+                        "text": FormattedText([("fg:ansidarkgray", placeholder_text)]),
+                    }
+                )
             else:
                 for m in models_in_cat:
-                    flat.append({
-                        "type": "model",
-                        "category": cat_name,
-                        "model": m,
-                        "text": None
-                    })
+                    flat.append({"type": "model", "category": cat_name, "model": m, "text": None})
         return flat
 
     def _render_list() -> FormattedText:
@@ -376,7 +391,15 @@ async def _show_model_picker(
                 provider_style = "fg:ansiyellow bg:ansigray fg:ansiblack"
                 ctx_style = "fg:ansicenter bg:ansigray fg:ansiblack"
                 speed_style = "fg:ansimagenta bg:ansigray fg:ansiblack"
-                status_style = "fg:ansigreen bg:ansigray fg:ansiblack" if status == "active" else ("fg:ansicenter bg:ansigray fg:ansiblack" if status == "installed" else "fg:ansidarkgray bg:ansigray fg:ansiblack")
+                status_style = (
+                    "fg:ansigreen bg:ansigray fg:ansiblack"
+                    if status == "active"
+                    else (
+                        "fg:ansicenter bg:ansigray fg:ansiblack"
+                        if status == "installed"
+                        else "fg:ansidarkgray bg:ansigray fg:ansiblack"
+                    )
+                )
                 caps_style = "fg:ansiblue bg:ansigray fg:ansiblack"
             else:
                 prefix = "  "
@@ -386,7 +409,11 @@ async def _show_model_picker(
                 provider_style = "fg:ansiyellow"
                 ctx_style = "fg:ansicenter"
                 speed_style = "fg:ansimagenta"
-                status_style = "fg:ansigreen" if status == "active" else ("fg:ansicenter" if status == "installed" else "fg:ansidarkgray")
+                status_style = (
+                    "fg:ansigreen"
+                    if status == "active"
+                    else ("fg:ansicenter" if status == "installed" else "fg:ansidarkgray")
+                )
                 caps_style = "fg:ansidarkgray"
 
             has_reasoning = check_reasoning(m)
@@ -441,11 +468,20 @@ async def _show_model_picker(
             if m.capabilities:
                 if getattr(m.capabilities, "coding", CapabilityLevel.NONE) >= CapabilityLevel.BASIC:
                     caps_list.append("coding")
-                if getattr(m.capabilities, "planning", CapabilityLevel.NONE) >= CapabilityLevel.BASIC:
+                if (
+                    getattr(m.capabilities, "planning", CapabilityLevel.NONE)
+                    >= CapabilityLevel.BASIC
+                ):
                     caps_list.append("planning")
-                if getattr(m.capabilities, "summarization", CapabilityLevel.NONE) >= CapabilityLevel.BASIC:
+                if (
+                    getattr(m.capabilities, "summarization", CapabilityLevel.NONE)
+                    >= CapabilityLevel.BASIC
+                ):
                     caps_list.append("summary")
-                if getattr(m.capabilities, "tool_use", CapabilityLevel.NONE) >= CapabilityLevel.BASIC:
+                if (
+                    getattr(m.capabilities, "tool_use", CapabilityLevel.NONE)
+                    >= CapabilityLevel.BASIC
+                ):
                     caps_list.append("tool_use")
             caps_str = ", ".join(caps_list) if caps_list else "general"
             lines.append((row_bg, "  "))
@@ -522,7 +558,6 @@ async def _show_model_picker(
 
 
 async def cmd_models(repl: VeluneREPL, args: str) -> None:
-    from rich.table import Table
 
     from velune.core.types.model import CapabilityLevel
 
@@ -531,7 +566,8 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
         return
     all_models = model_registry.list_all()
 
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli.ui_components import create_table, print_header
+
     if not all_models:
         from velune.cli.rendering.error_panel import render_error
         from velune.core.errors.catalog import NoModelsAvailableError
@@ -569,7 +605,7 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
 async def activate_model(repl: VeluneREPL, model: ModelDescriptor) -> None:
     """Set *model* as active and persist it as the default for next launch."""
     repl.active_model = model
-    from velune.cli.model_prefs import save_active_model, add_recent
+    from velune.cli.model_prefs import add_recent, save_active_model
 
     save_active_model(model.provider_id, model.model_id)
     add_recent(model.model_id)
@@ -689,9 +725,7 @@ async def _model_use(repl: VeluneREPL, name: str) -> None:
         from velune.core.errors.catalog import ModelNotFoundError
 
         repl.console.print(render_error(ModelNotFoundError(f"'{name}'")))
-        repl.console.print(
-            "[dim]→ Run [bold]/model discover[/bold] to refresh the registry.[/dim]"
-        )
+        repl.console.print("[dim]→ Run [bold]/model discover[/bold] to refresh the registry.[/dim]")
         return
     await activate_model(repl, model)
 
@@ -811,7 +845,6 @@ async def _model_locate(repl: VeluneREPL) -> None:
 
 
 async def _model_locations(repl: VeluneREPL, args: str) -> None:
-    from rich.table import Table
 
     from velune.providers.ollama_locations import OllamaLocationRegistry
 
@@ -830,6 +863,7 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
         return
 
     from velune.cli.ui_components import create_table, print_header, print_notification
+
     if sub in ("remove", "rm", "delete"):
         if not rest:
             repl.console.print("[yellow]Usage: /model locations remove <path>[/yellow]")
@@ -843,7 +877,11 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
 
     roots = reg.resolve_roots()
     if not roots:
-        print_notification(repl.console, "No model locations resolved. Run /model locate to register one.", type="info")
+        print_notification(
+            repl.console,
+            "No model locations resolved. Run /model locate to register one.",
+            type="info",
+        )
         return
 
     table = create_table("Location", "Source", "Status")
@@ -857,7 +895,7 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
         else:
             status = "[red]not an Ollama store[/red]"
         table.add_row(str(rr.path), rr.source, status)
-    
+
     print_header(repl.console, "Model Locations")
     repl.console.print(table)
     repl.console.print()
@@ -867,7 +905,7 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
         print_notification(
             repl.console,
             "Reconnect the drive(s) above and the models reappear automatically — no re-setup needed.",
-            type="info"
+            type="info",
         )
 
 
@@ -941,9 +979,7 @@ async def cmd_bench(repl: VeluneREPL, args: str) -> None:
             return
 
         models = model_registry.list_all()
-        models_to_probe = [
-            m for m in models if provider_registry.get(m.provider_id) is not None
-        ]
+        models_to_probe = [m for m in models if provider_registry.get(m.provider_id) is not None]
 
         if not models_to_probe:
             repl.console.print("[yellow]No models found/active to benchmark.[/yellow]")

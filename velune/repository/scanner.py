@@ -297,13 +297,14 @@ class FilesystemScanner:
         """Find .gitignore files in subdirectories."""
         found: list[Path] = []
         import subprocess
+
         try:
             res = subprocess.run(
                 ["git", "ls-files", "--cached", "--others", "--exclude-standard", "**/.gitignore"],
                 cwd=str(self.root_path),
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             for line in res.stdout.splitlines():
                 if not line.strip():

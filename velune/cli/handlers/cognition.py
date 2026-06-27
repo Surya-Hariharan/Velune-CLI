@@ -96,9 +96,7 @@ def _render_quick_summary(repl: VeluneREPL, summary: dict) -> None:
             elif isinstance(val, dict):
                 val = ", ".join(f"{k}={v}" for k, v in val.items())
             lines.append(f"[bold]{str(key).capitalize()}[/bold] {val}")
-    repl.console.print(
-        Panel("\n".join(lines), title="Quick Cognition", border_style=design.ACCENT)
-    )
+    repl.console.print(Panel("\n".join(lines), title="Quick Cognition", border_style=design.ACCENT))
     repl.console.print(
         "[dim]→ Run [bold]/index standard[/bold] to build a full symbol index.[/dim]"
     )

@@ -182,6 +182,147 @@ jobs:
           path: dist/
           retention-days: 7
 
+  build-go:
+    name: Go Launcher (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: ext/go
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache: true
+          cache-dependency-path: ext/go/go.sum
+
+      - name: Build
+        run: go build ./cmd/velune/...
+
+      - name: Test
+        run: go test -v ./cmd/velune/...
+
+      - name: Vet
+        run: go vet ./cmd/velune/...
+
+  build-rust:
+    name: Rust Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: ext/rust/velune-native
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ext/rust/velune-native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('ext/rust/velune-native/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy -- -D warnings
+
+      - name: Build (lib only — no Python needed for tests)
+        run: cargo build --lib
+
+      - name: Run unit tests
+        run: cargo test --lib
+
+  benchmark-native:
+    name: Benchmark sha256 (ubuntu, py3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install maturin + build native wheel
+        run: |
+          pip install maturin
+          cd ext/rust/velune-native
+          maturin build --release --out /tmp/native-wheel
+          pip install /tmp/native-wheel/*.whl
+
+      - name: Install velune (for _native.py)
+        run: pip install -e .
+
+      - name: Run benchmark (CI mode — fails if Rust is slower on large files)
+        run: |
+          python scripts/benchmark_native.py --ci \
+            --json .benchmarks/sha256_latest.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-sha256
+          path: .benchmarks/sha256_latest.json
+          retention-days: 30
+
+  benchmark-scan:
+    name: Benchmark scan_directory (ubuntu, py3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install maturin + build native wheel
+        run: |
+          pip install maturin
+          cd ext/rust/velune-native
+          maturin build --release --out /tmp/native-wheel
+          pip install /tmp/native-wheel/*.whl
+
+      - name: Install velune
+        run: pip install -e .
+
+      - name: Run scan benchmark (CI mode)
+        run: |
+          python scripts/benchmark_scan.py --ci \
+            --json .benchmarks/scan_latest.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-scan
+          path: .benchmarks/scan_latest.json
+          retention-days: 30
+
   install-smoke:
     name: Wheel Install + REPL Smoke (${{ matrix.os }}, py${{ matrix.python-version }})
     needs: build
@@ -227,7 +368,7 @@ jobs:
   ci-pass:
     name: CI Pass
     runs-on: ubuntu-latest
-    needs: [lint, security, test, build, install-smoke]
+    needs: [lint, security, test, build, install-smoke, build-go, build-rust, benchmark-native, benchmark-scan]
     if: always()
     steps:
       - name: Check all jobs passed
@@ -236,7 +377,11 @@ jobs:
              [ "${{ needs.security.result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ] || \
-             [ "${{ needs.install-smoke.result }}" != "success" ]; then
+             [ "${{ needs.install-smoke.result }}" != "success" ] || \
+             [ "${{ needs.build-go.result }}" != "success" ] || \
+             [ "${{ needs.build-rust.result }}" != "success" ] || \
+             [ "${{ needs.benchmark-native.result }}" != "success" ] || \
+             [ "${{ needs.benchmark-scan.result }}" != "success" ]; then
             echo "❌ One or more jobs failed"
             exit 1
           fi

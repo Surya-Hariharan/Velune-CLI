@@ -84,7 +84,9 @@ class GitContextProvider:
 
         staged_files = _git("diff", "--name-only", "--cached").splitlines()
         modified_files = _git("diff", "--name-only").splitlines()
-        untracked_files = _git("ls-files", "--others", "--exclude-standard").splitlines()[: self.MAX_UNTRACKED]
+        untracked_files = _git("ls-files", "--others", "--exclude-standard").splitlines()[
+            : self.MAX_UNTRACKED
+        ]
 
         staged_diff_summary = ""
         raw_diff = _git("diff", "--cached")

@@ -69,6 +69,7 @@ class ContextCacheProvider:
 # Anthropic — prompt-caching-2024-07-31
 # ---------------------------------------------------------------------------
 
+
 class AnthropicPromptCacheProvider(ContextCacheProvider):
     """Injects Anthropic cache_control blocks and parses cache token counts.
 
@@ -123,7 +124,8 @@ class AnthropicPromptCacheProvider(ContextCacheProvider):
             ]
             if _DEBUG:
                 logger.debug(
-                    "[cache/anthropic] system block marked ephemeral (%d chars)", len(system_content)
+                    "[cache/anthropic] system block marked ephemeral (%d chars)",
+                    len(system_content),
                 )
         elif system_content:
             cache_payload["system"] = system_content
@@ -184,6 +186,7 @@ class AnthropicPromptCacheProvider(ContextCacheProvider):
 # No-op — passthrough for all other providers
 # ---------------------------------------------------------------------------
 
+
 class NoOpCacheProvider(ContextCacheProvider):
     """Passthrough provider — returns request unchanged.
 
@@ -198,7 +201,9 @@ class NoOpCacheProvider(ContextCacheProvider):
     def supports_caching(self) -> bool:
         return False
 
-    def prepare_request(self, request: InferenceRequest, cacheable_indices: list[int]) -> InferenceRequest:
+    def prepare_request(
+        self, request: InferenceRequest, cacheable_indices: list[int]
+    ) -> InferenceRequest:
         return request
 
     def extract_cache_stats(self, response_metadata: dict[str, Any]) -> CacheMetrics:

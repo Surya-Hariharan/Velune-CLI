@@ -47,13 +47,17 @@ async def cmd_exit(repl: VeluneREPL, args: str) -> None:
 
 async def cmd_clear(repl: VeluneREPL, args: str) -> None:
     from velune.cli.ui_components import print_notification
+
     print("\033c", end="", flush=True)
-    print_notification(repl.console, "Screen cleared — conversation context preserved.", type="success")
+    print_notification(
+        repl.console, "Screen cleared — conversation context preserved.", type="success"
+    )
 
 
 async def cmd_new(repl: VeluneREPL, args: str) -> None:
     """Start an isolated conversation session inside the same workspace."""
     from velune.cli.ui_components import print_notification
+
     archived_note = ""
     try:
         has_exchange = any(m.get("role") == "assistant" for m in repl._conversation)
@@ -82,13 +86,14 @@ async def cmd_new(repl: VeluneREPL, args: str) -> None:
     print_notification(
         repl.console,
         f"New session started — project memory preserved.{archived_note}",
-        type="success"
+        type="success",
     )
 
 
 async def cmd_history(repl: VeluneREPL, args: str) -> None:
     """Show REPL command execution history."""
     from velune.cli.ui_components import print_header, print_notification
+
     if not repl._history_file.exists():
         print_notification(repl.console, "No command history found.", type="info")
         return
@@ -129,7 +134,7 @@ async def cmd_stats(repl: VeluneREPL, args: str) -> None:
     user_turns = sum(1 for m in repl._conversation if m.get("role") == "user")
 
     print_header(repl.console, "Session Statistics")
-    
+
     table = create_table("Metric", "Value")
     table.add_row("Session uptime", uptime)
     table.add_row("Conversation turns", str(turns))

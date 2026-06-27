@@ -150,6 +150,7 @@ def usage_summary(
 
 def _render_provider_table(provider_data: list) -> None:
     from velune.cli.ui_components import create_table, print_header
+
     print_header(console, "Provider Summary")
     table = create_table(
         "Provider",
@@ -183,6 +184,7 @@ def _render_provider_table(provider_data: list) -> None:
 
 def _render_model_table(model_data: list) -> None:
     from velune.cli.ui_components import create_table, print_header
+
     print_header(console, "Model Usage")
     table = create_table(
         "Model",
@@ -325,6 +327,7 @@ def quota_overview(
 
     # Per-provider quota table
     from velune.cli.ui_components import create_table
+
     table = create_table(
         "Provider",
         "Requests",

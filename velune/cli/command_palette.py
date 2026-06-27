@@ -334,4 +334,3 @@ PALETTE_STYLES: dict[str, str] = {
     "palette.muted": f"bg:{design.SURFACE} fg:{design.FAINT}",
     "palette.warning": f"bg:{design.SURFACE} fg:{design.WARN}",
 }
-

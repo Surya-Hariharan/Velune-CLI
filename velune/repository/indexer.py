@@ -1,12 +1,12 @@
 """Incremental symbol and repository metadata indexer."""
 
-import hashlib
 import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
 
 from velune.cognition.firewall import CognitiveFirewall
+from velune.repository._native import sha256_file as _sha256_file
 from velune.repository.parser import RepositorySnapshotParser
 from velune.repository.scanner import FilesystemScanner
 from velune.repository.schemas import (
@@ -238,12 +238,7 @@ class RepositoryIndexer:
         )
 
     def _compute_sha256(self, file_path: Path) -> str:
-        """Computes the SHA-256 hash of a file's contents."""
-        sha = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha.update(chunk)
-        return sha.hexdigest()
+        return _sha256_file(file_path)
 
     def _compile_language_summary(self, files: list[RepositoryFile]) -> dict[str, int]:
         """Summarizes counting of files grouped by programming language."""

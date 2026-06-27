@@ -370,7 +370,9 @@ def _test_all() -> None:
             model_str = str(len(result.models))
             msg_str = "OK"
         else:
-            status_str = f"[{design.WARN}]{result.status.value.replace('_', ' ').title()}[/{design.WARN}]"
+            status_str = (
+                f"[{design.WARN}]{result.status.value.replace('_', ' ').title()}[/{design.WARN}]"
+            )
             model_str = "—"
             msg_str = result.message[:50]
 
@@ -474,9 +476,7 @@ def provider_status(
             msg = "Authenticated"
         else:
             color = design.WARN
-            status_str = (
-                f"[{color}]{result.status.value.replace('_', ' ').title()}[/{color}]"
-            )
+            status_str = f"[{color}]{result.status.value.replace('_', ' ').title()}[/{color}]"
             model_count = "—"
             msg = result.message[:60]
 

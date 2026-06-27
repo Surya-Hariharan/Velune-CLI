@@ -65,5 +65,9 @@ class CacheState:
         changes, ensuring stale prefixes are never reused.
         """
         if _DEBUG:
-            logger.debug("[cache] INVALIDATE reason=%r (cleared %d fingerprints)", reason, len(self.fingerprints))
+            logger.debug(
+                "[cache] INVALIDATE reason=%r (cleared %d fingerprints)",
+                reason,
+                len(self.fingerprints),
+            )
         self.fingerprints.clear()

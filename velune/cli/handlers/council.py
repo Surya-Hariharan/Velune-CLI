@@ -18,9 +18,7 @@ async def cmd_run(repl: VeluneREPL, args: str) -> None:
         clean = args.replace("--bg", "").strip()
         await _submit_background_job(repl, clean)
         return
-    force_tier = (
-        None if repl._mode_manager.is_normal() else repl._mode_manager.config.council_tier
-    )
+    force_tier = None if repl._mode_manager.is_normal() else repl._mode_manager.config.council_tier
     await execute_council_task(repl, args, force_tier=force_tier)
 
 
@@ -198,9 +196,7 @@ async def _submit_background_job(repl: VeluneREPL, task: str) -> None:
     )
 
 
-async def execute_council_task(
-    repl: VeluneREPL, task: str, force_tier: str | None
-) -> None:
+async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | None) -> None:
     from rich.console import Group
     from rich.live import Live
     from rich.panel import Panel
@@ -376,9 +372,7 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
     resolved = applier.resolve_all(blocks)
 
     if not resolved:
-        repl.console.print(
-            "[yellow]All edit blocks failed to apply (SEARCH not matched).[/yellow]"
-        )
+        repl.console.print("[yellow]All edit blocks failed to apply (SEARCH not matched).[/yellow]")
         return
 
     repl.console.print(

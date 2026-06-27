@@ -1,11 +1,10 @@
 """Dependency and import grapher using networkx."""
 
 from pathlib import Path
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import networkx as nx
+    pass
 
 
 from velune.repository.schemas import RepositoryEdge, RepositorySymbol, RepositorySymbolKind
@@ -16,6 +15,7 @@ class RepositoryGrapher:
 
     def __init__(self, root_path: Path) -> None:
         import networkx as nx
+
         self.root_path = root_path.resolve()
         self.graph = nx.MultiDiGraph()
 

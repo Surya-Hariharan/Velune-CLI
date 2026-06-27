@@ -87,6 +87,33 @@ def _create_episodic_session_memory(env: RuntimeEnvironment):
     return EpisodicMemory(pool)
 
 
+def _create_three_brain_coordinator(env: RuntimeEnvironment):
+    from velune.memory.three_brain import ThreeBrainCoordinator
+
+    working = (
+        env.container.get("runtime.working_memory")
+        if env.container.has("runtime.working_memory")
+        else None
+    )
+    semantic = (
+        env.container.get("runtime.semantic_memory_lance")
+        if env.container.has("runtime.semantic_memory_lance")
+        else None
+    )
+    episodic = (
+        env.container.get("runtime.episodic_session_memory")
+        if env.container.has("runtime.episodic_session_memory")
+        else None
+    )
+    kg_query = (
+        env.container.get("runtime.knowledge_query")
+        if env.container.has("runtime.knowledge_query")
+        else None
+    )
+
+    return ThreeBrainCoordinator(working, semantic, episodic, kg_query)
+
+
 def _create_memory_lifecycle(env: RuntimeEnvironment):
     from velune.memory.lifecycle import MemoryLifecycleManager
 
@@ -200,6 +227,18 @@ MEMORY_MODULES = [
         container_key="runtime.episodic_session_memory",
         lifecycle_key="episodic_session_memory",  # calls EpisodicMemory.initialize()
         dependencies=["runtime.sqlite_pool"],
+    ),
+    SubsystemModule(
+        name="three_brain_coordinator",
+        factory=_create_three_brain_coordinator,
+        container_key="runtime.three_brain_coordinator",
+        lifecycle_key=None,  # Non-critical; absence degrades gracefully
+        dependencies=[
+            "runtime.working_memory",
+            "runtime.episodic_session_memory",
+            "runtime.semantic_memory_lance",
+        ],
+        tier=1,
     ),
     SubsystemModule(
         name="memory_lifecycle",

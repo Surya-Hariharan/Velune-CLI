@@ -77,9 +77,7 @@ def init_command(
                 indent=2,
             )
         )
-        console.print(
-            f"[green]Detected project type:[/green] [cyan]{_profile.display_name}[/cyan]"
-        )
+        console.print(f"[green]Detected project type:[/green] [cyan]{_profile.display_name}[/cyan]")
         if _profile.detected_frameworks:
             console.print(f"  [dim]Frameworks: {', '.join(_profile.detected_frameworks)}[/dim]")
     except Exception:
@@ -112,9 +110,7 @@ default_tier = "auto"
 enabled = true
 """
         config_path.write_text(config_content)
-        console.print(
-            f"[green]Created .velune/config.toml[/green] (provider: {default_provider})"
-        )
+        console.print(f"[green]Created .velune/config.toml[/green] (provider: {default_provider})")
 
     # .gitignore
     gitignore = workspace / ".gitignore"

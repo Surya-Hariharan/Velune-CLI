@@ -30,7 +30,6 @@ class DisplayPanels:
         self.console.print(ui.warning_panel(title, content))
 
     def error_panel(self, title: str, content: str) -> None:
-        from rich.text import Text
         self.console.print(ui.error_panel(title, cause=content))
 
     def create_table(self, title: str, columns: list[str]) -> Table:

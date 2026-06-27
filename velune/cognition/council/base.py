@@ -44,6 +44,7 @@ class BaseCouncilAgent(ABC):
         # Cache manager — one per agent instance so fingerprint history is
         # preserved across consecutive deliberations within the same run.
         from velune.context.cache.manager import make_cache_manager
+
         self._cache_manager = make_cache_manager(provider.provider_id)
 
     async def deliberate(

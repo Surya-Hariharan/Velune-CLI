@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import typer
+
     from velune.kernel.registry import ServiceContainer
 
 

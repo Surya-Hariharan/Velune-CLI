@@ -2,6 +2,8 @@
 name = "velune-native"
 version = "0.1.0"
 edition = "2021"
+description = "CPU-intensive native extensions for Velune CLI (repository indexing, hashing, scanning)"
+license = "MIT"
 
 [lib]
 name = "velune_native"
@@ -9,3 +11,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.20.0", features = ["extension-module"] }
+sha2 = "0.10"
+hex = "0.4"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

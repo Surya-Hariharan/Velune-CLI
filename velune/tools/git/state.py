@@ -15,13 +15,8 @@ from velune.tools.base.tool import BaseTool, ToolPermission
 
 def _git_run(cwd: Path, *args: str) -> str:
     import subprocess
-    res = subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False
-    )
+
+    res = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False)
     if res.returncode != 0:
         raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
     return res.stdout.strip()
@@ -71,13 +66,13 @@ class GitStatus(BaseTool):
                     path = line[3:].strip()
                     if path.startswith('"') and path.endswith('"'):
                         path = path[1:-1]
-                    if xy == '??':
+                    if xy == "??":
                         status["untracked"].append(path)
-                    elif 'A' in xy:
+                    elif "A" in xy:
                         status["added"].append(path)
-                    elif 'D' in xy:
+                    elif "D" in xy:
                         status["deleted"].append(path)
-                    elif 'M' in xy or 'R' in xy or 'C' in xy or 'U' in xy:
+                    elif "M" in xy or "R" in xy or "C" in xy or "U" in xy:
                         status["modified"].append(path)
             except Exception:
                 pass
@@ -119,7 +114,7 @@ class GitBranch(BaseTool):
                 current = _git_run(safe_root, "symbolic-ref", "--short", "HEAD")
             except Exception:
                 current = "(detached HEAD)"
-            
+
             try:
                 out = _git_run(safe_root, "branch", "-a", "--format=%(refname:short)")
                 branches = [b for b in out.splitlines() if b]

@@ -24,7 +24,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import FormattedText
 
 from velune._compat import uncancel_task
-from velune.cli.slash_commands import SlashCommand, SlashCommandRegistry
+from velune.cli.slash_commands import SlashCommandRegistry
 from velune.core.runtime import RuntimeContext
 from velune.core.types.model import ModelDescriptor
 
@@ -892,199 +892,248 @@ class VeluneREPL:
 
     async def _cmd_help(self, args: str) -> None:
         from velune.cli.handlers.session import cmd_help
+
         await cmd_help(self, args)
 
     async def _cmd_exit(self, args: str) -> None:
         from velune.cli.handlers.session import cmd_exit
+
         await cmd_exit(self, args)
 
     async def _cmd_clear(self, args: str) -> None:
         from velune.cli.handlers.session import cmd_clear
+
         await cmd_clear(self, args)
 
     async def _cmd_new(self, args: str) -> None:
         from velune.cli.handlers.session import cmd_new
+
         await cmd_new(self, args)
 
     async def _cmd_history(self, args: str) -> None:
         from velune.cli.handlers.session import cmd_history
+
         await cmd_history(self, args)
 
     async def _cmd_stats(self, args: str) -> None:
         from velune.cli.handlers.session import cmd_stats
+
         await cmd_stats(self, args)
 
     async def _cmd_settings(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_settings
+
         await cmd_settings(self, args)
 
     async def _cmd_config(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_config
+
         await cmd_config(self, args)
 
     async def _cmd_hooks(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_hooks
+
         await cmd_hooks(self, args)
 
     async def _cmd_approve(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_approve
+
         await cmd_approve(self, args)
 
     async def _cmd_doctor(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_doctor
+
         await cmd_doctor(self, args)
 
     async def _cmd_sandbox(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_sandbox
+
         await cmd_sandbox(self, args)
 
     async def _cmd_model(self, args: str) -> None:
         from velune.cli.handlers.model import cmd_model
+
         await cmd_model(self, args)
 
     async def _cmd_models(self, args: str) -> None:
         from velune.cli.handlers.model import cmd_models
+
         await cmd_models(self, args)
 
     async def _cmd_pull(self, args: str) -> None:
         from velune.cli.handlers.model import cmd_pull
+
         await cmd_pull(self, args)
 
     async def _cmd_delete(self, args: str) -> None:
         from velune.cli.handlers.model import cmd_delete
+
         await cmd_delete(self, args)
 
     async def _cmd_bench(self, args: str) -> None:
         from velune.cli.handlers.model import cmd_bench
+
         await cmd_bench(self, args)
 
     async def _cmd_cognition(self, args: str) -> None:
         from velune.cli.handlers.cognition import cmd_cognition
+
         await cmd_cognition(self, args)
 
     async def _cmd_run(self, args: str) -> None:
         from velune.cli.handlers.council import cmd_run
+
         await cmd_run(self, args)
 
     async def _cmd_council(self, args: str) -> None:
         from velune.cli.handlers.council import cmd_council
+
         await cmd_council(self, args)
 
     async def _cmd_jobs(self, args: str) -> None:
         from velune.cli.handlers.council import cmd_jobs
+
         await cmd_jobs(self, args)
 
     async def _cmd_dashboard(self, args: str) -> None:
         from velune.cli.handlers.council import cmd_dashboard
+
         await cmd_dashboard(self, args)
 
     async def _cmd_session(self, args: str) -> None:
         from velune.cli.handlers.session_mgmt import cmd_session
+
         await cmd_session(self, args)
 
     async def _cmd_project(self, args: str) -> None:
         from velune.cli.handlers.workspace import cmd_project
+
         await cmd_project(self, args)
 
     async def _cmd_memory(self, args: str) -> None:
         from velune.cli.handlers.memory import cmd_memory
+
         await cmd_memory(self, args)
 
     async def _cmd_context(self, args: str) -> None:
         from velune.cli.handlers.memory import cmd_context
+
         await cmd_context(self, args)
 
     async def _cmd_graph(self, args: str) -> None:
         from velune.cli.handlers.memory import cmd_graph
+
         await cmd_graph(self, args)
 
     async def _cmd_optimus(self, args: str) -> None:
         from velune.cli.handlers.mode import cmd_optimus
+
         await cmd_optimus(self, args)
 
     async def _cmd_godly(self, args: str) -> None:
         from velune.cli.handlers.mode import cmd_godly
+
         await cmd_godly(self, args)
 
     async def _cmd_normal(self, args: str) -> None:
         from velune.cli.handlers.mode import cmd_normal
+
         await cmd_normal(self, args)
 
     async def _cmd_mode(self, args: str) -> None:
         from velune.cli.handlers.mode import cmd_mode
+
         await cmd_mode(self, args)
 
     async def _cmd_councilmodel(self, args: str) -> None:
         from velune.cli.handlers.councilmodel import cmd_councilmodel
+
         await cmd_councilmodel(self, args)
 
     async def _cmd_councilmodel_show(self, args: str) -> None:
         from velune.cli.handlers.councilmodel import cmd_councilmodel_show
+
         await cmd_councilmodel_show(self)
 
     async def _cmd_diff(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_diff
+
         await cmd_diff(self, args)
 
     async def _cmd_undo(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_undo
+
         await cmd_undo(self, args)
 
     async def _cmd_hunk(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_hunk
+
         await cmd_hunk(self, args)
 
     async def _cmd_push(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_push
+
         await cmd_push(self, args)
 
     async def _cmd_pr(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_pr
+
         await cmd_pr(self, args)
 
     async def _cmd_issue(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_issue
+
         await cmd_issue(self, args)
 
     async def _cmd_mcp(self, args: str) -> None:
         from velune.cli.handlers.mcp import cmd_mcp
+
         await cmd_mcp(self, args)
 
     async def _cmd_plugin(self, args: str) -> None:
         from velune.cli.handlers.plugins import cmd_plugin
+
         await cmd_plugin(self, args)
 
     async def _cmd_lint(self, args: str) -> None:
         from velune.cli.handlers.code_intel import cmd_lint
+
         await cmd_lint(self, args)
 
     async def _cmd_refactor(self, args: str) -> None:
         from velune.cli.handlers.code_intel import cmd_refactor
+
         await cmd_refactor(self, args)
 
     async def _cmd_typify(self, args: str) -> None:
         from velune.cli.handlers.code_intel import cmd_typify
+
         await cmd_typify(self, args)
 
     async def _cmd_providers(self, args: str) -> None:
         from velune.cli.handlers.providers import cmd_providers
+
         await cmd_providers(self, args)
 
     # Backwards-compat aliases used by the old private API in tests/tools
     async def _restore_active_model(self) -> None:
         from velune.cli.handlers.model import restore_active_model
+
         restore_active_model(self)
 
     def _apply_role_overrides_to_orchestrator(self) -> None:
         from velune.cli.handlers.councilmodel import apply_role_overrides_to_orchestrator
+
         apply_role_overrides_to_orchestrator(self)
 
     def _poll_and_render_alerts(self) -> None:
         from velune.cli.handlers.council import poll_and_render_alerts
+
         poll_and_render_alerts(self)
 
     def _register_plugin_commands(self, plugins) -> None:
         from velune.cli.handlers.plugins import register_plugin_commands
+
         register_plugin_commands(self, plugins)
 
 

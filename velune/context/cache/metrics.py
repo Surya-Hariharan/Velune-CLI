@@ -19,8 +19,8 @@ class CacheMetrics:
     writes: int = 0
     hits: int = 0
     misses: int = 0
-    cached_input_tokens: int = 0   # tokens written into the cache (billed at full price)
-    cache_read_tokens: int = 0     # tokens read from cache (billed at ~10% price)
+    cached_input_tokens: int = 0  # tokens written into the cache (billed at full price)
+    cache_read_tokens: int = 0  # tokens read from cache (billed at ~10% price)
 
     # Per-call tracking (populated by ContextCacheManager.record())
     _model_id: str = field(default="", repr=False)
@@ -57,7 +57,7 @@ class CacheMetrics:
     # Merging
     # ------------------------------------------------------------------ #
 
-    def merge(self, other: "CacheMetrics") -> None:
+    def merge(self, other: CacheMetrics) -> None:
         """Merge another CacheMetrics into this one (in-place)."""
         self.writes += other.writes
         self.hits += other.hits

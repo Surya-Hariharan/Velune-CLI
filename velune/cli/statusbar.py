@@ -27,15 +27,15 @@ from velune.cli import design
 
 _BG = design.SURFACE
 STATUS_BAR_STYLES: dict[str, str] = {
-    "bottom-toolbar":         f"noinherit bg:{_BG} {design.MUTED}",
-    "bottom-toolbar.key":     f"bg:{_BG} {design.FAINT}",
-    "bottom-toolbar.model":   f"bg:{_BG} {design.ACCENT} bold",
-    "bottom-toolbar.mode":    f"bg:{_BG} {design.HIGHLIGHT}",
-    "bottom-toolbar.ok":      f"bg:{_BG} {design.OK}",
-    "bottom-toolbar.warn":    f"bg:{_BG} {design.WARN}",
-    "bottom-toolbar.danger":  f"bg:{_BG} {design.DANGER}",
-    "bottom-toolbar.hint":    f"bg:{_BG} {design.HIGHLIGHT} bold",
-    "bottom-toolbar.speed":   f"bg:{_BG} {design.ENERGY}",
+    "bottom-toolbar": f"noinherit bg:{_BG} {design.MUTED}",
+    "bottom-toolbar.key": f"bg:{_BG} {design.FAINT}",
+    "bottom-toolbar.model": f"bg:{_BG} {design.ACCENT} bold",
+    "bottom-toolbar.mode": f"bg:{_BG} {design.HIGHLIGHT}",
+    "bottom-toolbar.ok": f"bg:{_BG} {design.OK}",
+    "bottom-toolbar.warn": f"bg:{_BG} {design.WARN}",
+    "bottom-toolbar.danger": f"bg:{_BG} {design.DANGER}",
+    "bottom-toolbar.hint": f"bg:{_BG} {design.HIGHLIGHT} bold",
+    "bottom-toolbar.speed": f"bg:{_BG} {design.ENERGY}",
     "bottom-toolbar.privacy": f"bg:{_BG} {design.PRIMARY_GREEN}",
     "bottom-toolbar.project": f"bg:{_BG} {design.INFO}",
 }
@@ -56,8 +56,8 @@ class StatusBarState:
     exit_hint: bool = False
     context_used: int | None = None
     context_max: int | None = None
-    session_cost: float = 0.0       # kept for compat; use /stats to view
-    provider_health: str | None = None   # "ok" | "degraded" | "down"
+    session_cost: float = 0.0  # kept for compat; use /stats to view
+    provider_health: str | None = None  # "ok" | "degraded" | "down"
     bg_job_count: int = 0
     alert_count: int = 0
 

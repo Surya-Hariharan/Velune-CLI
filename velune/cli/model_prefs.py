@@ -41,14 +41,14 @@ def save_active_model(provider_id: str, model_id: str, path: Path | None = None)
                 pass
         data["provider_id"] = provider_id
         data["model_id"] = model_id
-        
+
         # Add to recents automatically
         recents = data.setdefault("recents", [])
         if model_id in recents:
             recents.remove(model_id)
         recents.insert(0, model_id)
         data["recents"] = recents[:10]  # Keep last 10
-        
+
         tmp = target.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(target)
@@ -111,7 +111,7 @@ def toggle_favorite(model_id: str, path: Path | None = None) -> bool:
         else:
             favorites.append(model_id)
             is_fav = True
-        
+
         tmp = target.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(target)
@@ -149,10 +149,9 @@ def add_recent(model_id: str, path: Path | None = None) -> None:
             recents.remove(model_id)
         recents.insert(0, model_id)
         data["recents"] = recents[:10]
-        
+
         tmp = target.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(target)
     except Exception as exc:
         _log.warning("Could not add recent model: %s", exc)
-

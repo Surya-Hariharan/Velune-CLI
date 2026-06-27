@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "velune-native"
 version = "0.1.0"
-description = "Native Rust extension for Velune CLI (AST parsing and fast indexing)"
+description = "Native Rust extension for Velune CLI (SHA-256 hashing, fast directory scanning)"
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Rust",

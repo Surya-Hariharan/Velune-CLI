@@ -26,9 +26,7 @@ def render_error(error: VeluneError) -> Panel:
         cause=error.get_cause() or None,
         fix=list(error.fix) if error.fix else None,
         detail=(
-            error.get_detail()
-            if error.get_detail() and error.get_detail() != error.title
-            else None
+            error.get_detail() if error.get_detail() and error.get_detail() != error.title else None
         ),
         docs_url=error.docs_url or None,
     )

@@ -73,29 +73,31 @@ from velune.cli import design
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _state_color(kind: str) -> str:
     """Map a semantic kind string to a hex color."""
     return {
-        "info":    design.INFO,
+        "info": design.INFO,
         "success": design.OK,
         "warning": design.WARN,
-        "error":   design.DANGER,
+        "error": design.DANGER,
         "default": design.FAINT,
     }.get(kind, design.FAINT)
 
 
 def _state_icon(kind: str) -> str:
     return {
-        "info":    design.ICON_INFO,
+        "info": design.ICON_INFO,
         "success": design.ICON_SUCCESS,
         "warning": design.ICON_WARNING,
-        "error":   design.ICON_ERROR,
+        "error": design.ICON_ERROR,
     }.get(kind, design.ICON_INFO)
 
 
 # ---------------------------------------------------------------------------
 # Inline notifications — no border, one line
 # ---------------------------------------------------------------------------
+
 
 def notification(message: str, kind: str = "info") -> RenderableType:
     """Single-line inline notification with a semantic glyph prefix.
@@ -141,6 +143,7 @@ def info(message: str) -> RenderableType:
 # Header
 # ---------------------------------------------------------------------------
 
+
 def header(
     title: str,
     subtitle: str | None = None,
@@ -170,6 +173,7 @@ def header(
 # Divider
 # ---------------------------------------------------------------------------
 
+
 def rule(label: str | None = None) -> RenderableType:
     """Horizontal divider with an optional centered label.
 
@@ -190,6 +194,7 @@ def rule(label: str | None = None) -> RenderableType:
 # ---------------------------------------------------------------------------
 # Footer / keyboard hints
 # ---------------------------------------------------------------------------
+
 
 def footer(hint: str) -> RenderableType:
     """Single-line bottom hint for non-interactive screens.
@@ -229,6 +234,7 @@ def key_hints(*pairs: tuple[str, str]) -> RenderableType:
 # ---------------------------------------------------------------------------
 # Structural panels — bordered blocks
 # ---------------------------------------------------------------------------
+
 
 def panel(
     body: RenderableType,
@@ -344,6 +350,7 @@ def warning_panel(title: str, body: RenderableType) -> Panel:
 # Modal dialog
 # ---------------------------------------------------------------------------
 
+
 def modal(
     body: RenderableType,
     title: str | None = None,
@@ -372,6 +379,7 @@ def modal(
 # ---------------------------------------------------------------------------
 # Confirmation dialog
 # ---------------------------------------------------------------------------
+
 
 def confirm_text(question: str, hint: str | None = None) -> RenderableType:
     """Confirmation prompt display text (pair with prompt_toolkit for actual input).
@@ -403,6 +411,7 @@ def confirm_text(question: str, hint: str | None = None) -> RenderableType:
 # Empty state
 # ---------------------------------------------------------------------------
 
+
 def empty_state(message: str, hint: str | None = None) -> RenderableType:
     """Placeholder shown when a list or table has no rows.
 
@@ -425,6 +434,7 @@ def empty_state(message: str, hint: str | None = None) -> RenderableType:
 # Loading state
 # ---------------------------------------------------------------------------
 
+
 def loading(message: str) -> str:
     """Spinner label string for use with ``console.status()``.
 
@@ -439,6 +449,7 @@ def loading(message: str) -> str:
 # ---------------------------------------------------------------------------
 # Progress bar
 # ---------------------------------------------------------------------------
+
 
 def progress_bar(
     label: str,
@@ -467,8 +478,10 @@ def progress_bar(
     empty = 20 - filled
 
     color = (
-        design.OK if pct < design.CTX_WARN_PCT
-        else design.WARN if pct < design.CTX_DANGER_PCT
+        design.OK
+        if pct < design.CTX_WARN_PCT
+        else design.WARN
+        if pct < design.CTX_DANGER_PCT
         else design.DANGER
     )
 
@@ -485,6 +498,7 @@ def progress_bar(
 # ---------------------------------------------------------------------------
 # Search box (display-only — wire to prompt_toolkit for input)
 # ---------------------------------------------------------------------------
+
 
 def search_box(
     query: str = "",
@@ -517,6 +531,7 @@ def search_box(
 # ---------------------------------------------------------------------------
 # TableView
 # ---------------------------------------------------------------------------
+
 
 class TableView:
     """Data table with consistent Velune styling.
@@ -566,7 +581,7 @@ class TableView:
         for i, col in enumerate(self._columns):
             col_style = design.WHITE if i == 0 else design.MUTED
             table.add_column(col, style=col_style, no_wrap=False)
-        for row, style in zip(self._rows, self._row_styles):
+        for row, style in zip(self._rows, self._row_styles, strict=False):
             table.add_row(*row, style=style or "")
         return table
 
@@ -574,6 +589,7 @@ class TableView:
 # ---------------------------------------------------------------------------
 # ListView
 # ---------------------------------------------------------------------------
+
 
 class ListView:
     """Selectable item list with a ▶ focus indicator.
@@ -618,6 +634,7 @@ class ListView:
 # CommandPalette
 # ---------------------------------------------------------------------------
 
+
 class CommandPalette:
     """Command search result list rendered as a bordered panel.
 
@@ -645,7 +662,7 @@ class CommandPalette:
         if self._query:
             body.append(f"  > {self._query}\n\n", style=design.WHITE)
         else:
-            body.append(f"  > \n\n", style=design.FAINT)
+            body.append("  > \n\n", style=design.FAINT)
 
         if not self._entries:
             body.append(
@@ -671,6 +688,7 @@ class CommandPalette:
 # Console factory
 # ---------------------------------------------------------------------------
 
+
 def make_console(**kwargs: Any) -> Console:
     """Return a ``Console`` pre-configured with the Velune Rich theme.
 
@@ -681,4 +699,5 @@ def make_console(**kwargs: Any) -> Console:
         console = make_console(highlight=False)
     """
     from velune.cli.display.themes import VeluneTheme
+
     return Console(theme=VeluneTheme.get_theme(), **kwargs)

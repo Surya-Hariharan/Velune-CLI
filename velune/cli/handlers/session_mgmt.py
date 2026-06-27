@@ -119,17 +119,17 @@ async def _resume_snapshot(repl: VeluneREPL, session_id: str) -> bool:
 async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
     from datetime import datetime
 
-    from rich.table import Table
-
     try:
         episodic = repl.container.get("runtime.episodic_session_memory")
         sessions = await episodic.list_recent_sessions(workspace, limit=10)
     except Exception as exc:
         from velune.cli.ui_components import print_notification
+
         print_notification(repl.console, f"Could not load sessions: {exc}", type="error")
         return
 
     from velune.cli.ui_components import create_table, print_header, print_notification
+
     if not sessions:
         print_notification(repl.console, "No sessions found for this workspace.", type="info")
         return

@@ -20,17 +20,17 @@ if TYPE_CHECKING:
     from velune.proactive.alerts import AlertStore
 
 _STATUS_COLOR: dict[str, str] = {
-    "running":   design.WARN,
+    "running": design.WARN,
     "completed": design.OK,
-    "failed":    design.DANGER,
+    "failed": design.DANGER,
     "cancelled": design.FAINT,
-    "pending":   design.INFO,
+    "pending": design.INFO,
 }
 
 _SEV_COLOR: dict[str, str] = {
     "danger": design.DANGER,
-    "warn":   design.WARN,
-    "info":   design.FAINT,
+    "warn": design.WARN,
+    "info": design.FAINT,
 }
 
 
@@ -68,12 +68,12 @@ class ProgressDashboard:
             show_edge=False,
             expand=True,
         )
-        table.add_column("ID",      style=design.MUTED,  no_wrap=True, width=10)
-        table.add_column("Task",    style=design.WHITE,  max_width=40)
-        table.add_column("Status",  width=11)
-        table.add_column("Phase",   style=design.FAINT,  width=16)
-        table.add_column("Elapsed", justify="right",     width=8)
-        table.add_column("Result",  style=design.MUTED,  max_width=30)
+        table.add_column("ID", style=design.MUTED, no_wrap=True, width=10)
+        table.add_column("Task", style=design.WHITE, max_width=40)
+        table.add_column("Status", width=11)
+        table.add_column("Phase", style=design.FAINT, width=16)
+        table.add_column("Elapsed", justify="right", width=8)
+        table.add_column("Result", style=design.MUTED, max_width=30)
 
         if self._jobs is None:
             table.add_row("—", f"[{design.FAINT}]job registry unavailable[/]", "", "", "", "")
@@ -110,9 +110,7 @@ class ProgressDashboard:
                 lines: list[str] = []
                 for a in alerts[:10]:
                     color = _SEV_COLOR.get(a.severity.value, design.FAINT)
-                    lines.append(
-                        f"[{color}]{a.title}[/]  [{design.FAINT}]{a.body[:60]}[/]"
-                    )
+                    lines.append(f"[{color}]{a.title}[/]  [{design.FAINT}]{a.body[:60]}[/]")
                 body = "\n".join(lines)
         return Panel(
             body,
@@ -127,8 +125,8 @@ class ProgressDashboard:
             body = f"[{design.FAINT}]Health monitor not available[/]"
         else:
             _health_color = {
-                "healthy":     design.OK,
-                "degraded":    design.WARN,
+                "healthy": design.OK,
+                "degraded": design.WARN,
                 "unavailable": design.DANGER,
             }
             try:
@@ -138,9 +136,7 @@ class ProgressDashboard:
                 else:
                     lines: list[str] = []
                     for pid, m in manifests.items():
-                        health_val = (
-                            m.health.value if hasattr(m.health, "value") else str(m.health)
-                        )
+                        health_val = m.health.value if hasattr(m.health, "value") else str(m.health)
                         color = _health_color.get(health_val, design.FAINT)
                         latency = getattr(m, "estimated_latency_ms", None)
                         lat_str = f"[{design.FAINT}]{latency}ms[/]" if latency else ""
@@ -159,7 +155,7 @@ class ProgressDashboard:
     def _build_layout(self) -> Layout:
         layout = Layout()
         layout.split_column(
-            Layout(name="jobs",   ratio=2),
+            Layout(name="jobs", ratio=2),
             Layout(name="bottom", ratio=1),
         )
         layout["bottom"].split_row(
@@ -219,4 +215,5 @@ class ProgressDashboard:
 def _read_line() -> str:
     """Blocking stdin read — runs in a thread via asyncio.to_thread."""
     import sys
+
     return sys.stdin.readline()

@@ -215,9 +215,7 @@ def run_setup_wizard() -> None:
                 retry = Confirm.ask("  Save anyway? (not recommended)", default=False)
                 if retry:
                     save_key(pid, key)
-                    console.print(
-                        f"  [{design.WARN}]Key saved without validation.[/{design.WARN}]"
-                    )
+                    console.print(f"  [{design.WARN}]Key saved without validation.[/{design.WARN}]")
                     configured.append(pid)
                 else:
                     console.print(f"  [{design.MUTED}]Skipped.[/{design.MUTED}]")

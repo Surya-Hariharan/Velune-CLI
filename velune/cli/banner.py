@@ -75,12 +75,12 @@ def _render_logo() -> Text:
     from velune.cli import design
 
     colors = [
-        design.ACCENT,        # V — hot pink
-        design.ACCENT_SOFT,   # E — soft blush
-        design.GREEN,         # L — rose
-        design.GREEN,         # U — rose
-        design.HIGHLIGHT,     # N — vivid magenta
-        design.PRIMARY_GREEN, # E — deep magenta
+        design.ACCENT,  # V — hot pink
+        design.ACCENT_SOFT,  # E — soft blush
+        design.GREEN,  # L — rose
+        design.GREEN,  # U — rose
+        design.HIGHLIGHT,  # N — vivid magenta
+        design.PRIMARY_GREEN,  # E — deep magenta
     ]
     logo = Text()
     rows = len(_LOGO_ART[0])
@@ -177,9 +177,9 @@ def render_startup_banner(
     # --- Key-value block ------------------------------------------------------
     rows: list[tuple[str, str]] = [
         ("Workspace", folder),
-        ("Provider",  provider_label),
-        ("Model",     active_model_id if active_model_id else f"[{design.FAINT}]none[/{design.FAINT}]"),
-        ("Status",    status_text),
+        ("Provider", provider_label),
+        ("Model", active_model_id if active_model_id else f"[{design.FAINT}]none[/{design.FAINT}]"),
+        ("Status", status_text),
     ]
 
     label_w = max(len(k) for k, _ in rows)

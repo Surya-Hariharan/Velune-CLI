@@ -14,7 +14,6 @@ silent failures.
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -136,18 +135,12 @@ def show_returning_summary(
         providers_str = "  ·  ".join(p.title() for p in configured[:6])
         if len(configured) > 6:
             providers_str += f"  [dim]+{len(configured) - 6} more[/dim]"
-        lines.append(
-            f"  [{design.MUTED}]Providers[/{design.MUTED}]"
-            f" {providers_str}"
-        )
+        lines.append(f"  [{design.MUTED}]Providers[/{design.MUTED}] {providers_str}")
 
     if not lines:
         return
 
-    content = (
-        f"[bold {design.ACCENT}]Welcome back.[/bold {design.ACCENT}]\n\n"
-        + "\n".join(lines)
-    )
+    content = f"[bold {design.ACCENT}]Welcome back.[/bold {design.ACCENT}]\n\n" + "\n".join(lines)
     console.print(Panel(content, border_style=design.GREEN, padding=(0, 2)))
 
 
@@ -247,9 +240,7 @@ def _run_inner(runtime: object, skip_to: str | None) -> None:
 
 
 def _step_welcome(console: Console) -> None:
-    console.print(
-        f"\n[{design.MUTED}]Let's get you set up in under a minute.[/{design.MUTED}]\n"
-    )
+    console.print(f"\n[{design.MUTED}]Let's get you set up in under a minute.[/{design.MUTED}]\n")
 
 
 # ── Step S1: AI mode selection ─────────────────────────────────────────────────
@@ -271,23 +262,31 @@ def _step_ai_mode(console: Console) -> Literal["local", "cloud", "hybrid", "skip
     console.print()
 
     _map: dict[str, str] = {
-        "1": "local", "2": "cloud", "3": "hybrid", "4": "skip",
-        "local": "local", "cloud": "cloud", "hybrid": "hybrid", "skip": "skip",
+        "1": "local",
+        "2": "cloud",
+        "3": "hybrid",
+        "4": "skip",
+        "local": "local",
+        "cloud": "cloud",
+        "hybrid": "hybrid",
+        "skip": "skip",
     }
 
     while True:
-        raw = Prompt.ask(
-            f"  Choice [{design.MUTED}](1-4)[/{design.MUTED}]",
-            default="3",
-        ).strip().lower()
+        raw = (
+            Prompt.ask(
+                f"  Choice [{design.MUTED}](1-4)[/{design.MUTED}]",
+                default="3",
+            )
+            .strip()
+            .lower()
+        )
 
         result = _map.get(raw)
         if result:
             return result  # type: ignore[return-value]
 
-        console.print(
-            f"  [{design.WARN}]Please enter 1, 2, 3, or 4.[/{design.WARN}]"
-        )
+        console.print(f"  [{design.WARN}]Please enter 1, 2, 3, or 4.[/{design.WARN}]")
 
 
 # ── Step S2: local provider detection ─────────────────────────────────────────
@@ -303,9 +302,7 @@ def _step_local_detection(console: Console) -> list[str]:
     attempt = 0
 
     while attempt <= _MAX_LOCAL_RETRIES:
-        with console.status(
-            f"  [{design.MUTED}]Scanning for local AI servers...[/{design.MUTED}]"
-        ):
+        with console.status(f"  [{design.MUTED}]Scanning for local AI servers...[/{design.MUTED}]"):
             ollama_live = is_ollama_live(timeout=1.0)
             if ollama_live:
                 ollama_result = validate_provider_sync("ollama", "")
@@ -334,9 +331,7 @@ def _step_local_detection(console: Console) -> list[str]:
             return configured
 
         # Nothing found
-        console.print(
-            f"\n  [{design.DANGER}]No local AI server detected[/{design.DANGER}]\n"
-        )
+        console.print(f"\n  [{design.DANGER}]No local AI server detected[/{design.DANGER}]\n")
         console.print(
             f"  [{design.MUTED}]Ollama is a free local AI server that runs models on your machine.[/{design.MUTED}]\n"
             f"  [{design.MUTED}]  Install: [link=https://ollama.com]https://ollama.com[/link][/{design.MUTED}]\n"
@@ -350,10 +345,14 @@ def _step_local_detection(console: Console) -> list[str]:
             )
             return configured
 
-        choice = Prompt.ask(
-            f"  [[bold]R[/bold]] Retry  [[bold]S[/bold]] Skip  [[bold]Q[/bold]] Quit setup",
-            default="R",
-        ).strip().upper()[:1]
+        choice = (
+            Prompt.ask(
+                "  [[bold]R[/bold]] Retry  [[bold]S[/bold]] Skip  [[bold]Q[/bold]] Quit setup",
+                default="R",
+            )
+            .strip()
+            .upper()[:1]
+        )
 
         if choice == "S":
             return configured
@@ -459,7 +458,6 @@ def _step_key_entry(
         PROVIDER_ENV_VARS,
         get_key,
         has_key,
-        save_key,
     )
     from velune.providers.validation import validate_provider_sync
 
@@ -468,17 +466,13 @@ def _step_key_entry(
         f"  [{design.MUTED}]({step_n}/{total_steps})[/{design.MUTED}]"
         f" [{design.INFO}]{label}[/{design.INFO}]"
     )
-    console.print(
-        f"  [{design.MUTED}]Get your key: {get_key_url}[/{design.MUTED}]"
-    )
+    console.print(f"  [{design.MUTED}]Get your key: {get_key_url}[/{design.MUTED}]")
 
     # Existing key — offer to keep or replace.
     if has_key(pid):
         existing = get_key(pid)
         masked = _mask_key(existing)
-        console.print(
-            f"  [{design.OK}]Key already configured ({masked})[/{design.OK}]"
-        )
+        console.print(f"  [{design.OK}]Key already configured ({masked})[/{design.OK}]")
         overwrite = Confirm.ask("  Replace it?", default=False)
         if not overwrite:
             return True  # Keep existing key
@@ -511,10 +505,14 @@ def _step_key_entry(
             console.print(
                 f"  [{design.MUTED}]Could not reach {pid} — your network may be offline.[/{design.MUTED}]"
             )
-            choice = Prompt.ask(
-                f"  [[bold]T[/bold]] Try again  [[bold]W[/bold]] Save anyway  [[bold]S[/bold]] Skip",
-                default="W",
-            ).strip().upper()[:1]
+            choice = (
+                Prompt.ask(
+                    "  [[bold]T[/bold]] Try again  [[bold]W[/bold]] Save anyway  [[bold]S[/bold]] Skip",
+                    default="W",
+                )
+                .strip()
+                .upper()[:1]
+            )
 
             if choice == "W":
                 _safe_save_key(console, pid, key, PROVIDER_ENV_VARS)
@@ -528,15 +526,17 @@ def _step_key_entry(
 
         else:
             # Hard failure (invalid/expired/revoked key)
-            console.print(
-                f"  [{design.MUTED}]Get a new key: {get_key_url}[/{design.MUTED}]"
-            )
+            console.print(f"  [{design.MUTED}]Get a new key: {get_key_url}[/{design.MUTED}]")
 
             if attempt < _MAX_KEY_ATTEMPTS - 1:
-                choice = Prompt.ask(
-                    f"  [[bold]T[/bold]] Try again  [[bold]S[/bold]] Skip",
-                    default="T",
-                ).strip().upper()[:1]
+                choice = (
+                    Prompt.ask(
+                        "  [[bold]T[/bold]] Try again  [[bold]S[/bold]] Skip",
+                        default="T",
+                    )
+                    .strip()
+                    .upper()[:1]
+                )
                 if choice == "S":
                     return False
                 # T → next attempt
@@ -560,11 +560,15 @@ def _step_model_discovery(console: Console) -> list[ModelDescriptor]:
     scanner = ModelDiscoveryScanner()
     models: list = []
 
-    with console.status(
-        f"  [{design.MUTED}]Discovering available models...[/{design.MUTED}]"
-    ):
+    with console.status(f"  [{design.MUTED}]Discovering available models...[/{design.MUTED}]"):
         try:
-            models = asyncio.run(scanner.scan_all())
+            # Onboarding runs synchronously before the main event loop starts;
+            # a short-lived loop keeps the security gate count at exactly one.
+            _loop = asyncio.new_event_loop()
+            try:
+                models = _loop.run_until_complete(scanner.scan_all())
+            finally:
+                _loop.close()
         except Exception:
             models = []
 
@@ -627,9 +631,7 @@ def _step_model_recommendation(
     accept = Confirm.ask("\n  Use this model?", default=True)
     if accept:
         save_active_model(best.provider_id, best.model_id)
-        console.print(
-            f"  [{design.OK}]{best.model_id} set as default model.[/{design.OK}]"
-        )
+        console.print(f"  [{design.OK}]{best.model_id} set as default model.[/{design.OK}]")
         return True
 
     return _step_manual_model_select(console, models)
@@ -643,9 +645,7 @@ def _step_manual_model_select(
     from velune.cli.model_prefs import save_active_model
 
     if not models:
-        console.print(
-            f"  [{design.WARN}]No models available to select.[/{design.WARN}]"
-        )
+        console.print(f"  [{design.WARN}]No models available to select.[/{design.WARN}]")
         return False
 
     display_models = models[:20]
@@ -687,9 +687,7 @@ def _step_manual_model_select(
         if 0 <= idx < len(display_models):
             chosen = display_models[idx]
             save_active_model(chosen.provider_id, chosen.model_id)
-            console.print(
-                f"  [{design.OK}]{chosen.model_id} set as default model.[/{design.OK}]"
-            )
+            console.print(f"  [{design.OK}]{chosen.model_id} set as default model.[/{design.OK}]")
             return True
 
     console.print(
@@ -735,8 +733,7 @@ def _step_workspace_detection(console: Console, workspace: Path) -> None:
     console.print()
     type_str = f" ({project_type})" if project_type else ""
     console.print(
-        f"  [{design.INFO}]Repository detected:[/{design.INFO}]"
-        f" [bold]{repo_name}[/bold]{type_str}"
+        f"  [{design.INFO}]Repository detected:[/{design.INFO}] [bold]{repo_name}[/bold]{type_str}"
     )
 
     open_it = Confirm.ask(
@@ -753,9 +750,7 @@ def _step_workspace_detection(console: Console, workspace: Path) -> None:
         reg.register(workspace)
         console.print(f"  [{design.OK}]Workspace registered.[/{design.OK}]")
     except Exception as exc:
-        console.print(
-            f"  [{design.WARN}]Could not register workspace: {exc}[/{design.WARN}]"
-        )
+        console.print(f"  [{design.WARN}]Could not register workspace: {exc}[/{design.WARN}]")
         return
 
     index_it = Confirm.ask(
@@ -790,8 +785,7 @@ def _step_ready_summary(
         provider = getattr(model_pref, "provider_id", "")
         model_id = getattr(model_pref, "model_id", "")
         lines.append(
-            f"  [{design.MUTED}]Model     [/{design.MUTED}]"
-            f" {provider} / [bold]{model_id}[/bold]"
+            f"  [{design.MUTED}]Model     [/{design.MUTED}] {provider} / [bold]{model_id}[/bold]"
         )
     else:
         lines.append(
@@ -803,10 +797,7 @@ def _step_ready_summary(
         providers_str = "  ·  ".join(p.title() for p in configured[:5])
         if len(configured) > 5:
             providers_str += f"  [dim]+{len(configured) - 5} more[/dim]"
-        lines.append(
-            f"  [{design.MUTED}]Providers [/{design.MUTED}]"
-            f" {providers_str}"
-        )
+        lines.append(f"  [{design.MUTED}]Providers [/{design.MUTED}] {providers_str}")
     else:
         lines.append(
             f"  [{design.MUTED}]Providers [/{design.MUTED}]"
@@ -815,14 +806,9 @@ def _step_ready_summary(
 
     if workspace:
         ws_name = workspace.name or str(workspace)
-        lines.append(
-            f"  [{design.MUTED}]Workspace [/{design.MUTED}]"
-            f" {ws_name}"
-        )
+        lines.append(f"  [{design.MUTED}]Workspace [/{design.MUTED}] {ws_name}")
 
-    lines.append(
-        f"  [{design.MUTED}]Memory    [/{design.MUTED}] ready"
-    )
+    lines.append(f"  [{design.MUTED}]Memory    [/{design.MUTED}] ready")
     lines.append(
         f"  [{design.MUTED}]Index     [/{design.MUTED}]"
         f" [dim]not yet — type /index to build AI context[/dim]"
@@ -846,10 +832,7 @@ def _step_ready_summary(
             '"Help me debug this error: ..."',
         ]
 
-    suggestions = "\n".join(
-        f"  [{design.MUTED}]{ex}[/{design.MUTED}]"
-        for ex in examples
-    )
+    suggestions = "\n".join(f"  [{design.MUTED}]{ex}[/{design.MUTED}]" for ex in examples)
 
     content = (
         f"[bold {design.ACCENT}]Velune is ready.[/bold {design.ACCENT}]\n\n"
@@ -909,9 +892,7 @@ def _show_models_mini(console: Console, model_ids: list[str]) -> None:
     if not model_ids:
         return
     preview = ", ".join(model_ids[:5])
-    console.print(
-        f"  [{design.MUTED}]  {preview}[/{design.MUTED}]"
-    )
+    console.print(f"  [{design.MUTED}]  {preview}[/{design.MUTED}]")
 
 
 def _mask_key(key: str | None) -> str:

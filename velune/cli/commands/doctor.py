@@ -820,9 +820,9 @@ def _check_memory_health() -> dict:
 def _check_council_roles() -> dict:
     """Verify that each council role has at least one model candidate assigned."""
     try:
+        from velune.models.registry import ModelCapabilityRegistry
         from velune.models.specializations import CouncilRole, ModelSpecializationMapper
 
-        from velune.models.registry import ModelCapabilityRegistry
         mapper = ModelSpecializationMapper(ModelCapabilityRegistry())
         try:
             role_map = mapper.map_roles()

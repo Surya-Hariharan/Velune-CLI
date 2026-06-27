@@ -27,8 +27,8 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)
 # Suppress the root logger from printing INFO/DEBUG to stderr.
 logging.getLogger().setLevel(logging.WARNING)
 
-from typing import TYPE_CHECKING
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import typer
@@ -50,7 +50,7 @@ def _detect_repo_marker(path: Path) -> str | None:
     return None
 
 
-def create_app(register: str | None = "__all__") -> 'typer.Typer':
+def create_app(register: str | None = "__all__") -> typer.Typer:
     """Create the root Typer application.
 
     ``register`` is forwarded to :func:`register_commands` to control how many
@@ -59,6 +59,7 @@ def create_app(register: str | None = "__all__") -> 'typer.Typer':
     REPL path), or a single command name (lazy-import just that one).
     """
     import typer
+
     globals()["typer"] = typer
     from rich.console import Console
     from rich.text import Text
@@ -250,10 +251,10 @@ def create_app(register: str | None = "__all__") -> 'typer.Typer':
     return app
 
 
-_app_singleton: 'typer.Typer | None' = None
+_app_singleton: typer.Typer | None = None
 
 
-def __getattr__(name: str) -> 'typer.Typer':
+def __getattr__(name: str) -> typer.Typer:
     """Build the Typer app on first attribute access, not at import time.
 
     Importing this module used to eagerly call ``create_app()`` — which imports

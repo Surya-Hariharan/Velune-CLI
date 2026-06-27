@@ -21,13 +21,8 @@ from velune.tools.base.tool import BaseTool, ToolPermission
 
 def _git_run(cwd: Path, *args: str) -> str:
     import subprocess
-    res = subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False
-    )
+
+    res = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False)
     if res.returncode != 0:
         raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
     return res.stdout.strip()
@@ -68,17 +63,24 @@ class GitLog(BaseTool):
         def _fetch() -> list[dict]:
             commits = []
             try:
-                out = _git_run(safe_root, "log", f"-n{max(1, int(limit))}", "--format=%H%n%an%n%aI%n%s%n---VELUNE---")
+                out = _git_run(
+                    safe_root,
+                    "log",
+                    f"-n{max(1, int(limit))}",
+                    "--format=%H%n%an%n%aI%n%s%n---VELUNE---",
+                )
                 if out:
                     for block in out.split("---VELUNE---"):
                         lines = block.strip().split("\n")
                         if len(lines) >= 4:
-                            commits.append({
-                                "hash": lines[0],
-                                "author": lines[1],
-                                "date": lines[2],
-                                "message": "\n".join(lines[3:]).strip()
-                            })
+                            commits.append(
+                                {
+                                    "hash": lines[0],
+                                    "author": lines[1],
+                                    "date": lines[2],
+                                    "message": "\n".join(lines[3:]).strip(),
+                                }
+                            )
             except Exception:
                 pass
             return commits
@@ -180,31 +182,37 @@ class GitBlame(BaseTool):
                 out = _git_run(safe_root, "blame", "-p", "HEAD", "--", rel)
             except Exception:
                 return lines
-                
+
             current_commit = {}
             for line in out.splitlines():
-                if not line: continue
-                if line.startswith('\t'):
+                if not line:
+                    continue
+                if line.startswith("\t"):
                     content = line[1:]
-                    lines.append({
-                        "commit": current_commit.get("hash", ""),
-                        "author": current_commit.get("author", ""),
-                        "date": current_commit.get("date", ""),
-                        "content": content
-                    })
+                    lines.append(
+                        {
+                            "commit": current_commit.get("hash", ""),
+                            "author": current_commit.get("author", ""),
+                            "date": current_commit.get("date", ""),
+                            "content": content,
+                        }
+                    )
                     # Keep hash, author, date if subsequent lines belong to the same commit
                 else:
                     parts = line.split(" ", 1)
                     key = parts[0]
-                    if len(key) == 40: # commit hash
+                    if len(key) == 40:  # commit hash
                         current_commit["hash"] = key
                     elif key == "author":
-                        current_commit["author"] = parts[1] if len(parts)>1 else ""
+                        current_commit["author"] = parts[1] if len(parts) > 1 else ""
                     elif key == "author-time":
                         import datetime
+
                         try:
                             ts = int(parts[1])
-                            current_commit["date"] = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+                            current_commit["date"] = datetime.datetime.fromtimestamp(
+                                ts, tz=datetime.timezone.utc
+                            ).isoformat()
                         except Exception:
                             current_commit["date"] = ""
             return lines

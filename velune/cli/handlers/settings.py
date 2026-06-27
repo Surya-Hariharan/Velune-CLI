@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
@@ -16,6 +16,7 @@ async def cmd_config(repl: VeluneREPL, args: str) -> None:
     """Show current system configuration settings."""
     import logging as _logging
     from pathlib import Path
+
     from velune.cli.ui_components import create_table, print_header
 
     config = repl.runtime.config
@@ -30,7 +31,7 @@ async def cmd_config(repl: VeluneREPL, args: str) -> None:
     if hasattr(config, "model_dump"):
         dump = config.model_dump()
     elif hasattr(config, "dict"):
-        dump = getattr(config, "dict")()
+        dump = config.dict()
     else:
         dump = {}
 
@@ -58,7 +59,7 @@ async def cmd_hooks(repl: VeluneREPL, args: str) -> None:
         print_notification(
             repl.console,
             "No hooks configured. Create .velune/hooks.json or ~/.velune/hooks.json to add lifecycle hooks.",
-            type="info"
+            type="info",
         )
         return
 
@@ -107,9 +108,7 @@ async def cmd_approve(repl: VeluneREPL, args: str) -> None:
 
     repl._approval_mode = new_mode
     style = {"safe": "green", "ask": "yellow", "block": "red"}.get(new_mode.value, "white")
-    repl.console.print(
-        f"[{style}]Approval mode set to:[/{style}] [bold]{new_mode.value}[/bold]"
-    )
+    repl.console.print(f"[{style}]Approval mode set to:[/{style}] [bold]{new_mode.value}[/bold]")
 
 
 async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
@@ -161,9 +160,7 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
             except Exception as e:
                 results.append(
                     {
-                        "name": check_fn.__name__.replace("_check_", "")
-                        .replace("_", " ")
-                        .title(),
+                        "name": check_fn.__name__.replace("_check_", "").replace("_", " ").title(),
                         "status": "error",
                         "message": str(e),
                     }
@@ -230,9 +227,7 @@ async def cmd_sandbox(repl: VeluneREPL, args: str) -> None:
 
         cfg = ConfigLoader(workspace / "velune.toml").load()
         docker_configured = getattr(getattr(cfg, "execution", None), "docker_sandbox", False)
-        docker_image = getattr(
-            getattr(cfg, "execution", None), "docker_image", "python:3.12-slim"
-        )
+        docker_image = getattr(getattr(cfg, "execution", None), "docker_image", "python:3.12-slim")
     except Exception:
         docker_configured = False
         docker_image = "python:3.12-slim"
@@ -265,7 +260,7 @@ SETTINGS_DEFS = {
             "choices": ["dark", "light", "monokai", "nord", "dracula"],
             "section": "appearance",
             "key": "theme",
-            "default": "dark"
+            "default": "dark",
         },
         {
             "name": "Show Status Bar",
@@ -273,7 +268,7 @@ SETTINGS_DEFS = {
             "type": "bool",
             "section": "appearance",
             "key": "show_status_bar",
-            "default": True
+            "default": True,
         },
         {
             "name": "Font Size",
@@ -281,8 +276,8 @@ SETTINGS_DEFS = {
             "type": "int",
             "section": "appearance",
             "key": "font_size",
-            "default": 12
-        }
+            "default": 12,
+        },
     ],
     "Providers": [
         {
@@ -292,7 +287,7 @@ SETTINGS_DEFS = {
             "choices": ["openai", "anthropic", "gemini", "ollama"],
             "section": "providers",
             "key": "default_provider",
-            "default": "openai"
+            "default": "openai",
         },
         {
             "name": "OpenAI Base URL",
@@ -300,7 +295,7 @@ SETTINGS_DEFS = {
             "type": "string",
             "section": "providers",
             "key": "openai_base_url",
-            "default": "https://api.openai.com/v1"
+            "default": "https://api.openai.com/v1",
         },
         {
             "name": "Anthropic Base URL",
@@ -308,8 +303,8 @@ SETTINGS_DEFS = {
             "type": "string",
             "section": "providers",
             "key": "anthropic_base_url",
-            "default": "https://api.anthropic.com/v1"
-        }
+            "default": "https://api.anthropic.com/v1",
+        },
     ],
     "Models": [
         {
@@ -318,7 +313,7 @@ SETTINGS_DEFS = {
             "type": "string",
             "section": "models",
             "key": "active_model_id",
-            "default": "gpt-4o"
+            "default": "gpt-4o",
         },
         {
             "name": "Speed Tier Preference",
@@ -327,8 +322,8 @@ SETTINGS_DEFS = {
             "choices": ["fast", "medium", "slow"],
             "section": "models",
             "key": "speed_tier_preference",
-            "default": "medium"
-        }
+            "default": "medium",
+        },
     ],
     "Memory": [
         {
@@ -337,7 +332,7 @@ SETTINGS_DEFS = {
             "type": "int",
             "section": "memory",
             "key": "sqlite_pool_size",
-            "default": 5
+            "default": 5,
         },
         {
             "name": "Vector Index Type",
@@ -346,8 +341,8 @@ SETTINGS_DEFS = {
             "choices": ["lancedb", "qdrant", "chroma"],
             "section": "memory",
             "key": "vector_index_type",
-            "default": "lancedb"
-        }
+            "default": "lancedb",
+        },
     ],
     "Workspace": [
         {
@@ -356,7 +351,7 @@ SETTINGS_DEFS = {
             "type": "bool",
             "section": "workspace",
             "key": "auto_index",
-            "default": True
+            "default": True,
         },
         {
             "name": "Workspace Trust Level",
@@ -365,8 +360,8 @@ SETTINGS_DEFS = {
             "choices": ["trusted", "restricted", "sandboxed"],
             "section": "workspace",
             "key": "trust_level",
-            "default": "trusted"
-        }
+            "default": "trusted",
+        },
     ],
     "MCP": [
         {
@@ -375,7 +370,7 @@ SETTINGS_DEFS = {
             "type": "bool",
             "section": "mcp",
             "key": "enabled",
-            "default": True
+            "default": True,
         },
         {
             "name": "Registry Config Path",
@@ -383,8 +378,8 @@ SETTINGS_DEFS = {
             "type": "string",
             "section": "mcp",
             "key": "registry_path",
-            "default": "~/.velune/mcp_servers.json"
-        }
+            "default": "~/.velune/mcp_servers.json",
+        },
     ],
     "Performance": [
         {
@@ -393,7 +388,7 @@ SETTINGS_DEFS = {
             "type": "int",
             "section": "performance",
             "key": "max_threads",
-            "default": 4
+            "default": 4,
         },
         {
             "name": "Rate Limit (RPM)",
@@ -401,7 +396,7 @@ SETTINGS_DEFS = {
             "type": "int",
             "section": "performance",
             "key": "rate_limit_rpm",
-            "default": 60
+            "default": 60,
         },
         {
             "name": "Retrieval Context Depth",
@@ -409,8 +404,8 @@ SETTINGS_DEFS = {
             "type": "int",
             "section": "performance",
             "key": "context_depth",
-            "default": 20
-        }
+            "default": 20,
+        },
     ],
     "Security": [
         {
@@ -419,7 +414,7 @@ SETTINGS_DEFS = {
             "type": "bool",
             "section": "security",
             "key": "docker_sandbox",
-            "default": False
+            "default": False,
         },
         {
             "name": "Command Approval Level",
@@ -428,8 +423,8 @@ SETTINGS_DEFS = {
             "choices": ["safe", "ask", "block"],
             "section": "security",
             "key": "approval_level",
-            "default": "ask"
-        }
+            "default": "ask",
+        },
     ],
     "Telemetry": [
         {
@@ -438,7 +433,7 @@ SETTINGS_DEFS = {
             "type": "bool",
             "section": "telemetry",
             "key": "enabled",
-            "default": True
+            "default": True,
         }
     ],
     "Experimental": [
@@ -448,7 +443,7 @@ SETTINGS_DEFS = {
             "type": "bool",
             "section": "experimental",
             "key": "smart_routing",
-            "default": False
+            "default": False,
         },
         {
             "name": "Code Summarizer View",
@@ -456,9 +451,9 @@ SETTINGS_DEFS = {
             "type": "bool",
             "section": "experimental",
             "key": "code_summarizer",
-            "default": False
-        }
-    ]
+            "default": False,
+        },
+    ],
 }
 
 
@@ -473,26 +468,28 @@ def get_setting_value(repl: VeluneREPL, section: str, key: str, default: Any) ->
                 return val
     except Exception:
         pass
-    
+
     # Try reading from TOML directly
     try:
         workspace = Path(repl.container.get("runtime.workspace"))
         config_path = repl.container.get("runtime.config_path") or (workspace / "velune.toml")
         if config_path.exists():
             import toml
+
             data = toml.load(config_path)
             val = data.get(section, {}).get(key)
             if val is not None:
                 return val
     except Exception:
         pass
-        
+
     return default
 
 
 def save_setting_to_toml(repl: VeluneREPL, section: str, key: str, value: Any) -> None:
     try:
         import toml
+
         workspace = Path(repl.container.get("runtime.workspace"))
         config_path = repl.container.get("runtime.config_path") or (workspace / "velune.toml")
         config_path = Path(config_path)
@@ -513,7 +510,7 @@ def _update_runtime_config(repl: VeluneREPL, section: str, key: str, value: Any)
             setattr(sec_obj, key, value)
     except Exception:
         pass
-    
+
     # Custom triggers
     if section == "models" and key == "active_model_id":
         try:
@@ -548,7 +545,7 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
         "Performance",
         "Security",
         "Telemetry",
-        "Experimental"
+        "Experimental",
     ]
 
     settings_cache = {}
@@ -556,10 +553,7 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
         settings_cache[cat] = []
         for s_def in SETTINGS_DEFS[cat]:
             curr_val = get_setting_value(repl, s_def["section"], s_def["key"], s_def["default"])
-            settings_cache[cat].append({
-                **s_def,
-                "value": curr_val
-            })
+            settings_cache[cat].append({**s_def, "value": curr_val})
 
     state = {
         "mode": "categories",
@@ -567,7 +561,7 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
         "selected_setting_idx": 0,
         "selected_choice_idx": 0,
         "edit_text_value": "",
-        "status_message": "Use arrow keys to navigate. Enter to select. Esc to exit."
+        "status_message": "Use arrow keys to navigate. Enter to select. Esc to exit.",
     }
 
     def _render_tui() -> FormattedText:
@@ -583,19 +577,19 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
                 style = "bold fg:ansiyellow" if is_sel else "fg:ansiwhite"
                 lines.append((style, f"  {prefix}{cat}\n"))
             lines.append(("", "\n"))
-        
+
         elif state["mode"] == "settings":
             cat = categories[state["selected_category_idx"]]
-            lines.append(("", f"\n  Category: "))
+            lines.append(("", "\n  Category: "))
             lines.append(("bold fg:ansiyellow", f"{cat}"))
-            lines.append(("", f" settings:\n\n"))
-            
+            lines.append(("", " settings:\n\n"))
+
             cat_settings = settings_cache[cat]
             for i, s in enumerate(cat_settings):
                 is_sel = i == state["selected_setting_idx"]
                 prefix = "❯ " if is_sel else "  "
                 style = "bold fg:ansicyan" if is_sel else "fg:ansiwhite"
-                
+
                 val = s["value"]
                 if s["type"] == "bool":
                     val_str = "True" if val else "False"
@@ -603,7 +597,7 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
                 else:
                     val_str = str(val)
                     val_style = "fg:ansicyan"
-                
+
                 if is_sel:
                     lines.append(("bold fg:ansicyan", f"  {prefix}{s['name']}: "))
                     lines.append((val_style + " bold", f"{val_str}"))
@@ -612,36 +606,36 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
                     lines.append(("fg:ansiwhite", f"  {prefix}{s['name']}: "))
                     lines.append((val_style, f"{val_str}"))
                     lines.append(("fg:ansidarkgray", f"  — {s['desc']}\n"))
-            
+
             is_back_sel = state["selected_setting_idx"] == len(cat_settings)
             prefix = "❯ " if is_back_sel else "  "
             back_style = "bold fg:ansiyellow" if is_back_sel else "fg:ansidarkgray"
             lines.append((back_style, f"\n  {prefix}[Back to Categories]\n"))
-            
+
         elif state["mode"] == "choices":
             cat = categories[state["selected_category_idx"]]
             setting = settings_cache[cat][state["selected_setting_idx"]]
-            lines.append(("", f"\n  Select value for "))
+            lines.append(("", "\n  Select value for "))
             lines.append(("bold fg:ansicyan", f"{setting['name']}"))
-            lines.append(("", f":\n\n"))
-            
+            lines.append(("", ":\n\n"))
+
             for i, choice in enumerate(setting["choices"]):
                 is_sel = i == state["selected_choice_idx"]
                 prefix = "❯ " if is_sel else "  "
                 style = "bold fg:ansiyellow" if is_sel else "fg:ansiwhite"
-                
+
                 bullet = "• " if str(setting["value"]) == str(choice) else "  "
                 lines.append((style, f"  {prefix}{bullet}{choice}\n"))
-                
+
             lines.append(("", "\n"))
 
         elif state["mode"] == "text_input":
             cat = categories[state["selected_category_idx"]]
             setting = settings_cache[cat][state["selected_setting_idx"]]
-            lines.append(("", f"\n  Editing setting: "))
+            lines.append(("", "\n  Editing setting: "))
             lines.append(("bold fg:ansicyan", f"{setting['name']}\n"))
             lines.append(("fg:ansidarkgray", f"  Description: {setting['desc']}\n\n"))
-            
+
             lines.append(("bold fg:ansiwhite", "  Enter new value: "))
             lines.append(("fg:ansiyellow bold", state["edit_text_value"]))
             lines.append(("fg:ansiyellow blink", "█"))
@@ -664,7 +658,9 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
         elif state["mode"] == "choices":
             cat = categories[state["selected_category_idx"]]
             setting = settings_cache[cat][state["selected_setting_idx"]]
-            state["selected_choice_idx"] = (state["selected_choice_idx"] - 1) % len(setting["choices"])
+            state["selected_choice_idx"] = (state["selected_choice_idx"] - 1) % len(
+                setting["choices"]
+            )
 
     @kb.add("down")
     def _down(event) -> None:
@@ -677,7 +673,9 @@ async def _show_settings_tui(repl: VeluneREPL) -> None:
         elif state["mode"] == "choices":
             cat = categories[state["selected_category_idx"]]
             setting = settings_cache[cat][state["selected_setting_idx"]]
-            state["selected_choice_idx"] = (state["selected_choice_idx"] + 1) % len(setting["choices"])
+            state["selected_choice_idx"] = (state["selected_choice_idx"] + 1) % len(
+                setting["choices"]
+            )
 
     @kb.add("enter")
     def _enter(event) -> None:

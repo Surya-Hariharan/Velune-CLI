@@ -76,9 +76,9 @@ ICON_CURSOR = "█"
 # --- Spacing tokens --------------------------------------------------------
 # Rich padding tuples: (top/bottom, left/right)
 PADDING_NONE = (0, 0)
-PADDING_COMPACT = (0, 1)   # tight inline use
-PADDING_DEFAULT = (0, 2)   # standard panels
-PADDING_RELAXED = (1, 2)   # modals, dialogs
+PADDING_COMPACT = (0, 1)  # tight inline use
+PADDING_DEFAULT = (0, 2)  # standard panels
+PADDING_RELAXED = (1, 2)  # modals, dialogs
 
 # --- Separator glyph -------------------------------------------------------
 SEP = "  ·  "  # metadata separator used in status bar and key hints

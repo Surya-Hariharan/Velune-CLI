@@ -17,7 +17,9 @@ class ContextFingerprinter:
     @classmethod
     def fingerprint(cls, content: str) -> str:
         """Return a 16-char hex fingerprint for *content*."""
-        return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[: cls._HEX_LENGTH]
+        return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[
+            : cls._HEX_LENGTH
+        ]
 
     @classmethod
     def fingerprint_segments(cls, segments: dict[str, str]) -> dict[str, str]:

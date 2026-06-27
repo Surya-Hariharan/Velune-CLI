@@ -98,7 +98,5 @@ async def cmd_mode(repl: VeluneREPL, args: str) -> None:
     table.add_row("Compression", "on" if config.context_compression else "off")
     table.add_row("Retrieval depth", str(config.retrieval_depth))
     table.add_row("Critics", "disabled" if config.disable_critics else "enabled")
-    table.add_row(
-        "Current model", repl.active_model.model_id if repl.active_model else "none"
-    )
+    table.add_row("Current model", repl.active_model.model_id if repl.active_model else "none")
     repl.console.print(table)

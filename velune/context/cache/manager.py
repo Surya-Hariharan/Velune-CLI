@@ -58,7 +58,10 @@ class ContextCacheManager:
         """
         if not self._provider.supports_caching():
             if _DEBUG:
-                logger.debug("[cache] provider=%r does not support caching — passthrough", self._provider.provider_id)
+                logger.debug(
+                    "[cache] provider=%r does not support caching — passthrough",
+                    self._provider.provider_id,
+                )
             return request
 
         cacheable_indices: list[int] = []
@@ -129,6 +132,7 @@ class ContextCacheManager:
     def get_metrics(self) -> CacheMetrics:
         """Return a snapshot copy of accumulated metrics."""
         from dataclasses import replace
+
         return replace(self._metrics)
 
     def reset(self) -> None:

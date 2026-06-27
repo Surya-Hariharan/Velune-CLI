@@ -27,9 +27,7 @@ async def cmd_plugin(repl: VeluneREPL, args: str) -> None:
                 "[cyan].velune/plugins/[/cyan] and run [bold]/plugin reload[/bold].[/dim]"
             )
             return
-        tbl = Table(
-            show_header=True, border_style="dim", padding=(0, 1), header_style="bold cyan"
-        )
+        tbl = Table(show_header=True, border_style="dim", padding=(0, 1), header_style="bold cyan")
         tbl.add_column("Name", style="cyan", width=18)
         tbl.add_column("Version", width=8)
         tbl.add_column("Cmds", width=5)
