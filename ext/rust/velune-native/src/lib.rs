@@ -93,7 +93,7 @@ fn scan_directory(
 /// Exposed to Python via PyO3. All functions have pure-Python fallbacks in
 /// `velune/repository/_native.py` so the module is optional at runtime.
 #[pymodule]
-fn velune_native(_py: Python, m: &PyModule) -> PyResult<()> {
+fn velune_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sha256_file, m)?)?;
     m.add_function(wrap_pyfunction!(scan_directory, m)?)?;
     Ok(())

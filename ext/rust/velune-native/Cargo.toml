@@ -11,7 +11,7 @@ name = "velune_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.20.0", features = ["extension-module"] }
+pyo3 = { version = "0.29.0", features = ["abi3-py310"] }
 sha2 = "0.10"
 hex = "0.4"
 walkdir = "2"

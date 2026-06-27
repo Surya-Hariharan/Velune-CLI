@@ -224,6 +224,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
       - name: Set up Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -246,7 +251,7 @@ jobs:
       - name: Clippy (deny warnings)
         run: cargo clippy -- -D warnings
 
-      - name: Build (lib only — no Python needed for tests)
+      - name: Build Rust library
         run: cargo build --lib
 
       - name: Run unit tests
