@@ -13,6 +13,10 @@ from velune.core.redaction import (
 )
 
 
+def _fake_bearer_token() -> str:
+    return "velune-test-token-placeholder"
+
+
 @pytest.mark.parametrize(
     "secret",
     [
@@ -33,7 +37,7 @@ def test_known_key_shapes_are_redacted(secret: str) -> None:
 
 
 def test_bearer_token_is_redacted() -> None:
-    token = "abcDEF123456ghijklmnop"
+    token = _fake_bearer_token()
     output = redact_secrets(f"Authorization: Bearer {token}")
     assert token not in output
     assert REDACTION_PLACEHOLDER in output
@@ -53,7 +57,7 @@ def test_ordinary_text_is_unchanged() -> None:
 
 
 def test_logging_filter_scrubs_formatted_record() -> None:
-    token = "abcDEF123456ghijklmnop"
+    token = _fake_bearer_token()
     record = logging.LogRecord(
         name="velune.test",
         level=logging.INFO,
