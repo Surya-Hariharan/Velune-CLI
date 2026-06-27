@@ -103,9 +103,9 @@ telemetry = [
     "opentelemetry-sdk>=1.22.0",
     "opentelemetry-exporter-otlp>=1.22.0",
 ]
-# Git provider tools (push / PR / issue) and repo git context. All git imports
-# are lazy, so the CLI runs without it; git-backed tools error with a clear hint.
-git = ["gitpython>=3.1.40"]
+# Git provider tools (push / PR / issue) and repo git context. All git tools
+# now use native subprocess commands, so this extra is empty and retained for compatibility.
+git = []
 # GGUF metadata reading only — safe, no diskcache dependency.
 gguf = ["gguf>=0.6.0"]
 # Docker sandbox isolation — install to enable execution.docker_sandbox = true.

@@ -13,11 +13,24 @@ from velune.execution.path_guard import PathGuard
 from velune.tools.base.tool import BaseTool, ToolPermission
 
 
-def _open_repo(path: Path):  # type: ignore[return]
-    try:
-        import git
+def _git_run(cwd: Path, *args: str) -> str:
+    import subprocess
+    res = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
+    return res.stdout.strip()
 
-        return git.Repo(str(path), search_parent_directories=True)
+
+def _ensure_git_repo(path: Path) -> Path:
+    try:
+        _git_run(path, "rev-parse", "--is-inside-work-tree")
+        return path
     except Exception as exc:
         raise ValueError(f"Not a git repository: {path}") from exc
 
@@ -40,7 +53,7 @@ class GitStatus(BaseTool):
     async def execute(self, directory: str = ".") -> dict:
         guard = PathGuard(self.workspace)
         safe_root = guard.validate(directory)
-        repo = _open_repo(safe_root)
+        _ensure_git_repo(safe_root)
 
         def _fetch() -> dict:
             status: dict[str, list[str]] = {
@@ -49,28 +62,25 @@ class GitStatus(BaseTool):
                 "deleted": [],
                 "untracked": [],
             }
-            # Staged changes (index vs HEAD)
             try:
-                for diff in repo.index.diff("HEAD"):
-                    if diff.change_type == "M":
-                        status["modified"].append(diff.b_path or diff.a_path)
-                    elif diff.change_type == "A":
-                        status["added"].append(diff.b_path)
-                    elif diff.change_type == "D":
-                        status["deleted"].append(diff.a_path)
-            except Exception:
-                pass
-            # Unstaged changes (working tree vs index)
-            try:
-                for diff in repo.index.diff(None):
-                    path = diff.a_path
-                    if diff.change_type == "M" and path not in status["modified"]:
-                        status["modified"].append(path)
-                    elif diff.change_type == "D" and path not in status["deleted"]:
+                out = _git_run(safe_root, "status", "--porcelain")
+                for line in out.splitlines():
+                    if len(line) < 4:
+                        continue
+                    xy = line[0:2]
+                    path = line[3:].strip()
+                    if path.startswith('"') and path.endswith('"'):
+                        path = path[1:-1]
+                    if xy == '??':
+                        status["untracked"].append(path)
+                    elif 'A' in xy:
+                        status["added"].append(path)
+                    elif 'D' in xy:
                         status["deleted"].append(path)
+                    elif 'M' in xy or 'R' in xy or 'C' in xy or 'U' in xy:
+                        status["modified"].append(path)
             except Exception:
                 pass
-            status["untracked"] = list(repo.untracked_files)
             return status
 
         return await asyncio.to_thread(_fetch)
@@ -102,18 +112,23 @@ class GitBranch(BaseTool):
     async def execute(self, directory: str = ".") -> dict:
         guard = PathGuard(self.workspace)
         safe_root = guard.validate(directory)
-        repo = _open_repo(safe_root)
+        _ensure_git_repo(safe_root)
 
         def _fetch() -> dict:
             try:
-                current = repo.active_branch.name
-            except TypeError:
+                current = _git_run(safe_root, "symbolic-ref", "--short", "HEAD")
+            except Exception:
                 current = "(detached HEAD)"
-            branches = [h.name for h in repo.heads]
-            remote_branches = [ref.name for ref in repo.remote_refs] if repo.remotes else []
+            
+            try:
+                out = _git_run(safe_root, "branch", "-a", "--format=%(refname:short)")
+                branches = [b for b in out.splitlines() if b]
+            except Exception:
+                branches = []
+
             return {
                 "current": current,
-                "all": branches + remote_branches,
+                "all": branches,
             }
 
         return await asyncio.to_thread(_fetch)

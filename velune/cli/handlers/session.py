@@ -13,9 +13,8 @@ _log = logging.getLogger("velune.cli.handlers.session")
 
 
 async def cmd_help(repl: VeluneREPL, args: str) -> None:
-    from rich.table import Table
-
     from velune.cli.autocomplete import CATEGORY_ORDER
+    from velune.cli.ui_components import create_table
 
     show_hidden = any(tok in ("--all", "-a", "all") for tok in args.split())
 
@@ -29,30 +28,15 @@ async def cmd_help(repl: VeluneREPL, args: str) -> None:
     ordered += sorted(c for c in grouped if c not in CATEGORY_ORDER)
 
     for category in ordered:
-        table = Table(
-            show_header=False,
-            border_style="dim",
-            padding=(0, 1),
-            title=f"[bold cyan]{category}[/bold cyan]",
-            title_justify="left",
-        )
-        table.add_column("Command", style="cyan", width=16)
-        table.add_column("Aliases", style="dim white", width=14)
-        table.add_column("Description")
+        table = create_table("Command", "Aliases", "Description", title=category)
         for cmd in sorted(grouped[category], key=lambda c: c.name):
             aliases = ", ".join(f"/{a}" for a in cmd.aliases) if cmd.aliases else ""
-            name = f"/{cmd.name}" + (" [dim](dev)[/dim]" if cmd.hidden else "")
-            table.add_row(name, aliases, cmd.description)
+            name = f"[cyan]/{cmd.name}[/cyan]" + (" [dim](dev)[/dim]" if cmd.hidden else "")
+            table.add_row(name, f"[dim white]{aliases}[/dim white]", cmd.description)
         repl.console.print(table)
+        repl.console.print()
 
-    tips = (
-        "[dim]Tip: press [bold]Tab[/bold] to fuzzy-complete any command · "
-        "[bold]/help --all[/bold] shows developer commands · "
-        "type [bold]/<cmd>[/bold] with no args for its usage.[/dim]\n"
-        "[dim]Troubleshooting: models not showing? → [bold]/model discover[/bold] "
-        "or [bold]/model locate[/bold] (custom drive). "
-        "Something stuck warming up? → [bold]/doctor[/bold].[/dim]"
-    )
+    tips = "[dim]Press [bold]Tab[/bold] to autocomplete · [bold]/help --all[/bold] for dev commands · [bold]/doctor[/bold] for diagnostics.[/dim]"
     repl.console.print(tips)
 
 
@@ -62,15 +46,14 @@ async def cmd_exit(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_clear(repl: VeluneREPL, args: str) -> None:
+    from velune.cli.ui_components import print_notification
     print("\033c", end="", flush=True)
-    repl.console.print(
-        "[dim]Screen cleared — conversation context preserved. "
-        "Use /new for a fresh session.[/dim]"
-    )
+    print_notification(repl.console, "Screen cleared — conversation context preserved.", type="success")
 
 
 async def cmd_new(repl: VeluneREPL, args: str) -> None:
     """Start an isolated conversation session inside the same workspace."""
+    from velune.cli.ui_components import print_notification
     archived_note = ""
     try:
         has_exchange = any(m.get("role") == "assistant" for m in repl._conversation)
@@ -86,7 +69,7 @@ async def cmd_new(repl: VeluneREPL, args: str) -> None:
                 title=args.strip() or auto_title(repl._conversation),
                 total_tokens=repl.session_tokens,
             )
-            archived_note = f"  [dim]previous saved as[/dim] [cyan]{meta.title}[/cyan]"
+            archived_note = f" (Previous saved as {meta.title})"
     except Exception as exc:
         _log.warning("Could not archive previous session: %s", exc)
 
@@ -96,15 +79,18 @@ async def cmd_new(repl: VeluneREPL, args: str) -> None:
     repl.session_cost = 0.0
     repl._context_tracker.update(repl._conversation)
     await repl._start_episodic_session()
-    repl.console.print(
-        f"[green]New session started[/green] — project memory preserved.{archived_note}"
+    print_notification(
+        repl.console,
+        f"New session started — project memory preserved.{archived_note}",
+        type="success"
     )
 
 
 async def cmd_history(repl: VeluneREPL, args: str) -> None:
     """Show REPL command execution history."""
+    from velune.cli.ui_components import print_header, print_notification
     if not repl._history_file.exists():
-        repl.console.print("[dim]No command history found.[/dim]")
+        print_notification(repl.console, "No command history found.", type="info")
         return
 
     try:
@@ -112,22 +98,21 @@ async def cmd_history(repl: VeluneREPL, args: str) -> None:
         cmds = [line[1:] for line in lines if line.startswith("+")]
 
         if not cmds:
-            repl.console.print("[dim]No command history found.[/dim]")
+            print_notification(repl.console, "No command history found.", type="info")
             return
 
         last_n = cmds[-25:]
-        repl.console.print("\n[bold cyan]REPL Command History (last 25):[/bold cyan]")
+        print_header(repl.console, "REPL Command History", "Last 25 executed commands")
         for i, cmd in enumerate(last_n, len(cmds) - len(last_n) + 1):
             repl.console.print(f"  [dim]{i:3d}[/dim]  {cmd}")
         repl.console.print()
     except Exception as e:
-        repl.console.print(f"[red]Failed to read history: {e}[/red]")
+        print_notification(repl.console, f"Failed to read history: {e}", type="error")
 
 
 async def cmd_stats(repl: VeluneREPL, args: str) -> None:
     """Show session statistics — tokens, cost, turns, uptime, approval mode."""
-    from rich.panel import Panel
-    from rich.table import Table
+    from velune.cli.ui_components import create_table, print_header
 
     elapsed = _time.monotonic() - repl._session_start_time
     hours, remainder = divmod(int(elapsed), 3600)
@@ -143,10 +128,9 @@ async def cmd_stats(repl: VeluneREPL, args: str) -> None:
     turns = len(repl._conversation)
     user_turns = sum(1 for m in repl._conversation if m.get("role") == "user")
 
-    table = Table(show_header=False, border_style="dim", padding=(0, 2))
-    table.add_column("Metric", style="dim", width=22)
-    table.add_column("Value", style="white")
-
+    print_header(repl.console, "Session Statistics")
+    
+    table = create_table("Metric", "Value")
     table.add_row("Session uptime", uptime)
     table.add_row("Conversation turns", str(turns))
     table.add_row("User messages", str(user_turns))
@@ -163,11 +147,5 @@ async def cmd_stats(repl: VeluneREPL, args: str) -> None:
     table.add_row("Approval mode", repl._approval_mode.value)
     table.add_row("Session mode", repl._mode_manager.current.value.upper())
 
-    repl.console.print(
-        Panel(
-            table,
-            title="[bold cyan]Session Statistics[/bold cyan]",
-            border_style="cyan",
-            padding=(0, 1),
-        )
-    )
+    repl.console.print(table)
+    repl.console.print()

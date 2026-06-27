@@ -43,77 +43,64 @@ class GitContextProvider:
 
         Designed to be called via asyncio.to_thread — fully synchronous.
         """
-        try:
-            import git  # gitpython
+        import subprocess
 
-            repo = git.Repo(str(self._root), search_parent_directories=True)
-        except Exception:
+        def _git(*args: str) -> str:
+            res = subprocess.run(
+                ["git", *args],
+                cwd=str(self._root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return res.stdout.strip() if res.returncode == 0 else ""
+
+        # Check if it's a git repo
+        if not _git("rev-parse", "--is-inside-work-tree"):
             return None
 
-        try:
-            branch = repo.active_branch.name
-        except TypeError:
-            # Detached HEAD
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+        if not branch or branch == "HEAD":
             branch = "HEAD (detached)"
 
-        try:
-            head_sha = repo.head.commit.hexsha
-        except Exception:
-            head_sha = ""
+        head_sha = _git("rev-parse", "HEAD")
 
         last_commits: list[dict[str, str]] = []
-        try:
-            for commit in repo.iter_commits(max_count=self.MAX_COMMITS):
-                lines = commit.message.split("\n")
-                body = "\n".join(lines[1:]).strip()
-                last_commits.append(
-                    {
-                        "sha7": commit.hexsha[:7],
-                        "subject": lines[0][:80],
-                        "body": body,
-                    }
-                )
-        except Exception:
-            pass
+        log_out = _git("log", f"-n{self.MAX_COMMITS}", "--format=%h%n%s%n%b%n---VELUNE_COMMIT---")
+        if log_out:
+            blocks = log_out.split("---VELUNE_COMMIT---")
+            for block in blocks:
+                lines = block.strip().split("\n")
+                if len(lines) >= 2:
+                    last_commits.append(
+                        {
+                            "sha7": lines[0],
+                            "subject": lines[1][:80],
+                            "body": "\n".join(lines[2:]).strip(),
+                        }
+                    )
 
         commit_bodies = [c["body"] for c in last_commits if c.get("body")]
 
-        staged_files: list[str] = []
-        modified_files: list[str] = []
-        untracked_files: list[str] = []
-        try:
-            diff_staged = repo.index.diff("HEAD")
-            staged_files = [d.a_path for d in diff_staged]
-        except Exception:
-            pass
-        try:
-            diff_unstaged = repo.index.diff(None)
-            modified_files = [d.a_path for d in diff_unstaged]
-        except Exception:
-            pass
-        try:
-            untracked_files = repo.untracked_files[: self.MAX_UNTRACKED]
-        except Exception:
-            pass
+        staged_files = _git("diff", "--name-only", "--cached").splitlines()
+        modified_files = _git("diff", "--name-only").splitlines()
+        untracked_files = _git("ls-files", "--others", "--exclude-standard").splitlines()[: self.MAX_UNTRACKED]
 
         staged_diff_summary = ""
-        try:
-            raw_diff = repo.git.diff("--cached")
-            if raw_diff:
-                if len(raw_diff) > self.MAX_DIFF_CHARS:
-                    staged_diff_summary = raw_diff[: self.MAX_DIFF_CHARS] + "\n... [diff truncated]"
-                else:
-                    staged_diff_summary = raw_diff
-        except Exception:
-            pass
+        raw_diff = _git("diff", "--cached")
+        if raw_diff:
+            if len(raw_diff) > self.MAX_DIFF_CHARS:
+                staged_diff_summary = raw_diff[: self.MAX_DIFF_CHARS] + "\n... [diff truncated]"
+            else:
+                staged_diff_summary = raw_diff
 
         last_commit_diff_stat = ""
-        try:
-            raw_stat = repo.git.diff("HEAD~1", "--stat")
-            if raw_stat:
-                last_commit_diff_stat = raw_stat[:800]
-        except Exception:
-            pass
+        raw_stat = _git("diff", "HEAD~1", "HEAD", "--stat")
+        if not raw_stat:
+            # Fallback if there is no HEAD~1
+            raw_stat = _git("diff", "--stat")
+        if raw_stat:
+            last_commit_diff_stat = raw_stat[:800]
 
         return GitSnapshot(
             branch=branch,

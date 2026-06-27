@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-import networkx as nx
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import networkx as nx
+
 
 from velune.repository.schemas import RepositoryEdge, RepositorySymbol, RepositorySymbolKind
 
@@ -11,6 +15,7 @@ class RepositoryGrapher:
     """Builds and analyzes dependency graphs for repository files and symbols."""
 
     def __init__(self, root_path: Path) -> None:
+        import networkx as nx
         self.root_path = root_path.resolve()
         self.graph = nx.MultiDiGraph()
 

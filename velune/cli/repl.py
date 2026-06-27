@@ -914,6 +914,10 @@ class VeluneREPL:
         from velune.cli.handlers.session import cmd_stats
         await cmd_stats(self, args)
 
+    async def _cmd_settings(self, args: str) -> None:
+        from velune.cli.handlers.settings import cmd_settings
+        await cmd_settings(self, args)
+
     async def _cmd_config(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_config
         await cmd_config(self, args)
@@ -1016,7 +1020,7 @@ class VeluneREPL:
 
     async def _cmd_councilmodel_show(self, args: str) -> None:
         from velune.cli.handlers.councilmodel import cmd_councilmodel_show
-        await cmd_councilmodel_show(self, args)
+        await cmd_councilmodel_show(self)
 
     async def _cmd_diff(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_diff

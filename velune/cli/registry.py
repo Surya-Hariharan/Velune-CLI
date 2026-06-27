@@ -21,10 +21,12 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from types import ModuleType
+from typing import TYPE_CHECKING
 
-import typer
+if TYPE_CHECKING:
+    import typer
+    from velune.kernel.registry import ServiceContainer
 
-from velune.kernel.registry import ServiceContainer
 
 _CORE = "Core"
 _WORKSPACE = "Workspace & Sessions"

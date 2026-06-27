@@ -17,11 +17,24 @@ from velune.execution.path_guard import PathGuard
 from velune.tools.base.tool import BaseTool, ToolPermission
 
 
-def _open_repo(path: Path):  # type: ignore[return]
-    try:
-        import git
+def _git_run(cwd: Path, *args: str) -> str:
+    import subprocess
+    res = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
+    return res.stdout.strip()
 
-        return git.Repo(str(path), search_parent_directories=True)
+
+def _ensure_git_repo(path: Path) -> Path:
+    try:
+        _git_run(path, "rev-parse", "--is-inside-work-tree")
+        return path
     except Exception as exc:
         raise ValueError(f"Not a git repository: {path}") from exc
 
@@ -55,13 +68,16 @@ class GitCommit(BaseTool):
     ) -> str:
         guard = PathGuard(self.workspace)
         safe_root = guard.validate(directory)
-        repo = _open_repo(safe_root)
+        _ensure_git_repo(safe_root)
 
         def _do_commit() -> str:
             if add_all:
-                repo.git.add(A=True)
-            commit = repo.index.commit(message)
-            return f"Committed: {message} ({commit.hexsha[:8]})"
+                _git_run(safe_root, "add", "-A")
+            _git_run(safe_root, "commit", "-m", message)
+            
+            # Get the new commit hash
+            new_sha = _git_run(safe_root, "rev-parse", "--short", "HEAD")
+            return f"Committed: {message} ({new_sha})"
 
         return await asyncio.to_thread(_do_commit)
 
@@ -101,17 +117,15 @@ class GitCheckout(BaseTool):
         _validate_ref_name(branch, label="branch")
         guard = PathGuard(self.workspace)
         safe_root = guard.validate(directory)
-        repo = _open_repo(safe_root)
+        _ensure_git_repo(safe_root)
 
         def _do_checkout() -> str:
             if create:
-                new_head = repo.create_head(branch)
-                new_head.checkout()
+                _git_run(safe_root, "checkout", "-b", branch)
             else:
-                existing = {h.name: h for h in repo.heads}
-                if branch not in existing:
-                    raise ValueError(f"Branch not found: '{branch}'")
-                existing[branch].checkout()
+                # verify branch exists
+                _git_run(safe_root, "rev-parse", "--verify", branch)
+                _git_run(safe_root, "checkout", branch)
             return f"Checked out: {branch}"
 
         return await asyncio.to_thread(_do_checkout)

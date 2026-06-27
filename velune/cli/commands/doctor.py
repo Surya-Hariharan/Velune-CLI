@@ -510,9 +510,9 @@ def _check_treesitter() -> dict:
         ]:
             try:
                 if name == "typescript":
-                    Language(mod.language_typescript())
+                    Language(mod.language_typescript())  # type: ignore
                 else:
-                    Language(mod.language())
+                    Language(mod.language())  # type: ignore
                 langs.append(name)
             except Exception:
                 pass
@@ -822,7 +822,8 @@ def _check_council_roles() -> dict:
     try:
         from velune.models.specializations import CouncilRole, ModelSpecializationMapper
 
-        mapper = ModelSpecializationMapper()
+        from velune.models.registry import ModelCapabilityRegistry
+        mapper = ModelSpecializationMapper(ModelCapabilityRegistry())
         try:
             role_map = mapper.map_roles()
         except Exception as exc:

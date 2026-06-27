@@ -54,6 +54,20 @@ def _remote_hostname(url: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _git_run(cwd: Path, *args: str) -> str:
+    import subprocess
+    res = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
+    return res.stdout.strip()
+
+
 def _detect_provider(workspace: Path) -> tuple[str, str]:
     """Infer (provider_name, repo_slug) from the origin remote URL.
 
@@ -64,13 +78,17 @@ def _detect_provider(workspace: Path) -> tuple[str, str]:
         ValueError if no suitable remote is found.
     """
     try:
-        import git
-
-        repo = git.Repo(str(workspace), search_parent_directories=True)
-        remotes = {r.name: r.url for r in repo.remotes}
-        url: str = remotes.get("origin") or next(iter(remotes.values()))
-    except Exception as exc:
-        raise ValueError(f"Cannot detect git remote: {exc}") from exc
+        url = _git_run(workspace, "remote", "get-url", "origin")
+    except Exception:
+        try:
+            out = _git_run(workspace, "remote")
+            if out:
+                first_remote = out.splitlines()[0]
+                url = _git_run(workspace, "remote", "get-url", first_remote)
+            else:
+                raise ValueError("No remotes found")
+        except Exception as exc:
+            raise ValueError(f"Cannot detect git remote: {exc}") from exc
 
     url = url.rstrip("/").removesuffix(".git")
 
@@ -98,10 +116,7 @@ def _detect_provider(workspace: Path) -> tuple[str, str]:
 
 def _get_current_branch(workspace: Path) -> str:
     try:
-        import git
-
-        repo = git.Repo(str(workspace), search_parent_directories=True)
-        return repo.active_branch.name
+        return _git_run(workspace, "symbolic-ref", "--short", "HEAD")
     except Exception as exc:
         raise ValueError(f"Cannot determine current branch: {exc}") from exc
 
@@ -166,38 +181,28 @@ class GitPushTool(BaseTool):
         """
 
         def _push() -> str:
-            try:
-                import git
-            except ImportError as e:
-                raise RuntimeError("gitpython is required: pip install gitpython") from e
-
-            repo = git.Repo(str(self.workspace), search_parent_directories=True)
-            target_branch = branch or repo.active_branch.name
+            target_branch = branch
+            if not target_branch:
+                try:
+                    target_branch = _git_run(self.workspace, "symbolic-ref", "--short", "HEAD")
+                except Exception:
+                    raise ValueError("Cannot determine current branch for push")
 
             if target_branch.startswith("-"):
                 raise ValueError(f"Invalid branch name: {target_branch!r}")
 
-            push_args: dict = {}
+            push_args = [remote, f"{target_branch}:{target_branch}"]
             if set_upstream:
-                push_args["set_upstream"] = True
+                push_args.insert(0, "-u")
             if force:
-                push_args["force"] = True
+                push_args.insert(0, "--force")
+                
+            try:
+                _git_run(self.workspace, "push", *push_args)
+            except RuntimeError as e:
+                raise RuntimeError(f"Push failed: {e}")
 
-            remote_obj = repo.remote(remote)
-            result = remote_obj.push(f"{target_branch}:{target_branch}", **push_args)
-
-            if not result:
-                return f"Pushed {target_branch!r} → {remote}"
-
-            summaries = []
-            for info in result:
-                flag = getattr(info, "flags", 0)
-                # PushInfo.ERROR = 1024
-                if flag & 1024:
-                    raise RuntimeError(f"Push failed: {getattr(info, 'summary', 'unknown error')}")
-                summaries.append(getattr(info, "summary", "ok").strip())
-
-            return f"Pushed {target_branch!r} → {remote}: {', '.join(summaries)}"
+            return f"Pushed {target_branch!r} → {remote}"
 
         return await asyncio.to_thread(_push)
 

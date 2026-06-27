@@ -87,43 +87,197 @@ async def _project_close(repl: VeluneREPL) -> None:
 
 
 async def _project_status(repl: VeluneREPL) -> None:
-    from rich.panel import Panel
+    from rich.table import Table
+    from velune.repository.index_state import IndexState
+    from velune.providers.keystore import list_configured_providers
 
     workspace = Path(repl.container.get("runtime.workspace")).resolve()
-    info = repl._workspace_registry.get(workspace)
     is_git = (workspace / ".git").exists()
-    indexed = (workspace / ".velune" / "index_state.json").exists()
-    ptype = (info.project_type if info else None) or ("git repo" if is_git else "folder")
-    model = repl.active_model.model_id if repl.active_model else "[dim]none[/dim]"
-    repl.console.print(
-        Panel(
-            f"[bold]Workspace[/bold]  [cyan]{workspace.name}[/cyan]\n"
-            f"[bold]Path[/bold]       {workspace}\n"
-            f"[bold]Type[/bold]       {ptype}\n"
-            f"[bold]Git[/bold]        {'yes' if is_git else 'no'}\n"
-            f"[bold]Indexed[/bold]    {'yes' if indexed else 'no — run /index'}\n"
-            f"[bold]Model[/bold]      {model}",
-            title="Project Status",
-            border_style="dim",
-        )
+
+    ws_name = workspace.name
+    ws_path = str(workspace)
+
+    # Git Branch & Status
+    active_branch = repl._cached_branch
+    if not active_branch or active_branch == "unknown":
+        if is_git:
+            from velune.repository.tracker import GitTracker
+            try:
+                active_branch = GitTracker(workspace).get_active_branch()
+            except Exception:
+                active_branch = "unknown"
+        else:
+            active_branch = "non-git"
+
+    repo_status = "non-git"
+    modified_count = 0
+    untracked_count = 0
+    if is_git:
+        try:
+            import subprocess
+            res = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    if line.startswith("??"):
+                        untracked_count += 1
+                    else:
+                        modified_count += 1
+                if modified_count == 0 and untracked_count == 0:
+                    repo_status = "clean"
+                else:
+                    parts = []
+                    if modified_count > 0:
+                        parts.append(f"{modified_count} modified")
+                    if untracked_count > 0:
+                        parts.append(f"{untracked_count} untracked")
+                    repo_status = f"dirty ({', '.join(parts)})"
+            else:
+                repo_status = "unknown"
+        except Exception:
+            repo_status = "unknown"
+
+    # Indexed Files
+    state_path = workspace / ".velune" / "index_state.json"
+    index_state = IndexState.load(state_path) if state_path.exists() else None
+    indexed_files = len(index_state.file_index) if index_state else 0
+    indexed_str = f"{indexed_files} files indexed" if index_state else "not indexed — run /index"
+
+    # Project Profile (Language / Framework)
+    profile = repl._project_profile or repl._load_project_profile()
+    language = getattr(profile, "primary_language", "unknown") if profile else "unknown"
+    frameworks = getattr(profile, "detected_frameworks", []) if profile else []
+    framework = ", ".join(frameworks) if frameworks else "generic / none"
+
+    # Memory Status
+    working_turns = 0
+    episodic_turns = 0
+    graph_nodes = 0
+    try:
+        working = repl.container.get("runtime.working_memory")
+        working_turns = len(working.get_turns())
+    except Exception:
+        pass
+    try:
+        episodic_tier = repl.container.get("runtime.episodic_memory")
+        if episodic_tier:
+            episodic_turns = len(await episodic_tier.get_turns("default"))
+    except Exception:
+        pass
+    try:
+        graph = repl.container.get("runtime.graph_memory")
+        if graph:
+            nodes = await graph.get_all_nodes()
+            graph_nodes = len(nodes)
+    except Exception:
+        pass
+    
+    memory_status = (
+        f"Working: {working_turns} turns · "
+        f"Episodic: {episodic_turns} turns · "
+        f"Graph: {graph_nodes} entities"
     )
+
+    # MCP Status
+    connected_mcp = 0
+    total_mcp = 0
+    try:
+        mcp_status = repl._mcp_registry.status()
+        total_mcp = len(mcp_status)
+        connected_mcp = sum(1 for s in mcp_status if s["state"] == "connected")
+    except Exception:
+        pass
+    mcp_status_str = f"{connected_mcp} connected / {total_mcp} configured"
+
+    # Connected Providers
+    try:
+        configured_providers = list_configured_providers()
+    except Exception:
+        configured_providers = []
+    providers_str = ", ".join(configured_providers) if configured_providers else "none connected"
+
+    # Current Model
+    model = repl.active_model.model_id if repl.active_model else "none selected"
+
+    # Recent Tasks
+    recent_jobs = []
+    if repl._job_registry:
+        try:
+            jobs = repl._job_registry.all_jobs()
+            jobs.sort(key=lambda j: j.submitted_at, reverse=True)
+            recent_jobs = jobs[:5]
+        except Exception:
+            pass
+
+    # Pending Warnings
+    pending_warnings = []
+    if repl._alert_store:
+        try:
+            pending_warnings = [a.title for a in repl._alert_store.all_alerts()]
+        except Exception:
+            pass
+    
+    if not is_git:
+        pending_warnings.append("Not a git repository")
+    if not index_state:
+        pending_warnings.append("Workspace is not indexed — run /index to analyze files")
+    if not repl.active_model:
+        pending_warnings.append("No active model selected — run /model to choose one")
+    if not configured_providers:
+        pending_warnings.append("No AI providers configured — run /providers to add API keys")
+
+    # Clean table layout
+    from velune.cli.ui_components import create_table, print_header, print_notification
+    table = create_table("Key", "Value")
+
+    table.add_row("Workspace", ws_name)
+    table.add_row("Path", ws_path)
+    table.add_row("Git Branch", active_branch)
+    table.add_row("Repository Status", repo_status)
+    table.add_row("Indexed Files", indexed_str)
+    table.add_row("Language", language)
+    table.add_row("Framework", framework)
+    table.add_row("", "")
+    table.add_row("Current Model", model)
+    table.add_row("Connected Providers", providers_str)
+    table.add_row("MCP Status", mcp_status_str)
+    table.add_row("Memory Status", memory_status)
+
+    print_header(repl.console, "Workspace Overview")
+    repl.console.print(table)
+    repl.console.print()
+
+    if recent_jobs:
+        print_header(repl.console, "Recent Tasks")
+        for job in recent_jobs:
+            status_color = "yellow" if job.status.value == "running" else ("green" if job.status.value == "completed" else "red")
+            repl.console.print(f"  [cyan]{job.job_id:<10}[/cyan]  {job.description[:45]:<45}  [{status_color}]{job.status.value}[/{status_color}]")
+        repl.console.print()
+
+    print_header(repl.console, "Pending Warnings")
+    if pending_warnings:
+        for warn in pending_warnings:
+            print_notification(repl.console, warn, type="warning")
+    else:
+        print_notification(repl.console, "No pending warnings. System is healthy.", type="success")
+    repl.console.print()
 
 
 async def _project_list(repl: VeluneREPL) -> None:
-    from rich.table import Table
-
+    from velune.cli.ui_components import create_table, print_notification
     workspaces = repl._workspace_registry.list()
     if not workspaces:
-        repl.console.print("[dim]No workspaces registered. Use /project add <path>.[/dim]")
+        print_notification(repl.console, "No workspaces registered. Use /project add <path>.", type="info")
         return
     current = str(Path(repl.container.get("runtime.workspace")).resolve())
-    table = Table(border_style="dim", padding=(0, 1))
-    table.add_column("Project", style="cyan")
-    table.add_column("Type", style="dim")
-    table.add_column("Last Opened", style="dim")
-    table.add_column("Path", style="dim")
+    table = create_table("Project", "Type", "Last Opened", "Path")
     for w in workspaces:
-        name = f"{w.name} [green](current)[/green]" if w.path == current else w.name
+        name = f"[bold]{w.name}[/bold] [green](current)[/green]" if w.path == current else w.name
         table.add_row(
             name,
             w.project_type or ("git" if w.is_git else "—"),
@@ -131,6 +285,7 @@ async def _project_list(repl: VeluneREPL) -> None:
             w.path,
         )
     repl.console.print(table)
+    repl.console.print()
 
 
 async def _project_picker(repl: VeluneREPL) -> None:

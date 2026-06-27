@@ -27,20 +27,11 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)
 # Suppress the root logger from printing INFO/DEBUG to stderr.
 logging.getLogger().setLevel(logging.WARNING)
 
+from typing import TYPE_CHECKING
 from pathlib import Path
 
-import typer
-from rich.console import Console
-from rich.text import Text
-
-from velune import __version__
-from velune.cli import design
-from velune.cli.context import CLIContext
-from velune.cli.registry import bootstrap_level, register_commands
-from velune.core.startup_profiler import mark as _startup_mark
-from velune.kernel.registry import ServiceContainer
-
-_startup_mark("cli.app imported (typer/rich/runtime ready)")
+if TYPE_CHECKING:
+    import typer
 
 
 # Repository markers that indicate *workspace* is (probably) a project root.
@@ -59,7 +50,7 @@ def _detect_repo_marker(path: Path) -> str | None:
     return None
 
 
-def create_app(register: str | None = "__all__") -> typer.Typer:
+def create_app(register: str | None = "__all__") -> 'typer.Typer':
     """Create the root Typer application.
 
     ``register`` is forwarded to :func:`register_commands` to control how many
@@ -67,6 +58,19 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
     the back-compat singleton, completion, and tests), ``None`` (none — the bare
     REPL path), or a single command name (lazy-import just that one).
     """
+    import typer
+    globals()["typer"] = typer
+    from rich.console import Console
+    from rich.text import Text
+
+    from velune import __version__
+    from velune.cli import design
+    from velune.cli.context import CLIContext
+    from velune.cli.registry import bootstrap_level, register_commands
+    from velune.core.startup_profiler import mark as _startup_mark
+    from velune.kernel.registry import ServiceContainer
+
+    _startup_mark("cli.app imported (typer/rich/runtime ready)")
 
     app = typer.Typer(
         name="velune",
@@ -246,10 +250,10 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
     return app
 
 
-_app_singleton: typer.Typer | None = None
+_app_singleton: 'typer.Typer | None' = None
 
 
-def __getattr__(name: str) -> typer.Typer:
+def __getattr__(name: str) -> 'typer.Typer':
     """Build the Typer app on first attribute access, not at import time.
 
     Importing this module used to eagerly call ``create_app()`` — which imports

@@ -70,6 +70,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "issue": "Git",
     "sandbox": "Git",
     # Settings
+    "settings": "Settings",
     "config": "Settings",
     "approve": "Settings",
     # System
@@ -186,6 +187,15 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Run environment health checks",
             usage="/doctor",
             handler=repl._cmd_doctor,
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="settings",
+            aliases=["setup"],
+            description="Interactive settings dashboard (keyboard navigation)",
+            usage="/settings",
+            handler=repl._cmd_settings,
         )
     )
     registry.register(

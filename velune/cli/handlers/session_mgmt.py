@@ -125,19 +125,16 @@ async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
         episodic = repl.container.get("runtime.episodic_session_memory")
         sessions = await episodic.list_recent_sessions(workspace, limit=10)
     except Exception as exc:
-        repl.console.print(f"[red]Could not load sessions: {exc}[/red]")
+        from velune.cli.ui_components import print_notification
+        print_notification(repl.console, f"Could not load sessions: {exc}", type="error")
         return
 
+    from velune.cli.ui_components import create_table, print_header, print_notification
     if not sessions:
-        repl.console.print("[dim]No sessions found for this workspace.[/dim]")
+        print_notification(repl.console, "No sessions found for this workspace.", type="info")
         return
 
-    table = Table(border_style="dim", padding=(0, 1))
-    table.add_column("ID", style="cyan", width=16)
-    table.add_column("Started", style="dim", width=14)
-    table.add_column("Model", style="dim", width=22)
-    table.add_column("Tokens", style="dim", justify="right", width=8)
-    table.add_column("First Prompt", style="white")
+    table = create_table("ID", "Started", "Model", "Tokens", "First Prompt")
 
     for s in sessions:
         dt = datetime.fromtimestamp(s.started_at).strftime("%m-%d %H:%M")
@@ -145,7 +142,9 @@ async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
         preview = first[:50] + ("…" if len(first) > 50 else "")
         table.add_row(s.id, dt, s.model_used or "—", str(s.total_tokens), preview)
 
+    print_header(repl.console, "Recent Sessions")
     repl.console.print(table)
+    repl.console.print()
 
 
 async def _cmd_session_resume(repl: VeluneREPL, session_id: str) -> None:

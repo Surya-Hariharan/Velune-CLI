@@ -294,22 +294,23 @@ class FilesystemScanner:
             return []
 
     def _find_nested_gitignores(self) -> list[Path]:
-        """Find .gitignore files in subdirectories (max 4 levels deep)."""
+        """Find .gitignore files in subdirectories."""
         found: list[Path] = []
+        import subprocess
         try:
-            for gitignore in self.root_path.rglob(".gitignore"):
-                if gitignore == self.root_path / ".gitignore":
-                    continue  # already loaded
-                # Don't descend into dirs we'd skip anyway
-                rel = gitignore.relative_to(self.root_path)
-                parts = rel.parts
-                if any(
-                    p.startswith(".") or p in {"node_modules", "__pycache__", "venv", ".venv"}
-                    for p in parts[:-1]
-                ):
+            res = subprocess.run(
+                ["git", "ls-files", "--cached", "--others", "--exclude-standard", "**/.gitignore"],
+                cwd=str(self.root_path),
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            for line in res.stdout.splitlines():
+                if not line.strip():
                     continue
-                if len(parts) <= 5:  # cap depth
-                    found.append(gitignore)
+                p = self.root_path / line.strip()
+                if p != self.root_path / ".gitignore":
+                    found.append(p)
         except Exception:
             pass
         return found

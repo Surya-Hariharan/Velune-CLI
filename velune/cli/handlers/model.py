@@ -531,6 +531,7 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
         return
     all_models = model_registry.list_all()
 
+    from velune.cli.ui_components import create_table, print_header, print_notification
     if not all_models:
         from velune.cli.rendering.error_panel import render_error
         from velune.core.errors.catalog import NoModelsAvailableError
@@ -538,13 +539,7 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
         repl.console.print(render_error(NoModelsAvailableError()))
         return
 
-    table = Table(border_style="dim", padding=(0, 1))
-    table.add_column("Model", style="cyan")
-    table.add_column("Provider", style="dim")
-    table.add_column("Type", style="dim")
-    table.add_column("Speed", style="dim")
-    table.add_column("Context", style="dim", justify="right")
-    table.add_column("Top Skill", style="magenta")
+    table = create_table("Model", "Provider", "Type", "Speed", "Context", "Top Skill")
 
     skill_attrs = ["coding", "reasoning", "planning", "summarization"]
     for m in all_models:
@@ -557,7 +552,7 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
                     top_skill = attr
                     break
         is_active = repl.active_model is not None and m.model_id == repl.active_model.model_id
-        name_col = f"{m.model_id} [green](active)[/green]" if is_active else m.model_id
+        name_col = f"[bold]{m.model_id}[/bold] [green](active)[/green]" if is_active else m.model_id
         table.add_row(
             name_col,
             m.provider_id,
@@ -566,7 +561,9 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
             f"{m.context_length // 1000}k",
             top_skill,
         )
+    print_header(repl.console, "Available Models")
     repl.console.print(table)
+    repl.console.print()
 
 
 async def activate_model(repl: VeluneREPL, model: ModelDescriptor) -> None:
@@ -832,29 +829,24 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
         repl.console.print(f"[{style}]{result.message}[/{style}]")
         return
 
+    from velune.cli.ui_components import create_table, print_header, print_notification
     if sub in ("remove", "rm", "delete"):
         if not rest:
             repl.console.print("[yellow]Usage: /model locations remove <path>[/yellow]")
             return
         ok = reg.remove(rest)
         if ok:
-            repl.console.print(f"[green]Removed location:[/green] {rest}")
+            print_notification(repl.console, f"Removed location: {rest}", type="success")
         else:
-            repl.console.print(f"[yellow]Not a registered location:[/yellow] {rest}")
+            print_notification(repl.console, f"Not a registered location: {rest}", type="warning")
         return
 
     roots = reg.resolve_roots()
     if not roots:
-        repl.console.print(
-            "[dim]No model locations resolved. Run [bold]/model locate[/bold] "
-            "to register one.[/dim]"
-        )
+        print_notification(repl.console, "No model locations resolved. Run /model locate to register one.", type="info")
         return
 
-    table = Table(border_style="dim", padding=(0, 1))
-    table.add_column("Location", style="cyan")
-    table.add_column("Source", style="dim")
-    table.add_column("Status")
+    table = create_table("Location", "Source", "Status")
     for rr in roots:
         if rr.disconnected:
             status = "[yellow]disconnected (device unavailable)[/yellow]"
@@ -865,13 +857,17 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
         else:
             status = "[red]not an Ollama store[/red]"
         table.add_row(str(rr.path), rr.source, status)
+    
+    print_header(repl.console, "Model Locations")
     repl.console.print(table)
+    repl.console.print()
 
     disconnected = [rr for rr in roots if rr.disconnected]
     if disconnected:
-        repl.console.print(
-            "[dim]Reconnect the drive(s) above and the models reappear "
-            "automatically — no re-setup needed.[/dim]"
+        print_notification(
+            repl.console,
+            "Reconnect the drive(s) above and the models reappear automatically — no re-setup needed.",
+            type="info"
         )
 
 
