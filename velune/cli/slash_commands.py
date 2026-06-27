@@ -22,6 +22,11 @@ class SlashCommand:
     category: str = "General"
     # Hidden developer commands are omitted from /help unless `/help --all`.
     hidden: bool = False
+    # Optional palette metadata. Commands without explicit examples still show
+    # their usage as a useful, deterministic example.
+    examples: tuple[str, ...] = ()
+    search_terms: tuple[str, ...] = ()
+    shortcut: str | None = None
 
 
 class SlashCommandRegistry:

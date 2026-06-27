@@ -26,16 +26,15 @@ class CommandEntry:
 # Display order for categories in /help and the completion menu. Categories
 # not listed here are appended afterwards, alphabetically.
 CATEGORY_ORDER: list[str] = [
-    "Session",
-    "Workspace",
-    "Models",
+    "AI",
     "Providers",
-    "Council",
-    "Modes",
+    "Models",
+    "Projects",
     "Memory",
-    "Code",
+    "Tools",
+    "MCP",
     "Git",
-    "Extend",
+    "Settings",
     "System",
 ]
 
@@ -151,6 +150,7 @@ class SlashCompleter(Completer):
         commands: list[CommandEntry] | None = None,
         max_results: int = 12,
         symbol_names: list[str] | None = None,
+        show_command_completions: bool = True,
     ) -> None:
         if commands is not None:
             self._entries = list(commands)
@@ -160,7 +160,12 @@ class SlashCompleter(Completer):
         self._model_ids: list[str] = model_ids or []
         self._symbol_names: list[str] = symbol_names or []
         self._max_results = max_results
+        self._show_command_completions = show_command_completions
         self._recent: deque[str] = deque(maxlen=8)
+
+    def set_commands(self, commands: list[CommandEntry]) -> None:
+        """Replace command entries after plugins or workspace commands load."""
+        self._entries = list(commands)
 
     def record_use(self, command_name: str) -> None:
         """Note that a command was executed, boosting it in future completions."""
@@ -199,7 +204,8 @@ class SlashCompleter(Completer):
         if sep:
             return
 
-        yield from self._complete_commands(head)
+        if self._show_command_completions:
+            yield from self._complete_commands(head)
 
     def _complete_symbol_mentions(self, partial: str):
         """Complete @@<partial> against the in-memory symbol name cache."""

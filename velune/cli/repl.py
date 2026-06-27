@@ -42,6 +42,7 @@ class VeluneREPL:
             profile_label=self._runtime_profile.label if self._runtime_profile else None,
         )
         self._completer = None
+        self._command_palette = None
         self.session_tokens: int = 0
         self.session_cost: float = 0.0
         self._history_file = Path.home() / ".velune" / "repl_history"
@@ -180,6 +181,7 @@ class VeluneREPL:
 
         from velune.cli import design
         from velune.cli.autocomplete import CommandEntry, SlashCompleter
+        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette
         from velune.cli.statusbar import STATUS_BAR_STYLES
         from velune.cli.validators import InlineSyntaxValidator
 
@@ -197,6 +199,7 @@ class VeluneREPL:
                 "mode.godly": f"{design.ENERGY} bold",
                 "mode.optimus": f"{design.WARN} bold",
                 **STATUS_BAR_STYLES,
+                **PALETTE_STYLES,
             }
         )
 
@@ -218,8 +221,17 @@ class VeluneREPL:
             for cmd in self._registry.all_unique()
             if not cmd.hidden
         ]
-        completer = SlashCompleter(commands=entries, model_ids=model_ids)
+        # Slash commands use the two-panel palette. The completer remains
+        # active for model ids and @@symbol names.
+        completer = SlashCompleter(
+            commands=entries,
+            model_ids=model_ids,
+            show_command_completions=False,
+        )
         self._completer = completer
+
+        palette = CommandPalette(self._registry.all_unique())
+        self._command_palette = palette
 
         kb = KeyBindings()
 
@@ -248,7 +260,9 @@ class VeluneREPL:
             """Insert a literal newline without submitting the prompt."""
             event.app.current_buffer.insert_text("\n")
 
-        return PromptSession(
+        palette.add_bindings(kb)
+
+        session = PromptSession(
             history=FileHistory(str(self._history_file)),
             auto_suggest=AutoSuggestFromHistory(),
             completer=completer,
@@ -261,7 +275,10 @@ class VeluneREPL:
             wrap_lines=True,
             key_bindings=kb,
             bottom_toolbar=self._render_toolbar,
+            reserve_space_for_menu=19,
         )
+        palette.attach(session)
+        return session
 
     def _render_toolbar(self):
         from velune.cli.statusbar import render_status_bar
@@ -4257,7 +4274,7 @@ class VeluneREPL:
                         description=f"{cmd.description}  {cmd.help_label}",
                         usage=cmd.usage,
                         handler=_make_handler(),
-                        category="Extend",
+                        category="Tools",
                     )
                 )
         # Rebuild completer entries to include new commands
@@ -4274,7 +4291,9 @@ class VeluneREPL:
                 for c in self._registry.all_unique()
                 if not c.hidden
             ]
-            self._completer.commands = entries
+            self._completer.set_commands(entries)
+        if self._command_palette is not None:
+            self._command_palette.set_commands(self._registry.all_unique())
 
     async def _cmd_plugin(self, args: str) -> None:
         from rich.table import Table

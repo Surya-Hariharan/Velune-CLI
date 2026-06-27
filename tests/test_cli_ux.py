@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+
+from prompt_toolkit import PromptSession
 from prompt_toolkit.document import Document
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.output import DummyOutput
 
 from velune.cli.autocomplete import CommandEntry, SlashCompleter, fuzzy_score
+from velune.cli.command_palette import CommandPalette, CommandPaletteModel
 from velune.cli.rendering.markdown import MarkdownStreamBuffer, StreamStats
+from velune.cli.slash_commands import SlashCommand
 from velune.cli.statusbar import StatusBarState, render_status_bar
 
 
@@ -88,6 +96,111 @@ class TestSlashCompleter:
     def test_static_fallback_list_still_works(self):
         completer = SlashCompleter()
         assert "help" in _completions(completer, "/he")
+
+    def test_palette_mode_suppresses_legacy_command_menu_only(self):
+        completer = SlashCompleter(
+            commands=ENTRIES,
+            model_ids=["qwen-coder"],
+            show_command_completions=False,
+        )
+        assert _completions(completer, "/mod") == []
+        assert _completions(completer, "/model qwen") == ["qwen-coder"]
+
+
+async def _noop(args: str = "") -> None:
+    return None
+
+
+PALETTE_COMMANDS = [
+    SlashCommand(
+        "run",
+        [],
+        "Run a task with AI",
+        "/run <task>",
+        _noop,
+        category="AI",
+    ),
+    SlashCommand(
+        "providers",
+        ["provider", "prov"],
+        "Manage cloud AI providers",
+        "/providers [add|status]",
+        _noop,
+        category="Providers",
+        examples=("/providers add anthropic",),
+        search_terms=("anthropic", "openai"),
+        shortcut="/prov",
+    ),
+    SlashCommand(
+        "models",
+        ["ls"],
+        "List available models",
+        "/models",
+        _noop,
+        category="Models",
+    ),
+]
+
+
+class TestCommandPalette:
+    @staticmethod
+    async def _type_in_palette(keys: str) -> str:
+        palette = CommandPalette(PALETTE_COMMANDS)
+        bindings = KeyBindings()
+        palette.add_bindings(bindings)
+        with create_pipe_input() as pipe_input:
+            session: PromptSession[str] = PromptSession(
+                input=pipe_input,
+                output=DummyOutput(),
+                key_bindings=bindings,
+            )
+            palette.attach(session)
+            prompt = asyncio.create_task(session.prompt_async())
+            pipe_input.send_text(keys)
+            return await asyncio.wait_for(prompt, timeout=2)
+
+    def test_slash_alone_opens_and_whitespace_closes(self):
+        assert CommandPaletteModel.query_from_text("/") == ""
+        assert CommandPaletteModel.query_from_text("/prov") == "prov"
+        assert CommandPaletteModel.query_from_text("hello") is None
+        assert CommandPaletteModel.query_from_text("/providers status") is None
+
+    def test_fuzzy_alias_and_domain_term_find_provider_command(self):
+        model = CommandPaletteModel(PALETTE_COMMANDS)
+        for query in ("provider", "prov", "anthropic"):
+            assert model.matches(query)[0].command.name == "providers"
+
+    def test_results_are_grouped_in_palette_order(self):
+        model = CommandPaletteModel(PALETTE_COMMANDS)
+        assert [match.command.category for match in model.matches("")] == [
+            "AI",
+            "Providers",
+            "Models",
+        ]
+
+    def test_arrow_navigation_wraps(self):
+        model = CommandPaletteModel(PALETTE_COMMANDS)
+        model.move("", -1)
+        assert model.selected("").name == "models"
+        model.move("", 1)
+        assert model.selected("").name == "run"
+
+    def test_detail_panel_has_required_sections(self):
+        palette = CommandPalette(PALETTE_COMMANDS)
+        palette._buffer_text = lambda: "/anthropic"  # type: ignore[method-assign]
+        text = "".join(fragment for _, fragment in palette.render_details())
+        for heading in ("DESCRIPTION", "USAGE", "EXAMPLES", "SHORTCUT"):
+            assert heading in text
+        assert "/providers add anthropic" in text
+        assert "/prov" in text
+
+    def test_enter_runs_fuzzy_selected_command(self):
+        result = asyncio.run(self._type_in_palette("/anthropic\r"))
+        assert result == "/providers"
+
+    def test_tab_completes_and_returns_to_argument_input(self):
+        result = asyncio.run(self._type_in_palette("/prov\tstatus\r"))
+        assert result == "/providers status"
 
 
 class TestMarkdownStreamBuffer:

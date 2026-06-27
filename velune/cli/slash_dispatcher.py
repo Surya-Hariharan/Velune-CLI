@@ -28,21 +28,17 @@ _log = logging.getLogger("velune.cli.slash_dispatcher")
 # and the completer share one source of truth. A test asserts every registered
 # command name appears here (no silent "General" fallback for built-ins).
 _BUILTIN_CATEGORIES: dict[str, str] = {
-    # Session
-    "help": "Session",
-    "exit": "Session",
-    "clear": "Session",
-    "new": "Session",
-    "history": "Session",
-    "stats": "Session",
-    "session": "Session",
-    "context": "Session",
-    # Workspace
-    "project": "Workspace",
-    "index": "Workspace",
-    "diff": "Workspace",
-    "undo": "Workspace",
-    "hunk": "Workspace",
+    # AI
+    "run": "AI",
+    "council": "AI",
+    "jobs": "AI",
+    "dashboard": "AI",
+    "optimus": "AI",
+    "godly": "AI",
+    "normal": "AI",
+    "mode": "AI",
+    # Providers
+    "providers": "Providers",
     # Models
     "model": "Models",
     "models": "Models",
@@ -50,38 +46,41 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "delete": "Models",
     "bench": "Models",
     "councilmodel": "Models",
-    # Council
-    "run": "Council",
-    "council": "Council",
-    "jobs": "Council",
-    "dashboard": "Council",
-    # Modes
-    "optimus": "Modes",
-    "godly": "Modes",
-    "normal": "Modes",
-    "mode": "Modes",
+    # Projects
+    "project": "Projects",
+    "index": "Projects",
     # Memory
     "memory": "Memory",
     "graph": "Memory",
-    # Code
-    "lint": "Code",
-    "refactor": "Code",
-    "typify": "Code",
+    "context": "Memory",
+    # Tools
+    "lint": "Tools",
+    "refactor": "Tools",
+    "typify": "Tools",
+    "plugin": "Tools",
+    "hooks": "Tools",
+    # MCP
+    "mcp": "MCP",
     # Git
+    "diff": "Git",
+    "undo": "Git",
+    "hunk": "Git",
     "push": "Git",
     "pr": "Git",
     "issue": "Git",
     "sandbox": "Git",
-    # Extend
-    "mcp": "Extend",
-    "plugin": "Extend",
-    # Providers
-    "providers": "Providers",
+    # Settings
+    "config": "Settings",
+    "approve": "Settings",
     # System
+    "help": "System",
+    "exit": "System",
+    "clear": "System",
+    "new": "System",
+    "history": "System",
+    "stats": "System",
+    "session": "System",
     "doctor": "System",
-    "config": "System",
-    "hooks": "System",
-    "approve": "System",
 }
 
 
@@ -160,6 +159,24 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Add, manage, test, and discover models from cloud AI providers",
             usage="/providers [add|manage|test|discover|refresh|remove|status] [provider-id]",
             handler=repl._cmd_providers,
+            examples=(
+                "/providers",
+                "/providers add anthropic",
+                "/providers status",
+            ),
+            search_terms=(
+                "anthropic",
+                "openai",
+                "google",
+                "gemini",
+                "mistral",
+                "deepseek",
+                "cohere",
+                "nvidia",
+                "huggingface",
+                "ollama",
+            ),
+            shortcut="/prov",
         )
     )
     registry.register(
