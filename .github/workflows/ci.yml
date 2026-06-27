@@ -198,7 +198,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.26"
           # No external Go deps → no go.sum; disable dependency-path cache.
           cache: false
 

@@ -122,6 +122,7 @@ jobs:
           packages-dir: dist/
           # Uses the PYPI_TOKEN repo secret for API token auth.
           password: ${{ secrets.PYPI_TOKEN }}
+          skip-existing: true
 
   release:
     name: Create GitHub Release

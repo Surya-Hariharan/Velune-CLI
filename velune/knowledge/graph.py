@@ -450,18 +450,26 @@ class KnowledgeGraph:
         """Bulk-delete nodes for multiple files in a single transaction."""
         if not file_paths:
             return 0
-        placeholders = ",".join("?" * len(file_paths))
         async with self._write() as conn:
-            cursor = await conn.execute(
-                f"DELETE FROM kg_nodes WHERE file_path IN ({placeholders})",
-                file_paths,
-            )
-            # Also delete the file nodes themselves (their id is "file:<path>")
-            file_nids = [f"file:{p}" for p in file_paths]
-            phs2 = ",".join("?" * len(file_nids))
             await conn.execute(
-                f"DELETE FROM kg_nodes WHERE id IN ({phs2})",
-                file_nids,
+                "CREATE TEMP TABLE IF NOT EXISTS temp_kg_delete_paths (path TEXT PRIMARY KEY)"
+            )
+            await conn.execute("DELETE FROM temp_kg_delete_paths")
+            await conn.executemany(
+                "INSERT OR IGNORE INTO temp_kg_delete_paths(path) VALUES (?)",
+                ((path,) for path in file_paths),
+            )
+            cursor = await conn.execute(
+                """
+                DELETE FROM kg_nodes
+                WHERE file_path IN (SELECT path FROM temp_kg_delete_paths)
+                """
+            )
+            await conn.execute(
+                """
+                DELETE FROM kg_nodes
+                WHERE id IN (SELECT 'file:' || path FROM temp_kg_delete_paths)
+                """
             )
             return cursor.rowcount
 

@@ -47,8 +47,7 @@ fn scan_directory(
     skip_names: Vec<String>,
 ) -> PyResult<Vec<String>> {
     let ext_lower: Vec<String> = extensions.iter().map(|e| e.to_lowercase()).collect();
-    let skip_set: std::collections::HashSet<&str> =
-        skip_names.iter().map(|s| s.as_str()).collect();
+    let skip_set: std::collections::HashSet<&str> = skip_names.iter().map(|s| s.as_str()).collect();
 
     let mut results: Vec<String> = Vec::new();
 
@@ -135,7 +134,10 @@ mod tests {
         let f = NamedTempFile::new().unwrap();
         let got = sha256_file(f.path().to_str().unwrap()).unwrap();
         // SHA-256 of empty string
-        assert_eq!(got, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(
+            got,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 
     #[test]
@@ -170,8 +172,7 @@ mod tests {
         std::fs::write(dir.path().join("main.py"), b"").unwrap();
 
         let root = dir.path().to_str().unwrap();
-        let found =
-            scan_directory(root, vec![".py".into()], vec![".venv".into()]).unwrap();
+        let found = scan_directory(root, vec![".py".into()], vec![".venv".into()]).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].ends_with("main.py"));
     }
