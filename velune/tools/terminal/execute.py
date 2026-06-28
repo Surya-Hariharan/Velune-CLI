@@ -62,10 +62,49 @@ class ExecuteCommand(BaseTool):
         if verdict.mode == ApprovalMode.BLOCK:
             raise PermissionError(f"Command refused — {verdict.reason}: {command!r}")
 
+        # Check instance-level allowed commands cache
+        if not hasattr(self, "_allowed_commands"):
+            self._allowed_commands = set()
+
         if self.approval_mode == ApprovalMode.ASK and verdict.mode != ApprovalMode.SAFE:
-            # Signal to the REPL that this command needs user confirmation.
-            # The REPL catches PermissionError with this prefix and shows a prompt.
-            raise PermissionError(f"__approval_required__:{command}")
+            if command not in self._allowed_commands:
+                try:
+                    from prompt_toolkit.application.current import get_app
+                    app = get_app()
+                    
+                    if app is not None and app.is_running:
+                        def _ask_user() -> str:
+                            print(f"\n\033[1;33mVelune wants to execute:\033[0m")
+                            print(f"  \033[1;36m{command}\033[0m")
+                            if directory:
+                                print(f"  \033[2m(in {directory})\033[0m")
+                            print("\nChoose:")
+                            print("  [1] Allow once")
+                            print("  [2] Always allow for this session")
+                            print("  [3] Skip")
+                            print("  [4] Cancel")
+                            while True:
+                                try:
+                                    choice = input("\033[1mYour choice (1-4): \033[0m").strip()
+                                    if choice in ("1", "2", "3", "4"):
+                                        return choice
+                                except (KeyboardInterrupt, EOFError):
+                                    return "4"
+                                    
+                        choice = await app.run_in_terminal(_ask_user)
+                        
+                        if choice == "1":
+                            pass # allow once
+                        elif choice == "2":
+                            self._allowed_commands.add(command)
+                        elif choice == "3":
+                            return {"exit_code": 0, "stdout": "Skipped by user", "stderr": "", "duration_ms": 0}
+                        else:
+                            raise PermissionError(f"Command cancelled by user: {command!r}")
+                    else:
+                        raise PermissionError(f"__approval_required__:{command}")
+                except ImportError:
+                    raise PermissionError(f"__approval_required__:{command}")
         # -----------------------------------------------------------------
 
         workspace = Path(directory or self._workspace_path or Path.cwd())

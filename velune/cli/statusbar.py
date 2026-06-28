@@ -25,22 +25,22 @@ from prompt_toolkit.formatted_text import FormattedText
 
 from velune.cli import design
 
-_BG = design.SURFACE
+_BG = design.BACKGROUND
 STATUS_BAR_STYLES: dict[str, str] = {
     "bottom-toolbar": f"noinherit bg:{_BG} {design.MUTED}",
     "bottom-toolbar.key": f"bg:{_BG} {design.FAINT}",
-    "bottom-toolbar.model": f"bg:{_BG} {design.ACCENT} bold",
-    "bottom-toolbar.mode": f"bg:{_BG} {design.HIGHLIGHT}",
-    "bottom-toolbar.ok": f"bg:{_BG} {design.OK}",
+    "bottom-toolbar.model": f"bg:{_BG} {design.MUTED}",
+    "bottom-toolbar.mode": f"bg:{_BG} {design.MUTED}",
+    "bottom-toolbar.ok": f"bg:{_BG} {design.MUTED}",
     "bottom-toolbar.warn": f"bg:{_BG} {design.WARN}",
     "bottom-toolbar.danger": f"bg:{_BG} {design.DANGER}",
-    "bottom-toolbar.hint": f"bg:{_BG} {design.HIGHLIGHT} bold",
-    "bottom-toolbar.speed": f"bg:{_BG} {design.ENERGY}",
-    "bottom-toolbar.privacy": f"bg:{_BG} {design.PRIMARY_GREEN}",
-    "bottom-toolbar.project": f"bg:{_BG} {design.INFO}",
+    "bottom-toolbar.hint": f"bg:{_BG} {design.MUTED} italic",
+    "bottom-toolbar.speed": f"bg:{_BG} {design.FAINT}",
+    "bottom-toolbar.privacy": f"bg:{_BG} {design.FAINT}",
+    "bottom-toolbar.project": f"bg:{_BG} {design.FAINT}",
 }
 
-_SEP = ("class:bottom-toolbar.key", "  ·  ")
+_SEP = ("class:bottom-toolbar.key", " │ ")
 
 
 @dataclass
