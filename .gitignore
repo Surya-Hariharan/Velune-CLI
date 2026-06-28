@@ -122,3 +122,11 @@ ext/rust/**/target/
 node_modules/
 package-lock.json
 yarn.lock
+
+# Databases & Local State
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+credentials.json
+master.key

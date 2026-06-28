@@ -213,27 +213,16 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                     from velune.cli.onboarding import (
                         onboarding_state,
                         run_onboarding,
-                        show_returning_summary,
                     )
 
                     state = onboarding_state()
 
                     if state == "returning":
-                        from velune.cli.model_prefs import load_active_model
-                        from velune.providers.keystore import list_configured_providers
-
-                        configured = list_configured_providers()
-                        model_pref = load_active_model()
-                        show_returning_summary(runtime.console, configured, model_pref)
                         # Advisory repo detection for returning users — hint only (Rule 12).
                         repo_name = _detect_repo_marker(workspace)
                         if repo_name:
-                            runtime.console.print(
-                                Text.from_markup(
-                                    f"[{design.FAINT}]→  Detected project"
-                                    f" [{design.MUTED}]{repo_name}[/{design.MUTED}]"
-                                    f" · run /project open . then /index[/{design.FAINT}]"
-                                )
+                            logging.getLogger("velune").debug(
+                                "Detected project marker before REPL launch: %s", repo_name
                             )
                     elif state == "partial":
                         # Providers configured but no model selected — jump to model discovery.

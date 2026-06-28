@@ -45,7 +45,9 @@ WARN = "#ffb86b"  # warm peach — warning (kept distinct for legibility)
 DANGER = "#ff4d6d"  # hot red-pink — danger
 
 # Neutrals.
+BACKGROUND = "#0b0b0b"  # fullscreen REPL background
 WHITE = "#ffffff"  # primary body text
+SECONDARY = "#bbbbbb"  # neutral secondary text
 MUTED = "#d9a8c0"  # secondary text (soft mauve-pink)
 FAINT = "#9a6f82"  # frame glyphs, separators (dim mauve)
 SURFACE = "#1a0d14"  # very dark plum background

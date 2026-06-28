@@ -59,6 +59,11 @@ class StreamRenderer:
         self._console = console
         self._interrupts = interrupts
         self._status_state = status_state
+        self._fullscreen_ui: Any | None = None
+
+    def attach_fullscreen_ui(self, ui: Any | None) -> None:
+        """Route streaming updates into the fullscreen transcript when active."""
+        self._fullscreen_ui = ui
 
     async def render(self, provider: Any, request: Any) -> RenderResult:
         """Run the provider call and render its output.
@@ -84,7 +89,37 @@ class StreamRenderer:
                 capabilities = provider.get_capabilities()
                 supports_stream = getattr(capabilities, "supports_streaming", False)
 
-                if supports_stream:
+                if self._fullscreen_ui is not None:
+                    t0 = time.perf_counter()
+                    first_token_at: float | None = None
+                    self._fullscreen_ui.begin_assistant("Thinking...")
+
+                    if supports_stream:
+                        async for chunk in provider.stream(request):
+                            if chunk.content:
+                                if first_token_at is None:
+                                    first_token_at = time.perf_counter()
+                                result.full_content.append(chunk.content)
+                                self._fullscreen_ui.update_assistant(result.text)
+                        self._fullscreen_ui.update_assistant(result.text, final=True)
+                    else:
+                        response = await provider.infer(request)
+                        result.full_content.append(response.content)
+                        result.tokens_used = response.tokens_used
+                        if first_token_at is None:
+                            first_token_at = time.perf_counter()
+                        self._fullscreen_ui.update_assistant(response.content, final=True)
+
+                    self._fullscreen_ui.finish_assistant()
+                    elapsed = max(time.perf_counter() - t0, 0.001)
+                    if first_token_at is not None:
+                        self._status_state.last_latency_ms = (first_token_at - t0) * 1000.0
+                    text_len = len(result.text)
+                    self._status_state.last_tokens_per_sec = (
+                        (text_len / 4) / elapsed if supports_stream and text_len else None
+                    )
+
+                elif supports_stream:
                     from rich.text import Text as _Text
 
                     stream_buffer = MarkdownStreamBuffer()

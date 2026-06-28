@@ -48,7 +48,11 @@ async def cmd_exit(repl: VeluneREPL, args: str) -> None:
 async def cmd_clear(repl: VeluneREPL, args: str) -> None:
     from velune.cli.ui_components import print_notification
 
-    print("\033c", end="", flush=True)
+    ui = getattr(repl, "_fullscreen_ui", None)
+    if ui is not None:
+        ui.clear()
+    else:
+        print("\033c", end="", flush=True)
     print_notification(
         repl.console, "Screen cleared — conversation context preserved.", type="success"
     )

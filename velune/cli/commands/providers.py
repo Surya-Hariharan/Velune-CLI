@@ -10,6 +10,7 @@ from velune.cli import design
 from velune.providers.keystore import (
     delete_key,
     get_key,
+    get_provider_status,
     has_key,
     is_ollama_live,
     save_key,
@@ -483,6 +484,50 @@ def provider_status(
         table.add_row(pid, status_str, model_count, msg)
 
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# velune provider api
+# ---------------------------------------------------------------------------
+
+@provider_cmd.command("api")
+def api_status(
+    provider_id: str = typer.Argument(
+        "", help="Provider name, or leave empty for all configured providers"
+    ),
+) -> None:
+    """Show detailed internal diagnostic status for provider API keys."""
+    if provider_id:
+        pids = [provider_id.lower().strip()]
+    else:
+        pids = [pid for pid, meta in _PROVIDER_META.items() if not meta.get("local")]
+
+    for pid in sorted(pids):
+        info = get_provider_status(pid)
+        key = get_key(pid) or ""
+
+        console.print(f"\n[bold {design.ACCENT}]{pid.capitalize()}[/bold {design.ACCENT}]")
+
+        # Stored check
+        if info["stored"]:
+            console.print(f"[{design.OK}]✓ Stored[/{design.OK}] [{design.MUTED}]({info['location']})[/{design.MUTED}]")
+        else:
+            console.print(f"[{design.WARN}]✗ Not stored[/{design.WARN}]")
+            continue
+
+        # Validation Check (Live)
+        with console.status(f"  [{design.MUTED}]Validating...[/{design.MUTED}]"):
+            result = validate_provider_sync(pid, key)
+
+        if result.ok:
+            console.print(f"[{design.OK}]✓ Valid[/{design.OK}]")
+            console.print(f"[{design.OK}]✓ Reachable[/{design.OK}]")
+            console.print(f"[{design.OK}]✓ Loaded[/{design.OK}]")
+        else:
+            if result.status == ValidationStatus.NETWORK_ERROR:
+                console.print(f"[{design.WARN}]⚠ Offline validation unavailable[/{design.WARN}]")
+            else:
+                console.print(f"[{design.DANGER}]✗ Invalid[/{design.DANGER}] [{design.MUTED}]({result.message})[/{design.MUTED}]")
 
 
 # ---------------------------------------------------------------------------

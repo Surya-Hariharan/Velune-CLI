@@ -48,6 +48,14 @@ class ModelProvider(Protocol):
         """Perform provider connection setup and warmups."""
         ...
 
+    async def authenticate(self) -> None:
+        """Verify API keys or tokens with the provider."""
+        ...
+
+    async def reconnect(self) -> None:
+        """Attempt to re-establish a dropped connection."""
+        ...
+
     async def shutdown(self) -> None:
         """Gracefully release provider connection resource pools."""
         ...

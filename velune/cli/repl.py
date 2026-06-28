@@ -120,6 +120,7 @@ class VeluneREPL:
         except Exception:
             self._alert_store = None
         self._prev_ctx_pct: float = 0.0
+        self._fullscreen_ui = None
 
     # ------------------------------------------------------------------
     # Workspace trust
@@ -265,13 +266,109 @@ class VeluneREPL:
         palette.attach(session)
         return session
 
+    def _build_fullscreen_ui(self):
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
+
+        from velune.cli import design
+        from velune.cli.autocomplete import CommandEntry, SlashCompleter
+        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette
+        from velune.cli.fullscreen import FullscreenREPLUI
+        from velune.cli.statusbar import STATUS_BAR_STYLES
+        from velune.cli.validators import InlineSyntaxValidator
+
+        style_fragments = {
+            "prompt.frame": design.FAINT,
+            "prompt.prefix": f"{design.ACCENT} bold",
+            "prompt.branch": design.MUTED,
+            "prompt.model": design.FAINT,
+            "prompt.mode": design.HIGHLIGHT,
+            "prompt.arrow": f"{design.ACCENT_SOFT} bold",
+            "ctx.ok": f"{design.OK} bold",
+            "ctx.warn": f"{design.WARN} bold",
+            "ctx.danger": f"{design.DANGER} bold",
+            "mode.godly": f"{design.ENERGY} bold",
+            "mode.optimus": f"{design.WARN} bold",
+            **STATUS_BAR_STYLES,
+            **PALETTE_STYLES,
+        }
+
+        try:
+            models = self.container.get("runtime.model_registry").list_all()
+            model_ids = [m.model_id for m in models]
+        except Exception:
+            model_ids = []
+
+        entries = [
+            CommandEntry(
+                name=cmd.name,
+                description=cmd.description,
+                category=cmd.category,
+                aliases=tuple(cmd.aliases),
+            )
+            for cmd in self._registry.all_unique()
+            if not cmd.hidden
+        ]
+        completer = SlashCompleter(
+            commands=entries,
+            model_ids=model_ids,
+            show_command_completions=False,
+        )
+        self._completer = completer
+
+        palette = CommandPalette(self._registry.all_unique())
+        self._command_palette = palette
+
+        kb = KeyBindings()
+        palette.add_bindings(kb)
+
+        def _interrupt(event):
+            if self._interrupts.note_interrupt():
+                return True
+            event.app.invalidate()
+            return False
+
+        return FullscreenREPLUI(
+            status_state=self._status_state,
+            history=FileHistory(str(self._history_file)),
+            completer=completer,
+            validator=InlineSyntaxValidator(),
+            style_fragments=style_fragments,
+            key_bindings=kb,
+            on_interrupt=_interrupt,
+            on_status_render=self._refresh_status_state,
+        )
+
     def _render_toolbar(self):
         from velune.cli.statusbar import render_status_bar
 
+        self._refresh_status_state()
+        return render_status_bar(self._status_state)
+
+    def _refresh_status_state(self) -> None:
+        workspace_path = self.container.get("runtime.workspace")
+        folder_name = Path(workspace_path).name if workspace_path else "velune"
+
+        if self.active_model:
+            self._context_tracker.max_tokens = self.active_model.context_length
+            self._context_tracker.update(self._conversation)
+
         self._status_state.exit_hint = self._interrupts.exit_hint_active
+        self._status_state.model_id = self.active_model.model_id if self.active_model else None
+        self._status_state.mode_label = self._mode_manager.current.value.upper()
+        self._status_state.context_pct = (
+            self._context_tracker.percentage if self.active_model else 0.0
+        )
+        if self.active_model:
+            self._status_state.context_used = self._context_tracker.used_tokens
+            self._status_state.context_max = self._context_tracker.max_tokens
+        else:
+            self._status_state.context_used = None
+            self._status_state.context_max = None
+        self._status_state.session_cost = self.session_cost
+        self._status_state.workspace_name = folder_name
         if self._job_registry is not None:
             self._status_state.bg_job_count = self._job_registry.active_count()
-        return render_status_bar(self._status_state)
 
     def _get_prompt_tokens(self) -> FormattedText:
         from velune.cli import design
@@ -331,19 +428,7 @@ class VeluneREPL:
         tokens.append(("class:prompt.frame", "\n╰"))
         tokens.append(("class:prompt.arrow", "❯ "))
 
-        self._status_state.model_id = self.active_model.model_id if self.active_model else None
-        self._status_state.mode_label = self._mode_manager.current.value.upper()
-        self._status_state.context_pct = (
-            self._context_tracker.percentage if self.active_model else 0.0
-        )
-        if self.active_model:
-            self._status_state.context_used = self._context_tracker.used_tokens
-            self._status_state.context_max = self._context_tracker.max_tokens
-        else:
-            self._status_state.context_used = None
-            self._status_state.context_max = None
-        self._status_state.session_cost = self.session_cost
-        self._status_state.workspace_name = folder_name
+        self._refresh_status_state()
 
         pct = self._status_state.context_pct
         prev_pct = self._prev_ctx_pct
@@ -376,9 +461,16 @@ class VeluneREPL:
         from velune.cli.handlers.model import restore_active_model
         from velune.cli.handlers.plugins import register_plugin_commands
 
-        session = self._build_prompt_session()
+        ui = self._build_fullscreen_ui()
+        self._fullscreen_ui = ui
+        self.console = ui.console
+        self.runtime.console = ui.console
+        self.container.register_instance("runtime.console", ui.console)
+        self._stream_renderer.attach_fullscreen_ui(ui)
+        ui_task = asyncio.create_task(ui.run(), name="velune.fullscreen_ui")
+        ui_task.add_done_callback(lambda _task: ui.request_exit())
+
         restore_active_model(self)
-        await asyncio.to_thread(self._print_startup_banner)
         await self._start_episodic_session()
 
         model_id = self.active_model.model_id if self.active_model else ""
@@ -387,32 +479,23 @@ class VeluneREPL:
             model_id=model_id,
         )
         if _hook_start.system_message:
-            self.console.print(f"[dim]{_hook_start.system_message}[/dim]")
+            _log.debug("Session start hook message: %s", _hook_start.system_message)
 
         try:
             trusted = self._ensure_workspace_trust()
             self._mcp_registry.load_config(trusted=trusted)
             if self._mcp_registry._entries:
                 server_count = len(self._mcp_registry._entries)
-                self.console.print(f"[dim]Connecting {server_count} MCP server(s)...[/dim]")
                 results = await self._mcp_registry.connect_all()
                 ok = sum(1 for v in results.values() if v)
                 if ok:
-                    self.console.print(
-                        f"[dim]MCP: {ok}/{server_count} server(s) connected. "
-                        "Use [bold]/mcp[/bold] to inspect.[/dim]"
-                    )
+                    _log.debug("MCP: %s/%s server(s) connected", ok, server_count)
         except Exception as exc:
             _log.debug("MCP auto-connect error (non-fatal): %s", exc)
 
         try:
             new_plugins = self._plugin_manager.load()
             if new_plugins:
-                self.console.print(
-                    f"[dim]Loaded {len(new_plugins)} plugin(s): "
-                    + ", ".join(f"[bold]{p.name}[/bold]" for p in new_plugins)
-                    + ". Use [bold]/plugin[/bold] to inspect.[/dim]"
-                )
                 register_plugin_commands(self, new_plugins)
                 self._plugin_manager.wire_hooks(self._hook_dispatcher)
                 self._plugin_manager.wire_mcp(self._mcp_registry)
@@ -428,7 +511,7 @@ class VeluneREPL:
         try:
             while not self._exit_requested:
                 try:
-                    raw = await session.prompt_async(self._get_prompt_tokens)
+                    raw = await ui.read_input()
                     from velune.cli.handlers.council import poll_and_render_alerts
 
                     poll_and_render_alerts(self)
@@ -471,7 +554,14 @@ class VeluneREPL:
                         self.console.print(render_unexpected_error(e))
         finally:
             self._interrupts.uninstall()
-            await self._shutdown_repl()
+            try:
+                await self._shutdown_repl()
+            finally:
+                ui.stop()
+                try:
+                    await ui_task
+                except Exception:
+                    pass
 
     def _print_interrupted_frame(self) -> None:
         self.console.print("[dim]╭─[/dim] [yellow]Generation interrupted[/yellow]")

@@ -53,61 +53,65 @@ class NVIDIAProvider(ModelProvider):
                 timeout=300.0,
             )
 
+    async def authenticate(self) -> None:
+        """Verify the API key by pinging the models endpoint."""
+        await self.initialize()
+        assert self.client is not None
+        try:
+            resp = await self.client.get("/models", timeout=10.0)
+            if resp.status_code == 401:
+                raise ProviderAuthenticationError("NVIDIA API key is invalid or expired.")
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ProviderAuthenticationError("NVIDIA API key is invalid or expired.")
+            raise InferenceError(f"Authentication failed: {e}")
+        except httpx.HTTPError as e:
+            raise InferenceError(f"Connection failed during authentication: {e}")
+
+    async def reconnect(self) -> None:
+        """Attempt to re-establish connection."""
+        await self.shutdown()
+        await self.initialize()
+        await self.authenticate()
+
     async def list_models(self) -> list[ModelDescriptor]:
         await self.initialize()
-        return [
-            ModelDescriptor(
-                model_id="meta/llama-3.3-70b-instruct",
-                display_name="Llama 3.3 70B Instruct (NIM)",
-                provider_id="nvidia",
-                context_length=128000,
-                capabilities={
-                    "coding": CapabilityLevel.ADVANCED,
-                    "reasoning": CapabilityLevel.ADVANCED,
-                    "planning": CapabilityLevel.ADVANCED,
-                    "summarization": CapabilityLevel.ADVANCED,
-                    "instruction_following": CapabilityLevel.EXPERT,
-                    "tool_use": CapabilityLevel.ADVANCED,
-                    "long_context": CapabilityLevel.ADVANCED,
-                },
-                is_local=False,
-                cost_per_1k_tokens=0.00027,
-            ),
-            ModelDescriptor(
-                model_id="mistralai/mistral-large-2-instruct",
-                display_name="Mistral Large 2 (NIM)",
-                provider_id="nvidia",
-                context_length=128000,
-                capabilities={
-                    "coding": CapabilityLevel.EXPERT,
-                    "reasoning": CapabilityLevel.EXPERT,
-                    "planning": CapabilityLevel.ADVANCED,
-                    "summarization": CapabilityLevel.ADVANCED,
-                    "instruction_following": CapabilityLevel.EXPERT,
-                    "tool_use": CapabilityLevel.EXPERT,
-                    "long_context": CapabilityLevel.ADVANCED,
-                },
-                is_local=False,
-                cost_per_1k_tokens=0.002,
-            ),
-            ModelDescriptor(
-                model_id="nvidia/llama-3.1-nemotron-70b-instruct",
-                display_name="Nemotron 70B Instruct",
-                provider_id="nvidia",
-                context_length=128000,
-                capabilities={
-                    "coding": CapabilityLevel.EXPERT,
-                    "reasoning": CapabilityLevel.EXPERT,
-                    "planning": CapabilityLevel.ADVANCED,
-                    "summarization": CapabilityLevel.ADVANCED,
-                    "instruction_following": CapabilityLevel.EXPERT,
-                    "tool_use": CapabilityLevel.ADVANCED,
-                    "long_context": CapabilityLevel.ADVANCED,
-                },
-                is_local=False,
-                cost_per_1k_tokens=0.00035,
-            ),
-        ]
+        assert self.client is not None
+        try:
+            resp = await self.client.get("/models")
+            if resp.status_code == 401:
+                raise ProviderAuthenticationError("NVIDIA API key is invalid or expired.")
+            resp.raise_for_status()
+            data = resp.json()
+            
+            models = []
+            for item in data.get("data", []):
+                model_id = item.get("id")
+                if not model_id:
+                    continue
+                # Give a basic description; NVIDIA API models differ wildly in capabilities.
+                models.append(
+                    ModelDescriptor(
+                        model_id=model_id,
+                        display_name=model_id.split("/")[-1].replace("-", " ").title(),
+                        provider_id="nvidia",
+                        context_length=128000,
+                        capabilities={
+                            "coding": CapabilityLevel.ADVANCED,
+                            "reasoning": CapabilityLevel.ADVANCED,
+                            "instruction_following": CapabilityLevel.ADVANCED,
+                        },
+                        is_local=False,
+                    )
+                )
+            return models
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ProviderAuthenticationError("NVIDIA API key is invalid or expired.")
+            raise InferenceError(f"Failed to fetch models from NVIDIA NIM: {e}")
+        except httpx.HTTPError as e:
+            raise InferenceError(f"Connection error while fetching NVIDIA models: {e}")
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         await self.initialize()
@@ -140,9 +144,9 @@ class NVIDIAProvider(ModelProvider):
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
                 raise ProviderAuthenticationError("NVIDIA API key is invalid or expired.")
-            raise InferenceError(f"NVIDIA NIM completion failed: {e}")
+            raise InferenceError(f"NVIDIA NIM completion failed: HTTP {e.response.status_code}")
         except httpx.HTTPError as e:
-            raise InferenceError(f"NVIDIA NIM completion failed: {e}")
+            raise InferenceError(f"NVIDIA NIM completion connection error: {e}")
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         await self.initialize()

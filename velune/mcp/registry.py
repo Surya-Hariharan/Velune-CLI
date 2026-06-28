@@ -165,13 +165,13 @@ class MCPServerRegistry:
         entry.error = ""
         conn = make_connection(entry.config, allowed_hosts=self._allowed_hosts)
         try:
-            await conn.connect()
+            await asyncio.wait_for(conn.connect(), timeout=15.0)
             entry.connection = conn
             entry.state = ServerState.CONNECTED
             # Discover tools and resources
-            entry.tools = await conn.list_tools()
+            entry.tools = await asyncio.wait_for(conn.list_tools(), timeout=10.0)
             try:
-                entry.resources = await conn.list_resources()
+                entry.resources = await asyncio.wait_for(conn.list_resources(), timeout=10.0)
             except Exception:
                 entry.resources = []
             self._rebuild_tool_index()
@@ -274,7 +274,19 @@ class MCPServerRegistry:
 
         # Unqualify the tool name before passing to the server
         raw_name = _strip_server_prefix(qualified_name, server_name)
-        return await entry.connection.call_tool(raw_name, arguments)
+        try:
+            return await asyncio.wait_for(
+                entry.connection.call_tool(raw_name, arguments), timeout=60.0
+            )
+        except asyncio.TimeoutError:
+            entry.state = ServerState.ERROR
+            entry.error = "Tool execution timed out."
+            raise MCPTransportError(f"MCP tool '{qualified_name}' on '{server_name}' timed out after 60 seconds.")
+        except Exception as exc:
+            # Reconnect might be needed
+            entry.state = ServerState.ERROR
+            entry.error = str(exc)
+            raise MCPTransportError(f"MCP tool '{qualified_name}' execution failed: {exc}")
 
     async def read_resource(self, uri: str) -> str:
         """Read a resource from whichever connected server exposes it."""

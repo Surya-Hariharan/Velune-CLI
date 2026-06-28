@@ -16,6 +16,8 @@ class ProviderHealth(StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNAVAILABLE = "unavailable"
+    OFFLINE = "offline"
+    UNAUTHORIZED = "unauthorized"
     UNKNOWN = "unknown"
 
 

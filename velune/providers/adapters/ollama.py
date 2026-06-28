@@ -52,6 +52,15 @@ class OllamaProvider(ModelProvider):
         if not self.client:
             self.client = httpx.AsyncClient(base_url=self._base_url, timeout=300.0)
 
+    async def authenticate(self) -> None:
+        """Ollama is local and unauthenticated."""
+        pass
+
+    async def reconnect(self) -> None:
+        """Attempt to re-establish connection."""
+        await self.shutdown()
+        await self.initialize()
+
     async def _get_model_context_length(self, model_name: str) -> int:
         """Query /api/show for the model's actual context window size.
 
@@ -224,7 +233,7 @@ class OllamaProvider(ModelProvider):
             raise InferenceError(f"Ollama embedding failed: {e}")
 
     async def health_check(self) -> ProviderHealth:
-        """Pings Ollama core endpoint."""
+        """Pings Ollama core endpoint and checks process if unreachable."""
         await self.initialize()
         assert self.client is not None
         try:
@@ -233,6 +242,16 @@ class OllamaProvider(ModelProvider):
                 return ProviderHealth.HEALTHY
             return ProviderHealth.DEGRADED
         except Exception:
+            # Fallback to checking if the process is running locally
+            if "localhost" in self._base_url or "127.0.0.1" in self._base_url:
+                import psutil
+                try:
+                    for proc in psutil.process_iter(['name']):
+                        if proc.info['name'] and 'ollama' in proc.info['name'].lower():
+                            logger.error("Ollama service is stopped. Please run `ollama serve`.")
+                            return ProviderHealth.OFFLINE
+                except Exception:
+                    pass
             return ProviderHealth.UNAVAILABLE
 
     def get_capabilities(self) -> ProviderCapabilities:

@@ -1,30 +1,26 @@
-"""BYOK key storage backed by the OS keyring with env-var fallback.
+"""Authoritative API key storage layer.
 
-Performance notes
------------------
-On Windows the OS keyring is the Windows Credential Manager (DPAPI). A single
-``keyring.get_password`` call can block for *seconds* the first time it is hit
-after a cold boot or screen unlock, and Velune historically issued one such
-call per provider (9+) sequentially during startup — tens of seconds of pure
-blocking. This module now:
-
-* imports ``keyring`` lazily (env-only users never pay the import cost);
-* checks the free, instant environment variables before ever touching the
-  keyring;
-* parallelizes the remaining keyring probes across a thread pool.
-
-We deliberately do *not* cache resolved keys process-wide: a stale cache would
-mask a key the user just saved (or deleted) mid-session, and correctness here
-matters more than shaving a second off repeated lookups.
+Provides a unified, cross-platform, encrypted credential manager backed by a
+single JSON configuration file. Supports atomic file writes to prevent corruption
+and merges updates rather than overwriting unrelated providers.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+from threading import Lock
+from typing import Any
 
-_SERVICE = "velune/{}"
-_USERNAME = "api_key"
+from platformdirs import user_config_dir
+
+from velune.providers.crypto import decrypt_credentials, encrypt_credentials
+
+logger = logging.getLogger("velune.providers.keystore")
 
 PROVIDER_ENV_VARS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -42,51 +38,159 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "nvidia": "NVIDIA_API_KEY",
 }
 
-_ENV_VARS = PROVIDER_ENV_VARS
+
+class CredentialManager:
+    """Manages the encrypted credentials.json file."""
+
+    _instance = None
+    _lock = Lock()
+
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(CredentialManager, cls).__new__(cls)
+                cls._instance._init()
+            return cls._instance
+
+    def _init(self) -> None:
+        self._config_dir = Path(user_config_dir("Velune"))
+        self._credentials_file = self._config_dir / "credentials.json"
+        self._cache: dict[str, dict[str, Any]] | None = None
+        self._cache_lock = Lock()
+
+    def _load_disk(self, retry: bool = True) -> dict[str, dict[str, Any]]:
+        """Load and decrypt the configuration from disk."""
+        if not self._credentials_file.exists():
+            return {}
+
+        try:
+            encrypted_data = self._credentials_file.read_bytes()
+            if not encrypted_data:
+                return {}
+            json_str = decrypt_credentials(encrypted_data)
+            data = json.loads(json_str)
+            return data.get("providers", {})
+        except Exception as e:
+            logger.error("Failed to load credentials from disk: %s", e)
+            if retry and self._attempt_backup_restore():
+                return self._load_disk(retry=False)
+            return {}
+
+    def _attempt_backup_restore(self) -> bool:
+        """Attempt to recover from a backup file if primary is corrupted."""
+        backup = self._credentials_file.with_name("credentials.json.bak")
+        if backup.exists():
+            try:
+                shutil.copy2(backup, self._credentials_file)
+                logger.info("Restored credentials from backup.")
+                return True
+            except Exception as e:
+                logger.error("Failed to restore backup: %s", e)
+        return False
+
+    def _save_disk(self, providers: dict[str, dict[str, Any]]) -> None:
+        """Encrypt and atomically save the configuration to disk."""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Read the most recent disk state to merge updates instead of overwriting
+        disk_data = self._load_disk()
+        disk_data.update(providers)
+
+        data_wrapper = {"providers": disk_data}
+        json_str = json.dumps(data_wrapper, indent=2)
+        encrypted_data = encrypt_credentials(json_str)
+
+        # Atomic write sequence: Temp file -> fsync -> rename
+        temp_file = self._credentials_file.with_suffix(".tmp")
+        try:
+            temp_file.write_bytes(encrypted_data)
+
+            # Flush and sync to disk
+            with open(temp_file, "r+b") as f:
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Create backup of known good state
+            if self._credentials_file.exists():
+                backup_file = self._credentials_file.with_name("credentials.json.bak")
+                shutil.copy2(self._credentials_file, backup_file)
+
+            # Atomic replace
+            temp_file.replace(self._credentials_file)
+
+            # Secure file permissions (Linux/macOS)
+            if os.name != 'nt':
+                self._credentials_file.chmod(0o600)
+        finally:
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
+
+    def get_provider(self, provider_id: str) -> dict[str, Any] | None:
+        """Get the full record for a provider."""
+        with self._cache_lock:
+            if self._cache is None:
+                self._cache = self._load_disk()
+            return self._cache.get(provider_id)
+
+    def save_provider(self, provider_id: str, key: str, status: str = "valid") -> None:
+        """Save a provider's key and metadata."""
+        with self._cache_lock:
+            if self._cache is None:
+                self._cache = self._load_disk()
+
+            self._cache[provider_id] = {
+                "key": key,
+                "status": status,
+                "last_verified": datetime.now(timezone.utc).isoformat(),
+            }
+            self._save_disk(self._cache)
+
+    def delete_provider(self, provider_id: str) -> None:
+        """Delete a provider from the configuration."""
+        with self._cache_lock:
+            if self._cache is None:
+                self._cache = self._load_disk()
+
+            if provider_id in self._cache:
+                del self._cache[provider_id]
+                self._save_disk(self._cache)
+
+    def get_all_providers(self) -> dict[str, dict[str, Any]]:
+        """Get a copy of all loaded providers."""
+        with self._cache_lock:
+            if self._cache is None:
+                self._cache = self._load_disk()
+            return dict(self._cache)
 
 
-def _keyring_get(provider_id: str) -> str | None:
-    """Raw, uncached OS-keyring lookup. Lazily imports keyring."""
-    try:
-        import keyring
-
-        return keyring.get_password(_SERVICE.format(provider_id), _USERNAME)
-    except Exception:
-        return None
-
-
-def _resolve_uncached(provider_id: str) -> str | None:
-    """Resolve a key without consulting the cache (keyring then env)."""
-    key = _keyring_get(provider_id)
-    if key:
-        return key
-    env_var = _ENV_VARS.get(provider_id)
-    if env_var:
-        return os.getenv(env_var) or None
-    return None
+_manager = CredentialManager()
 
 
 def save_key(provider_id: str, api_key: str) -> None:
-    """Persist *api_key* for *provider_id* in the OS keyring."""
-    import keyring
-
-    keyring.set_password(_SERVICE.format(provider_id), _USERNAME, api_key)
+    """Persist *api_key* for *provider_id*."""
+    _manager.save_provider(provider_id, api_key)
 
 
 def get_key(provider_id: str) -> str | None:
-    """Return the API key for *provider_id* (OS keyring first, then env var)."""
-    return _resolve_uncached(provider_id)
+    """Return the API key for *provider_id* (Environment var first, then config)."""
+    env_var = PROVIDER_ENV_VARS.get(provider_id)
+    if env_var:
+        val = os.getenv(env_var)
+        if val:
+            return val
+
+    record = _manager.get_provider(provider_id)
+    if record and "key" in record:
+        return record["key"]
+    return None
 
 
 def delete_key(provider_id: str) -> None:
-    """Remove the stored key for *provider_id* from the OS keyring."""
-    import keyring
-    import keyring.errors
-
-    try:
-        keyring.delete_password(_SERVICE.format(provider_id), _USERNAME)
-    except keyring.errors.PasswordDeleteError:
-        pass
+    """Remove the stored key for *provider_id*."""
+    _manager.delete_provider(provider_id)
 
 
 def has_key(provider_id: str) -> bool:
@@ -95,18 +199,7 @@ def has_key(provider_id: str) -> bool:
 
 
 def is_ollama_live(timeout: float = 0.25) -> bool:
-    """Return True if a local Ollama server is reachable.
-
-    Uses a raw TCP connect to ``127.0.0.1:11434`` rather than an HTTP GET:
-
-    * It avoids importing ``httpx`` on the hot startup path.
-    * It targets ``127.0.0.1`` explicitly. Resolving ``localhost`` makes the
-      client try IPv6 (``::1``) first, and when nothing is listening that
-      attempt burns the *full* timeout before falling back to IPv4 — doubling
-      the cost for the common "Ollama not running" case.
-    * A closed port refuses the connection immediately, so when Ollama is down
-      this returns in microseconds instead of blocking for seconds.
-    """
+    """Return True if a local Ollama server is reachable."""
     import socket
 
     try:
@@ -117,37 +210,55 @@ def is_ollama_live(timeout: float = 0.25) -> bool:
 
 
 def list_configured_providers(include_ollama: bool = True) -> list[str]:
-    """Return provider IDs that have a usable key, resolved in parallel.
-
-    Environment variables are checked first (free, instant). Only providers
-    not already satisfied by an env var incur a (parallelized, cached) keyring
-    probe. Ollama is local and keyless — it counts as configured when its
-    server is reachable.
+    """Return provider IDs that have a usable key.
+    
+    Environment variables are checked first, followed by the local JSON configuration.
     """
     configured: set[str] = set()
-    needs_keyring: list[str] = []
 
-    for pid, env_var in _ENV_VARS.items():
+    for pid, env_var in PROVIDER_ENV_VARS.items():
         if os.getenv(env_var):
             configured.add(pid)
-        else:
-            needs_keyring.append(pid)
 
-    if needs_keyring:
-        with ThreadPoolExecutor(max_workers=min(8, len(needs_keyring))) as pool:
-            futures = {pool.submit(_keyring_get, pid): pid for pid in needs_keyring}
-            for fut in as_completed(futures):
-                pid = futures[fut]
-                try:
-                    key = fut.result()
-                except Exception:
-                    key = None
-                if key:
-                    configured.add(pid)
+    disk_providers = _manager.get_all_providers()
+    for pid in disk_providers:
+        configured.add(pid)
 
-    # Preserve a stable, declaration-order result.
-    ordered = [pid for pid in _ENV_VARS if pid in configured]
+    ordered = [pid for pid in PROVIDER_ENV_VARS if pid in configured]
 
     if include_ollama and is_ollama_live():
         ordered.insert(0, "ollama")
     return ordered
+
+
+def get_provider_status(provider_id: str) -> dict[str, Any]:
+    """Diagnostic helper for returning a provider's state and configuration info."""
+    record = _manager.get_provider(provider_id)
+    env_var = PROVIDER_ENV_VARS.get(provider_id)
+    is_env = bool(env_var and os.getenv(env_var))
+
+    if is_env:
+        return {
+            "stored": True,
+            "source": "environment",
+            "status": "valid",
+            "last_verified": "dynamic",
+            "location": f"${env_var}"
+        }
+
+    if record:
+        return {
+            "stored": True,
+            "source": "config",
+            "status": record.get("status", "unknown"),
+            "last_verified": record.get("last_verified", "unknown"),
+            "location": str(_manager._credentials_file)
+        }
+
+    return {
+        "stored": False,
+        "source": "none",
+        "status": "missing",
+        "last_verified": "n/a",
+        "location": "n/a"
+    }
