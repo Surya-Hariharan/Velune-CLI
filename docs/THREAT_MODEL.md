@@ -52,35 +52,37 @@ you have allowed to run," not as a hard isolation boundary. See [B1](#b1--subpro
 
 ## Trust boundary diagram
 
-```
-                            ┌─────────────────────────────┐
-        UNTRUSTED  ───────► │   LLM output / model tokens │
-   (prompt injection,       └──────────────┬──────────────┘
-    poisoned repo files)                   │  proposed commands / edits / tool calls
-                                           ▼
-   ┌───────────────────────────────────────────────────────────────────────────┐
-   │                        VELUNE TRUST BOUNDARY                                │
-   │                                                                             │
-   │  command string ─► CommandSpec.from_string (shlex, reject shell operators)  │
-   │                  ─► allowlist + PATH-hijack guard + pinned abs path         │
-   │                  ─► SubprocessSandbox (shell=False, env-scrub, rlimits,     │
-   │                                        process-tree kill)         ──────────┼──► child process
-   │                                                                             │
-   │  file path ──────► PathGuard.validate (canonical, symlink-resolved,         │
-   │                                         within workspace) ─► DiffPreview ───┼──► disk (after approval)
-   │                                                                             │
-   │  web URL ────────► validate_url (SSRF: private/link-local/metadata,         │
-   │                                  DNS-rebind, numeric forms) ────────────────┼──► network (allowed only)
-   │                                                                             │
-   │  MCP server URL ─► validate_mcp_url (metadata/link-local block,             │
-   │                                      optional host allowlist) ──────────────┼──► MCP server (SSE)
-   │                                                                             │
-   │  secrets ────────► OS keyring (no process-wide cache)                       │
-   │                  ─► SecretRedactingFilter on all log output                 │
-   │                                                                             │
-   │  per-project state ─► workspace_storage_dir = <app-data>/workspaces/        │
-   │                       <name>-<sha1(abs path)>  (disjoint per project)       │
-   └───────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph UNTRUSTED [UNTRUSTED]
+        LLM["<b>LLM output / model tokens</b><br/>prompt injection, poisoned repo files"]
+    end
+    
+    LLM -->|proposed commands / edits / tool calls| TB
+    
+    subgraph TB [VELUNE TRUST BOUNDARY]
+        CMD["<b>command string</b><br/>CommandSpec.from_string (shlex, no shell ops)<br/>allowlist + PATH guard<br/>SubprocessSandbox"]
+        FILE["<b>file path</b><br/>PathGuard.validate<br/>DiffPreview"]
+        WEB["<b>web URL</b><br/>validate_url (SSRF checks)"]
+        MCP["<b>MCP server URL</b><br/>validate_mcp_url"]
+        SEC["<b>secrets</b><br/>OS keyring<br/>SecretRedactingFilter"]
+        STATE["<b>per-project state</b><br/>workspace_storage_dir (hashed)"]
+    end
+    
+    CMD -->|child process| C_PROC[OS Process]
+    FILE -->|disk after approval| DISK[Disk]
+    WEB -->|network allowed only| NET[Network]
+    MCP -->|SSE| MCPS[MCP Server]
+    
+    style UNTRUSTED fill:#ff4757,stroke:#ff6b81,stroke-width:2px,color:#fff
+    style LLM fill:#ff4757,color:#fff
+    style TB fill:#2f3542,stroke:#57606f,stroke-width:2px,color:#fff
+    style CMD fill:#747d8c,color:#fff
+    style FILE fill:#747d8c,color:#fff
+    style WEB fill:#747d8c,color:#fff
+    style MCP fill:#747d8c,color:#fff
+    style SEC fill:#747d8c,color:#fff
+    style STATE fill:#747d8c,color:#fff
 ```
 
 ## Boundaries and controls

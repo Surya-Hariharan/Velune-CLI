@@ -1,13 +1,14 @@
-# Velune
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="150" />
+  <h1>Velune CLI</h1>
+  <p><em>Local-first multi-model AI developer CLI. Council-based agents, persistent memory, repository cognition.</em></p>
+  <p><strong>No cloud required. No quota. No lock-in.</strong></p>
 
-> Local-first multi-model AI developer CLI. Council-based agents,
-> persistent memory, repository cognition.
-> No cloud required. No quota. No lock-in.
-
-[![PyPI](https://img.shields.io/pypi/v/velune-cli)](https://pypi.org/project/velune-cli/)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
+  [![PyPI - Version](https://img.shields.io/pypi/v/velune-cli?style=for-the-badge&color=00ff00)](https://pypi.org/project/velune-cli/)
+  [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+  [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?style=for-the-badge)](LICENSE)
+  [![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI&style=for-the-badge&logo=github)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
+</div>
 
 ---
 
@@ -97,37 +98,44 @@ Python to PATH”** checked (or using `pipx`) resolves it permanently.
 
 ## Hardware requirements
 
-| RAM    | GPU              | Can run local LLM? | Recommended setup            |
-|--------|------------------|--------------------|------------------------------|
-| < 8 GB | any              | ✗ No               | Use Groq free tier           |
-| 8 GB   | integrated       | ⚠ 3B models only   | Groq + phi3-mini local       |
-| 16 GB  | integrated       | ⚠ Slow (CPU only)  | Groq + 3B local              |
-| 16 GB  | 6–8 GB VRAM      | ✓ 7B comfortable   | qwen2.5-coder:7b             |
-| 32 GB  | 12+ GB VRAM      | ✓ 13B comfortable  | Full council local           |
-| 36 GB  | Apple Silicon    | ✓ 27B comfortable  | Full council, Metal accel    |
-| 64 GB  | 24 GB VRAM       | ✓ 70B capable      | Max power mode               |
+| RAM | GPU | Can run local LLM? | Recommended setup |
+| :---: | :--- | :--- | :--- |
+| **< 8 GB** | Any | ❌ No | Use Groq free tier |
+| **8 GB** | Integrated | ⚠️ 3B models only | Groq + phi3-mini local |
+| **16 GB** | Integrated | ⚠️ Slow (CPU only) | Groq + 3B local |
+| **16 GB** | 6–8 GB VRAM | ✅ 7B comfortable | `qwen2.5-coder:7b` |
+| **32 GB** | 12+ GB VRAM | ✅ 13B comfortable | Full council local |
+| **36 GB** | Apple Silicon | ✅ 27B comfortable | Full council, Metal accel |
+| **64 GB** | 24 GB VRAM | ✅ 70B capable | Max power mode |
 
-Velune detects your hardware on startup and prints tier, GPU, and recommendations.
-On underpowered machines it routes tasks to cloud providers automatically.
+> [!NOTE]
+> Velune detects your hardware on startup and prints tier, GPU, and recommendations. On underpowered machines, it routes tasks to cloud providers automatically.
 
 ---
 
 ## Startup flow
 
-Velune starts instantly and does no work until you ask for it. Repository
-cognition (indexing) is **explicit and on-demand** — it never runs automatically
-on launch.
+Velune starts instantly and does no work until you ask for it. Repository cognition (indexing) is **explicit and on-demand** — it never runs automatically on launch.
 
-```text
-velune
-    ↓
-CLI opens instantly
-    ↓
-Connect a model      →  /model discover · /model connect <id> · /model use <id>
-    ↓
-Open a project       →  /project open <path> · /project status
-    ↓
-Run cognition        →  /cognition quick · /cognition standard · /cognition deep
+```mermaid
+flowchart TD
+    Start([velune]) --> CLI[CLI opens instantly]
+    CLI --> Connect[Connect a model]
+    Connect -.-> C1("`/model discover`")
+    Connect -.-> C2("`/model connect <id>`")
+    Connect -.-> C3("`/model use <id>`")
+    Connect --> Open[Open a project]
+    Open -.-> O1("`/project open <path>`")
+    Open -.-> O2("`/project status`")
+    Open --> Cog[Run cognition]
+    Cog -.-> R1("`/cognition quick`")
+    Cog -.-> R2("`/cognition standard`")
+    Cog -.-> R3("`/cognition deep`")
+    
+    classDef action fill:#0a3d62,stroke:#3c6382,stroke-width:2px,color:#fff;
+    classDef cmd fill:#079992,stroke:#38ada9,stroke-width:1px,color:#fff;
+    class Start,CLI,Connect,Open,Cog action;
+    class C1,C2,C3,O1,O2,R1,R2,R3 cmd;
 ```
 
 ---
@@ -146,25 +154,26 @@ Velune features a modern, clean terminal interface designed for productivity:
 
 ## Providers
 
-| Provider     | Type  | Cost          | Models                                        | Setup                        |
-|--------------|-------|---------------|-----------------------------------------------|------------------------------|
-| Ollama       | Local | Free          | Any pulled model                              | Install Ollama, pull a model |
-| LM Studio    | Local | Free          | Any GGUF / MLX model                          | Launch LM Studio server      |
-| Groq         | Cloud | Free tier     | Llama 3.3 70B, Mixtral, Gemma2                | `velune setup` → enter key   |
-| OpenRouter   | Cloud | Pay-per-token | 100+ models                                   | `velune setup` → enter key   |
-| OpenAI       | Cloud | Pay-per-token | GPT-4o, GPT-4o Mini                           | `velune setup` → enter key   |
-| Anthropic    | Cloud | Pay-per-token | Claude Opus, Sonnet, Haiku                    | `velune setup` → enter key   |
-| xAI (Grok)   | Cloud | Pay-per-token | Grok 2, Grok 2 Mini                           | `velune setup` → enter key   |
-| Google       | Cloud | Free quota    | Gemini 2.0 Flash, 1.5 Pro/Flash               | `velune setup` → enter key   |
-| Together AI  | Cloud | Pay-per-token | Llama 3.3 70B, Qwen 2.5 Coder, DeepSeek R1    | `velune setup` → enter key   |
-| Fireworks AI | Cloud | Pay-per-token | DeepSeek R1, Qwen 2.5 Coder, Mixtral 8x22B    | `velune setup` → enter key   |
-| Mistral      | Cloud | Pay-per-token | Mistral Large, Codestral, Mixtral             | `velune setup` → enter key   |
-| DeepSeek     | Cloud | Pay-per-token | DeepSeek R1, DeepSeek Coder                   | `velune setup` → enter key   |
-| Cohere       | Cloud | Pay-per-token | Command R+, Command R                         | `velune setup` → enter key   |
-| NVIDIA NIM   | Cloud | Pay-per-token | Llama, Mistral, and other NIM models          | `velune setup` → enter key   |
-| HuggingFace  | Cloud | Free/paid     | Open models via Inference API                 | `velune setup` → enter key   |
+| Provider | Type | Cost | Models | Setup |
+| :--- | :---: | :--- | :--- | :--- |
+| **Ollama** | 🏠 Local | Free | Any pulled model | Install Ollama, pull a model |
+| **LM Studio** | 🏠 Local | Free | Any GGUF / MLX model | Launch LM Studio server |
+| **Groq** | ☁️ Cloud | Free tier | Llama 3.3 70B, Mixtral, Gemma2 | `velune setup` → enter key |
+| **OpenRouter** | ☁️ Cloud | Pay-per-token | 100+ models | `velune setup` → enter key |
+| **OpenAI** | ☁️ Cloud | Pay-per-token | GPT-4o, GPT-4o Mini | `velune setup` → enter key |
+| **Anthropic** | ☁️ Cloud | Pay-per-token | Claude Opus, Sonnet, Haiku | `velune setup` → enter key |
+| **xAI (Grok)** | ☁️ Cloud | Pay-per-token | Grok 2, Grok 2 Mini | `velune setup` → enter key |
+| **Google** | ☁️ Cloud | Free quota | Gemini 2.0 Flash, 1.5 Pro/Flash | `velune setup` → enter key |
+| **Together AI** | ☁️ Cloud | Pay-per-token | Llama 3.3 70B, Qwen 2.5, DeepSeek R1 | `velune setup` → enter key |
+| **Fireworks AI** | ☁️ Cloud | Pay-per-token | DeepSeek R1, Qwen 2.5, Mixtral 8x22B | `velune setup` → enter key |
+| **Mistral** | ☁️ Cloud | Pay-per-token | Mistral Large, Codestral, Mixtral | `velune setup` → enter key |
+| **DeepSeek** | ☁️ Cloud | Pay-per-token | DeepSeek R1, DeepSeek Coder | `velune setup` → enter key |
+| **Cohere** | ☁️ Cloud | Pay-per-token | Command R+, Command R | `velune setup` → enter key |
+| **NVIDIA NIM** | ☁️ Cloud | Pay-per-token | Llama, Mistral, and other NIM models | `velune setup` → enter key |
+| **HuggingFace** | ☁️ Cloud | Free/paid | Open models via Inference API | `velune setup` → enter key |
 
-Keys are stored in your OS keyring — never in files, never in git.
+> [!TIP]
+> Keys are stored securely in your OS keyring — never in plain text files, never in git.
 
 ---
 
@@ -362,13 +371,14 @@ to reconstruct intent without you explaining it again.
 
 ## Session modes
 
-| Mode    | Command    | Council tier | Model    | Context cap  |
-|---------|------------|--------------|----------|--------------|
-| Normal  | `/normal`  | auto         | current  | 16 k tokens  |
-| Optimus | `/optimus` | instant      | smallest | 4 k tokens   |
-| Godly   | `/godly`   | full         | largest  | 128 k tokens |
+| Mode | Command | Council tier | Model | Context cap |
+| :--- | :--- | :---: | :--- | :--- |
+| **Normal** | `/normal` | Auto | Current | 16k tokens |
+| **Optimus** | `/optimus` | Instant | Smallest | 4k tokens |
+| **Godly** | `/godly` | Full | Largest | 128k tokens |
 
-Switch modes at any time mid-session. The prompt badge updates immediately.
+> [!TIP]
+> Switch modes at any time mid-session. The prompt badge updates immediately.
 
 ---
 

@@ -1,4 +1,7 @@
-# Development Guide
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
+  <h1>Development Guide</h1>
+</div>
 
 ## Setup
 
@@ -397,13 +400,28 @@ python -m cProfile -s cumtime -m velune doctor check
 
 All checks run automatically on push/PR:
 
-- **lint** (30s) - ruff + pyright
-- **security** (60s) - pip-audit, regression checks
-- **architecture** (10s) - layer boundaries
-- **test-unit** (60s) - pytest with 70% coverage
-- **build-check** (20s) - python -m build
-- **test-integration** (5m, PRs/main only)
-- **startup-perf** (30s, main only)
+```mermaid
+flowchart TD
+    subgraph Fast Checks
+        LINT["<b>lint (30s)</b><br/>ruff + pyright"]
+        SEC["<b>security (60s)</b><br/>pip-audit, regression checks"]
+        ARCH["<b>architecture (10s)</b><br/>layer boundaries"]
+    end
+    
+    subgraph Core
+        TEST["<b>test-unit (60s)</b><br/>pytest with 70% coverage"]
+        BUILD["<b>build-check (20s)</b><br/>python -m build"]
+    end
+    
+    subgraph Extended
+        INT["<b>test-integration (5m)</b><br/>PRs/main only"]
+        PERF["<b>startup-perf (30s)</b><br/>main only"]
+    end
+    
+    LINT --> SEC --> ARCH
+    ARCH --> TEST --> BUILD
+    BUILD --> INT --> PERF
+```
 
 See [CI_CD_SETUP.md](../CI_CD_SETUP.md) for details.
 

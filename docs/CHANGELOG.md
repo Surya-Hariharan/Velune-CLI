@@ -1,9 +1,12 @@
-# Changelog
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
+  <h1>Changelog</h1>
+</div>
 
 All notable changes to this project will be documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+> [!NOTE]
+> The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
@@ -11,7 +14,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [0.9.4] - 2026-06-28
 
-### New
+### ![New](https://img.shields.io/badge/-New-success?style=flat-square)
 
 - Go production launcher improvements for cross-platform startup and health checks.
 - Rust native module foundation for optional hot-path repository operations.
@@ -20,7 +23,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Native integration layer with pure-Python fallbacks when native wheels are unavailable.
 - Cross-platform CI covering Python, Go, Rust, packaging, install smoke tests, and native benchmarks.
 
-### Improved
+### ![Improved](https://img.shields.io/badge/-Improved-blue?style=flat-square)
 
 - Faster startup paths for lightweight commands and launcher-assisted execution.
 - More reliable native integration across supported operating systems.
@@ -29,7 +32,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Expanded tests for knowledge graph, intelligence engine, memory coordination, and native fallbacks.
 - More reproducible build and artifact validation.
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - Cross-platform build issues in Go and Rust CI jobs.
 - PyO3 compatibility for Rust unit-test linkage.
@@ -117,7 +120,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (3.10 – 3.13).
 - **`ci-pass` gate job** — requires all matrix jobs before reporting green.
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - Benchmark jobs no longer use `--ci` performance-threshold mode; benchmarks
   are informational in CI and will never fail due to machine variance.
@@ -127,7 +130,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `cargo test --lib` can link the Rust test harness without a Python runtime.
 - `velune update` PyPI URL corrected from `/pypi/velune/` to `/pypi/velune-cli/`.
 
-### Tests
+### ![Tests](https://img.shields.io/badge/-Tests-lightgrey?style=flat-square)
 
 - 139 tests passing — 42 new for Three-Brain Memory, 41 for Intelligence Engine,
   41 for Knowledge Graph, plus cross-platform CI matrix (3 OS × 4 Python).
@@ -160,7 +163,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Git · Extend · System) instead of one flat table, with a Tab-completion tip.
   (`velune/cli/repl.py`, `velune/cli/autocomplete.py`)
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - **Alias-collision guard.** The slash registry now warns when a name or alias
   would silently shadow another command (e.g. `/h` mapping to both `/help` and
@@ -173,7 +176,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `ProviderUnavailableError`, unexpected-error rendering), giving consistent,
   actionable recovery hints. (`velune/cli/repl.py`)
 
-### Added
+### ![Added](https://img.shields.io/badge/-Added-success?style=flat-square)
 
 - **Regression tests** locking in alias integrity, the `cognition`→`index`
   rename, `/mode` consolidation, and `/help` categorization.
@@ -207,12 +210,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (`quick` · `standard` · `deep` · `status` · `init` · `cancel` · `rebuild`).
   `quick` scans manifests only; `standard`/`deep` build a full symbol index.
 
-### Removed
+### ![Removed](https://img.shields.io/badge/-Removed-critical?style=flat-square)
 
 - **Automatic repository cognition on startup.** Indexing is now opt-in through
   the `/cognition` command. This is the headline behavior change in this release.
 
-### Performance
+### ![Performance](https://img.shields.io/badge/-Performance-blueviolet?style=flat-square)
 
 - Startup no longer blocks on indexing or a second model-reachability probe;
   cognition cost is paid only when explicitly requested.
@@ -248,7 +251,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the root callback skips full-subsystem initialization when help is requested.
 - Removed a redundant second Ollama reachability probe on REPL startup.
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - First run with no providers and a non-interactive stdin now prints the
   `velune setup` hint and exits cleanly instead of blocking on a confirmation
@@ -369,7 +372,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `disconnect <name>`, `refresh <name>` — inspect MCP connections without
   leaving the REPL.
 
-### Security
+### ![Security](https://img.shields.io/badge/-Security-yellow?style=flat-square)
 
 - **Isolated `llama-cpp-python` from the default install set** to eliminate the
   `diskcache ≤ 5.6.3` transitive vulnerability (unsafe pickle deserialization — no
@@ -380,7 +383,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   **no known vulnerabilities** on a default install. (`pyproject.toml`,
   `velune/providers/adapters/llamacpp.py`)
 
-### Added
+### ![Added](https://img.shields.io/badge/-Added-success?style=flat-square)
 
 - **Intent reconstruction** — new `velune/cognition/intent.py` with `IntentClassifier`
   and `IntentType` enum (EXPLAIN / GENERATE / REFACTOR / DEBUG / REVIEW / QUESTION / COMMAND).
@@ -477,7 +480,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `PluginManifest` dataclass respectively. Deleted `velune/context/window.py` (legacy
   `ContextWindowTracker`); `estimate_tokens()` now lives in `token_counter.py`.
 
-### Changed
+### ![Changed](https://img.shields.io/badge/-Changed-blue?style=flat-square)
 
 - `StatusBarState` gains `bg_job_count` and `alert_count` fields; `render_status_bar`
   renders them as warn-coloured segments only when non-zero. (`velune/cli/statusbar.py`)
@@ -486,7 +489,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `_async_main()` now starts `ProactiveWatcher` after `lifecycle.startup()` and
   cleanly stops it in the `finally` block. (`velune/kernel/entrypoint.py`)
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - **Intent classifier word boundaries** — `_score()` now uses `\b` anchors so
   `"build"` no longer fires on `"rebuild"` and `"implement"` no longer fires on
@@ -496,7 +499,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `_extract_hook_names()` which handles both declarative (hooks JSON file) and legacy
   (inline `hooks` list) manifest shapes.
 
-### Tests
+### ![Tests](https://img.shields.io/badge/-Tests-lightgrey?style=flat-square)
 
 - `tests/test_intent.py` — 7 intent-type test classes + confidence + engine integration
   tests (28 cases total).
@@ -512,7 +515,7 @@ and packaging-correctness work that had accumulated on `main` since `0.9.0` into
 properly tagged, reproducible PyPI artifact. There are no new features and no breaking
 changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 
-### Security
+### ![Security](https://img.shields.io/badge/-Security-yellow?style=flat-square)
 
 - **Windows PATH-hijack guard now enforced.** `_is_trusted_path` previously returned
   `True` unconditionally on Windows, so a malicious binary planted earlier in `PATH`
@@ -532,7 +535,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Added Bandit static analysis to CI (gates on medium+ severity) and gitleaks secret scanning.
 - Resolved Bandit high/medium findings: marked the non-cryptographic workspace-slug SHA-1 with `usedforsecurity=False`, and gave the Ollama HTTP client a bounded default timeout (60s, 5s connect) so non-streaming calls cannot hang indefinitely.
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - **Subprocess pipe-buffer deadlock in the execution sandbox.** `SubprocessSandbox.execute`
   read child output via `communicate()` only *after* the poll loop saw the process exit.
@@ -544,7 +547,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
   parent memory against runaway producers, and preserves partial output on timeout.
   (`velune/execution/sandbox.py`)
 
-### Added
+### ![Added](https://img.shields.io/badge/-Added-success?style=flat-square)
 
 - **`velune doctor` runtime path-safety check.** A new Security-category diagnostic resolves
   each allowlisted executable via the same `shutil.which` lookup the sandbox uses and
@@ -553,7 +556,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
   refuse to run). Makes the PATH-hijack guarantee observable rather than silent.
   (`velune/cli/commands/doctor.py`)
 
-### Changed
+### ![Changed](https://img.shields.io/badge/-Changed-blue?style=flat-square)
 
 - CI test matrix expanded to **Ubuntu / Windows / macOS × Python 3.11 / 3.12 / 3.13**.
 - Release pipeline now publishes to PyPI via **OIDC trusted publishing** (no long-lived token); removed the `continue-on-error` that silently swallowed failed publishes.
@@ -563,7 +566,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Migrated the event-bus `Event` model from Pydantic v1 `class Config` to `ConfigDict` (removes a deprecation warning, forward-compatible with Pydantic v3).
 - Dependabot now groups minor/patch bumps into single PRs and uses the correct GitHub reviewer handle.
 
-### Added
+### ![Added](https://img.shields.io/badge/-Added-success?style=flat-square)
 
 - New CI **`build`** + **`install-smoke`** jobs: reproducible build, strict metadata validation, pure-python wheel assertion, and a cross-platform (Ubuntu/Windows/macOS × Py 3.11/3.13) wheel-install + `velune --version`/`--help` REPL smoke test.
 - Python 3.13 classifier, `Typing :: Typed` classifier, and a `Documentation` project URL in `pyproject.toml`.
@@ -578,25 +581,25 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 
 ## [0.9.0] - 2026-06-12
 
-### Security
+### ![Security](https://img.shields.io/badge/-Security-yellow?style=flat-square)
 
 - Plugin sandbox status: Plugin sandbox remains unimplemented or disabled for standard CLI operations.
 - Removal of `run_until_complete` anti-pattern: Cleaned up all async loop management and centralized loop execution in `entrypoint.py`.
 - Security audit suite extension: Centralized static and runtime vulnerability controls.
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - Fixed memory lifecycle shutdown duplication to prevent multiple DB closure errors.
 - Fixed Ollama context-window detection to correctly read local model metadata.
 
-### Changed
+### ![Changed](https://img.shields.io/badge/-Changed-blue?style=flat-square)
 
 - Consolidated AST parser logic into a unified syntax parsing layer.
 - Consolidated council orchestrators to streamline Planner/Coder/Reviewer loops.
 - Modernized CLI theme, refined color palettes, updated startup banner, and context trackers.
 - Reconciled documentation and cleaned up dead MCP CLI commands.
 
-### Removed
+### ![Removed](https://img.shields.io/badge/-Removed-critical?style=flat-square)
 
 - Removed superseded `tests/` and `scripts/` directories entirely from the repository.
 
@@ -655,7 +658,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Dual-path retrieval disabled (experimental feature)
 - Cloud provider integration incomplete for some APIs
 
-### Security
+### ![Security](https://img.shields.io/badge/-Security-yellow?style=flat-square)
 
 - All OWASP top 10 checks passing
 - Architecture lint enforced (no shell=True, asyncio.run isolated)
@@ -665,7 +668,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 
 ## [0.6.0] — 2026-06-12
 
-### Added
+### ![Added](https://img.shields.io/badge/-Added-success?style=flat-square)
 
 - **Provider Health Monitoring** — Real-time health tracking with CapabilityManifest
   - Background polling every 30 seconds
@@ -700,7 +703,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - **Type Checking** — Pyright configuration with standard mode
 - **Enhanced Code Coverage** — Branch coverage + exclusion rules
 
-### Changed
+### ![Changed](https://img.shields.io/badge/-Changed-blue?style=flat-square)
 
 - Updated all provider adapters to record latency
   - Anthropic, OpenAI, Google, Groq, HuggingFace, LM Studio, Ollama, LlamaCpp
@@ -708,19 +711,19 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Improved pytest configuration (timeouts, coverage reporting)
 - Reorganized pyproject.toml with comprehensive tool configurations
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - Replaced `UNHEALTHY` enum with `UNAVAILABLE` for consistency
 - Fixed provider health check timeouts
 - Added proper error handling for latency recording
 
-### Removed
+### ![Removed](https://img.shields.io/badge/-Removed-critical?style=flat-square)
 
 - Demo files (council_example.py)
 - Unnecessary documentation (implementation details)
 - Redundant markdown files
 
-### Security
+### ![Security](https://img.shields.io/badge/-Security-yellow?style=flat-square)
 
 - Added pip-audit dependency vulnerability scanning
 - shell=True regression check (P0-2)
@@ -730,7 +733,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 
 ## [0.5.0-beta] — 2026-06-07
 
-### Added
+### ![Added](https://img.shields.io/badge/-Added-success?style=flat-square)
 
 - Google Gemini provider (2.0 Flash, 1.5 Pro, 1.5 Flash, 2.0 Flash Thinking)
 - Together AI provider (Llama 3.3 70B, Qwen 2.5 Coder 32B, DeepSeek R1)
@@ -772,12 +775,12 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - GitHub issue templates (bug report, feature request)
 - `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
 
-### Security
+### ![Security](https://img.shields.io/badge/-Security-yellow?style=flat-square)
 
 - All provider adapters and discovery modules now use `keystore.get_key()` instead of bare `os.getenv()` for API key retrieval (`adapters/anthropic.py`, `adapters/openai.py`, `adapters/huggingface.py`, `discovery/anthropic.py`, `discovery/openai.py`, `cli/commands/doctor.py`)
 - `tests/test_security.py` — 6 security property tests covering shell injection, API key bypass, SSRF blocking, veluneignore coverage, and rate limiting
 
-### Changed
+### ![Changed](https://img.shields.io/badge/-Changed-blue?style=flat-square)
 
 - `GGUFDiscovery.discover()` now delegates to `LocalModelResolver` instead of
   a bare `rglob` — depth-limited (5 levels), capped at 100k files per root,
@@ -789,7 +792,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - `SECURITY.md` and `CONTRIBUTING.md` consolidated (removed duplicate sections)
 - `.gitignore` expanded with `.benchmarks/`, `.claude/`, secret file patterns
 
-### Fixed
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
 
 - `CONTRIBUTING.md` footer appeared three times — reduced to one
 - `README.md` referenced MIT License — corrected to Apache-2.0
@@ -799,7 +802,7 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 
 ## [0.1.0] - 2026-06-05
 
-### Added
+### ![Added](https://img.shields.io/badge/-Added-success?style=flat-square)
 
 - Initial public release
 - Typer CLI with `ask`, `run`, `workspace`, `doctor`, `models`, `chat` subcommands

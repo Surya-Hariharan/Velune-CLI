@@ -1,4 +1,7 @@
-# Startup Architecture Refactor — Migration Report
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
+  <h1>Startup Architecture Refactor — Migration Report</h1>
+</div>
 
 ## Why this change
 
@@ -14,21 +17,39 @@ configured model.
 
 ## Before / after startup flow
 
-```
-BEFORE                                   AFTER
-──────                                   ─────
-velune                                   velune
- ├─ load config                           ├─ load config / settings
- ├─ detect repository                     ├─ load command registry + UI
- ├─ scan repository          (removed)    ├─ load model registry (lazy)
- ├─ build cognition          (removed)    ├─ restore default model (no network)
- ├─ generate embeddings      (removed)    ├─ advisory repo hint (no scan)
- ├─ load memory              (deferred)   └─ REPL prompt  ◀── <500ms
- ├─ build architecture map   (removed)
- └─ display CLI                          Cognition is now explicit:
-                                           /project open <path>
-                                            └─ /cognition quick|standard|deep
-                                                └─ preview → confirm → bg job
+```mermaid
+flowchart LR
+    subgraph Before
+        direction TB
+        B1([velune]) --> B2[load config]
+        B2 --> B3[detect repository]
+        B3 --> B4[scan repository]
+        B4 --> B5[build cognition]
+        B5 --> B6[generate embeddings]
+        B6 --> B7[load memory]
+        B7 --> B8[build architecture map]
+        B8 --> B9([display CLI])
+    end
+    
+    subgraph After
+        direction TB
+        A1([velune]) --> A2[load config / settings]
+        A2 --> A3[load command registry + UI]
+        A3 --> A4[load model registry lazy]
+        A4 --> A5[restore default model]
+        A5 --> A6[advisory repo hint]
+        A6 --> A7([REPL prompt  ◀── <500ms])
+        
+        A7 -.->|Cognition is now explicit| A8([/project open])
+        A8 --> A9([/cognition quick|standard|deep])
+        A9 --> A10([preview -> confirm -> bg job])
+    end
+    
+    style B4 fill:#ff4757,stroke:#ff6b81,stroke-width:2px,color:#fff
+    style B5 fill:#ff4757,stroke:#ff6b81,stroke-width:2px,color:#fff
+    style B6 fill:#ff4757,stroke:#ff6b81,stroke-width:2px,color:#fff
+    style B8 fill:#ff4757,stroke:#ff6b81,stroke-width:2px,color:#fff
+    style A7 fill:#2ed573,stroke:#7bed9f,stroke-width:2px,color:#fff
 ```
 
 The key mechanical change: `RepositoryCognitionService.initialize()` — the

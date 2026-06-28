@@ -1,4 +1,7 @@
-# Security Policy
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
+  <h1>Security Policy</h1>
+</div>
 
 ## Supported versions
 
@@ -8,15 +11,16 @@ protection.
 
 | Branch / Release | Security support |
 | :--- | :--- |
-| `main` | Active — security fixes merged here first |
-| Latest tagged release | Active — critical backports when feasible |
-| Older releases | Best-effort; upgrade recommended |
+| `main` | ✅ Active — security fixes merged here first |
+| Latest tagged release | ✅ Active — critical backports when feasible |
+| Older releases | ⚠️ Best-effort; upgrade recommended |
 
 ---
 
 ## Reporting a vulnerability
 
-**Do not open a public GitHub issue for security vulnerabilities.**
+> [!CAUTION]
+> **Do not open a public GitHub issue for security vulnerabilities.**
 
 ### Primary channel
 

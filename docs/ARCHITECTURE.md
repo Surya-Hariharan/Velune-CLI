@@ -4,29 +4,31 @@
 
 Velune is organized into distinct layers with clear separation of concerns:
 
-```
-┌─────────────────────────────────────────────────┐
-│ velune/cli/                 (UI Layer)           │
-│ Commands, REPL, output formatting               │
-├─────────────────────────────────────────────────┤
-│ velune/cognition/           (Application Logic)  │
-│ Agents, orchestration, decision-making          │
-├─────────────────────────────────────────────────┤
-│ velune/retrieval/           (Retrieval Layer)    │
-│ Search, ranking, document handling              │
-├─────────────────────────────────────────────────┤
-│ velune/memory/              (Infrastructure)    │
-│ Storage tiers, lifecycle management             │
-│                                                 │
-│ velune/providers/           (Infrastructure)    │
-│ LLM providers, routing, health monitoring       │
-│                                                 │
-│ velune/kernel/              (Infrastructure)    │
-│ Config, registry, lifecycle coordination        │
-├─────────────────────────────────────────────────┤
-│ velune/telemetry/           (Observability)     │
-│ Logging, tracing, usage analytics               │
-└─────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    CLI["<b>UI Layer (velune/cli)</b><br/>Commands, REPL, output formatting"]
+    COG["<b>Application Logic (velune/cognition)</b><br/>Agents, orchestration, decision-making"]
+    RET["<b>Retrieval Layer (velune/retrieval)</b><br/>Search, ranking, document handling"]
+    
+    subgraph INFRA [Infrastructure]
+        MEM["<b>velune/memory</b><br/>Storage tiers, lifecycle management"]
+        PROV["<b>velune/providers</b><br/>LLM providers, routing, health monitoring"]
+        KERN["<b>velune/kernel</b><br/>Config, registry, lifecycle coordination"]
+    end
+    
+    TEL["<b>Observability (velune/telemetry)</b><br/>Logging, tracing, usage analytics"]
+
+    CLI --> COG
+    COG --> RET
+    COG --> INFRA
+    RET --> INFRA
+    INFRA --> TEL
+    
+    style CLI fill:#2e86de,stroke:#0abde3,stroke-width:2px,color:#fff
+    style COG fill:#ff9f43,stroke:#feca57,stroke-width:2px,color:#fff
+    style RET fill:#10ac84,stroke:#1dd1a1,stroke-width:2px,color:#fff
+    style INFRA fill:#222f3e,stroke:#576574,stroke-width:2px,color:#fff
+    style TEL fill:#ee5253,stroke:#ff6b6b,stroke-width:2px,color:#fff
 ```
 
 ## Native Component Boundaries

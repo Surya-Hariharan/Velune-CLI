@@ -1,10 +1,12 @@
-# Contributing to Velune
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
+  <h1>Contributing to Velune</h1>
+</div>
 
-Thank you for helping improve Velune. This guide covers development setup,
-how to add new providers, agents, and commands, and the review process.
+Thank you for helping improve Velune! This guide covers development setup, how to add new providers, agents, and commands, and the review process.
 
-For anything larger than a small fix, open an issue first to discuss
-scope before writing code.
+> [!IMPORTANT]
+> For anything larger than a small fix, open an issue first to discuss scope before writing code.
 
 ---
 
@@ -23,6 +25,22 @@ scope before writing code.
 ---
 
 ## Development setup
+
+Follow these steps to set up a local development environment.
+
+```mermaid
+flowchart LR
+    A[Clone Repo] --> B[Create Venv]
+    B --> C[Activate Venv]
+    C --> D[Install Deps]
+    D --> E[Verify Setup]
+    
+    style A fill:#4CAF50,color:white
+    style B fill:#2196F3,color:white
+    style C fill:#FF9800,color:white
+    style D fill:#E91E63,color:white
+    style E fill:#9C27B0,color:white
+```
 
 ```bash
 git clone https://github.com/Surya-Hariharan/Velune-CLI.git
@@ -413,12 +431,11 @@ velune --version
 velune doctor
 ```
 
-Include the exact command that failed, the full error message (run
-with `--verbose` for stack traces), and your OS and Python version.
+Include the exact command that failed, the full error message (run with `--verbose` for stack traces), and your OS and Python version.
 
-Report security vulnerabilities via
-[GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new),
-not public issues.
+> [!CAUTION]
+> **Do not report security vulnerabilities in public issues!**  
+> Report security vulnerabilities via [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new).
 
 ---
 

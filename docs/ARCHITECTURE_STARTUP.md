@@ -11,63 +11,49 @@ configuration, lifecycle, daemon startup, and command policy.
 
 ## 1. Startup path (instant, <500ms target)
 
-```
-                      ┌──────────────────────────────────────────┐
-   velune  ──────────▶│ main()  (velune/main.py)                  │
-                      │   • --version / --help fast-paths         │
-                      └──────────────────┬───────────────────────┘
-                                         ▼
-                      ┌──────────────────────────────────────────┐
-                      │ build_runtime()  (velune/core/runtime.py) │
-                      │   • config + logging + console            │
-                      │   • module bootstrap (factories only)     │
-                      └──────────────────┬───────────────────────┘
-                                         ▼
-   ┌─────────────────────────────────────────────────────────────────────┐
-   │ REPL handoff (velune/cli/app.py → kernel/entrypoint.py)               │
-   │   • lifecycle.startup() → RepositoryCognitionService.initialize()     │
-   │       └── NO-OP  ◀── the critical change (cognition.py)               │
-   │   • _restore_active_model()   (no network — reads active_model.json)  │
-   │   • _show_welcome_guide()     (first launch, no model configured)     │
-   │   • _detect_repo_marker()     (advisory hint ONLY — never scans)      │
-   └─────────────────────────────────────────────────────────────────────┘
-                                         ▼
-                                   PROMPT VISIBLE
+```mermaid
+flowchart TD
+    A([velune]) --> B[<b>main()</b> velune/main.py<br/>--version / --help fast-paths]
+    B --> C[<b>build_runtime()</b> velune/core/runtime.py<br/>config + logging + console<br/>module bootstrap factories]
+    C --> D[<b>REPL handoff</b> cli/app.py -> kernel/entrypoint.py<br/>- lifecycle.startup -> RepositoryCognitionService.initialize <b>(NO-OP)</b><br/>- _restore_active_model<br/>- _show_welcome_guide<br/>- _detect_repo_marker]
+    D --> E([PROMPT VISIBLE])
 
-   Allowed at startup: config, settings, command registry, UI, model
-   registry (lazy), lightweight memory metadata, restore default model.
-   Forbidden at startup: scanning, cognition, embeddings, indexing,
-   chunking, graph/architecture/dependency analysis, RAG/vector build.
+    style A fill:#2e86de,stroke:#0abde3,stroke-width:2px,color:#fff
+    style E fill:#10ac84,stroke:#1dd1a1,stroke-width:2px,color:#fff
 ```
+
+> [!TIP]
+> **Allowed at startup**: config, settings, command registry, UI, model registry (lazy), lightweight memory metadata, restore default model.
+>
+> **Forbidden at startup**: scanning, cognition, embeddings, indexing, chunking, graph/architecture/dependency analysis, RAG/vector build.
 
 ## 2. On-demand cognition path (explicit)
 
-```
-   /project open <path>          register + activate workspace (no cognition)
-          │                       WorkspaceRegistry → ~/.velune/workspaces.json
-          ▼
-   /cognition quick              quick_summary()   manifests only      (2–5s)
-   /cognition standard|init      run_incremental() file-level symbols
-   /cognition deep|rebuild       run_deep()        symbols+graph+arch
-          │
-          ▼
-   ┌──────────────────────────────────────────────────────────────┐
-   │ guards (cli/repl.py)                                           │
-   │   1. _cognition_model_ready()   → Rule 4: refuse if no model   │
-   │   2. cog.unsafe_reason()        → Rule 12: refuse home/root    │
-   └───────────────┬──────────────────────────────────────────────┘
-                   ▼
-   preview()  ──▶  _confirm_cognition() panel  ──▶  [Y/N]
-   (file count,      Workspace / Mode / Files /
-    est. tokens)     Est. Tokens / Cost / Duration
-                   │ confirmed
-                   ▼
-   _submit_cognition_job()  → JobRegistry + track()  (background)
-          │
-          ▼
-   /cognition status   table of cognition jobs (phase, result)
-   /cognition cancel   cancels the running job
-   /jobs · /dashboard  shared job views
+```mermaid
+flowchart TD
+    A([/project open path]) -->|register + activate workspace| B[WorkspaceRegistry<br/>~/.velune/workspaces.json]
+    B --> C1([/cognition quick<br/>manifests only])
+    B --> C2([/cognition standard | init<br/>file-level symbols])
+    B --> C3([/cognition deep | rebuild<br/>symbols+graph+arch])
+    
+    C1 --> D
+    C2 --> D
+    C3 --> D
+    
+    D[<b>Guards</b> cli/repl.py<br/>1. Model ready<br/>2. Unsafe root reason] --> E[<b>preview()</b><br/>_confirm_cognition panel]
+    E -->|Confirmed Y| F[<b>_submit_cognition_job</b><br/>JobRegistry + track in background]
+    
+    F --> G1([/cognition status])
+    F --> G2([/cognition cancel])
+    F --> G3([/jobs /dashboard])
+    
+    style A fill:#2e86de,stroke:#0abde3,stroke-width:2px,color:#fff
+    style C1 fill:#22a6b3,color:#fff
+    style C2 fill:#22a6b3,color:#fff
+    style C3 fill:#22a6b3,color:#fff
+    style G1 fill:#10ac84,color:#fff
+    style G2 fill:#10ac84,color:#fff
+    style G3 fill:#10ac84,color:#fff
 ```
 
 ## 3. Safety model
@@ -84,18 +70,29 @@ configuration, lifecycle, daemon startup, and command policy.
 
 ## 4. Model registry, discovery & persistence
 
-```
-   /model discover ─▶ ModelCapabilityRegistry.refresh()
-                         └─ ModelDiscoveryScanner.scan_all()
-                              ├─ Ollama        :11434  (reachability-gated)
-                              ├─ LM Studio     :1234   (reachability-gated)
-                              ├─ OpenAI-compat :8000/:8080/:3000 (gated)  ◀ Rule 7
-                              └─ cloud providers (only if API key in keystore)
-                         picker ─▶ _activate_model()
-                                      ├─ save_active_model() → ~/.velune/active_model.json
-                                      └─ providers.default_provider → velune.toml
-
-   next launch ─▶ _restore_active_model()  (reads active_model.json, no network)
+```mermaid
+flowchart TD
+    A([/model discover]) --> B[ModelCapabilityRegistry.refresh]
+    B --> C[ModelDiscoveryScanner.scan_all]
+    
+    C -->|:11434| D1[Ollama]
+    C -->|:1234| D2[LM Studio]
+    C -->|:8000 / :8080 / :3000| D3[OpenAI-compat]
+    C -->|API key in keystore| D4[Cloud providers]
+    
+    D1 --> P[picker]
+    D2 --> P
+    D3 --> P
+    D4 --> P
+    
+    P --> E[<b>_activate_model</b>]
+    E --> F[save_active_model<br/>~/.velune/active_model.json]
+    E --> G[providers.default_provider<br/>velune.toml]
+    
+    NL([next launch]) --> RM[<b>_restore_active_model</b><br/>reads active_model.json, no network]
+    
+    style A fill:#ff9f43,color:#fff
+    style NL fill:#ff9f43,color:#fff
 ```
 
 - Discovery is **by model name only** (Rule 6) — `/api/tags` for Ollama,
