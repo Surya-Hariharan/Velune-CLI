@@ -11,16 +11,10 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from velune.memory.three_brain import ThreeBrainCoordinator, ThreeBrainResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fakes
@@ -31,7 +25,9 @@ def _make_turn(role: str = "user", content: str = "hello") -> SimpleNamespace:
     return SimpleNamespace(role=role, content=content)
 
 
-def _make_retrieved(content: str = "memory content", attribution: str = "just now") -> SimpleNamespace:
+def _make_retrieved(
+    content: str = "memory content", attribution: str = "just now"
+) -> SimpleNamespace:
     return SimpleNamespace(content=content, attribution=attribution, distance=0.1)
 
 
@@ -347,7 +343,9 @@ class TestQueryEpisodicBrain:
 
 class TestQueryKGBrain:
     async def test_kg_context_included_when_symbols_found(self):
-        node = SimpleNamespace(node_type=SimpleNamespace(value="function"), label="my_func", file_path="app.py")
+        node = SimpleNamespace(
+            node_type=SimpleNamespace(value="function"), label="my_func", file_path="app.py"
+        )
         kg_query = MagicMock()
         kg_query.summary_text = AsyncMock(return_value="Graph: 10 files, 50 symbols.")
         kg_query.find_by_label = AsyncMock(return_value=[node])
@@ -397,7 +395,9 @@ class TestQueryAllBrainsActive:
         working_turns = [_make_turn("user", "current question")]
         semantic_hits = [_make_retrieved("past memory")]
         episodic_turns = [_make_episodic_turn("assistant", "old answer")]
-        node = SimpleNamespace(node_type=SimpleNamespace(value="class"), label="MyClass", file_path="model.py")
+        node = SimpleNamespace(
+            node_type=SimpleNamespace(value="class"), label="MyClass", file_path="model.py"
+        )
 
         working = MagicMock()
         working.get_recent_turns = MagicMock(return_value=working_turns)

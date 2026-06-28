@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from velune.core.errors.provider import ProviderAuthenticationError
 from velune.core.types.provider import ProviderHealth
-from velune.providers.base import ModelProvider
 from velune.providers.registry import ProviderRegistry
 
 logger = logging.getLogger("velune.providers.manager")
@@ -46,7 +44,7 @@ class ProviderManager:
                     # Add authenticate step if it exists
                     if hasattr(provider, "authenticate"):
                         await provider.authenticate()
-                    
+
                     health = await provider.health_check()
                     self._health_states[provider_id] = health
                     return health
@@ -67,7 +65,7 @@ class ProviderManager:
                         return ProviderHealth.OFFLINE
                     await asyncio.sleep(backoff)
                     backoff *= 2
-            
+
             return ProviderHealth.OFFLINE
 
     async def get_health(self, provider_id: str) -> ProviderHealth:
@@ -81,9 +79,9 @@ class ProviderManager:
         available = self.registry.list_available_providers()
         tasks = [self.initialize_provider(pid) for pid in available]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         health_map = {}
-        for pid, res in zip(available, results):
+        for pid, res in zip(available, results, strict=False):
             if isinstance(res, Exception):
                 logger.error("Failed to check health for %s: %s", pid, res)
                 health_map[pid] = ProviderHealth.OFFLINE

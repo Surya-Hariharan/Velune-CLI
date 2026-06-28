@@ -48,7 +48,7 @@ class CredentialManager:
     def __new__(cls):
         with cls._lock:
             if cls._instance is None:
-                cls._instance = super(CredentialManager, cls).__new__(cls)
+                cls._instance = super().__new__(cls)
                 cls._instance._init()
             return cls._instance
 
@@ -119,7 +119,7 @@ class CredentialManager:
             temp_file.replace(self._credentials_file)
 
             # Secure file permissions (Linux/macOS)
-            if os.name != 'nt':
+            if os.name != "nt":
                 self._credentials_file.chmod(0o600)
         finally:
             if temp_file.exists():
@@ -211,7 +211,7 @@ def is_ollama_live(timeout: float = 0.25) -> bool:
 
 def list_configured_providers(include_ollama: bool = True) -> list[str]:
     """Return provider IDs that have a usable key.
-    
+
     Environment variables are checked first, followed by the local JSON configuration.
     """
     configured: set[str] = set()
@@ -243,7 +243,7 @@ def get_provider_status(provider_id: str) -> dict[str, Any]:
             "source": "environment",
             "status": "valid",
             "last_verified": "dynamic",
-            "location": f"${env_var}"
+            "location": f"${env_var}",
         }
 
     if record:
@@ -252,7 +252,7 @@ def get_provider_status(provider_id: str) -> dict[str, Any]:
             "source": "config",
             "status": record.get("status", "unknown"),
             "last_verified": record.get("last_verified", "unknown"),
-            "location": str(_manager._credentials_file)
+            "location": str(_manager._credentials_file),
         }
 
     return {
@@ -260,5 +260,5 @@ def get_provider_status(provider_id: str) -> dict[str, Any]:
         "source": "none",
         "status": "missing",
         "last_verified": "n/a",
-        "location": "n/a"
+        "location": "n/a",
     }

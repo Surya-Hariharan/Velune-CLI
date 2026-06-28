@@ -100,12 +100,24 @@ class FullscreenREPLUI:
         self._thinking_task: asyncio.Task | None = None
         self._thinking_idx: int = 0
         self._thinking_words = [
-            "Thinking...", "Planning...", "Connecting ideas...",
-            "Organizing thoughts...", "Brewing...", "Cooking...",
-            "Polishing...", "Exploring...", "Synthesizing...",
-            "Refactoring...", "Mapping...", "Reflecting...",
-            "Optimizing...", "Calibrating...", "Cross-checking...",
-            "Inspecting...", "Verifying...", "Composing..."
+            "Thinking...",
+            "Planning...",
+            "Connecting ideas...",
+            "Organizing thoughts...",
+            "Brewing...",
+            "Cooking...",
+            "Polishing...",
+            "Exploring...",
+            "Synthesizing...",
+            "Refactoring...",
+            "Mapping...",
+            "Reflecting...",
+            "Optimizing...",
+            "Calibrating...",
+            "Cross-checking...",
+            "Inspecting...",
+            "Verifying...",
+            "Composing...",
         ]
 
         def _on_accept(buffer: Buffer) -> bool:
@@ -275,17 +287,18 @@ class FullscreenREPLUI:
 
     async def _animate_logo_out(self, text: str) -> None:
         import random
+
         # Randomize thinking words at the start of the session
         random.shuffle(self._thinking_words)
-        
+
         # Slide up animation (200-350ms)
         steps = 15
         delay = 0.25 / steps
-        for i in range(steps):
+        for _i in range(steps):
             self._logo_offset += 1.5
             self.invalidate()
             await asyncio.sleep(delay)
-        
+
         self.append_user(text)
         self._queue.put_nowait(text)
         self._logo_animating = False
@@ -321,7 +334,7 @@ class FullscreenREPLUI:
         self._stream_text = self._thinking_words[0]
         self._replace_stream_lines(self._stream_text, "class:conversation.thinking")
         self.invalidate()
-        
+
         async def _thinking_anim():
             while True:
                 await asyncio.sleep(0.6)
@@ -336,7 +349,7 @@ class FullscreenREPLUI:
         if self._thinking_task and not self._thinking_task.done():
             self._thinking_task.cancel()
             self._thinking_task = None
-            
+
         if self._stream_start is None:
             self.begin_assistant("")
             if self._thinking_task:
@@ -352,7 +365,7 @@ class FullscreenREPLUI:
         if self._thinking_task and not self._thinking_task.done():
             self._thinking_task.cancel()
             self._thinking_task = None
-            
+
         if self._stream_start is not None:
             self._replace_stream_lines(self._stream_text, "class:conversation.assistant")
         self._stream_start = None
@@ -415,36 +428,36 @@ class FullscreenREPLUI:
     def _render_logo(self) -> AnyFormattedText:
         width = self._width()
         height = self._height()
-        
-        logo_width = max(len(line) for letter in _LOGO_ART for line in letter) # Approximate
+
+        max(len(line) for letter in _LOGO_ART for line in letter)  # Approximate
         logo_lines = [""] * 6
         for row in range(6):
-            for i, letter in enumerate(_LOGO_ART):
+            for _i, letter in enumerate(_LOGO_ART):
                 logo_lines[row] += letter[row]
 
         actual_logo_width = max(len(line) for line in logo_lines)
         left = " " * max(0, (width - actual_logo_width) // 2)
-        
+
         # Calculate base top, then subtract animation offset
         base_top_lines = max(0, (height - len(logo_lines) - 7) // 2)
         anim_top_lines = max(0, int(base_top_lines - self._logo_offset))
-        
+
         top = "\n" * anim_top_lines
 
         fragments: list[tuple[str, str]] = [("class:conversation", top)]
-        
-        for row, line in enumerate(logo_lines):
+
+        for _row, line in enumerate(logo_lines):
             fragments.append(("class:conversation", left))
-            
+
             # The 'V' is the first letter, which is 9 chars wide in _LOGO_ART[0]
             # _LOGO_ART[0] lines are 9 chars. We color the V pink, rest white.
             v_part = line[:9]
             rest_part = line[9:]
-            
+
             fragments.append(("class:logo.pink", v_part))
             fragments.append(("class:logo.white", rest_part))
             fragments.append(("class:conversation", "\n"))
-            
+
         return FormattedText(fragments)
 
     def _width(self) -> int:

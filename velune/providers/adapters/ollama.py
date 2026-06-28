@@ -245,9 +245,10 @@ class OllamaProvider(ModelProvider):
             # Fallback to checking if the process is running locally
             if "localhost" in self._base_url or "127.0.0.1" in self._base_url:
                 import psutil
+
                 try:
-                    for proc in psutil.process_iter(['name']):
-                        if proc.info['name'] and 'ollama' in proc.info['name'].lower():
+                    for proc in psutil.process_iter(["name"]):
+                        if proc.info["name"] and "ollama" in proc.info["name"].lower():
                             logger.error("Ollama service is stopped. Please run `ollama serve`.")
                             return ProviderHealth.OFFLINE
                 except Exception:

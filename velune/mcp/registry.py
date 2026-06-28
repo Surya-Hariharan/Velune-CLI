@@ -281,7 +281,9 @@ class MCPServerRegistry:
         except asyncio.TimeoutError:
             entry.state = ServerState.ERROR
             entry.error = "Tool execution timed out."
-            raise MCPTransportError(f"MCP tool '{qualified_name}' on '{server_name}' timed out after 60 seconds.")
+            raise MCPTransportError(
+                f"MCP tool '{qualified_name}' on '{server_name}' timed out after 60 seconds."
+            )
         except Exception as exc:
             # Reconnect might be needed
             entry.state = ServerState.ERROR

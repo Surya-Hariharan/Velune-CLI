@@ -490,6 +490,7 @@ def provider_status(
 # velune provider api
 # ---------------------------------------------------------------------------
 
+
 @provider_cmd.command("api")
 def api_status(
     provider_id: str = typer.Argument(
@@ -510,7 +511,9 @@ def api_status(
 
         # Stored check
         if info["stored"]:
-            console.print(f"[{design.OK}]✓ Stored[/{design.OK}] [{design.MUTED}]({info['location']})[/{design.MUTED}]")
+            console.print(
+                f"[{design.OK}]✓ Stored[/{design.OK}] [{design.MUTED}]({info['location']})[/{design.MUTED}]"
+            )
         else:
             console.print(f"[{design.WARN}]✗ Not stored[/{design.WARN}]")
             continue
@@ -527,7 +530,9 @@ def api_status(
             if result.status == ValidationStatus.NETWORK_ERROR:
                 console.print(f"[{design.WARN}]⚠ Offline validation unavailable[/{design.WARN}]")
             else:
-                console.print(f"[{design.DANGER}]✗ Invalid[/{design.DANGER}] [{design.MUTED}]({result.message})[/{design.MUTED}]")
+                console.print(
+                    f"[{design.DANGER}]✗ Invalid[/{design.DANGER}] [{design.MUTED}]({result.message})[/{design.MUTED}]"
+                )
 
 
 # ---------------------------------------------------------------------------

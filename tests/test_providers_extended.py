@@ -1,39 +1,42 @@
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from velune.providers.adapters.openai import OpenAIProvider
+
+from velune.core.types.provider import ProviderHealth
 from velune.providers.adapters.anthropic import AnthropicProvider
 from velune.providers.adapters.google import GoogleProvider
-from velune.core.types.provider import ProviderHealth
+from velune.providers.adapters.openai import OpenAIProvider
+
+
+class MockResponse:
+    def __init__(self, status_code):
+        self.status_code = status_code
 
 @pytest.mark.asyncio
 async def test_openai_health_check_success():
-    provider = OpenAIProvider()
-    with patch("velune.providers.adapters.openai.AsyncOpenAI") as MockClient:
-        instance = MockClient.return_value
-        instance.models.list = AsyncMock()
-        health = await provider.health_check()
-        # Even if we don't have a real key, the mock prevents throwing
-        # Wait, if there's no key, the provider might return UNAUTHENTICATED before network call.
-        # Let's assume we patch the key retrieval.
-        pass
+    with patch("velune.providers.adapters.openai.get_key", return_value="fake-key"):
+        provider = OpenAIProvider()
+        with patch("httpx.AsyncClient.get", return_value=MockResponse(200)):
+            health = await provider.health_check()
+            assert health == ProviderHealth.HEALTHY
+
 
 @pytest.mark.asyncio
 async def test_anthropic_health_check_failure():
-    provider = AnthropicProvider()
-    with patch("velune.providers.keystore.get_key", return_value="fake-key"):
-        with patch("velune.providers.adapters.anthropic.AsyncAnthropic") as MockClient:
-            instance = MockClient.return_value
-            instance.models.list = AsyncMock(side_effect=Exception("Network Error"))
-            
+    with patch("velune.providers.adapters.anthropic.get_key", return_value="fake-key"):
+        provider = AnthropicProvider()
+        with patch("httpx.AsyncClient.post", side_effect=Exception("Network Error")):
             health = await provider.health_check()
-            assert health == ProviderHealth.OFFLINE
+            assert health == ProviderHealth.UNAVAILABLE
+
 
 @pytest.mark.asyncio
 async def test_google_health_check_unauthenticated():
-    provider = GoogleProvider()
-    with patch("velune.providers.keystore.get_key", return_value=None):
+    with patch("velune.providers.adapters.google.get_key", return_value=None):
+        provider = GoogleProvider()
         health = await provider.health_check()
-        assert health == ProviderHealth.UNAUTHENTICATED
+        assert health == ProviderHealth.UNAVAILABLE
+
 
 @pytest.mark.asyncio
 async def test_openai_streaming_mock():
@@ -42,8 +45,9 @@ async def test_openai_streaming_mock():
     caps = provider.get_capabilities()
     assert caps.supports_streaming is True
 
+
 @pytest.mark.asyncio
 async def test_anthropic_tool_calling_mock():
     provider = AnthropicProvider()
     caps = provider.get_capabilities()
-    assert caps.supports_tools is True
+    assert caps.supports_function_calling is True

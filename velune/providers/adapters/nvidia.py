@@ -84,7 +84,7 @@ class NVIDIAProvider(ModelProvider):
                 raise ProviderAuthenticationError("NVIDIA API key is invalid or expired.")
             resp.raise_for_status()
             data = resp.json()
-            
+
             models = []
             for item in data.get("data", []):
                 model_id = item.get("id")

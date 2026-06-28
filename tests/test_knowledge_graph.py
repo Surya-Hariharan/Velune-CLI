@@ -33,7 +33,6 @@ from velune.repository.schemas import (
     RepositorySymbolKind,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -50,11 +49,36 @@ def graph(tmp_path: Path) -> KnowledgeGraph:
 @pytest.fixture
 def sample_nodes() -> list[KnowledgeNode]:
     return [
-        KnowledgeNode(id="file:main.py", node_type=NodeType.FILE, label="main.py", file_path="main.py"),
-        KnowledgeNode(id="file:utils.py", node_type=NodeType.FILE, label="utils.py", file_path="utils.py"),
-        KnowledgeNode(id="sym:main.py:run", node_type=NodeType.FUNCTION, label="run", file_path="main.py", line_start=5, line_end=20),
-        KnowledgeNode(id="sym:utils.py:Helper", node_type=NodeType.CLASS, label="Helper", file_path="utils.py", line_start=1, line_end=30),
-        KnowledgeNode(id="sym:utils.py:Helper.do_work", node_type=NodeType.METHOD, label="do_work", file_path="utils.py", line_start=5, line_end=15),
+        KnowledgeNode(
+            id="file:main.py", node_type=NodeType.FILE, label="main.py", file_path="main.py"
+        ),
+        KnowledgeNode(
+            id="file:utils.py", node_type=NodeType.FILE, label="utils.py", file_path="utils.py"
+        ),
+        KnowledgeNode(
+            id="sym:main.py:run",
+            node_type=NodeType.FUNCTION,
+            label="run",
+            file_path="main.py",
+            line_start=5,
+            line_end=20,
+        ),
+        KnowledgeNode(
+            id="sym:utils.py:Helper",
+            node_type=NodeType.CLASS,
+            label="Helper",
+            file_path="utils.py",
+            line_start=1,
+            line_end=30,
+        ),
+        KnowledgeNode(
+            id="sym:utils.py:Helper.do_work",
+            node_type=NodeType.METHOD,
+            label="do_work",
+            file_path="utils.py",
+            line_start=5,
+            line_end=15,
+        ),
     ]
 
 
@@ -63,8 +87,14 @@ def sample_edges() -> list[KnowledgeEdge]:
     return [
         KnowledgeEdge(source="file:main.py", target="file:utils.py", edge_type=EdgeType.IMPORTS),
         KnowledgeEdge(source="file:main.py", target="sym:main.py:run", edge_type=EdgeType.DEFINES),
-        KnowledgeEdge(source="file:utils.py", target="sym:utils.py:Helper", edge_type=EdgeType.DEFINES),
-        KnowledgeEdge(source="sym:utils.py:Helper", target="sym:utils.py:Helper.do_work", edge_type=EdgeType.CONTAINS),
+        KnowledgeEdge(
+            source="file:utils.py", target="sym:utils.py:Helper", edge_type=EdgeType.DEFINES
+        ),
+        KnowledgeEdge(
+            source="sym:utils.py:Helper",
+            target="sym:utils.py:Helper.do_work",
+            edge_type=EdgeType.CONTAINS,
+        ),
     ]
 
 
@@ -152,11 +182,15 @@ class TestKnowledgeGraphPersistence:
         sources = {n.id for n, _ in nbrs}
         assert "file:main.py" in sources
 
-    def test_neighbors_filtered_by_edge_type(self, graph: KnowledgeGraph, sample_nodes, sample_edges):
+    def test_neighbors_filtered_by_edge_type(
+        self, graph: KnowledgeGraph, sample_nodes, sample_edges
+    ):
         _run(graph.upsert_nodes_bulk(sample_nodes))
         _run(graph.upsert_edges_bulk(sample_edges))
 
-        defines_nbrs = _run(graph.neighbors("file:main.py", edge_type=EdgeType.DEFINES, direction="out"))
+        defines_nbrs = _run(
+            graph.neighbors("file:main.py", edge_type=EdgeType.DEFINES, direction="out")
+        )
         assert len(defines_nbrs) == 1
         assert defines_nbrs[0][0].id == "sym:main.py:run"
 
@@ -238,13 +272,13 @@ class TestSubgraph:
         assert any(n.id == "file:main.py" for n in nodes)
         assert len(edges) == 0
 
-    def test_subgraph_filtered_by_edge_type(self, graph: KnowledgeGraph, sample_nodes, sample_edges):
+    def test_subgraph_filtered_by_edge_type(
+        self, graph: KnowledgeGraph, sample_nodes, sample_edges
+    ):
         _run(graph.upsert_nodes_bulk(sample_nodes))
         _run(graph.upsert_edges_bulk(sample_edges))
 
-        nodes, edges = _run(
-            graph.subgraph("file:main.py", depth=2, edge_types=[EdgeType.IMPORTS])
-        )
+        nodes, edges = _run(graph.subgraph("file:main.py", depth=2, edge_types=[EdgeType.IMPORTS]))
         edge_types = {e.edge_type for e in edges}
         assert EdgeType.DEFINES not in edge_types
 

@@ -143,18 +143,19 @@ class VeluneMCPClient:
     async def connect(self) -> list[dict[str, Any]]:
         """Connect and return list of available tool dicts with strict timeouts."""
         import asyncio
+
         conn = make_connection(self._config, allowed_hosts=self._allowed_hosts)
         try:
             await asyncio.wait_for(conn.connect(), timeout=15.0)
         except asyncio.TimeoutError:
             raise RuntimeError(f"MCP server '{self.server_name}' handshake timed out.")
-            
+
         self._connection = conn
         try:
             self._raw_tools = await asyncio.wait_for(conn.list_tools(), timeout=10.0)
         except asyncio.TimeoutError:
             raise RuntimeError(f"MCP server '{self.server_name}' tool listing timed out.")
-            
+
         return [
             {
                 "name": t.name,
@@ -176,18 +177,22 @@ class VeluneMCPClient:
             for t in self._raw_tools
         ]
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 60.0) -> str:
+    async def call_tool(
+        self, tool_name: str, arguments: dict[str, Any], timeout: float = 60.0
+    ) -> str:
         """Directly call a tool by its raw (un-prefixed) name with a timeout."""
         import asyncio
+
         if self._connection is None:
             raise RuntimeError(f"MCP client '{self.server_name}' is not connected.")
         try:
             return await asyncio.wait_for(
-                self._connection.call_tool(tool_name, arguments), 
-                timeout=timeout
+                self._connection.call_tool(tool_name, arguments), timeout=timeout
             )
         except asyncio.TimeoutError:
-            raise RuntimeError(f"MCP tool '{tool_name}' on '{self.server_name}' timed out after {timeout} seconds.")
+            raise RuntimeError(
+                f"MCP tool '{tool_name}' on '{self.server_name}' timed out after {timeout} seconds."
+            )
 
     async def disconnect(self) -> None:
         """Disconnect and clean up."""

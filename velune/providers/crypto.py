@@ -49,11 +49,12 @@ def _get_fallback_key() -> bytes:
 
 def get_or_create_master_key() -> bytes:
     """Retrieve the master key from the OS keyring, or create/store a new one.
-    
+
     If the keyring is unavailable, falls back to a machine-specific key.
     """
     try:
         import keyring
+
         key_b64 = keyring.get_password(_SERVICE, _USERNAME)
         if key_b64:
             return base64.b64decode(key_b64.encode("ascii"))
@@ -66,6 +67,7 @@ def get_or_create_master_key() -> bytes:
         new_key = AESGCM.generate_key(bit_length=256)
         key_b64 = base64.b64encode(new_key).decode("ascii")
         import keyring
+
         keyring.set_password(_SERVICE, _USERNAME, key_b64)
         return new_key
     except Exception as e:

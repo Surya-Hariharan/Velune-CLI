@@ -7,14 +7,11 @@ directly so they are always exercised.
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from velune.repository import _native
-
 
 # ─── sha256_file ─────────────────────────────────────────────────────────────
 
@@ -24,7 +21,10 @@ class TestSha256File:
         f = tmp_path / "empty.bin"
         f.write_bytes(b"")
         # SHA-256 of empty input
-        assert _native.sha256_file(f) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        assert (
+            _native.sha256_file(f)
+            == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        )
 
     def test_known_content(self, tmp_path: Path) -> None:
         f = tmp_path / "hello.txt"

@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from velune.intelligence.events import (
     RepositoryEventType,
@@ -32,9 +30,8 @@ from velune.intelligence.events import (
 )
 from velune.intelligence.graph_patcher import KnowledgeGraphPatcher, PatchResult
 from velune.knowledge.graph import KnowledgeGraph
-from velune.knowledge.schemas import EdgeType, KnowledgeNode, NodeType
+from velune.knowledge.schemas import KnowledgeNode, NodeType
 from velune.repository.incremental_indexer import IndexDelta
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -169,7 +166,9 @@ class TestKnowledgeGraphFileDeletion:
     def _seed(self, graph: KnowledgeGraph) -> None:
         nodes = [
             KnowledgeNode(id="file:a.py", node_type=NodeType.FILE, label="a.py", file_path="a.py"),
-            KnowledgeNode(id="sym:a.py:fn", node_type=NodeType.FUNCTION, label="fn", file_path="a.py"),
+            KnowledgeNode(
+                id="sym:a.py:fn", node_type=NodeType.FUNCTION, label="fn", file_path="a.py"
+            ),
             KnowledgeNode(id="file:b.py", node_type=NodeType.FILE, label="b.py", file_path="b.py"),
         ]
         _run(graph.upsert_nodes_bulk(nodes))
@@ -187,7 +186,7 @@ class TestKnowledgeGraphFileDeletion:
         g = _make_graph(tmp_path)
         self._seed(g)
         _run(g.delete_nodes_by_files(["a.py"]))
-        stats = _run(g.stats())
+        _run(g.stats())
         # b.py's file node should remain
         file_nodes = _run(g.get_nodes_by_type(NodeType.FILE))
         file_paths = {n.file_path for n in file_nodes}
@@ -196,7 +195,7 @@ class TestKnowledgeGraphFileDeletion:
     def test_delete_nonexistent_file_is_noop(self, tmp_path: Path):
         g = _make_graph(tmp_path)
         self._seed(g)
-        count = _run(g.delete_nodes_by_file("does_not_exist.py"))
+        _run(g.delete_nodes_by_file("does_not_exist.py"))
         stats = _run(g.stats())
         assert stats.node_count == 3  # unchanged
 
@@ -259,7 +258,7 @@ class TestKnowledgeGraphPatcher:
 
         # Now remove one file (don't need it to exist on disk for removal)
         delta = IndexDelta(to_remove=["utils.py"])
-        result = _run(patcher.patch(delta))
+        _run(patcher.patch(delta))
 
         after = _run(g.stats())
         assert after.node_count < before.node_count
@@ -271,10 +270,10 @@ class TestKnowledgeGraphPatcher:
 
         # Initial add
         _run(patcher.patch(IndexDelta(to_add=["app.py"])))
-        before = _run(g.stats())
+        _run(g.stats())
 
         # Simulate update (file content unchanged on disk, but treat as update)
-        result = _run(patcher.patch(IndexDelta(to_update=["app.py"])))
+        _run(patcher.patch(IndexDelta(to_update=["app.py"])))
         after = _run(g.stats())
 
         # Node count should be stable (old removed, new added)
@@ -317,7 +316,7 @@ class TestRepositoryIntelligenceEngine:
             cognition=cognition,
             knowledge_graph=graph,
             bus=bus,
-            change_poll_interval=60.0,   # effectively disable polling in tests
+            change_poll_interval=60.0,  # effectively disable polling in tests
             git_poll_interval=60.0,
         )
         return engine, bus, cognition

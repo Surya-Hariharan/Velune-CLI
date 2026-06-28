@@ -59,14 +59,15 @@ def show_providers() -> None:
 
     print_provider_health_report(console)
 
+
 @doctor_cmd.command(name="network")
 def check_network() -> None:
     """Proactively ping all providers and display network health dashboard."""
-    import asyncio
     from rich.table import Table
+
+    from velune.core.types.provider import ProviderHealth
     from velune.providers.manager import ProviderManager
     from velune.providers.registry import ProviderRegistry
-    from velune.core.types.provider import ProviderHealth
 
     async def _run() -> None:
         registry = ProviderRegistry()
@@ -74,7 +75,9 @@ def check_network() -> None:
         console.print("[cyan]Pinging all registered providers...[/cyan]")
         health_map = await manager.check_all_health()
 
-        table = Table(title="Provider Network Health Dashboard", show_header=True, header_style="bold magenta")
+        table = Table(
+            title="Provider Network Health Dashboard", show_header=True, header_style="bold magenta"
+        )
         table.add_column("Provider", style="cyan")
         table.add_column("Status", style="green")
         table.add_column("Models Discovered")
@@ -82,31 +85,39 @@ def check_network() -> None:
 
         for pid, status in health_map.items():
             provider = registry.get(pid)
-            color = "green" if status == ProviderHealth.HEALTHY else "red" if status in (ProviderHealth.OFFLINE, ProviderHealth.UNAUTHORIZED) else "yellow"
-            
+            color = (
+                "green"
+                if status == ProviderHealth.HEALTHY
+                else "red"
+                if status in (ProviderHealth.OFFLINE, ProviderHealth.UNAUTHORIZED)
+                else "yellow"
+            )
+
             models_str = "0"
             streaming = "Unknown"
-            
+
             if status == ProviderHealth.HEALTHY and provider:
                 try:
                     models = await provider.list_models()
                     models_str = str(len(models))
                 except Exception:
                     models_str = "Error"
-                
+
                 caps = provider.get_capabilities()
                 streaming = "✓" if caps.supports_streaming else "✗"
-            
+
             table.add_row(
                 pid,
                 f"[{color}]{status.value.upper()}[/{color}]",
                 models_str,
                 streaming,
             )
-        
+
         console.print(table)
-    
-    asyncio.run(_run())
+
+    from velune.kernel.entrypoint import run_async
+
+    run_async(_run())
 
 
 @doctor_cmd.command(name="check")
