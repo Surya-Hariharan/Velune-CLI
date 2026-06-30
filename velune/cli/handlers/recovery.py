@@ -1,0 +1,168 @@
+"""Slash-command handlers for /backup, /restore, /recover.
+
+Thin wrappers over :mod:`velune.recovery.archive` and the session store so the
+REPL surface stays in lockstep with the top-level CLI commands.
+"""
+
+from __future__ import annotations
+
+import shlex
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from velune.cli import design
+from velune.recovery import SUBSYSTEMS, create_backup, restore_backup
+
+if TYPE_CHECKING:
+    from velune.cli.repl import VeluneREPL
+
+
+def _parse_include(tokens: list[str]) -> set[str] | None:
+    """Pull a ``--include a,b`` filter out of *tokens*, validating names.
+
+    Raises ``ValueError`` on an unknown subsystem so callers abort rather than
+    silently widening the operation to every subsystem.
+    """
+    for i, tok in enumerate(tokens):
+        if tok in ("--include", "-i") and i + 1 < len(tokens):
+            names = {n.strip() for n in tokens[i + 1].split(",") if n.strip()}
+            unknown = names - set(SUBSYSTEMS)
+            if unknown:
+                raise ValueError(f"Unknown subsystem(s): {', '.join(sorted(unknown))}")
+            return names
+    return None
+
+
+async def cmd_backup(repl: VeluneREPL, args: str) -> None:
+    """/backup [path] [--include a,b] [--no-secrets]"""
+    console = repl.console
+    tokens = shlex.split(args) if args else []
+    no_secrets = "--no-secrets" in tokens
+    try:
+        include = _parse_include(tokens)
+    except ValueError as exc:
+        console.print(f"[{design.DANGER}]{exc}[/{design.DANGER}]")
+        return
+    positional = [t for t in tokens if not t.startswith("-")]
+    # Drop the value that followed --include, if any.
+    if include is not None and positional:
+        inc_raw = next(
+            (tokens[i + 1] for i, t in enumerate(tokens) if t in ("--include", "-i")), ""
+        )
+        positional = [p for p in positional if p != inc_raw]
+
+    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    dest = Path(positional[0]) if positional else Path.cwd() / f"velune-backup-{date_str}.tar.gz"
+
+    workspace = Path(str(repl.container.get("runtime.workspace") or Path.cwd()))
+    console.print(f"[{design.MUTED}]Building backup...[/{design.MUTED}]")
+    result = create_backup(dest, include=include, with_secrets=not no_secrets, workspace=workspace)
+
+    console.print(f"[{design.OK}]Backup written:[/{design.OK}] {result.path}")
+    console.print(f"[{design.MUTED}]Size: {result.size_bytes / 1024:.1f} KB[/{design.MUTED}]")
+    if result.with_secrets and "providers" in result.subsystems:
+        console.print(
+            f"[{design.WARN}]Archive contains plaintext API keys — store it securely.[/{design.WARN}]"
+        )
+
+
+async def cmd_restore(repl: VeluneREPL, args: str) -> None:
+    """/restore <archive> [--include a,b] [--overwrite] [--dry-run]"""
+    console = repl.console
+    tokens = shlex.split(args) if args else []
+    if not tokens:
+        console.print(
+            f"[{design.WARN}]Usage:[/{design.WARN}] /restore <archive> [--dry-run] [--overwrite]"
+        )
+        return
+
+    overwrite = "--overwrite" in tokens
+    dry_run = "--dry-run" in tokens
+    try:
+        include = _parse_include(tokens)
+    except ValueError as exc:
+        console.print(f"[{design.DANGER}]{exc}[/{design.DANGER}]")
+        return
+    inc_raw = next((tokens[i + 1] for i, t in enumerate(tokens) if t in ("--include", "-i")), "")
+    positional = [t for t in tokens if not t.startswith("-") and t != inc_raw]
+    if not positional:
+        console.print(
+            f"[{design.WARN}]Provide the archive path: /restore <archive>[/{design.WARN}]"
+        )
+        return
+
+    src = Path(positional[0])
+    workspace = Path(str(repl.container.get("runtime.workspace") or Path.cwd()))
+    try:
+        result = restore_backup(
+            src, include=include, overwrite=overwrite, dry_run=dry_run, workspace=workspace
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[{design.DANGER}]{exc}[/{design.DANGER}]")
+        return
+
+    label = "Would restore" if dry_run else "Restored"
+    any_action = False
+    for name in SUBSYSTEMS:
+        actions = result.restored.get(name)
+        if actions:
+            any_action = True
+            console.print(f"[{design.OK}]{label} {name}:[/{design.OK}] {', '.join(actions)}")
+        skipped = result.skipped.get(name)
+        if skipped:
+            console.print(f"[{design.MUTED}]Skipped {name}:[/{design.MUTED}] {', '.join(skipped)}")
+    if not any_action:
+        console.print(f"[{design.MUTED}]Nothing restored.[/{design.MUTED}]")
+
+
+async def cmd_recover(repl: VeluneREPL, args: str) -> None:
+    """/recover [id] [--all]"""
+    console = repl.console
+    store = repl._session_store
+    tokens = shlex.split(args) if args else []
+    recover_all = "--all" in tokens or "-a" in tokens
+    positional = [t for t in tokens if not t.startswith("-")]
+
+    orphans = store.list_orphaned_autosaves()
+
+    if recover_all:
+        if not orphans:
+            console.print(f"[{design.MUTED}]No unsaved sessions to recover.[/{design.MUTED}]")
+            return
+        for meta in orphans:
+            saved = store.recover_autosave(meta.id)
+            if saved:
+                console.print(f"[{design.OK}]Recovered[/{design.OK}] {saved.id} — {saved.title}")
+        return
+
+    if positional:
+        saved = store.recover_autosave(positional[0])
+        if saved is None:
+            console.print(
+                f"[{design.DANGER}]No orphaned autosave '{positional[0]}' found.[/{design.DANGER}]"
+            )
+            return
+        console.print(
+            f"[{design.OK}]Recovered session [bold]{saved.id}[/bold] — {saved.title}[/{design.OK}]"
+        )
+        return
+
+    if not orphans:
+        console.print(f"[{design.OK}]No unsaved sessions — nothing to recover.[/{design.OK}]")
+        return
+
+    from rich.box import ROUNDED
+    from rich.table import Table
+
+    table = Table(box=ROUNDED, border_style=design.FAINT, expand=False)
+    table.add_column("ID", style=design.ACCENT, no_wrap=True)
+    table.add_column("Title", style=design.INFO)
+    table.add_column("Updated", style=design.MUTED, no_wrap=True)
+    table.add_column("Turns", justify="right", style=design.MUTED)
+    for m in orphans:
+        table.add_row(m.id, m.title, m.updated_at[:16].replace("T", " "), str(m.turn_count))
+    console.print(table)
+    console.print(
+        f"[{design.MUTED}]Recover one: [/]/recover <id>   [{design.MUTED}]all: [/]/recover --all"
+    )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from rich import box
@@ -12,10 +13,13 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from velune.cli import design
+from velune.cli.statusbar import _context_bar
 
 if TYPE_CHECKING:
+    from velune.cli.display.system_snapshot import LiveSessionState, SystemSnapshot
     from velune.core.task_registry import JobRegistry
     from velune.proactive.alerts import AlertStore
 
@@ -48,11 +52,18 @@ class ProgressDashboard:
         job_registry: JobRegistry | None,
         alert_store: AlertStore | None,
         health_monitor: Any | None = None,
+        snapshot: SystemSnapshot | None = None,
+        live_state: Callable[[], LiveSessionState] | None = None,
     ) -> None:
         self._console = console
         self._jobs = job_registry
         self._alerts = alert_store
         self._health = health_monitor
+        # Static system snapshot — built once by the caller and reused across the
+        # 500 ms refresh loop so the live view never re-reads disk mid-tick.
+        self._snapshot = snapshot
+        # Fast-changing session fields (model/mode/context) — re-read every tick.
+        self._live_state = live_state
 
     # ------------------------------------------------------------------
     # Rich builders — all colours from design tokens
@@ -152,12 +163,162 @@ class ProgressDashboard:
             padding=design.PADDING_COMPACT,
         )
 
+    # ------------------------------------------------------------------
+    # Session band + State row — the "what is Velune doing?" surface
+    # ------------------------------------------------------------------
+
+    _FRESHNESS_COLOR: dict[str, str] = {
+        "synced": design.OK,
+        "stale": design.WARN,
+        "unknown": design.FAINT,
+        "no-index": design.FAINT,
+    }
+
+    def _provider_line(self, provider_id: str | None) -> str:
+        """Health + latency for *provider_id*, read live from the health monitor."""
+        if not provider_id:
+            return f"[{design.FAINT}]no provider[/]"
+        if self._health is None:
+            return f"[{design.WHITE}]{provider_id}[/]"
+        try:
+            manifests = self._health.get_all_manifests()
+            m = manifests.get(provider_id)
+        except Exception:
+            m = None
+        if m is None:
+            return f"[{design.WHITE}]{provider_id}[/]"
+        health_val = m.health.value if hasattr(m.health, "value") else str(m.health)
+        color = {
+            "healthy": design.OK,
+            "degraded": design.WARN,
+            "unavailable": design.DANGER,
+        }.get(health_val, design.FAINT)
+        latency = getattr(m, "estimated_latency_ms", None)
+        lat = f"  [{design.FAINT}]{latency}ms[/]" if latency else ""
+        return f"[{design.WHITE}]{provider_id}[/]  [{color}]{health_val}[/]{lat}"
+
+    def _build_session_panel(self) -> Panel:
+        live = self._live_state() if self._live_state else None
+        snap = self._snapshot
+
+        model = (live.model_id if live and live.model_id else None) or "no model"
+        mode = live.mode_label if live else "NORMAL"
+        provider = self._provider_line(getattr(live, "provider_id", None) if live else None)
+
+        line1 = Text.from_markup(
+            f"{provider}  {design.SEP}  [{design.WHITE}]{model}[/]  "
+            f"{design.SEP}  [{design.MUTED}]{mode}[/]"
+        )
+
+        line2 = Text()
+        if snap is not None:
+            line2.append(snap.workspace, style=design.MUTED)
+            if snap.git_branch:
+                clean = snap.working_tree_dirty
+                git_state = f"git:{snap.git_branch} " + (
+                    "✓clean" if clean == 0 else (f"{clean} dirty" if clean > 0 else "")
+                )
+                line2.append(f"  {git_state.strip()}", style=design.FAINT)
+        if live is not None:
+            pct = live.context_pct
+            ctx_color = design.OK if pct < 70 else (design.WARN if pct < 90 else design.DANGER)
+            line2.append(f"   ctx {_context_bar(pct)} ", style=ctx_color)
+            line2.append(f"{pct:.0f}%", style=ctx_color)
+
+        body = Text.assemble(line1, "\n", line2)
+        return Panel(
+            body,
+            title=f"[bold {design.ACCENT}]Session[/]",
+            border_style=design.FAINT,
+            box=box.ROUNDED,
+            padding=design.PADDING_COMPACT,
+        )
+
+    def _build_index_panel(self) -> Panel:
+        snap = self._snapshot
+        if snap is None or not snap.index.exists:
+            body = f"[{design.FAINT}]not indexed — run /index[/]"
+        else:
+            ix = snap.index
+            color = self._FRESHNESS_COLOR.get(ix.freshness, design.FAINT)
+            body = (
+                f"[{color}]{ix.freshness}[/]\n"
+                f"[{design.WHITE}]{ix.files}[/] [{design.FAINT}]files[/]  "
+                f"[{design.WHITE}]{ix.symbols}[/] [{design.FAINT}]symbols[/]"
+            )
+        return Panel(
+            body,
+            title=f"[bold {design.INFO}]Index[/]",
+            border_style=design.FAINT,
+            box=box.ROUNDED,
+            padding=design.PADDING_COMPACT,
+        )
+
+    def _build_memory_panel(self) -> Panel:
+        snap = self._snapshot
+        tables = snap.memory_tables if snap else []
+        if not tables:
+            body = f"[{design.FAINT}]no records yet[/]"
+        else:
+            top = sorted(tables, key=lambda t: t.rows, reverse=True)[:3]
+            lines = [f"[{design.WHITE}]{t.rows}[/] [{design.FAINT}]{t.table}[/]" for t in top]
+            body = "\n".join(lines)
+        return Panel(
+            body,
+            title=f"[bold {design.INFO}]Memory[/]",
+            border_style=design.FAINT,
+            box=box.ROUNDED,
+            padding=design.PADDING_COMPACT,
+        )
+
+    def _build_integrations_panel(self) -> Panel:
+        snap = self._snapshot
+        if snap is None:
+            body = f"[{design.FAINT}]unavailable[/]"
+        else:
+            ig = snap.integrations
+            cfg = "✓" if ig.config_exists else "—"
+            body = (
+                f"[{design.WHITE}]{ig.plugins}[/] [{design.FAINT}]plugins[/]  "
+                f"[{design.WHITE}]{ig.mcp_servers}[/] [{design.FAINT}]mcp[/]\n"
+                f"[{design.WHITE}]{ig.sessions}[/] [{design.FAINT}]sessions[/]  "
+                f"[{design.FAINT}]config {cfg}[/]"
+            )
+        return Panel(
+            body,
+            title=f"[bold {design.INFO}]Integrations[/]",
+            border_style=design.FAINT,
+            box=box.ROUNDED,
+            padding=design.PADDING_COMPACT,
+        )
+
     def _build_layout(self) -> Layout:
         layout = Layout()
-        layout.split_column(
-            Layout(name="jobs", ratio=2),
-            Layout(name="bottom", ratio=1),
-        )
+        # The Session band + State row only appear when a snapshot was supplied,
+        # so existing callers that construct a bare jobs/alerts/health dashboard
+        # keep their original layout.
+        rich_view = self._snapshot is not None or self._live_state is not None
+        if rich_view:
+            layout.split_column(
+                Layout(name="session", size=4),
+                Layout(name="state", size=4),
+                Layout(name="jobs", ratio=2),
+                Layout(name="bottom", ratio=1),
+            )
+            layout["session"].update(self._build_session_panel())
+            layout["state"].split_row(
+                Layout(name="index"),
+                Layout(name="memory"),
+                Layout(name="integrations"),
+            )
+            layout["index"].update(self._build_index_panel())
+            layout["memory"].update(self._build_memory_panel())
+            layout["integrations"].update(self._build_integrations_panel())
+        else:
+            layout.split_column(
+                Layout(name="jobs", ratio=2),
+                Layout(name="bottom", ratio=1),
+            )
         layout["bottom"].split_row(
             Layout(name="alerts"),
             Layout(name="health"),

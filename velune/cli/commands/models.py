@@ -148,6 +148,19 @@ def models_scan(
     providers = {r.provider_id for r in records}
     console.print(f"[dim]Discovered {total} model(s) across {len(providers)} provider(s).[/dim]")
 
+    if records:
+        from velune.cli import guidance, ui
+
+        steps = guidance.steps_for("models_scanned", model=records[0].model_id)
+        if steps:
+            console.print(
+                ui.next_steps(
+                    "Models discovered",
+                    f"{total} model(s) ready across {len(providers)} provider(s).",
+                    steps,
+                )
+            )
+
 
 async def _models_scan_async(cli_context: CLIContext, provider_id: str | None, probe: bool) -> Any:
     container = cli_context.container
@@ -335,6 +348,20 @@ def models_list(ctx: typer.Context) -> None:
             ]
             if over_budget:
                 console.print(f"[yellow]{len(over_budget)} models exceed available VRAM[/yellow]")
+
+    if len(records) > 1:
+        from velune.cli import guidance, ui
+
+        steps = guidance.steps_for("models_listed_multi", model=records[0].model_id)
+        if steps:
+            console.print(
+                ui.next_steps(
+                    "Models registered",
+                    f"{len(records)} models available — pick one to work with.",
+                    steps,
+                    kind="info",
+                )
+            )
 
 
 @models_cmd.command("assign")

@@ -177,6 +177,7 @@ async def _run_command_async(
                     title="[bold green]Success Report[/bold green]",
                 )
             )
+            _print_run_next_steps(success=True, run_id=str(state.run_id))
         else:
             console.print(
                 Panel(
@@ -198,9 +199,31 @@ async def _run_command_async(
                     title="[bold red]Rollback Execution Report[/bold red]",
                 )
             )
+            _print_run_next_steps(success=False, run_id=str(state.run_id))
 
     # 6. Graceful Shutdown
     await lifecycle.shutdown()
+
+
+def _print_run_next_steps(*, success: bool, run_id: str) -> None:
+    """Close the run with review steps (success) or recovery steps (rollback)."""
+    from velune.cli import guidance, ui
+
+    outcome = "run_succeeded" if success else "run_rolled_back"
+    steps = guidance.steps_for(outcome, run_id=run_id)
+    if not steps:
+        return
+    if success:
+        console.print(ui.next_steps("Run complete", "Changes applied and checkpointed.", steps))
+    else:
+        console.print(
+            ui.next_steps(
+                "Run rolled back",
+                "No changes were kept — your workspace is intact.",
+                steps,
+                kind="warning",
+            )
+        )
 
 
 def _maybe_confirm_cost(cli_context: CLIContext, task: str) -> None:

@@ -317,6 +317,7 @@ def add_provider(
             _show_models_preview(console, result.models[:8], len(result.models))
         if result.account_info:
             _show_account_info(console, result.account_info, pid)
+        _print_provider_next_steps(pid, result.models, validated=True)
     else:
         console.print(f"[{design.WARN}]{result.human_message()}[/{design.WARN}]")
         if result.status == ValidationStatus.NETWORK_ERROR:
@@ -324,7 +325,32 @@ def add_provider(
             if save_q:
                 save_key(pid, api_key)
                 console.print(f"[{design.WARN}]Key saved without validation.[/{design.WARN}]")
+                _print_provider_next_steps(pid, result.models, validated=False)
         raise typer.Exit(1)
+
+
+def _print_provider_next_steps(pid: str, models: list[str], *, validated: bool) -> None:
+    """Close the add-provider flow with concrete follow-ups (Do → Suggest → Next)."""
+    from velune.cli import guidance, ui
+
+    suggested_model = models[0] if models else "<model-id>"
+    outcome = "provider_added" if validated else "provider_added_unvalidated"
+    steps = guidance.steps_for(outcome, model=suggested_model)
+    if not steps:
+        return
+    summary = (
+        f"{pid} validated — {len(models)} model(s) available."
+        if validated
+        else f"{pid} key saved (not yet validated)."
+    )
+    console.print(
+        ui.next_steps(
+            "Provider added",
+            summary,
+            steps,
+            kind="success" if validated else "warning",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

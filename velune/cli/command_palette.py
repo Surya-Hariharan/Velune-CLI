@@ -206,7 +206,14 @@ class CommandPalette:
             selected = index == self.model.selected_index
             marker = ">" if selected else " "
             style = "class:palette.selected" if selected else "class:palette.command"
-            lines.append((style, f"  {marker} /{command.name}\n"))
+            # Name + a short description so the grouped, empty-query view reads as a
+            # browseable feature menu, not just a list of command names.
+            name_cell = f"/{command.name}"
+            desc = command.description
+            if len(desc) > 52:
+                desc = desc[:51].rstrip() + "…"
+            lines.append((style, f"  {marker} {name_cell:<16}"))
+            lines.append(("class:palette.muted", f"{desc}\n"))
         return FormattedText(lines)
 
     def render_details(self) -> FormattedText:

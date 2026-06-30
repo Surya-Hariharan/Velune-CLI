@@ -158,6 +158,19 @@ async def _ask_command_async(
         display.render_step_header("Council Synthesizer")
         display.render_synthesized_response(final_summary)
 
+        from velune.cli import guidance, ui
+
+        short_task = prompt if len(prompt) <= 40 else prompt[:40].rstrip() + "…"
+        steps = guidance.steps_for("ask_completed", task=f'"{short_task}"')
+        if steps:
+            console.print(
+                ui.next_steps(
+                    "Council answered",
+                    "Turn this deliberation into action.",
+                    steps,
+                )
+            )
+
     # 7. Shutdown
     await lifecycle.shutdown()
 

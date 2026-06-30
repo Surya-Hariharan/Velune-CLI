@@ -44,6 +44,11 @@ def _trust_file() -> Path:
     return app_data_root() / _TRUST_FILE_NAME
 
 
+def trust_file_path() -> Path:
+    """Public path to the trust list file (for backup/recovery tooling)."""
+    return _trust_file()
+
+
 def _canonical(path: Path | str) -> str:
     """Return a stable, comparable absolute key for *path*."""
     p = Path(path)

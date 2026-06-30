@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -71,6 +72,10 @@ class VeluneREPL:
             status_state=self._status_state,
         )
         self._session_store = SessionStore()
+        # Stable id for this REPL's conversation, reused by autosave and the
+        # final archive so a recovered crash maps back to the same slot.
+        self._session_id = uuid.uuid4().hex[:8]
+        self._last_autosave: float = 0.0
         self._workspace_registry = WorkspaceRegistry()
         self._exit_requested = False
         import time as _time
@@ -508,6 +513,8 @@ class VeluneREPL:
         except Exception:
             pass
 
+        self._notify_orphaned_autosaves()
+
         try:
             while not self._exit_requested:
                 try:
@@ -621,6 +628,27 @@ class VeluneREPL:
             _log.warning("Background task cancellation failed: %s", exc)
         self.console.print("[dim]Goodbye.[/dim]")
 
+    def _autosave(self, *, force: bool = False) -> None:
+        """Crash-guard the live conversation (throttled to ~5s between writes)."""
+        if not self._conversation:
+            return
+        now = time.monotonic()
+        if not force and (now - self._last_autosave) < 5.0:
+            return
+        self._last_autosave = now
+        try:
+            workspace = str(self.container.get("runtime.workspace") or "")
+            self._session_store.autosave(
+                self._conversation,
+                session_id=self._session_id,
+                workspace=workspace,
+                model_id=self.active_model.model_id if self.active_model else "unknown",
+                mode=self._mode_manager.current.value,
+                total_tokens=self.session_tokens,
+            )
+        except Exception as exc:  # pragma: no cover - best effort
+            _log.debug("Autosave failed (non-fatal): %s", exc)
+
     def _archive_current_session(self) -> None:
         has_user = any(m.get("role") == "user" for m in self._conversation)
         has_assistant = any(m.get("role") == "assistant" for m in self._conversation)
@@ -633,7 +661,10 @@ class VeluneREPL:
             model_id=self.active_model.model_id if self.active_model else "unknown",
             mode=self._mode_manager.current.value,
             total_tokens=self.session_tokens,
+            session_id=self._session_id,
         )
+        # Clean exit — drop the crash-guard sidecar so it isn't flagged as orphaned.
+        self._session_store.clear_autosave(self._session_id)
 
     def _print_startup_banner(self) -> None:
         from velune import __version__
@@ -965,6 +996,7 @@ class VeluneREPL:
             _log.debug("MessageDisplay hook error (non-fatal): %s", exc)
 
         self._conversation.append({"role": "assistant", "content": assistant_text})
+        self._autosave()
         effective_tokens = tokens_used or len(assistant_text) // 4
         self._display_usage(model, effective_tokens)
         from velune.core.task_registry import track
@@ -1034,6 +1066,38 @@ class VeluneREPL:
         from velune.cli.handlers.settings import cmd_doctor
 
         await cmd_doctor(self, args)
+
+    async def _cmd_backup(self, args: str) -> None:
+        from velune.cli.handlers.recovery import cmd_backup
+
+        await cmd_backup(self, args)
+
+    async def _cmd_restore(self, args: str) -> None:
+        from velune.cli.handlers.recovery import cmd_restore
+
+        await cmd_restore(self, args)
+
+    async def _cmd_recover(self, args: str) -> None:
+        from velune.cli.handlers.recovery import cmd_recover
+
+        await cmd_recover(self, args)
+
+    def _notify_orphaned_autosaves(self) -> None:
+        """On startup, hint that an unsaved/crashed session can be recovered."""
+        try:
+            orphans = self._session_store.list_orphaned_autosaves()
+        except Exception:
+            return
+        if not orphans:
+            return
+        from velune.cli import design
+
+        n = len(orphans)
+        self.console.print(
+            f"[{design.WARN}]Recovered crash guard:[/{design.WARN}] "
+            f"{n} unsaved session{'s' if n > 1 else ''} found — "
+            f"run [bold]/recover[/bold] to restore."
+        )
 
     async def _cmd_sandbox(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_sandbox

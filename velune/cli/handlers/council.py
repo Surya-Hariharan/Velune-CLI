@@ -85,8 +85,11 @@ async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
-    """Open the live progress dashboard (jobs + alerts + provider health)."""
+    """Open the live system dashboard (session, state, jobs, alerts, health)."""
+    from pathlib import Path
+
     from velune.cli.display.dashboard import ProgressDashboard
+    from velune.cli.display.system_snapshot import LiveSessionState, build_system_snapshot
     from velune.kernel.async_utils import uncancel_task
 
     health_monitor = None
@@ -95,11 +98,36 @@ async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
     except Exception:
         pass
 
+    # Build the static snapshot once — on-disk reads must not run per refresh tick.
+    snapshot = None
+    try:
+        workspace = repl._mcp_registry.workspace or Path.cwd()
+        sessions = repl._session_store.list(workspace=str(workspace))
+        snapshot = build_system_snapshot(
+            Path(workspace),
+            plugin_count=repl._plugin_manager.plugin_count,
+            mcp_count=len(repl._mcp_registry._entries),
+            session_count=len(sessions),
+        )
+    except Exception:
+        snapshot = None
+
+    def _live_state() -> LiveSessionState:
+        model = repl.active_model
+        return LiveSessionState(
+            model_id=model.model_id if model else None,
+            provider_id=model.provider_id if model else None,
+            mode_label=repl._mode_manager.current.value.upper(),
+            context_pct=repl._context_tracker.percentage if model else 0.0,
+        )
+
     dashboard = ProgressDashboard(
         console=repl.console,
         job_registry=repl._job_registry,
         alert_store=repl._alert_store,
         health_monitor=health_monitor,
+        snapshot=snapshot,
+        live_state=_live_state,
     )
     async with repl._interrupts.foreground():
         try:

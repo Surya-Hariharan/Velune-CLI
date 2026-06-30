@@ -34,6 +34,7 @@ _WORKSPACE = "Workspace & Sessions"
 _SETUP = "Setup & Models"
 _ANALYTICS = "Analytics & Monitoring"
 _DIAG = "Diagnostics"
+_RECOVERY = "Trust & Recovery"
 
 
 @dataclass(frozen=True)
@@ -262,6 +263,34 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         _DIAG,
         "Trace a retrieval query through the search pipeline.",
     ),
+    # ── Trust & Recovery — never lose work ───────────────────────────────
+    CommandSpec(
+        "backup",
+        "command",
+        "velune.cli.commands.backup",
+        "backup_cmd",
+        _RECOVERY,
+        "Snapshot all Velune state to one portable archive.",
+        bootstrap="light",
+    ),
+    CommandSpec(
+        "restore",
+        "command",
+        "velune.cli.commands.backup",
+        "restore_cmd",
+        _RECOVERY,
+        "Restore Velune state from a backup archive.",
+        bootstrap="light",
+    ),
+    CommandSpec(
+        "recover",
+        "command",
+        "velune.cli.commands.recover",
+        "recover_cmd",
+        _RECOVERY,
+        "Recover an unsaved session left by a crash.",
+        bootstrap="light",
+    ),
 )
 
 _SPECS_BY_NAME: dict[str, CommandSpec] = {spec.name: spec for spec in COMMAND_SPECS}
@@ -278,7 +307,7 @@ def bootstrap_level(command: str | None) -> str:
     return spec.bootstrap if spec is not None else "full"
 
 
-PANEL_ORDER: tuple[str, ...] = (_CORE, _WORKSPACE, _SETUP, _ANALYTICS, _DIAG)
+PANEL_ORDER: tuple[str, ...] = (_CORE, _WORKSPACE, _SETUP, _ANALYTICS, _DIAG, _RECOVERY)
 
 BUILTIN_COMMAND_MODULES: Sequence[str] = tuple(dict.fromkeys(spec.module for spec in COMMAND_SPECS))
 

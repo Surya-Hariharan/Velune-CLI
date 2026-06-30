@@ -28,6 +28,7 @@ Component catalog
     error_panel(title, …)       cause / fix / detail error block
     success_panel(title, body)  green success block
     warning_panel(title, body)  amber warning block
+    next_steps(title, …)        "what next" follow-up footer (Do→Suggest→Next)
     modal(body, title)          full-weight dialog block
     confirm_text(question, …)   yes/no prompt text (pair with prompt_toolkit)
     empty_state(msg, hint)      empty-list placeholder
@@ -341,6 +342,65 @@ def warning_panel(title: str, body: RenderableType) -> Panel:
         body,
         title=f"[bold {design.WARN}]{title}[/]",
         border_style=design.WARN,
+        box=box.ROUNDED,
+        padding=design.PADDING_DEFAULT,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Outcome footer — Do → Explain → Suggest → Next
+# ---------------------------------------------------------------------------
+
+# A single suggested follow-up: (label, command, optional one-line why).
+Step = tuple[str, str, str | None]
+
+
+def next_steps(
+    title: str,
+    summary: str,
+    steps: list[Step],
+    *,
+    kind: str = "success",
+) -> Panel:
+    """Closing "what next" footer that turns an isolated command into a workflow.
+
+    Generalizes the onboarding ``_stage_done`` pattern so any command can end with
+    a summary plus an ordered list of concrete follow-up actions. Each step's
+    command is rendered in accent so it reads as something the user can run next.
+
+    Args:
+        title:   Short outcome headline, e.g. "Provider added".
+        summary: One-line recap of what just happened.
+        steps:   Ordered ``(label, command, why)`` follow-ups; ``why`` may be None.
+        kind:    Border/headline color — "success" (default) | "warning" | "info".
+
+    Example::
+
+        console.print(next_steps(
+            "Provider added",
+            "openai validated — 32 models available.",
+            [
+                ("Set as default model", "/model gpt-4o", None),
+                ("Discover all models", "/models scan", "probe capabilities"),
+            ],
+        ))
+    """
+    color = _state_color(kind)
+    body = Text()
+    body.append(summary, style=design.MUTED)
+    body.append("\n")
+    for label, command, why in steps:
+        body.append("\n")
+        body.append(f"  {design.ICON_ARROW} ", style=color)
+        body.append(label, style=design.WHITE)
+        body.append("  ")
+        body.append(command, style=f"bold {design.ACCENT}")
+        if why:
+            body.append(f"  {why}", style=design.FAINT)
+    return Panel(
+        body,
+        title=f"[bold {color}]{title}[/]",
+        border_style=color,
         box=box.ROUNDED,
         padding=design.PADDING_DEFAULT,
     )

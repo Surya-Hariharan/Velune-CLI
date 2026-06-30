@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import socket
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -182,6 +184,114 @@ class SessionStore:
             lines.append(turn.get("content", ""))
             lines.append("")
         return "\n".join(lines)
+
+    # ── Autosave / crash recovery ────────────────────────────────────────
+
+    @property
+    def autosave_dir(self) -> Path:
+        """Sidecar directory holding the live, crash-guarded conversation."""
+        return self.root / ".autosave"
+
+    def autosave(
+        self,
+        conversation: list[dict],
+        *,
+        session_id: str,
+        workspace: str,
+        model_id: str,
+        mode: str = "normal",
+        total_tokens: int = 0,
+    ) -> None:
+        """Persist the active conversation to a crash-guard sidecar.
+
+        A clean shutdown deletes this file via :meth:`clear_autosave`; anything
+        left behind means the process exited unexpectedly, so it is treated as
+        an orphan recoverable through ``velune recover``.
+        """
+        self.autosave_dir.mkdir(parents=True, exist_ok=True)
+        now = datetime.now().isoformat(timespec="seconds")
+        meta = SessionMeta(
+            id=session_id,
+            title=auto_title(conversation),
+            created_at=now,
+            updated_at=now,
+            workspace=workspace,
+            project_name=Path(workspace).name if workspace else "unknown",
+            model_id=model_id,
+            mode=mode,
+            total_tokens=total_tokens,
+            turn_count=len(conversation),
+        )
+        payload = {
+            "meta": asdict(meta),
+            "conversation": conversation,
+            "crash_guard": True,
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+        }
+        path = self.autosave_dir / f"{session_id}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+    def clear_autosave(self, session_id: str) -> None:
+        """Remove the crash-guard sidecar after a clean shutdown."""
+        path = self.autosave_dir / f"{session_id}.json"
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception as exc:  # pragma: no cover - best effort
+            _log.debug("Could not clear autosave %s: %s", session_id, exc)
+
+    def list_orphaned_autosaves(self) -> list[SessionMeta]:
+        """Crash-guard sidecars left by sessions that did not exit cleanly."""
+        if not self.autosave_dir.exists():
+            return []
+        metas: list[SessionMeta] = []
+        for f in self.autosave_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                metas.append(self._meta_from(data))
+            except Exception:
+                continue
+        metas.sort(key=lambda m: m.updated_at, reverse=True)
+        return metas
+
+    def recover_autosave(self, session_id: str) -> SessionMeta | None:
+        """Promote a crash-guard sidecar into a real session, then clear it.
+
+        Returns the saved session meta, or None if no such sidecar exists.
+        """
+        path = self.autosave_dir / f"{session_id}.json"
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            _log.warning("Could not read autosave %s: %s", session_id, exc)
+            return None
+        meta = self._meta_from(data)
+        conversation = data.get("conversation", [])
+        saved = self.save(
+            conversation,
+            workspace=meta.workspace,
+            model_id=meta.model_id,
+            mode=meta.mode,
+            title=meta.title,
+            total_tokens=meta.total_tokens,
+            session_id=session_id,
+        )
+        self.clear_autosave(session_id)
+        return saved
+
+    def discard_autosave(self, session_id: str) -> bool:
+        """Delete a crash-guard sidecar without recovering it."""
+        path = self.autosave_dir / f"{session_id}.json"
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
 
     # ── Internals ────────────────────────────────────────────────────────
 
