@@ -20,7 +20,15 @@ from typing import TYPE_CHECKING, Any
 import mcp.server.stdio
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
-from mcp.types import TextContent, Tool
+from mcp.types import (
+    GetPromptResult,
+    Prompt,
+    PromptArgument,
+    PromptMessage,
+    Role,
+    TextContent,
+    Tool,
+)
 
 from velune import __version__
 from velune.tools.base.registry import ToolRegistry
@@ -354,6 +362,63 @@ class VeluneMCPServer:
                 )
             ]
 
+        @self.server.list_prompts()
+        async def list_prompts() -> list[Prompt]:
+            return [
+                Prompt(
+                    name="session_context",
+                    description="Current workspace summary and active model configuration",
+                    arguments=[
+                        PromptArgument(
+                            name="workspace_path",
+                            description="Override workspace path",
+                            required=False,
+                        )
+                    ],
+                ),
+                Prompt(
+                    name="memory_recall",
+                    description="Recent relevant interactions from Velune's memory",
+                    arguments=[
+                        PromptArgument(
+                            name="query",
+                            description="Search query for memory",
+                            required=False,
+                        ),
+                        PromptArgument(
+                            name="limit",
+                            description="Max results (default 5)",
+                            required=False,
+                        ),
+                    ],
+                ),
+                Prompt(
+                    name="repository_summary",
+                    description="Repository structure and language breakdown",
+                    arguments=[
+                        PromptArgument(
+                            name="workspace_path",
+                            description="Override workspace path",
+                            required=False,
+                        )
+                    ],
+                ),
+            ]
+
+        @self.server.get_prompt()
+        async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
+            args = arguments or {}
+            if name == "session_context":
+                return await self._prompt_session_context(args.get("workspace_path"))
+            elif name == "memory_recall":
+                return await self._prompt_memory_recall(
+                    args.get("query", ""),
+                    int(args.get("limit", 5)),
+                )
+            elif name == "repository_summary":
+                return await self._prompt_repository_summary(args.get("workspace_path"))
+            raise ValueError(f"Unknown prompt: {name!r}")
+
     # =========================================================================
     # Tool implementations
     # =========================================================================
@@ -517,6 +582,128 @@ class VeluneMCPServer:
             logger.error("velune_estimate_blast_radius failed: %s", e)
             return {"error": str(e)}
 
+    # =========================================================================
+    # Prompt implementations
+    # =========================================================================
+
+    def _make_prompt_result(self, text: str) -> GetPromptResult:
+        return GetPromptResult(
+            messages=[
+                PromptMessage(
+                    role=Role.user,
+                    content=TextContent(type="text", text=text),
+                )
+            ]
+        )
+
+    async def _prompt_session_context(
+        self, workspace_path: str | None = None
+    ) -> GetPromptResult:
+        workspace = workspace_path or str(self.workspace_path)
+        lines = [
+            f"Workspace: {workspace}",
+            f"Velune version: {__version__}",
+        ]
+        if self.config is not None:
+            try:
+                model = getattr(self.config, "model", None) or "unknown"
+                lines.append(f"Active model: {model}")
+            except Exception:
+                pass
+        return self._make_prompt_result("\n".join(lines))
+
+    async def _prompt_memory_recall(
+        self, query: str = "", limit: int = 5
+    ) -> GetPromptResult:
+        if not self.memory_manager:
+            return self._make_prompt_result("Memory manager not available.")
+        try:
+            ctx = await self.memory_manager.retrieve(
+                query=query or "recent interactions",
+                workspace_root=str(self.workspace_path),
+            )
+            results = ctx.results[:limit]
+            if not results:
+                return self._make_prompt_result("No relevant memory found.")
+            lines = [f"- [{r.source_type}] {r.content}" for r in results]
+            return self._make_prompt_result("\n".join(lines))
+        except Exception as exc:
+            logger.warning("_prompt_memory_recall failed: %s", exc)
+            return self._make_prompt_result(f"Memory recall failed: {exc}")
+
+    async def _prompt_repository_summary(
+        self, workspace_path: str | None = None
+    ) -> GetPromptResult:
+        workspace = Path(workspace_path or self.workspace_path)
+        try:
+            if self.repository_cognition:
+                snapshot = self.repository_cognition.index(force=False)
+                if snapshot:
+                    lang_counts: dict[str, int] = {}
+                    for f in snapshot.files:
+                        lang_counts[f.language.value] = lang_counts.get(f.language.value, 0) + 1
+                    top = sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                    lines = [f"Repository: {workspace}", f"Total files: {len(snapshot.files)}"]
+                    lines += [f"  {lang}: {count} files" for lang, count in top]
+                    return self._make_prompt_result("\n".join(lines))
+        except Exception as exc:
+            logger.warning("_prompt_repository_summary index failed: %s", exc)
+        return self._make_prompt_result(f"Repository: {workspace}")
+
+    # =========================================================================
+    # Sampling implementation
+    # =========================================================================
+
+    async def _velune_sampling_create_message(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Handle a sampling/createMessage request by routing to the council orchestrator."""
+        messages = params.get("messages", [])
+        task_parts = []
+        for msg in messages:
+            content = msg.get("content", {})
+            if isinstance(content, dict):
+                text = content.get("text", "")
+            else:
+                text = str(content)
+            if text:
+                task_parts.append(text)
+        task = "\n".join(task_parts) or "Respond helpfully."
+
+        if not self.council_orchestrator:
+            return {
+                "role": "assistant",
+                "content": {"type": "text", "text": "Council not available."},
+                "model": "velune-council",
+                "stopReason": "error",
+            }
+        try:
+            from velune.cognition.budget import CouncilExecutionBudget
+
+            budget = CouncilExecutionBudget(max_wall_time_seconds=30, max_review_cycles=1)
+            state = await self.council_orchestrator.run(
+                task=task,
+                retrieved_context="",
+                budget=budget,
+            )
+            response = (
+                state.pending_diffs[0].get("proposed", "")
+                if state.pending_diffs
+                else state.final_output or "No response"
+            )
+            return {
+                "role": "assistant",
+                "content": {"type": "text", "text": response},
+                "model": "velune-council",
+                "stopReason": "endTurn",
+            }
+        except Exception as exc:
+            logger.error("sampling/createMessage failed: %s", exc)
+            return {
+                "role": "assistant",
+                "content": {"type": "text", "text": f"Error: {exc}"},
+                "model": "velune-council",
+                "stopReason": "error",
+            }
+
     def get_tools_list(self) -> list[dict[str, Any]]:
         """Return a list of all registered tools with their schemas (for testing/APIs)."""
         tools = [
@@ -627,6 +814,9 @@ class VeluneMCPServer:
                 params.get("file_path"),
             )
             return {"jsonrpc": "2.0", "id": req_id, "result": res}
+        elif method == "sampling/createMessage":
+            res = await self._velune_sampling_create_message(params)
+            return {"jsonrpc": "2.0", "id": req_id, "result": res}
         elif self.tool_registry and self.tool_registry.get(method):
             from velune.tools.base.tool import authorize_and_execute
 
@@ -661,7 +851,9 @@ class VeluneMCPServer:
                 read_stream,
                 write_stream,
                 InitializationOptions(
-                    server_name="velune", server_version=__version__, capabilities={"tools": {}}
+                    server_name="velune",
+                    server_version=__version__,
+                    capabilities={"tools": {}, "prompts": {}, "sampling": {}},
                 ),
             )
 

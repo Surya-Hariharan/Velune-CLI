@@ -86,6 +86,8 @@ class MCPServerRegistry:
         self._allowed_hosts = allowed_hosts
         self._entries: dict[str, ServerEntry] = {}
         self._tool_to_server: dict[str, str] = {}  # qualified tool name → server name
+        self._trusted: bool = True
+        self._watched_mtimes: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Configuration loading
@@ -108,6 +110,7 @@ class MCPServerRegistry:
         cannot auto-spawn MCP servers. User-level (``~/.mcp.json``) and
         caller-provided configs are always honored.
         """
+        self._trusted = trusted
         configs: list[ServerConfig] = []
 
         # User-level .mcp.json is always trusted. The project-level file is only
@@ -347,6 +350,106 @@ class MCPServerRegistry:
             return False
 
     # ------------------------------------------------------------------
+    # Environment-based discovery
+    # ------------------------------------------------------------------
+
+    def load_env(self) -> int:
+        """Load MCP server configs from the ``MCP_SERVERS_JSON`` environment variable.
+
+        Format: JSON object mapping server name → server config dict.
+        Example::
+
+            MCP_SERVERS_JSON='{"fs": {"command": "uvx", "args": ["mcp-server-filesystem", "/tmp"]}}'
+
+        Returns the number of servers successfully loaded.
+        """
+        import json
+        import os
+
+        raw = os.environ.get("MCP_SERVERS_JSON", "").strip()
+        if not raw:
+            return 0
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.warning("MCP_SERVERS_JSON is not valid JSON: %s", exc)
+            return 0
+        if not isinstance(data, dict):
+            logger.warning(
+                "MCP_SERVERS_JSON must be a JSON object, got %s", type(data).__name__
+            )
+            return 0
+        count = 0
+        for name, entry in data.items():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                cfg = ServerConfig.from_dict(name, entry)
+                if name not in self._entries:
+                    self._entries[name] = ServerEntry(config=cfg)
+                count += 1
+            except Exception as exc:
+                logger.warning(
+                    "Skipping malformed MCP_SERVERS_JSON entry '%s': %s", name, exc
+                )
+        if count:
+            logger.info("MCP_SERVERS_JSON: loaded %d server(s).", count)
+        return count
+
+    # ------------------------------------------------------------------
+    # Hot-reload / config watching
+    # ------------------------------------------------------------------
+
+    async def watch(self, interval_secs: float = 30.0) -> None:
+        """Poll config files for changes and hot-reload servers when they differ.
+
+        Watches ``<workspace>/.mcp.json`` and ``<workspace>/velune.toml``.
+        Designed to run as a background ``asyncio.Task`` for the lifetime of the
+        REPL session.
+        """
+        watch_paths = [
+            self.workspace / ".mcp.json",
+            self.workspace / "velune.toml",
+        ]
+        self._watched_mtimes = _read_mtimes(watch_paths)
+        while True:
+            try:
+                await asyncio.sleep(interval_secs)
+            except asyncio.CancelledError:
+                return
+            try:
+                current = _read_mtimes(watch_paths)
+                if current != self._watched_mtimes:
+                    self._watched_mtimes = current
+                    logger.info("MCP config change detected — hot-reloading servers.")
+                    await self._hot_reload()
+            except Exception as exc:
+                logger.debug("MCP watch error (non-fatal): %s", exc)
+
+    async def _hot_reload(self) -> None:
+        """Diff current vs reloaded config; disconnect removed servers, connect new ones."""
+        old_names = set(self._entries)
+        self.load_config(trusted=self._trusted)
+        self.load_env()
+        new_names = set(self._entries)
+
+        removed = old_names - new_names
+        added = new_names - old_names
+
+        for name in removed:
+            await self.disconnect(name)
+            self._entries.pop(name, None)
+            logger.info("MCP hot-reload: removed server '%s'.", name)
+
+        for name in added:
+            success = await self.connect(name)
+            logger.info(
+                "MCP hot-reload: added server '%s' (%s).",
+                name,
+                "connected" if success else "failed",
+            )
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -430,3 +533,14 @@ def _strip_server_prefix(qualified: str, server_name: str) -> str:
     if qualified.startswith(prefix):
         return qualified[len(prefix) :]
     return qualified
+
+
+def _read_mtimes(paths: list[Path]) -> dict[str, float]:
+    """Return a dict of path → mtime for each path that exists."""
+    result: dict[str, float] = {}
+    for p in paths:
+        try:
+            result[str(p)] = p.stat().st_mtime
+        except FileNotFoundError:
+            result[str(p)] = 0.0
+    return result

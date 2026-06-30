@@ -111,6 +111,7 @@ class VeluneREPL:
         self._mcp_registry = MCPServerRegistry(
             workspace=Path(workspace_path) if workspace_path else None,
         )
+        self._mcp_watch_task: asyncio.Task | None = None
         from velune.plugins.manager import PluginManager
 
         self._plugin_manager = PluginManager(
@@ -489,12 +490,16 @@ class VeluneREPL:
         try:
             trusted = self._ensure_workspace_trust()
             self._mcp_registry.load_config(trusted=trusted)
+            self._mcp_registry.load_env()
             if self._mcp_registry._entries:
                 server_count = len(self._mcp_registry._entries)
                 results = await self._mcp_registry.connect_all()
                 ok = sum(1 for v in results.values() if v)
                 if ok:
                     _log.debug("MCP: %s/%s server(s) connected", ok, server_count)
+            self._mcp_watch_task = asyncio.create_task(
+                self._mcp_registry.watch(), name="velune.mcp_watch"
+            )
         except Exception as exc:
             _log.debug("MCP auto-connect error (non-fatal): %s", exc)
 
@@ -614,6 +619,13 @@ class VeluneREPL:
         except Exception as exc:
             _log.warning("Session archive on exit failed: %s", exc)
         await self._end_episodic_session()
+
+        if self._mcp_watch_task is not None and not self._mcp_watch_task.done():
+            self._mcp_watch_task.cancel()
+            try:
+                await self._mcp_watch_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
         try:
             await self._mcp_registry.disconnect_all()
