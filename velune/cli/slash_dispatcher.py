@@ -82,6 +82,9 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "stats": "System",
     "session": "System",
     "doctor": "System",
+    "backup": "System",
+    "restore": "System",
+    "recover": "System",
 }
 
 
@@ -204,6 +207,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "ollama",
                 "api key",
                 "connect provider",
+                "credentials",
+                "auth",
+                "add key",
             ),
             shortcut="/prov",
         )
@@ -217,6 +223,46 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             handler=repl._cmd_doctor,
             examples=("/doctor",),
             search_terms=("health", "diagnostics", "environment", "check", "broken", "debug setup"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="backup",
+            aliases=[],
+            description="Snapshot all Velune state (sessions, config, providers, memory, trust)",
+            usage="/backup [path] [--include a,b] [--no-secrets]",
+            handler=repl._cmd_backup,
+            examples=("/backup", "/backup --include sessions,memory"),
+            search_terms=("backup", "snapshot", "archive", "export", "save state"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="restore",
+            aliases=[],
+            description="Restore Velune state from a backup archive",
+            usage="/restore <archive> [--overwrite] [--dry-run]",
+            handler=repl._cmd_restore,
+            examples=("/restore velune-backup-20260630.tar.gz", "/restore backup.tar.gz --dry-run"),
+            search_terms=("restore", "import", "recover state", "unpack archive"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="recover",
+            aliases=[],
+            description="Recover an unsaved session left behind by a crash",
+            usage="/recover [id] [--all]",
+            handler=repl._cmd_recover,
+            examples=("/recover", "/recover --all"),
+            search_terms=(
+                "recover",
+                "crash",
+                "unsaved",
+                "autosave",
+                "lost session",
+                "restore session",
+            ),
         )
     )
     registry.register(
@@ -406,13 +452,26 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     registry.register(
         SlashCommand(
             name="dashboard",
-            aliases=["dash"],
-            description="Live progress dashboard: jobs, alerts, and provider health",
+            aliases=["dash", "status"],
+            description="Live system dashboard: session, state, jobs, alerts, health",
             usage="/dashboard",
             handler=repl._cmd_dashboard,
-            examples=("/dashboard",),
-            search_terms=("live", "monitor", "status", "health", "progress", "overview"),
-            shortcut="/dash",
+            examples=("/dashboard", "/status"),
+            search_terms=(
+                "live",
+                "monitor",
+                "status",
+                "health",
+                "progress",
+                "overview",
+                "state",
+                "what is velune doing",
+                "what's running",
+                "current model",
+                "active provider",
+                "system state",
+            ),
+            shortcut="/status",
         )
     )
 

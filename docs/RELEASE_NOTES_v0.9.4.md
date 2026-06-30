@@ -1,7 +1,4 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
-  <h1>Velune CLI v0.9.4</h1>
-</div>
+# Velune CLI v0.9.4
 
 Velune CLI v0.9.4 hardens the native-extension path, expands repository
 intelligence, and improves the release/CI pipeline while keeping the standard

@@ -1,18 +1,14 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
-  <h1>Changelog</h1>
-</div>
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
-> [!NOTE]
-> The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
 ## [Unreleased]
 
-### ![New](https://img.shields.io/badge/-New-success?style=flat-square)
+### Added
 
 - **NVIDIA NIM provider** — discovery backend for NVIDIA NIM cloud models
   (`velune/providers/discovery/nvidia_nim.py`), surfaced in `velune setup`
@@ -37,7 +33,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.9.4] - 2026-06-28
 
-### ![New](https://img.shields.io/badge/-New-success?style=flat-square)
+### Added
 
 - Go production launcher improvements for cross-platform startup and health checks.
 - Rust native module foundation for optional hot-path repository operations.

@@ -1,7 +1,4 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
-  <h1>Security Policy</h1>
-</div>
+# Security Policy
 
 ## Supported versions
 
@@ -19,8 +16,7 @@ protection.
 
 ## Reporting a vulnerability
 
-> [!CAUTION]
-> **Do not open a public GitHub issue for security vulnerabilities.**
+> **Caution:** Do not open a public GitHub issue for security vulnerabilities.
 
 ### Primary channel
 

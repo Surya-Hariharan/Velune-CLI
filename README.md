@@ -1,14 +1,13 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="150" />
-  <h1>Velune CLI</h1>
-  <p><em>Local-first multi-model AI developer CLI. Council-based agents, persistent memory, repository cognition.</em></p>
-  <p><strong>No cloud required. No quota. No lock-in.</strong></p>
+# Velune CLI
 
-  [![PyPI - Version](https://img.shields.io/pypi/v/velune-cli?style=for-the-badge&color=00ff00)](https://pypi.org/project/velune-cli/)
-  [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-  [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?style=for-the-badge)](LICENSE)
-  [![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI&style=for-the-badge&logo=github)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
-</div>
+*Local-first multi-model AI developer CLI. Council-based agents, persistent memory, repository cognition.*
+
+**No cloud required. No quota. No lock-in.**
+
+[![PyPI - Version](https://img.shields.io/pypi/v/velune-cli?style=for-the-badge&color=00ff00)](https://pypi.org/project/velune-cli/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?style=for-the-badge)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI&style=for-the-badge&logo=github)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
 
 ---
 
@@ -108,8 +107,7 @@ Python to PATH”** checked (or using `pipx`) resolves it permanently.
 | **36 GB** | Apple Silicon | ✅ 27B comfortable | Full council, Metal accel |
 | **64 GB** | 24 GB VRAM | ✅ 70B capable | Max power mode |
 
-> [!NOTE]
-> Velune detects your hardware on startup and prints tier, GPU, and recommendations. On underpowered machines, it routes tasks to cloud providers automatically.
+> **Note:** Velune detects your hardware on startup and prints tier, GPU, and recommendations. On underpowered machines, it routes tasks to cloud providers automatically.
 
 ---
 
@@ -172,8 +170,7 @@ Velune features a modern, clean terminal interface designed for productivity:
 | **NVIDIA NIM** | ☁️ Cloud | Pay-per-token | Llama, Mistral, and other NIM models | `velune setup` → enter key |
 | **HuggingFace** | ☁️ Cloud | Free/paid | Open models via Inference API | `velune setup` → enter key |
 
-> [!TIP]
-> Keys are stored securely in your OS keyring — never in plain text files, never in git.
+> **Tip:** Keys are stored securely in your OS keyring — never in plain text files, never in git.
 
 ---
 
@@ -381,8 +378,7 @@ to reconstruct intent without you explaining it again.
 | **Optimus** | `/optimus` | Instant | Smallest | 4k tokens |
 | **Godly** | `/godly` | Full | Largest | 128k tokens |
 
-> [!TIP]
-> Switch modes at any time mid-session. The prompt badge updates immediately.
+> **Tip:** Switch modes at any time mid-session. The prompt badge updates immediately.
 
 ---
 

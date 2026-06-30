@@ -1,7 +1,4 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
-  <h1>Development Guide</h1>
-</div>
+# Development Guide
 
 ## Setup
 

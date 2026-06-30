@@ -1,12 +1,8 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/logo.png" alt="Velune Logo" width="100" />
-  <h1>Contributing to Velune</h1>
-</div>
+# Contributing to Velune
 
 Thank you for helping improve Velune! This guide covers development setup, how to add new providers, agents, and commands, and the review process.
 
-> [!IMPORTANT]
-> For anything larger than a small fix, open an issue first to discuss scope before writing code.
+> **Important:** For anything larger than a small fix, open an issue first to discuss scope before writing code.
 
 ---
 
@@ -433,9 +429,7 @@ velune doctor
 
 Include the exact command that failed, the full error message (run with `--verbose` for stack traces), and your OS and Python version.
 
-> [!CAUTION]
-> **Do not report security vulnerabilities in public issues!**  
-> Report security vulnerabilities via [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new).
+> **Caution:** Do not report security vulnerabilities in public issues. Report security vulnerabilities via [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new).
 
 ---
 
