@@ -12,6 +12,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### ![New](https://img.shields.io/badge/-New-success?style=flat-square)
+
+- **NVIDIA NIM provider** — discovery backend for NVIDIA NIM cloud models
+  (`velune/providers/discovery/nvidia_nim.py`), surfaced in `velune setup`
+  and the provider catalogue.
+- **Model registry cache** — persistent on-disk cache of discovered models
+  (`velune/models/registry_cache.py`) so repeat scans and the first REPL
+  prompt avoid redundant provider network calls.
+- **`velune onboard`** — dedicated first-run setup wizard entry point that can
+  resume an interrupted onboarding run.
+
+### ![Improved](https://img.shields.io/badge/-Improved-blue?style=flat-square)
+
+- Expanded and hardened provider discovery (Docker, OpenAI-compatible
+  endpoints, Ollama, LM Studio, Google) with more reliable detection and a
+  richer interactive `velune provider` / `velune models` command surface.
+
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
+
+- Resolved lint/format violations in the new provider discovery code that
+  broke the CI Lint job (unused import, import ordering, explicit `zip(strict=)`,
+  local-variable naming).
+
 ## [0.9.4] - 2026-06-28
 
 ### ![New](https://img.shields.io/badge/-New-success?style=flat-square)

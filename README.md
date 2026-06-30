@@ -187,15 +187,19 @@ velune                    # Start the interactive REPL session
 velune chat               # Same as above (explicit form)
 velune run "<task>"       # Run a task non-interactively and exit
 velune ask "<question>"   # Ask a one-shot question and exit
-velune init               # Initialize Velune in a project directory
+velune init               # Initialize Velune in the current workspace
+velune onboard            # Run (or resume) the first-time setup wizard
 
 # Workspace & sessions
-velune workspace init     # Index the current workspace
-velune workspace status   # Show index freshness and file counts
-velune workspace graph    # Render the workspace dependency graph
-velune workspace list     # List all known workspaces
+velune project init       # Index the current workspace (Tree-sitter AST)
+velune project status     # Show index freshness and file counts
+velune project graph      # Render the module-dependency graph
+velune project tree       # Render the workspace directory tree
+velune project list       # List all registered workspaces
+velune project explain    # Generate a plain-English architecture summary
 velune session list       # List saved chat sessions
 velune session delete <id>  # Delete a saved session
+velune trust              # Trust, list, or revoke workspace directories
 
 # Setup & models
 velune setup              # Configure API keys (stored in OS keyring)
@@ -429,7 +433,7 @@ lexical search and chat keep working).
 | `[rag]` | `lancedb`, `pyarrow`, `qdrant-client` | Semantic memory + vector retrieval (large compiled wheels) |
 | `[parsing]` | `tree-sitter` + grammars | Tree-sitter source parsing for deep repository cognition |
 | `[telemetry]` | `opentelemetry-*` | Export spans/metrics to an OTLP collector |
-| `[git]` | `gitpython` | Git provider tools (push / PR / issue) and richer git context |
+| `[git]` | *(no extra deps)* | Retained for compatibility — git tools (push / PR / issue) now use native `git` subprocess calls, so nothing extra installs |
 | `[gguf]` | `gguf` | GGUF file metadata reading — safe, no transitive risk |
 | `[docker]` | `docker` | Docker sandbox for isolated code execution |
 | `[all]` | everything above | Full-featured install |
