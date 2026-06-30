@@ -175,6 +175,8 @@ class OllamaDiscovery:
             parameter_count_b=stored.parameter_count_b,
             speed_tier="medium",
             cost_per_1k_tokens=None,
+            location=str(stored.root),
+            health="offline",
             tags=["local", "ollama", "filesystem", "unservable"],
             metadata={
                 "servable": False,
@@ -209,6 +211,8 @@ class OllamaDiscovery:
             parameter_count_b=details.get("parameter_count"),
             speed_tier="medium",
             cost_per_1k_tokens=None,
+            location=self.base_url,
+            health="unknown",
             tags=["local", "ollama"],
             metadata={"details": details},
         )
@@ -281,5 +285,12 @@ class OllamaDiscovery:
 
         if profile.instruction_following >= CapabilityLevel.INTERMEDIATE:
             profile.tool_use = CapabilityLevel.INTERMEDIATE
+
+        if any(name in model_lower for name in ["llava", "vision", "moondream", "vl", "minicpm-v", "bakllava"]):
+            profile.vision = CapabilityLevel.ADVANCED
+            profile.multimodal = CapabilityLevel.ADVANCED
+
+        if any(name in model_lower for name in ["embed", "bge-", "e5-", "gte-", "nomic-embed"]):
+            profile.embedding = CapabilityLevel.EXPERT
 
         return profile

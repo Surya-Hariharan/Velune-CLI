@@ -19,6 +19,17 @@ class ModelCapabilityRegistry:
     def __init__(self, scanner: ModelDiscoveryScanner | None = None) -> None:
         self.scanner = scanner or ModelDiscoveryScanner()
         self._models: dict[str, ModelDescriptor] = {}
+        # Pre-populate from disk cache so `models list` works without a scan
+        try:
+            from velune.models.registry_cache import ModelRegistryCache
+            self._registry_cache = ModelRegistryCache()
+            for model in self._registry_cache.load():
+                key = f"{model.provider_id}/{model.model_id}"
+                self._models[key] = model
+                if model.model_id not in self._models:
+                    self._models[model.model_id] = model
+        except Exception:
+            self._registry_cache = None
 
     async def refresh(self) -> None:
         """Scan all providers and refresh the local catalog cache with empirical profiles."""
@@ -113,6 +124,12 @@ class ModelCapabilityRegistry:
                 len(discovered),
                 sum(1 for m in discovered if m.metadata.get("validated", True)),
             )
+            # Persist to disk cache for next session
+            try:
+                if self._registry_cache is not None:
+                    self._registry_cache.save(discovered)
+            except Exception as cache_exc:
+                logger.debug("Registry cache save failed: %s", cache_exc)
         except Exception as e:
             logger.error("Failed to discover models during catalog refresh: %s", e)
 

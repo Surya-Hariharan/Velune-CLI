@@ -15,6 +15,31 @@ console = Console()
 models_cmd = typer.Typer(help="Scan, list, and assign AI models.")
 
 
+def _cap_badge(level) -> str:
+    """Return a Rich markup checkmark/dash based on CapabilityLevel."""
+    try:
+        from velune.core.types.model import CapabilityLevel
+        return "[green]✓[/green]" if level and level > CapabilityLevel.NONE else "[dim]—[/dim]"
+    except Exception:
+        return "[dim]—[/dim]"
+
+
+def _health_badge(health: str) -> str:
+    return {
+        "healthy": "[green]●[/green]",
+        "degraded": "[yellow]○[/yellow]",
+        "offline": "[red]✗[/red]",
+    }.get(health or "", "[dim]?[/dim]")
+
+
+def _short_location(location: str | None, max_len: int = 28) -> str:
+    if not location:
+        return "[dim]—[/dim]"
+    if location == "cloud":
+        return "[blue]cloud[/blue]"
+    return location if len(location) <= max_len else "…" + location[-(max_len - 1):]
+
+
 @models_cmd.command("scan")
 def models_scan(
     ctx: typer.Context,
@@ -71,6 +96,11 @@ def models_scan(
                     "speed_tier": record.speed_tier,
                     "context_length": record.context_length,
                     "embedding_supported": embedding_supported,
+                    "vision": record.capabilities.vision > CapabilityLevel.NONE,
+                    "tool_use": record.capabilities.tool_use > CapabilityLevel.NONE,
+                    "reasoning": record.capabilities.reasoning > CapabilityLevel.NONE,
+                    "health": getattr(record, "health", "unknown"),
+                    "location": getattr(record, "location", None),
                     "status": status,
                 }
             )
@@ -78,51 +108,37 @@ def models_scan(
         return
 
     table = Table(title="Discovered Models")
-    table.add_column("Provider", style="cyan")
+    table.add_column("Provider", style="cyan", no_wrap=True)
     table.add_column("Model", style="green")
-    table.add_column("Specialization", style="magenta")
+    table.add_column("Vision", justify="center")
+    table.add_column("Tool", justify="center")
+    table.add_column("Reason", justify="center")
+    table.add_column("Embed", justify="center")
     table.add_column("Speed", style="blue")
     table.add_column("Context", style="yellow")
-    table.add_column("Embedding", style="white")
-    table.add_column("Status", style="bold")
+    table.add_column("Health", justify="center")
+    table.add_column("Location", style="dim", max_width=28)
 
     for record in records:
-        capabilities_map = {
-            "coding": record.capabilities.coding,
-            "reasoning": record.capabilities.reasoning,
-            "planning": record.capabilities.planning,
-            "summarization": record.capabilities.summarization,
-            "tool_use": record.capabilities.tool_use,
-        }
-
-        highest_cap = "general"
-        highest_level = CapabilityLevel.NONE
-        for cap_name, level in capabilities_map.items():
-            if level > highest_level:
-                highest_level = level
-                highest_cap = cap_name
-
-        specialization = highest_cap if highest_level > CapabilityLevel.NONE else "general"
-        embedding_supported = (
-            "yes" if record.capabilities.embedding > CapabilityLevel.NONE else "no"
-        )
-
         validated = record.metadata.get("validated")
         if validated is None:
-            status = "[dim]cached[/dim]"
+            health_src = getattr(record, "health", "unknown")
         elif validated:
-            status = "[green]online[/green]"
+            health_src = "healthy"
         else:
-            status = "[red]offline[/red]"
+            health_src = "offline"
 
         table.add_row(
             record.provider_id,
             record.model_id,
-            specialization,
+            _cap_badge(record.capabilities.vision),
+            _cap_badge(record.capabilities.tool_use),
+            _cap_badge(record.capabilities.reasoning),
+            _cap_badge(record.capabilities.embedding),
             record.speed_tier,
             str(record.context_length),
-            embedding_supported,
-            status,
+            _health_badge(health_src),
+            _short_location(getattr(record, "location", None)),
         )
 
     console.print(table)
@@ -262,11 +278,13 @@ def models_list(ctx: typer.Context) -> None:
     table.add_column("ID", style="cyan")
     table.add_column("Name", style="green")
     table.add_column("Provider", style="magenta")
+    table.add_column("Health", justify="center")
+    table.add_column("Location", style="dim", max_width=28)
     table.add_column("Capabilities", style="blue")
 
     records = []
     if registry is None:
-        table.add_row("<uninitialized>", "Velune", "system", "bootstrap only")
+        table.add_row("<uninitialized>", "Velune", "system", "[dim]?[/dim]", "[dim]—[/dim]", "bootstrap only")
     else:
         from velune.core.types.model import CapabilityLevel
 
@@ -289,6 +307,8 @@ def models_list(ctx: typer.Context) -> None:
                 record.model_id,
                 record.display_name,
                 record.provider_id,
+                _health_badge(getattr(record, "health", "unknown")),
+                _short_location(getattr(record, "location", None)),
                 ", ".join(capabilities) or "none",
             )
 
@@ -353,23 +373,40 @@ def models_assign(
             )
         raise typer.Exit(code=1)
 
-    # Check if model exists
+    # Check if model exists and resolve provider_id for persistence
     registry = cli_context.container.get("runtime.model_registry") if cli_context else None
+    provider_id = "unknown"
     if registry:
         descriptor = registry.get(model_id)
-        if not descriptor and not (cli_context and cli_context.json_mode):
+        if descriptor:
+            provider_id = descriptor.provider_id
+        elif not (cli_context and cli_context.json_mode):
             console.print(
                 f"[yellow]Warning: Model '{model_id}' is not currently registered/discovered.[/yellow]"
             )
 
+    # Update in-memory mapper for the current session
     mapper.overrides[council_role] = model_id
+
+    # Persist to ~/.velune/council_roles.json (same file the REPL /councilmodel uses)
+    from pathlib import Path as _Path
+    from velune.orchestration.role_assignments import CouncilRoleMap
+    _assignments_path = _Path.home() / ".velune" / "council_roles.json"
+    try:
+        _role_map = CouncilRoleMap.load(_assignments_path)
+        _role_map.assign(council_role.value, model_id, provider_id)
+        _role_map.save(_assignments_path)
+    except Exception as _persist_exc:
+        if not (cli_context and cli_context.json_mode):
+            console.print(f"[yellow]Warning: could not persist assignment: {_persist_exc}[/yellow]")
+
     if cli_context and cli_context.json_mode:
         import json
 
-        print(json.dumps({"success": True, "role": council_role.value, "model_id": model_id}))
+        print(json.dumps({"success": True, "role": council_role.value, "model_id": model_id, "provider_id": provider_id}))
     else:
         console.print(
-            f"[green]Successfully assigned role '{council_role.value}' to model '{model_id}' for the current runtime context.[/green]"
+            f"[green]Assigned role '{council_role.value}' → '{model_id}' (persisted to council_roles.json)[/green]"
         )
 
 
@@ -679,3 +716,156 @@ def _save_model_assignments(coding_model: str, reasoning_model: str, fast_model:
 
     config_file.write_text(json.dumps(config, indent=2))
     console.print(f"[dim]Saved to {config_file}[/dim]")
+
+
+@models_cmd.command("health")
+def models_health(ctx: typer.Context) -> None:
+    """Ping all registered models and report health status."""
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    registry = cli_context.container.get("runtime.model_registry") if cli_context else None
+
+    if registry is None:
+        console.print("[red]Model registry is unavailable.[/red]")
+        raise typer.Exit(code=1)
+
+    all_models = registry.list_all()
+    if not all_models:
+        console.print("[yellow]No models registered. Run 'velune models scan' first.[/yellow]")
+        return
+
+    from velune.core.event_loop import submit
+    submit(_models_health_async(cli_context, registry, all_models))
+
+
+async def _models_health_async(
+    cli_context: CLIContext,
+    registry: Any,
+    models: list[Any],
+) -> None:
+    import asyncio
+    from velune.models.probes import FastProbe
+
+    provider_registry = cli_context.container.get("runtime.provider_registry") if cli_context else None
+    fast_probe = FastProbe()
+
+    # Identify models that have a live provider to ping
+    pingable: list[Any] = []
+    ping_tasks = []
+    for model in models:
+        provider = provider_registry.get(model.provider_id) if provider_registry else None
+        if provider:
+            pingable.append(model)
+            ping_tasks.append(fast_probe.ping(provider, model.model_id))
+
+    responses = await asyncio.gather(*ping_tasks, return_exceptions=True) if ping_tasks else []
+
+    pinged_keys = set()
+    for model, result in zip(pingable, responses):
+        key = (model.provider_id, model.model_id)
+        pinged_keys.add(key)
+        model.health = "healthy" if result is True else "offline"
+        registry.register(model)
+
+    table = Table(title="Model Health Check")
+    table.add_column("Provider", style="cyan")
+    table.add_column("Model", style="green")
+    table.add_column("Health", justify="center")
+    table.add_column("Latency", style="yellow", justify="right")
+    table.add_column("Location", style="dim", max_width=28)
+
+    for model in models:
+        key = (model.provider_id, model.model_id)
+        health_str = getattr(model, "health", "unknown")
+        if key not in pinged_keys:
+            health_str = health_str or "unknown"
+
+        lat = getattr(model, "last_latency_ms", None)
+        lat_str = f"{lat:.0f}ms" if lat is not None else "[dim]—[/dim]"
+
+        table.add_row(
+            model.provider_id,
+            model.model_id,
+            _health_badge(health_str),
+            lat_str,
+            _short_location(getattr(model, "location", None)),
+        )
+
+    console.print(table)
+
+    healthy = sum(1 for m in models if getattr(m, "health", "") == "healthy")
+    total = len(models)
+    not_pinged = total - len(pingable)
+    summary = f"[dim]{healthy}/{total} models healthy"
+    if not_pinged:
+        summary += f" ({not_pinged} not pingable — no live provider)"
+    summary += ".[/dim]"
+    console.print(summary)
+
+
+@models_cmd.command("show")
+def models_show(
+    ctx: typer.Context,
+    model_id: str = typer.Argument(..., help="Model ID to inspect"),
+) -> None:
+    """Show detailed information for a single model."""
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    registry = cli_context.container.get("runtime.model_registry") if cli_context else None
+
+    if registry is None:
+        console.print("[red]Model registry is unavailable.[/red]")
+        raise typer.Exit(code=1)
+
+    descriptor = registry.get(model_id)
+    if descriptor is None:
+        console.print(
+            f"[red]Model '{model_id}' not found. Run 'velune models scan' first.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    from rich.panel import Panel
+    from velune.core.types.model import CapabilityLevel
+
+    lines = [
+        f"[bold]Model ID:[/bold]      {descriptor.model_id}",
+        f"[bold]Display Name:[/bold]  {descriptor.display_name}",
+        f"[bold]Provider:[/bold]      {descriptor.provider_id}",
+        f"[bold]Health:[/bold]        {_health_badge(getattr(descriptor, 'health', 'unknown'))}",
+        f"[bold]Location:[/bold]      {getattr(descriptor, 'location', None) or '—'}",
+        f"[bold]Context:[/bold]       {descriptor.context_length:,} tokens",
+        f"[bold]Speed Tier:[/bold]    {descriptor.speed_tier}",
+        f"[bold]Local:[/bold]         {'yes' if descriptor.is_local else 'no'}",
+    ]
+    lat = getattr(descriptor, "last_latency_ms", None)
+    if lat is not None:
+        lines.append(f"[bold]Last Latency:[/bold]  {lat:.0f}ms")
+    if getattr(descriptor, "vram_required_gb", None):
+        lines.append(f"[bold]VRAM Required:[/bold] {descriptor.vram_required_gb:.1f} GB")
+    if descriptor.tags:
+        lines.append(f"[bold]Tags:[/bold]          {', '.join(descriptor.tags)}")
+
+    console.print(Panel(
+        "\n".join(lines),
+        title=f"[bold cyan]{descriptor.model_id}[/bold cyan]",
+        expand=False,
+    ))
+
+    # Capability breakdown panel
+    cap = descriptor.capabilities
+    cap_lines = []
+    for field_name in cap.model_fields:
+        level = getattr(cap, field_name, CapabilityLevel.NONE)
+        if level and level > CapabilityLevel.NONE:
+            cap_lines.append(
+                f"  [cyan]{field_name.replace('_', ' ').title():<22}[/cyan] {level.name}"
+            )
+
+    if cap_lines:
+        console.print(Panel(
+            "\n".join(cap_lines),
+            title="Capabilities",
+            expand=False,
+        ))
+    else:
+        console.print(
+            "[dim]No capability data. Run 'velune models scan --probe' to run empirical probes.[/dim]"
+        )

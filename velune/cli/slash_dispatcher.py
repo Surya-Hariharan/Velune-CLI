@@ -100,9 +100,12 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="help",
             aliases=["h", "?"],
-            description="Show all available commands",
-            usage="/help",
+            description="Show all available commands grouped by category",
+            usage="/help [--all]",
             handler=repl._cmd_help,
+            examples=("/help", "/help --all"),
+            search_terms=("commands", "reference", "documentation", "list"),
+            shortcut="/?",
         )
     )
     registry.register(
@@ -112,6 +115,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Exit the Velune session",
             usage="/exit",
             handler=repl._cmd_exit,
+            examples=("/exit",),
+            search_terms=("quit", "close", "bye", "leave"),
+            shortcut="/q",
         )
     )
     registry.register(
@@ -121,6 +127,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Clear the terminal screen (conversation context is preserved)",
             usage="/clear",
             handler=repl._cmd_clear,
+            examples=("/clear",),
+            search_terms=("screen", "clean terminal", "reset screen"),
+            shortcut="/cls",
         )
     )
     registry.register(
@@ -130,6 +139,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Start a new conversation session (project memory persists)",
             usage="/new [title]",
             handler=repl._cmd_new,
+            examples=("/new", '/new "feature exploration"'),
+            search_terms=("fresh start", "reset conversation", "new chat", "new session"),
+            shortcut="/fresh",
         )
     )
     registry.register(
@@ -139,6 +151,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Open, close, or inspect project workspaces (no indexing)",
             usage="/project [open <path>|close|status|list|add <path>|<name|path>]",
             handler=repl._cmd_project,
+            examples=("/project", "/project open ~/myproject", "/project list", "/project close"),
+            search_terms=("workspace", "directory", "folder", "open project", "switch project"),
+            shortcut="/proj",
         )
     )
     registry.register(
@@ -148,6 +163,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Index the workspace so Velune understands its code: quick, standard, or deep",
             usage="/index [init|quick|standard|deep|status|cancel|rebuild]",
             handler=repl._cmd_cognition,
+            examples=("/index", "/index quick", "/index deep", "/index status"),
+            search_terms=("cognition", "understand code", "code context", "codebase", "ai context", "scan"),
+            shortcut="/cog",
         )
     )
 
@@ -164,6 +182,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "/providers",
                 "/providers add anthropic",
                 "/providers status",
+                "/providers discover",
             ),
             search_terms=(
                 "anthropic",
@@ -176,6 +195,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "nvidia",
                 "huggingface",
                 "ollama",
+                "api key",
+                "connect provider",
             ),
             shortcut="/prov",
         )
@@ -184,9 +205,11 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="doctor",
             aliases=["diag"],
-            description="Run environment health checks",
+            description="Run environment health checks across all subsystems",
             usage="/doctor",
             handler=repl._cmd_doctor,
+            examples=("/doctor",),
+            search_terms=("health", "diagnostics", "environment", "check", "broken", "debug setup"),
         )
     )
     registry.register(
@@ -196,6 +219,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Interactive settings dashboard (keyboard navigation)",
             usage="/settings",
             handler=repl._cmd_settings,
+            examples=("/settings",),
+            search_terms=("configure", "preferences", "setup", "dashboard", "options"),
         )
     )
     registry.register(
@@ -205,6 +230,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Show current system configuration settings",
             usage="/config",
             handler=repl._cmd_config,
+            examples=("/config",),
+            search_terms=("configuration", "show config", "current settings", "velune.toml"),
+            shortcut="/cfg",
         )
     )
     registry.register(
@@ -214,6 +242,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Show session statistics: tokens, cost, turns, uptime",
             usage="/stats",
             handler=repl._cmd_stats,
+            examples=("/stats",),
+            search_terms=("tokens", "cost", "usage", "turns", "uptime", "spending"),
         )
     )
     registry.register(
@@ -223,6 +253,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Show REPL command execution history",
             usage="/history",
             handler=repl._cmd_history,
+            examples=("/history",),
+            search_terms=("previous commands", "command log", "past commands"),
+            shortcut="/hist",
         )
     )
     registry.register(
@@ -232,6 +265,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="List active lifecycle hooks and their config",
             usage="/hooks",
             handler=repl._cmd_hooks,
+            examples=("/hooks",),
+            search_terms=("lifecycle", "events", "callbacks", "pre-run", "post-run"),
         )
     )
 
@@ -247,15 +282,26 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "remove <id>|locate|locations]"
             ),
             handler=repl._cmd_model,
+            examples=(
+                "/model",
+                "/model discover",
+                "/model connect ollama/llama3.2",
+                "/model use gpt-4o",
+                "/model status",
+            ),
+            search_terms=("llm", "ai model", "switch model", "ollama", "connect model", "active model"),
+            shortcut="/m",
         )
     )
     registry.register(
         SlashCommand(
             name="models",
             aliases=["ls"],
-            description="List all available models",
+            description="List all available models with speed, context, and capability info",
             usage="/models",
             handler=repl._cmd_models,
+            examples=("/models",),
+            search_terms=("list models", "available models", "all models", "model catalogue"),
         )
     )
     registry.register(
@@ -265,6 +311,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Download an Ollama model interactively",
             usage="/pull [model-id]",
             handler=repl._cmd_pull,
+            examples=("/pull", "/pull llama3.2", "/pull mistral"),
+            search_terms=("download model", "install model", "ollama pull", "get model"),
         )
     )
     registry.register(
@@ -274,15 +322,20 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Delete a locally installed Ollama model",
             usage="/delete <model-id>",
             handler=repl._cmd_delete,
+            examples=("/delete llama3.2",),
+            search_terms=("remove model", "uninstall model", "free space"),
         )
     )
     registry.register(
         SlashCommand(
             name="councilmodel",
             aliases=["cm", "roles"],
-            description="Assign specific models to council agent roles",
+            description="Assign specific models to each Reasoning Council agent role",
             usage="/councilmodel [show|reset]",
             handler=repl._cmd_councilmodel,
+            examples=("/councilmodel", "/councilmodel show", "/councilmodel reset"),
+            search_terms=("assign model", "roles", "council roles", "agent roles", "multi-agent"),
+            shortcut="/cm",
         )
     )
 
@@ -295,6 +348,13 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Execute a task through the Reasoning Council",
             usage="/run <task description>",
             handler=repl._cmd_run,
+            examples=(
+                "/run write a REST endpoint for user auth",
+                "/run fix the bug in auth.py",
+                "/run explain how the payment flow works",
+            ),
+            search_terms=("task", "execute", "ai", "ask", "do", "generate", "write code"),
+            shortcut="/r",
         )
     )
     registry.register(
@@ -304,6 +364,12 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Force full council tier regardless of task complexity",
             usage="/council <task description>",
             handler=repl._cmd_council,
+            examples=(
+                "/council analyze security vulnerabilities in this codebase",
+                "/council review this architecture for scalability issues",
+            ),
+            search_terms=("full council", "multi-agent", "complex task", "deep analysis", "best quality"),
+            shortcut="/c",
         )
     )
     registry.register(
@@ -313,6 +379,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="List background jobs or cancel one (/jobs cancel <id>)",
             usage="/jobs [cancel <id>]",
             handler=repl._cmd_jobs,
+            examples=("/jobs", "/jobs cancel abc123"),
+            search_terms=("background", "running", "tasks", "cancel job", "progress", "queue"),
         )
     )
     registry.register(
@@ -322,6 +390,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Live progress dashboard: jobs, alerts, and provider health",
             usage="/dashboard",
             handler=repl._cmd_dashboard,
+            examples=("/dashboard",),
+            search_terms=("live", "monitor", "status", "health", "progress", "overview"),
+            shortcut="/dash",
         )
     )
 
@@ -334,15 +405,21 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Pick, resume, save, or export sessions (no args = interactive picker)",
             usage="/session [list|resume <id>|summary <id>|save|export]",
             handler=repl._cmd_session,
+            examples=("/session", "/session list", "/session resume", "/session save"),
+            search_terms=("history", "conversation", "resume", "save session", "past sessions", "switch session"),
+            shortcut="/s",
         )
     )
     registry.register(
         SlashCommand(
             name="memory",
             aliases=["mem"],
-            description="Inspect memory tiers and stats",
+            description="Inspect the 5-tier memory system: working, episodic, semantic, graph, lineage",
             usage="/memory [clear|stats]",
             handler=repl._cmd_memory,
+            examples=("/memory", "/memory stats", "/memory clear"),
+            search_terms=("remember", "recall", "knowledge", "tiers", "working memory", "episodic"),
+            shortcut="/mem",
         )
     )
     registry.register(
@@ -352,6 +429,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Show context window usage for the current conversation",
             usage="/context",
             handler=repl._cmd_context,
+            examples=("/context",),
+            search_terms=("tokens", "context window", "usage", "conversation length", "how full"),
+            shortcut="/ctx",
         )
     )
     registry.register(
@@ -361,6 +441,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Render a hierarchical tree of knowledge graph entities",
             usage="/graph",
             handler=repl._cmd_graph,
+            examples=("/graph",),
+            search_terms=("knowledge graph", "entities", "relationships", "tree", "concepts"),
+            shortcut="/g",
         )
     )
 
@@ -373,6 +456,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Speed mode — instant tier, compressed context, smallest model",
             usage="/optimus",
             handler=repl._cmd_optimus,
+            examples=("/optimus",),
+            search_terms=("fast", "quick", "speed", "instant", "lightweight", "small model"),
         )
     )
     registry.register(
@@ -382,6 +467,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Max power — full council, largest model, full context",
             usage="/godly",
             handler=repl._cmd_godly,
+            examples=("/godly",),
+            search_terms=("max", "full power", "powerful", "best model", "maximum quality"),
         )
     )
     registry.register(
@@ -391,6 +478,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Return to balanced normal mode",
             usage="/normal",
             handler=repl._cmd_normal,
+            examples=("/normal",),
+            search_terms=("balanced", "reset mode", "default mode"),
+            shortcut="/n",
         )
     )
     registry.register(
@@ -400,6 +490,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Show or switch the session mode: fast | max | normal | status",
             usage="/mode [fast|max|normal|status]",
             handler=repl._cmd_mode,
+            examples=("/mode", "/mode fast", "/mode normal", "/mode status"),
+            search_terms=("switch mode", "speed mode", "session mode", "change mode"),
         )
     )
 
@@ -412,6 +504,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Show uncommitted file changes from the last council run",
             usage="/diff",
             handler=repl._cmd_diff,
+            examples=("/diff",),
+            search_terms=("changes", "uncommitted", "git diff", "edits", "what changed"),
+            shortcut="/d",
         )
     )
     registry.register(
@@ -421,15 +516,20 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Revert the last Velune-generated git commit (keeps changes staged)",
             usage="/undo",
             handler=repl._cmd_undo,
+            examples=("/undo",),
+            search_terms=("revert", "rollback", "git undo", "undo commit", "take back"),
+            shortcut="/u",
         )
     )
     registry.register(
         SlashCommand(
             name="hunk",
             aliases=["hunks"],
-            description="Toggle hunk-by-hunk review mode for edits",
+            description="Toggle hunk-by-hunk review mode — approve each change before it's applied",
             usage="/hunk",
             handler=repl._cmd_hunk,
+            examples=("/hunk",),
+            search_terms=("review changes", "approve change", "hunk by hunk", "interactive review"),
         )
     )
     registry.register(
@@ -439,6 +539,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Set tool/command approval mode: safe | ask | block",
             usage="/approve [safe|ask|block]",
             handler=repl._cmd_approve,
+            examples=("/approve safe", "/approve ask", "/approve block"),
+            search_terms=("permissions", "safety", "tool approval", "confirmation", "auto-approve"),
         )
     )
 
@@ -451,6 +553,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="View or run empirical model capability benchmarks",
             usage="/bench [run]",
             handler=repl._cmd_bench,
+            examples=("/bench", "/bench run"),
+            search_terms=("benchmark", "test model", "capability", "performance", "compare models"),
         )
     )
 
@@ -460,18 +564,23 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="mcp",
             aliases=[],
-            description="Inspect MCP servers, tools, and resources",
+            description="Inspect MCP servers, tools, and resources — connect external capabilities",
             usage="/mcp [servers|tools|resources|connect <name>|disconnect <name>|refresh <name>]",
             handler=repl._cmd_mcp,
+            examples=("/mcp", "/mcp servers", "/mcp tools", "/mcp connect myserver"),
+            search_terms=("model context protocol", "tools", "server", "resources", "external tools", "integrations"),
         )
     )
     registry.register(
         SlashCommand(
             name="plugin",
             aliases=["plugins", "pl"],
-            description="List, enable, disable, or reload declarative plugins",
+            description="List, enable, disable, or reload declarative TOML/Markdown plugins",
             usage="/plugin [list|enable <name>|disable <name>|reload [name]|show <name>]",
             handler=repl._cmd_plugin,
+            examples=("/plugin list", "/plugin enable myplugin", "/plugin reload"),
+            search_terms=("extensions", "markdown commands", "custom commands", "SKILL.md", "plugins"),
+            shortcut="/pl",
         )
     )
 
@@ -484,6 +593,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Push current branch to remote origin",
             usage="/push [--force]",
             handler=repl._cmd_push,
+            examples=("/push", "/push --force"),
+            search_terms=("git push", "upload", "remote", "publish branch"),
+            shortcut="/gp",
         )
     )
     registry.register(
@@ -491,8 +603,10 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="pr",
             aliases=["pull-request", "mr"],
             description="Create a pull request / merge request on GitHub or GitLab",
-            usage="/pr <title> [--base <branch>] [--draft]",
+            usage='/pr <title> [--base <branch>] [--draft]',
             handler=repl._cmd_pr,
+            examples=('/pr "Add user auth" --base main', "/pr my-feature --draft"),
+            search_terms=("pull request", "merge request", "github", "gitlab", "create pr", "open pr"),
         )
     )
     registry.register(
@@ -502,6 +616,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Fetch a GitHub/GitLab issue and inject it as conversation context",
             usage="/issue <number>",
             handler=repl._cmd_issue,
+            examples=("/issue 42", "/issue 123"),
+            search_terms=("github issue", "ticket", "bug report", "issue context"),
         )
     )
     registry.register(
@@ -511,6 +627,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Show current sandbox type and status (subprocess or Docker)",
             usage="/sandbox [docker|status]",
             handler=repl._cmd_sandbox,
+            examples=("/sandbox", "/sandbox docker", "/sandbox status"),
+            search_terms=("isolation", "docker", "security", "execution environment", "container"),
+            shortcut="/sb",
         )
     )
 
@@ -523,6 +642,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Lint a Python file or the last @mentioned .py files",
             usage="/lint [file]",
             handler=repl._cmd_lint,
+            examples=("/lint", "/lint src/main.py"),
+            search_terms=("code quality", "errors", "linting", "syntax", "pyflakes", "warnings"),
         )
     )
     registry.register(
@@ -532,6 +653,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Detect code smells in a Python file",
             usage="/refactor <file>",
             handler=repl._cmd_refactor,
+            examples=("/refactor src/main.py",),
+            search_terms=("code smell", "cleanup", "improve code", "suggestions", "bad patterns"),
         )
     )
     registry.register(
@@ -541,6 +664,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Suggest type hints for unannotated functions in a Python file",
             usage="/typify <file>",
             handler=repl._cmd_typify,
+            examples=("/typify src/main.py",),
+            search_terms=("type hints", "annotations", "mypy", "typing", "add types"),
         )
     )
 

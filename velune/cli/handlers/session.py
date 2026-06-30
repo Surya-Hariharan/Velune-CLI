@@ -36,8 +36,14 @@ async def cmd_help(repl: VeluneREPL, args: str) -> None:
         repl.console.print(table)
         repl.console.print()
 
-    tips = "[dim]Press [bold]Tab[/bold] to autocomplete · [bold]/help --all[/bold] for dev commands · [bold]/doctor[/bold] for diagnostics.[/dim]"
-    repl.console.print(tips)
+    repl.console.print(
+        "[dim]"
+        "  [bold]Tab[/bold] autocomplete"
+        "  ·  type [bold]/[/bold] to open command palette"
+        "  ·  [bold]@@file.py[/bold] to mention files in prompts"
+        "  ·  [bold]/help --all[/bold] for dev commands"
+        "[/dim]"
+    )
 
 
 async def cmd_exit(repl: VeluneREPL, args: str) -> None:

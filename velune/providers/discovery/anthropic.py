@@ -43,6 +43,8 @@ class AnthropicDiscovery:
             parameter_count_b=None,
             speed_tier="medium",
             cost_per_1k_tokens=cost_per_1k,
+            location="cloud",
+            health="unknown",
             tags=["cloud", "anthropic"],
             metadata={},
         )
@@ -59,6 +61,8 @@ class AnthropicDiscovery:
             profile.instruction_following = CapabilityLevel.EXPERT
             profile.tool_use = CapabilityLevel.EXPERT
             profile.long_context = CapabilityLevel.EXPERT
+            profile.vision = CapabilityLevel.EXPERT
+            profile.multimodal = CapabilityLevel.EXPERT
         elif "sonnet" in model_id:
             profile.coding = CapabilityLevel.ADVANCED
             profile.reasoning = CapabilityLevel.ADVANCED
@@ -67,6 +71,8 @@ class AnthropicDiscovery:
             profile.instruction_following = CapabilityLevel.ADVANCED
             profile.tool_use = CapabilityLevel.EXPERT
             profile.long_context = CapabilityLevel.ADVANCED
+            profile.vision = CapabilityLevel.ADVANCED
+            profile.multimodal = CapabilityLevel.ADVANCED
         elif "haiku" in model_id:
             profile.coding = CapabilityLevel.INTERMEDIATE
             profile.reasoning = CapabilityLevel.INTERMEDIATE
@@ -75,5 +81,7 @@ class AnthropicDiscovery:
             profile.instruction_following = CapabilityLevel.ADVANCED
             profile.tool_use = CapabilityLevel.ADVANCED
             profile.long_context = CapabilityLevel.INTERMEDIATE
+            profile.vision = CapabilityLevel.INTERMEDIATE
+            profile.multimodal = CapabilityLevel.INTERMEDIATE
 
         return profile

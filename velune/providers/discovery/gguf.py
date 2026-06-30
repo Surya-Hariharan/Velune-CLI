@@ -55,6 +55,8 @@ class GGUFDiscovery:
                 parameter_count_b=param_count_b,
                 speed_tier="medium",
                 cost_per_1k_tokens=None,
+                location=str(gguf_path),
+                health="unknown",
                 tags=["local", "gguf"],
                 metadata={"gguf_path": str(gguf_path), "family": meta.get("family")},
             )

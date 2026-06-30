@@ -28,3 +28,4 @@ async def cmd_providers(repl: VeluneREPL, args: str) -> None:
 
     palette = ProviderPalette(console=repl.console, container=repl.container)
     await palette.run(args)
+    repl.console.print("[dim]→ /models to see available models  ·  /model connect <id> to activate one[/dim]")

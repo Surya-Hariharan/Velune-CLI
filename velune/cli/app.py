@@ -225,8 +225,16 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                                 "Detected project marker before REPL launch: %s", repo_name
                             )
                     elif state == "partial":
-                        # Providers configured but no model selected — jump to model discovery.
-                        run_onboarding(runtime, skip_to="model_discovery")
+                        # Providers configured but no model selected — show a hint.
+                        # Don't silently launch model discovery; direct to the named command
+                        # so the user understands what's happening.
+                        runtime.console.print(
+                            Text.from_markup(
+                                f"\n  [{design.WARN}]{design.ICON_WARNING}  Setup incomplete.[/{design.WARN}]"
+                                f"  [{design.MUTED}]Run [bold]velune onboard[/bold]"
+                                f" to finish selecting your default model.[/{design.MUTED}]\n"
+                            )
+                        )
                     else:
                         # Fresh install — run the full guided wizard.
                         run_onboarding(runtime, skip_to=None)

@@ -202,4 +202,17 @@ def render_startup_banner(
             )
         )
 
+    # --- Discoverability hint ------------------------------------------------
+    console.print(
+        Text.from_markup(
+            f"  [{design.FAINT}]/help[/{design.FAINT}]"
+            f"  [{design.FAINT}]·[/{design.FAINT}]"
+            f"  [{design.FAINT}]Tab to autocomplete[/{design.FAINT}]"
+            f"  [{design.FAINT}]·[/{design.FAINT}]"
+            f"  [{design.FAINT}]type / to search commands[/{design.FAINT}]"
+            f"  [{design.FAINT}]·[/{design.FAINT}]"
+            f"  [{design.FAINT}]@@file.py to mention files[/{design.FAINT}]"
+        )
+    )
+
     console.print()

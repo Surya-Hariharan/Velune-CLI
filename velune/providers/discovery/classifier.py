@@ -14,6 +14,7 @@ class CapabilityClassifier:
             "summarization": ["llama", "mistral"],
             "instruction_following": ["instruct", "chat"],
             "long_context": ["long", "32k", "128k", "200k"],
+            "vision": ["vision", "llava", "moondream", "minicpm-v", "-vl", "_vl", "llava"],
         }
 
     def classify(self, model: ModelDescriptor) -> ModelCapabilityProfile:

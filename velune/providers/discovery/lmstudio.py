@@ -60,6 +60,8 @@ class LMStudioDiscovery:
             parameter_count_b=None,
             speed_tier="medium",
             cost_per_1k_tokens=None,
+            location=self.base_url,
+            health="unknown",
             tags=["local", "lmstudio"],
             metadata={"raw": model_data},
         )
@@ -68,13 +70,27 @@ class LMStudioDiscovery:
         model_lower = model_id.lower()
         profile = ModelCapabilityProfile()
 
-        if any(name in model_lower for name in ["coder", "code"]):
+        if any(name in model_lower for name in ["coder", "code", "starcoder"]):
             profile.coding = CapabilityLevel.INTERMEDIATE
         else:
             profile.coding = CapabilityLevel.BASIC
 
-        profile.reasoning = CapabilityLevel.BASIC
+        if any(name in model_lower for name in ["r1", "reason", "qwq"]):
+            profile.reasoning = CapabilityLevel.ADVANCED
+        else:
+            profile.reasoning = CapabilityLevel.BASIC
+
         profile.instruction_following = CapabilityLevel.INTERMEDIATE
         profile.summarization = CapabilityLevel.BASIC
+
+        if any(name in model_lower for name in ["llava", "vision", "vl", "moondream", "minicpm-v", "bakllava"]):
+            profile.vision = CapabilityLevel.ADVANCED
+            profile.multimodal = CapabilityLevel.ADVANCED
+
+        if any(name in model_lower for name in ["embed", "bge-", "e5-", "gte-"]):
+            profile.embedding = CapabilityLevel.ADVANCED
+
+        if any(name in model_lower for name in ["instruct", "chat"]):
+            profile.tool_use = CapabilityLevel.INTERMEDIATE
 
         return profile

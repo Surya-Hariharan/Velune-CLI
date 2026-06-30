@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+import json
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from velune.cli import design
 from velune.providers.keystore import (
+    credentials_file_path,
     delete_key,
+    export_providers_json,
     get_key,
     get_provider_status,
     has_key,
+    import_providers_json,
     is_ollama_live,
+    repair_keystore,
     save_key,
 )
 from velune.providers.validation import (
@@ -121,6 +132,49 @@ _PROVIDER_META: dict[str, dict] = {
 }
 
 
+def _find_config_path() -> Path | None:
+    """Walk up from cwd looking for velune.toml (max 8 levels)."""
+    current = Path.cwd()
+    for _ in range(8):
+        candidate = current / "velune.toml"
+        if candidate.exists():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def _get_default_provider() -> str | None:
+    """Read providers.default_provider from velune.toml, or None if not found."""
+    path = _find_config_path()
+    if not path:
+        return None
+    try:
+        import toml
+
+        return toml.load(path).get("providers", {}).get("default_provider")
+    except Exception:
+        return None
+
+
+def _set_default_provider_in_toml(provider_id: str) -> Path | None:
+    """Write providers.default_provider to velune.toml. Returns path on success."""
+    try:
+        import toml
+
+        path = _find_config_path() or (Path.cwd() / "velune.toml")
+        data = toml.load(path) if path.exists() else {}
+        data.setdefault("providers", {})["default_provider"] = provider_id
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            toml.dump(data, fh)
+        return path
+    except Exception:
+        return None
+
+
 def _is_configured(pid: str) -> bool:
     meta = _PROVIDER_META.get(pid, {})
     if meta.get("local"):
@@ -145,20 +199,25 @@ def _is_configured(pid: str) -> bool:
 @provider_cmd.command("list")
 def list_providers() -> None:
     """List all providers and their configuration status."""
+    default_pid = _get_default_provider()
+
     table = Table(
         title=f"[bold {design.ACCENT}]Configured Providers[/bold {design.ACCENT}]",
         border_style=design.FAINT,
         padding=(0, 1),
     )
-    table.add_column("Provider", style=design.INFO, min_width=16)
+    table.add_column(" ", width=2)  # default marker
+    table.add_column("Provider", style=design.INFO, min_width=14)
     table.add_column("Label", style=design.MUTED, min_width=20)
     table.add_column("Type", style=design.MUTED, width=7)
     table.add_column("Status", min_width=16)
-    table.add_column("Env Var", style=design.MUTED)
+    table.add_column("Source", style=design.MUTED, width=5)
 
     for pid in sorted(_PROVIDER_META.keys()):
         meta = _PROVIDER_META[pid]
         configured = _is_configured(pid)
+        is_default = pid == default_pid
+        marker = f"[{design.OK}]★[/{design.OK}]" if is_default else ""
 
         if meta.get("local"):
             status_str = (
@@ -167,22 +226,29 @@ def list_providers() -> None:
                 else f"[{design.WARN}]not running[/{design.WARN}]"
             )
             ptype = "local"
-            env_str = "—"
+            source_str = "—"
         else:
-            status_str = (
-                f"[{design.OK}]key set[/{design.OK}]"
-                if configured
-                else f"[{design.MUTED}]not set[/{design.MUTED}]"
-            )
+            if configured:
+                status_str = f"[{design.OK}]key set[/{design.OK}]"
+                info = get_provider_status(pid)
+                source_str = "env" if info.get("source") == "environment" else "file"
+            else:
+                status_str = f"[{design.MUTED}]not set[/{design.MUTED}]"
+                source_str = "—"
             ptype = "cloud"
-            env_str = meta.get("env") or "—"
 
-        table.add_row(pid, meta["label"], ptype, status_str, env_str)
+        table.add_row(marker, pid, meta["label"], ptype, status_str, source_str)
 
     console.print(table)
-    console.print(
-        f"\n[{design.MUTED}]Run `velune provider add <name>` to configure a provider.[/{design.MUTED}]"
-    )
+    if default_pid:
+        console.print(
+            f"\n[{design.MUTED}]★ default provider: [bold]{default_pid}[/bold]"
+            f"  ·  Run `velune provider default <name>` to change.[/{design.MUTED}]"
+        )
+    else:
+        console.print(
+            f"\n[{design.MUTED}]Run `velune provider add <name>` to configure a provider.[/{design.MUTED}]"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +616,337 @@ def edit_provider(
 
 
 # ---------------------------------------------------------------------------
+# velune provider inspect
+# ---------------------------------------------------------------------------
+
+
+@provider_cmd.command("inspect")
+def inspect_provider(
+    provider_id: str = typer.Argument(..., help="Provider name"),
+    no_live: bool = typer.Option(False, "--no-live", help="Skip live API validation"),
+) -> None:
+    """Show comprehensive details for a single provider."""
+    pid = provider_id.lower().strip()
+    meta = _PROVIDER_META.get(pid)
+
+    if not meta:
+        supported = ", ".join(sorted(_PROVIDER_META.keys()))
+        console.print(
+            f"[{design.WARN}]Unknown provider '{pid}'.[/{design.WARN}]\n"
+            f"[{design.MUTED}]Supported: {supported}[/{design.MUTED}]"
+        )
+        raise typer.Exit(1)
+
+    info = get_provider_status(pid)
+    default_pid = _get_default_provider()
+    is_local = bool(meta.get("local"))
+    key = "" if is_local else (get_key(pid) or "")
+
+    lines: list[str] = []
+
+    # Identity
+    lines.append(f"[{design.MUTED}]Label[/{design.MUTED}]          {meta['label']}")
+    lines.append(f"[{design.MUTED}]Type[/{design.MUTED}]           {'local' if is_local else 'cloud'}")
+
+    if pid == default_pid:
+        lines.append(
+            f"[{design.MUTED}]Default[/{design.MUTED}]        [{design.OK}]★ yes[/{design.OK}]"
+        )
+
+    # Key / auth
+    if is_local:
+        lines.append(f"[{design.MUTED}]Auth[/{design.MUTED}]           no key required")
+    elif key:
+        masked = key[:6] + "***" + key[-4:] if len(key) > 10 else "***"
+        source_label = info.get("source", "file")
+        if source_label == "environment":
+            env_var = meta.get("env", "")
+            lines.append(
+                f"[{design.MUTED}]API Key[/{design.MUTED}]        {masked}"
+                f"  [{design.MUTED}](${env_var})[/{design.MUTED}]"
+            )
+        else:
+            lines.append(f"[{design.MUTED}]API Key[/{design.MUTED}]        {masked}  (file)")
+    else:
+        lines.append(f"[{design.MUTED}]API Key[/{design.MUTED}]        [{design.WARN}]not configured[/{design.WARN}]")
+
+    # Storage
+    if not is_local:
+        loc = info.get("location", "—")
+        lines.append(f"[{design.MUTED}]Storage[/{design.MUTED}]        {loc}")
+
+    # Last verified
+    lv = info.get("last_verified", "n/a")
+    if lv and lv not in ("n/a", "dynamic"):
+        try:
+            dt = datetime.fromisoformat(lv)
+            lv = dt.strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            pass
+    lines.append(f"[{design.MUTED}]Last Verified[/{design.MUTED}]  {lv}")
+
+    # Env var
+    if meta.get("env"):
+        env_set = "set" if get_provider_status(pid).get("source") == "environment" else "not set"
+        lines.append(
+            f"[{design.MUTED}]Env Var[/{design.MUTED}]        {meta['env']}"
+            f"  [{design.MUTED}]({env_set})[/{design.MUTED}]"
+        )
+
+    # URL
+    if meta.get("url"):
+        lines.append(f"[{design.MUTED}]Key URL[/{design.MUTED}]        {meta['url']}")
+
+    lines.append("")
+
+    # Live status
+    if no_live:
+        lines.append(f"[{design.MUTED}](live check skipped — pass without --no-live to validate)[/{design.MUTED}]")
+    elif not key and not is_local:
+        lines.append(f"[{design.WARN}]Live check skipped: no key configured.[/{design.WARN}]")
+    else:
+        t0 = time.monotonic()
+        with console.status(f"  [{design.MUTED}]Checking {meta['label']}...[/{design.MUTED}]"):
+            result = validate_provider_sync(pid, key)
+        latency_ms = int((time.monotonic() - t0) * 1000)
+
+        if result.ok:
+            lines.append(f"[{design.OK}]✓ Healthy[/{design.OK}]  [{design.MUTED}]{latency_ms}ms[/{design.MUTED}]")
+            if result.models:
+                n = len(result.models)
+                preview = ", ".join(result.models[:4])
+                if n > 4:
+                    preview += f" +{n - 4} more"
+                lines.append(f"[{design.MUTED}]Models[/{design.MUTED}]         {n} available")
+                lines.append(f"[{design.MUTED}]               {preview}[/{design.MUTED}]")
+            if result.account_info:
+                _append_account_info(lines, result.account_info)
+        else:
+            status_label = result.status.value.replace("_", " ").title()
+            lines.append(
+                f"[{design.WARN}]✗ {status_label}[/{design.WARN}]"
+                f"  [{design.MUTED}]{latency_ms}ms[/{design.MUTED}]"
+            )
+            lines.append(f"  [{design.MUTED}]{result.message}[/{design.MUTED}]")
+
+    body = "\n".join(lines)
+    console.print(
+        Panel(
+            body,
+            title=f"[bold {design.ACCENT}]{pid}[/bold {design.ACCENT}]",
+            border_style=design.GREEN,
+            padding=(0, 2),
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# velune provider default
+# ---------------------------------------------------------------------------
+
+
+@provider_cmd.command("default")
+def provider_default(
+    provider_id: str = typer.Argument(
+        "", help="Provider to set as default. Omit to show current default."
+    ),
+) -> None:
+    """Get or set the default AI provider."""
+    if not provider_id:
+        current = _get_default_provider()
+        config_path = _find_config_path()
+
+        if current:
+            console.print(
+                f"[{design.OK}]★ Default provider:[/{design.OK}] [bold]{current}[/bold]"
+            )
+            if config_path:
+                console.print(f"  [{design.MUTED}]{config_path}[/{design.MUTED}]")
+        else:
+            console.print(
+                f"[{design.WARN}]No default provider set.[/{design.WARN}]\n"
+                f"[{design.MUTED}]Run `velune provider default <name>` to set one.[/{design.MUTED}]"
+            )
+        return
+
+    pid = provider_id.lower().strip()
+    meta = _PROVIDER_META.get(pid)
+
+    if not meta:
+        supported = ", ".join(sorted(_PROVIDER_META.keys()))
+        console.print(
+            f"[{design.WARN}]Unknown provider '{pid}'.[/{design.WARN}]\n"
+            f"[{design.MUTED}]Supported: {supported}[/{design.MUTED}]"
+        )
+        raise typer.Exit(1)
+
+    if not meta.get("local") and not has_key(pid):
+        console.print(
+            f"[{design.WARN}]'{pid}' has no configured API key.[/{design.WARN}]\n"
+            f"[{design.MUTED}]Run `velune provider add {pid}` first.[/{design.MUTED}]"
+        )
+        raise typer.Exit(1)
+
+    config_path = _set_default_provider_in_toml(pid)
+    if config_path:
+        console.print(
+            f"[{design.OK}]★ Default provider set to:[/{design.OK}] [bold]{pid}[/bold]\n"
+            f"  [{design.MUTED}]{config_path}[/{design.MUTED}]"
+        )
+    else:
+        console.print(
+            f"[{design.WARN}]Could not write to velune.toml.[/{design.WARN}]\n"
+            f"[{design.MUTED}]Add `default_provider = \"{pid}\"` under [providers] in velune.toml manually.[/{design.MUTED}]"
+        )
+        raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# velune provider backup
+# ---------------------------------------------------------------------------
+
+
+@provider_cmd.command("backup")
+def backup_providers(
+    output: str = typer.Option(
+        "", "--output", "-o", help="Output file path (default: velune-providers-YYYYMMDD.json)"
+    ),
+) -> None:
+    """Export all configured provider credentials to a JSON backup file.
+
+    The exported file contains plaintext API keys — keep it secure.
+    """
+    snapshot = export_providers_json(include_keys=True)
+
+    if not snapshot:
+        console.print(
+            f"[{design.WARN}]No providers configured — nothing to back up.[/{design.WARN}]"
+        )
+        raise typer.Exit(1)
+
+    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    dest = Path(output) if output else Path.cwd() / f"velune-providers-{date_str}.json"
+
+    payload = {
+        "version": "1.0",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "providers": snapshot,
+    }
+
+    dest.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    console.print(
+        f"[{design.OK}]Backup written:[/{design.OK}] {dest}\n"
+        f"[{design.WARN}]This file contains plaintext API keys — store it securely.[/{design.WARN}]"
+    )
+    console.print(
+        f"[{design.MUTED}]Providers: {', '.join(sorted(snapshot.keys()))}[/{design.MUTED}]"
+    )
+
+
+# ---------------------------------------------------------------------------
+# velune provider restore
+# ---------------------------------------------------------------------------
+
+
+@provider_cmd.command("restore")
+def restore_providers(
+    file_path: str = typer.Argument(..., help="Path to a velune provider backup JSON file"),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Overwrite keys for providers already configured"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Import provider credentials from a backup JSON file."""
+    src = Path(file_path)
+    if not src.exists():
+        console.print(f"[{design.WARN}]File not found: {src}[/{design.WARN}]")
+        raise typer.Exit(1)
+
+    try:
+        payload = json.loads(src.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[{design.WARN}]Could not read backup file: {exc}[/{design.WARN}]")
+        raise typer.Exit(1)
+
+    records: dict = payload.get("providers", payload)
+    if not isinstance(records, dict) or not records:
+        console.print(f"[{design.WARN}]Backup file contains no provider records.[/{design.WARN}]")
+        raise typer.Exit(1)
+
+    exported_at = payload.get("exported_at", "unknown")
+    console.print(
+        f"[{design.MUTED}]Backup from:[/{design.MUTED}] {exported_at}\n"
+        f"[{design.MUTED}]Providers in file:[/{design.MUTED}] {', '.join(sorted(records.keys()))}"
+    )
+
+    if not yes:
+        confirmed = typer.confirm("Import these providers?", default=True)
+        if not confirmed:
+            console.print(f"[{design.MUTED}]Aborted.[/{design.MUTED}]")
+            return
+
+    imported, skipped = import_providers_json(records, overwrite=overwrite)
+
+    if imported:
+        console.print(
+            f"[{design.OK}]Imported:[/{design.OK}] {', '.join(sorted(imported))}"
+        )
+    if skipped:
+        hint = " (use --overwrite to replace existing keys)" if not overwrite else ""
+        console.print(
+            f"[{design.MUTED}]Skipped:[/{design.MUTED}] {', '.join(sorted(skipped))}{hint}"
+        )
+
+    if not imported and not skipped:
+        console.print(f"[{design.MUTED}]Nothing to import.[/{design.MUTED}]")
+
+
+# ---------------------------------------------------------------------------
+# velune provider repair
+# ---------------------------------------------------------------------------
+
+
+@provider_cmd.command("repair")
+def repair_providers_cmd() -> None:
+    """Attempt to repair corrupted or invalid provider credentials.
+
+    Tries to restore from the automatic backup, then removes any records
+    with empty or missing keys.
+    """
+    console.print(f"[{design.MUTED}]Running credential repair...[/{design.MUTED}]\n")
+
+    report = repair_keystore()
+
+    if report["restored_backup"]:
+        console.print(f"[{design.OK}]✓ Restored from backup (.bak file)[/{design.OK}]")
+    else:
+        console.print(f"[{design.MUTED}]Primary credential store loaded (no restore needed)[/{design.MUTED}]")
+
+    if report["removed"]:
+        console.print(
+            f"[{design.WARN}]Removed empty records:[/{design.WARN}] {', '.join(report['removed'])}"
+        )
+    else:
+        console.print(f"[{design.OK}]✓ No empty records found[/{design.OK}]")
+
+    if report["kept"]:
+        console.print(
+            f"[{design.OK}]✓ Valid providers kept:[/{design.OK}] {', '.join(report['kept'])}"
+        )
+
+    creds = credentials_file_path()
+    console.print(f"\n[{design.MUTED}]Credentials file: {creds}[/{design.MUTED}]")
+    bak = creds.with_name("credentials.json.bak")
+    if bak.exists():
+        console.print(f"[{design.MUTED}]Auto-backup file: {bak}[/{design.MUTED}]")
+
+    if not report["kept"] and not report["removed"]:
+        console.print(
+            f"\n[{design.WARN}]No providers found after repair. Run `velune setup` to add one.[/{design.WARN}]"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -573,3 +970,13 @@ def _show_account_info(c: Console, info: dict, pid: str) -> None:
         parts.append(f"{info['total_models']} total models")
     if parts:
         c.print(f"  [{design.MUTED}]Account: {', '.join(parts)}[/{design.MUTED}]")
+
+
+def _append_account_info(lines: list[str], info: dict) -> None:
+    parts = []
+    if "username" in info:
+        parts.append(f"user: {info['username']}")
+    if "organization" in info:
+        parts.append(f"org: {info['organization']}")
+    if parts:
+        lines.append(f"[{design.MUTED}]Account[/{design.MUTED}]        {', '.join(parts)}")

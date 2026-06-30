@@ -14,6 +14,8 @@ silent failures.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -86,6 +88,67 @@ _ONBOARDING_CLOUD: list[tuple[str, bool, str, str, str]] = [
 _MAX_LOCAL_RETRIES = 3
 _MAX_KEY_ATTEMPTS = 3
 
+# ── Progress persistence ───────────────────────────────────────────────────────
+
+_PROGRESS_FILE = Path.home() / ".velune" / "onboarding_progress.json"
+
+_STAGE_NAMES: tuple[str, ...] = (
+    "welcome",
+    "detect_environment",
+    "configure_providers",
+    "discover_models",
+    "select_default_model",
+    "health_check",
+    "workspace_setup",
+    "ready",
+)
+
+_log = logging.getLogger("velune.cli.onboarding")
+
+
+def _read_progress_file() -> dict:
+    try:
+        if _PROGRESS_FILE.exists():
+            return json.loads(_PROGRESS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _write_progress_file(data: dict) -> None:
+    try:
+        _PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _PROGRESS_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(_PROGRESS_FILE)
+    except Exception as exc:
+        _log.warning("Could not save onboarding progress: %s", exc)
+
+
+def save_stage_progress(stage: str) -> None:
+    """Append *stage* to the completed-stages list in the progress file."""
+    data = _read_progress_file()
+    stages: list[str] = data.get("completed_stages", [])
+    if stage not in stages:
+        stages.append(stage)
+    data["completed_stages"] = stages
+    data["version"] = 1
+    _write_progress_file(data)
+
+
+def load_stage_progress() -> list[str]:
+    """Return the list of completed stage names (empty list if not started)."""
+    return _read_progress_file().get("completed_stages", [])
+
+
+def mark_onboarding_complete() -> None:
+    """Write the 'complete' flag so onboarding_state() returns 'returning'."""
+    data = _read_progress_file()
+    data["complete"] = True
+    data["version"] = 1
+    _write_progress_file(data)
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
@@ -102,6 +165,10 @@ def onboarding_state() -> Literal["returning", "partial", "fresh"]:
     "fresh"
         No providers configured at all — run the full wizard.
     """
+    # Fast-path: if the wizard completed successfully, skip all live checks.
+    if _read_progress_file().get("complete"):
+        return "returning"
+
     from velune.cli.model_prefs import load_active_model
     from velune.providers.keystore import list_configured_providers
 
@@ -144,7 +211,11 @@ def show_returning_summary(
     console.print(Panel(content, border_style=design.GREEN, padding=(0, 2)))
 
 
-def run_onboarding(runtime: object, skip_to: str | None = None) -> None:
+def run_onboarding(
+    runtime: object,
+    skip_to: str | None = None,
+    start_stage: int = 0,
+) -> None:
     """Entry point for the onboarding wizard.
 
     Parameters
@@ -152,26 +223,58 @@ def run_onboarding(runtime: object, skip_to: str | None = None) -> None:
     runtime:
         The ``RuntimeContext`` produced by ``build_runtime()``.
     skip_to:
-        If ``"model_discovery"``, skip the mode/provider steps and jump
-        straight to model discovery (used for the PARTIAL state).
+        Legacy parameter — ``"model_discovery"`` maps to ``start_stage=3``.
+        Prefer ``start_stage`` for new callers.
+    start_stage:
+        0-indexed stage to begin from (0 = Stage 1 Welcome, 7 = Stage 8 Ready).
+        Stages before this index are skipped.
     """
     console: Console = runtime.console  # type: ignore[attr-defined]
+    if skip_to == "model_discovery" and start_stage == 0:
+        start_stage = 3
     try:
-        _run_inner(runtime, skip_to)
+        _run_inner(runtime, start_stage)
     except KeyboardInterrupt:
         console.print()
         console.print(
             f"[{design.WARN}]Setup interrupted.[/{design.WARN}]"
-            f" [{design.MUTED}]Run [bold]velune setup[/bold] any time to continue.[/{design.MUTED}]"
+            f" [{design.MUTED}]Run [bold]velune onboard[/bold] any time to resume.[/{design.MUTED}]"
         )
     except EOFError:
         pass
 
 
+# ── Stage UI helpers ───────────────────────────────────────────────────────────
+
+
+def _stage_header(console: Console, n: int, total: int, name: str) -> None:
+    """Print a numbered stage header with a horizontal rule."""
+    console.print()
+    console.print(
+        f"[bold {design.ACCENT}]Stage {n}/{total} — {name}[/bold {design.ACCENT}]"
+    )
+    console.print(f"[{design.FAINT}]{'─' * 52}[/{design.FAINT}]")
+
+
+def _stage_done(console: Console, summary: str, next_hint: str) -> None:
+    """Print the ✓ Done success panel that ends every stage."""
+    body = (
+        f"[{design.MUTED}]{summary}[/{design.MUTED}]\n\n"
+        f"[{design.MUTED}]Next: {next_hint}[/{design.MUTED}]"
+    )
+    console.print(
+        Panel(
+            f"[bold {design.OK}]{design.ICON_SUCCESS}  Done[/bold {design.OK}]\n\n{body}",
+            border_style=design.GREEN,
+            padding=(0, 2),
+        )
+    )
+
+
 # ── Internal orchestrator ──────────────────────────────────────────────────────
 
 
-def _run_inner(runtime: object, skip_to: str | None) -> None:
+def _run_inner(runtime: object, start_stage: int = 0) -> None:
     console: Console = runtime.console  # type: ignore[attr-defined]
 
     try:
@@ -180,51 +283,125 @@ def _run_inner(runtime: object, skip_to: str | None) -> None:
     except Exception:
         workspace = Path.cwd()
 
-    configured: list[str] = []
-    preferred_local = False
-
-    if skip_to == "model_discovery":
-        # PARTIAL state — providers already configured, just pick a model.
-        from velune.providers.keystore import list_configured_providers
-
-        configured = list_configured_providers()
-    else:
-        # FRESH state — full wizard.
-        _step_welcome(console)
-
+    # ── Stage 1: Welcome ───────────────────────────────────────────────────
+    mode: str = "hybrid"  # default when resuming past stage 1
+    if start_stage <= 0:
+        _stage_header(console, 1, 8, "Welcome")
+        action = _step_welcome(console)
+        if action == "skip":
+            _step_degraded_mode(console)
+            return
         mode = _step_ai_mode(console)
         if mode == "skip":
             _step_degraded_mode(console)
             return
+        _stage_done(
+            console,
+            f"Mode selected: {mode}.",
+            "Stage 2/8 — Detect Environment",
+        )
+        save_stage_progress("welcome")
 
-        preferred_local = mode in ("local", "hybrid")
+    # ── Stage 2: Detect Environment ────────────────────────────────────────
+    if start_stage <= 1:
+        _stage_header(console, 2, 8, "Detect Environment")
+        _step_detect_environment(console)
+        _stage_done(
+            console,
+            "Hardware profile detected.",
+            "Stage 3/8 — Configure Providers",
+        )
+        save_stage_progress("detect_environment")
 
+    # ── Stage 3: Configure Providers ───────────────────────────────────────
+    configured: list[str] = []
+    preferred_local: bool = False
+    if start_stage <= 2:
+        _stage_header(console, 3, 8, "Configure Providers")
         if mode in ("local", "hybrid"):
             local_cfg = _step_local_detection(console)
             configured.extend(local_cfg)
-
         if mode in ("cloud", "hybrid"):
             cloud_cfg = _step_cloud_setup(console)
             configured.extend(cloud_cfg)
-
         if not configured:
             _step_degraded_mode(console)
             return
-
-    # Model discovery & selection
-    models = _step_model_discovery(console)
-    if models:
-        _step_model_recommendation(console, models, preferred_local)
-    else:
-        console.print(
-            f"\n  [{design.WARN}]No models found — try [bold]/model discover[/bold]"
-            f" later once a provider is reachable.[/{design.WARN}]"
+        preferred_local = mode in ("local", "hybrid")
+        provider_str = ", ".join(configured) if configured else "none"
+        _stage_done(
+            console,
+            f"{len(configured)} provider(s) configured: {provider_str}.",
+            "Stage 4/8 — Discover Models",
         )
+        save_stage_progress("configure_providers")
+    else:
+        from velune.providers.keystore import list_configured_providers
 
-    # Workspace detection
-    _step_workspace_detection(console, workspace)
+        configured = list_configured_providers()
+        preferred_local = any(p in ("ollama", "lmstudio") for p in configured)
 
-    # Ready summary
+    # ── Stage 4: Discover Models ────────────────────────────────────────────
+    models: list = []
+    if start_stage <= 3:
+        _stage_header(console, 4, 8, "Discover Models")
+        models = _step_model_discovery(console)
+        total_models = len(models)
+        _stage_done(
+            console,
+            f"{total_models} model(s) found across your configured providers.",
+            "Stage 5/8 — Select Default Model",
+        )
+        save_stage_progress("discover_models")
+
+    # ── Stage 5: Select Default Model ──────────────────────────────────────
+    if start_stage <= 4:
+        _stage_header(console, 5, 8, "Select Default Model")
+        if models:
+            _step_model_recommendation(console, models, preferred_local)
+        else:
+            console.print(
+                f"\n  [{design.WARN}]No models found — try [bold]/model discover[/bold]"
+                f" later once a provider is reachable.[/{design.WARN}]"
+            )
+        from velune.cli.model_prefs import load_active_model
+
+        model_pref = load_active_model()
+        if model_pref:
+            model_str = f"{model_pref.provider_id} / {model_pref.model_id}"
+        else:
+            model_str = "none set — use /model connect in the REPL"
+        _stage_done(
+            console,
+            f"Default model: {model_str}.",
+            "Stage 6/8 — Health Check",
+        )
+        save_stage_progress("select_default_model")
+
+    # ── Stage 6: Health Check ───────────────────────────────────────────────
+    if start_stage <= 5:
+        _stage_header(console, 6, 8, "Health Check")
+        hc_summary = _step_health_check(console)
+        _stage_done(
+            console,
+            hc_summary,
+            "Stage 7/8 — Workspace Setup",
+        )
+        save_stage_progress("health_check")
+
+    # ── Stage 7: Workspace Setup ────────────────────────────────────────────
+    if start_stage <= 6:
+        _stage_header(console, 7, 8, "Workspace Setup")
+        _step_workspace_detection(console, workspace)
+        _stage_done(
+            console,
+            f"Workspace configured at {workspace}.",
+            "Stage 8/8 — Ready",
+        )
+        save_stage_progress("workspace_setup")
+
+    # ── Stage 8: Ready ──────────────────────────────────────────────────────
+    _stage_header(console, 8, 8, "Ready")
     from velune.cli.model_prefs import load_active_model
     from velune.providers.keystore import list_configured_providers
 
@@ -234,13 +411,156 @@ def _run_inner(runtime: object, skip_to: str | None) -> None:
         workspace,
         load_active_model(),
     )
+    save_stage_progress("ready")
+    mark_onboarding_complete()
 
 
 # ── Step S1: welcome ───────────────────────────────────────────────────────────
 
 
-def _step_welcome(console: Console) -> None:
-    console.print(f"\n[{design.MUTED}]Let's get you set up in under a minute.[/{design.MUTED}]\n")
+def _step_welcome(console: Console) -> Literal["begin", "skip"]:
+    """Show the welcome panel and ask the user to begin or skip setup."""
+    welcome_body = (
+        f"[bold {design.ACCENT}]Welcome to Velune.[/bold {design.ACCENT}]\n\n"
+        f"  [{design.MUTED}]{design.ICON_BULLET}  Connects to local AI (Ollama, LM Studio)"
+        f" and cloud providers (Groq, Anthropic, OpenAI, and more)[/{design.MUTED}]\n"
+        f"  [{design.MUTED}]{design.ICON_BULLET}  Stores everything locally — keys in OS"
+        f" keychain, data in [bold]~/.velune[/bold][/{design.MUTED}]\n"
+        f"  [{design.MUTED}]{design.ICON_BULLET}  This wizard runs once, then Velune"
+        f" remembers you[/{design.MUTED}]\n\n"
+        f"[{design.MUTED}]Setup takes about 2 minutes. You can skip at any time.[/{design.MUTED}]"
+    )
+    console.print(Panel(welcome_body, border_style=design.ACCENT, padding=(1, 2)))
+    console.print(
+        f"\n  [{design.MUTED}]Press [bold]Enter[/bold] to begin"
+        f"  {design.SEP}  [bold]S[/bold] to skip setup[/{design.MUTED}]\n"
+    )
+    raw = Prompt.ask("  ›", default="").strip().lower()
+    if raw in ("s", "skip", "q", "quit"):
+        return "skip"
+    return "begin"
+
+
+# ── Step S2: detect environment ────────────────────────────────────────────────
+
+
+def _step_detect_environment(console: Console) -> None:
+    """Probe hardware (CPU/GPU/VRAM) and display a summary table."""
+    from velune.hardware.detector import HardwareDetector
+
+    with console.status(f"  [{design.MUTED}]Scanning hardware...[/{design.MUTED}]"):
+        try:
+            profile = HardwareDetector().detect()
+        except Exception as exc:
+            _log.debug("Hardware detection failed: %s", exc)
+            console.print(
+                f"  [{design.WARN}]Hardware scan unavailable ({exc}).[/{design.WARN}]"
+                f" [{design.MUTED}]Continuing with defaults.[/{design.MUTED}]"
+            )
+            return
+
+    table = Table(border_style=design.FAINT, padding=(0, 1), show_header=False)
+    table.add_column("Property", style=design.MUTED, width=16)
+    table.add_column("Value", style=design.WHITE)
+
+    table.add_row("RAM", f"{profile.total_ram_gb:.0f} GB")
+    gpu_str = profile.gpu_name or "not detected"
+    table.add_row("GPU", gpu_str)
+    if profile.vram_total_gb is not None:
+        table.add_row("VRAM", f"{profile.vram_total_gb:.0f} GB")
+    table.add_row("Tier", profile.tier.value.upper())
+    if profile.recommended_model_size and profile.recommended_model_size != "none":
+        table.add_row("Best local model", f"up to {profile.recommended_model_size}")
+
+    console.print()
+    console.print(table)
+
+    for warning in profile.warnings:
+        console.print(f"  [{design.WARN}]{warning}[/{design.WARN}]")
+    for suggestion in profile.suggestions:
+        console.print(f"  [{design.MUTED}]{suggestion}[/{design.MUTED}]")
+
+
+# ── Step S6: health check ───────────────────────────────────────────────────────
+
+
+def _step_health_check(console: Console) -> str:
+    """Run 6 critical doctor checks; return a one-line summary string."""
+    from velune.cli.commands.doctor import (
+        _check_internet_connectivity,
+        _check_ollama_connectivity,
+        _check_python_version,
+        _check_sqlite,
+        _check_velune_dir,
+    )
+
+    checks = [
+        ("Python version", _check_python_version),
+        (".velune directory", _check_velune_dir),
+        ("SQLite", _check_sqlite),
+        ("Internet connectivity", _check_internet_connectivity),
+        ("Ollama (local)", _check_ollama_connectivity),
+    ]
+
+    # Conditionally add Groq check only if key is configured.
+    try:
+        from velune.providers.keystore import has_key
+
+        if has_key("groq"):
+            from velune.cli.commands.doctor import _check_groq
+
+            checks.append(("Groq API key", _check_groq))
+    except Exception:
+        pass
+
+    table = Table(border_style=design.FAINT, padding=(0, 1))
+    table.add_column("", width=2, no_wrap=True)
+    table.add_column("Check", style=design.MUTED)
+    table.add_column("Detail", style=design.MUTED)
+
+    results: list[dict] = []
+    console.print()
+    with console.status(f"  [{design.MUTED}]Running health checks...[/{design.MUTED}]"):
+        for name, fn in checks:
+            try:
+                result = fn()
+            except Exception as exc:
+                result = {"name": name, "status": "warn", "message": str(exc)}
+            results.append(result)
+
+    _STATUS_ICON = {
+        "ok":    (design.ICON_SUCCESS, design.OK),
+        "warn":  (design.ICON_WARNING, design.WARN),
+        "fail":  (design.ICON_ERROR,   design.DANGER),
+        "error": (design.ICON_ERROR,   design.DANGER),
+    }
+
+    for (check_name, _fn), res in zip(checks, results):
+        status = res.get("status", "warn")
+        icon, color = _STATUS_ICON.get(status, (design.ICON_WARNING, design.WARN))
+        table.add_row(
+            f"[{color}]{icon}[/{color}]",
+            check_name,
+            res.get("message", ""),
+        )
+
+    console.print(table)
+
+    failures = [r for r in results if r.get("status") in ("fail", "error")]
+    warnings = [r for r in results if r.get("status") == "warn"]
+
+    if failures:
+        fail_names = ", ".join(r.get("name", "?") for r in failures)
+        console.print(
+            f"\n  [{design.WARN}]{len(failures)} check(s) need attention: {fail_names}[/{design.WARN}]\n"
+            f"  [{design.MUTED}]Run [bold]velune doctor check[/bold] for full details.[/{design.MUTED}]"
+        )
+        return f"{len(failures)} check(s) need attention — run `velune doctor check`."
+
+    if warnings:
+        return f"Health check complete — {len(warnings)} advisory warning(s). Run `velune doctor check` for details."
+
+    return "All health checks passed."
 
 
 # ── Step S1: AI mode selection ─────────────────────────────────────────────────

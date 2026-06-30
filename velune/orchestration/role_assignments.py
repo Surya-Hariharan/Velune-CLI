@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -69,7 +70,17 @@ class CouncilRoleMap:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2))
+        data = json.dumps(self.to_dict(), indent=2)
+        tmp = path.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(data, encoding="utf-8")
+            os.replace(str(tmp), str(path))
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except Exception:
+                    pass
 
     @classmethod
     def load(cls, path: Path) -> CouncilRoleMap:

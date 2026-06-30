@@ -69,6 +69,8 @@ class OpenAIDiscovery:
             parameter_count_b=None,
             speed_tier="fast",
             cost_per_1k_tokens=cost_per_1k,
+            location="cloud",
+            health="unknown",
             tags=["cloud", "openai"],
             metadata={"raw": model_data},
         )
@@ -85,6 +87,9 @@ class OpenAIDiscovery:
             profile.instruction_following = CapabilityLevel.EXPERT
             profile.tool_use = CapabilityLevel.EXPERT
             profile.long_context = CapabilityLevel.ADVANCED
+            if "o" in model_id.lower() or "vision" in model_id.lower():
+                profile.vision = CapabilityLevel.ADVANCED
+                profile.multimodal = CapabilityLevel.ADVANCED
         elif "gpt-3.5" in model_id:
             profile.coding = CapabilityLevel.INTERMEDIATE
             profile.reasoning = CapabilityLevel.INTERMEDIATE

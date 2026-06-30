@@ -262,3 +262,104 @@ def get_provider_status(provider_id: str) -> dict[str, Any]:
         "last_verified": "n/a",
         "location": "n/a",
     }
+
+
+def credentials_file_path() -> Path:
+    """Return the path to the encrypted credentials file."""
+    return _manager._credentials_file
+
+
+def export_providers_json(include_keys: bool = True) -> dict[str, Any]:
+    """Produce a serialisable snapshot of all configured providers.
+
+    Used by ``velune provider backup`` to write a portable JSON export.
+    """
+    snap: dict[str, Any] = {}
+
+    for pid, rec in _manager.get_all_providers().items():
+        snap[pid] = {
+            "key": rec.get("key", "") if include_keys else "***",
+            "status": rec.get("status", "unknown"),
+            "last_verified": rec.get("last_verified", ""),
+            "source": "file",
+        }
+
+    for pid, env_var in PROVIDER_ENV_VARS.items():
+        if pid not in snap:
+            val = os.getenv(env_var)
+            if val:
+                snap[pid] = {
+                    "key": val if include_keys else "***",
+                    "status": "env",
+                    "last_verified": "dynamic",
+                    "source": "environment",
+                    "env_var": env_var,
+                }
+
+    return snap
+
+
+def import_providers_json(
+    records: dict[str, Any], overwrite: bool = False
+) -> tuple[list[str], list[str]]:
+    """Merge provider records from a backup JSON into the credential store.
+
+    Returns ``(imported, skipped)`` lists of provider IDs.
+    """
+    imported: list[str] = []
+    skipped: list[str] = []
+
+    for pid, entry in records.items():
+        key = entry.get("key", "").strip()
+        if not key or key == "***":
+            skipped.append(pid)
+            continue
+        if not overwrite and has_key(pid):
+            skipped.append(pid)
+            continue
+        _manager.save_provider(pid, key, status=entry.get("status", "imported"))
+        imported.append(pid)
+
+    return imported, skipped
+
+
+def repair_keystore() -> dict[str, Any]:
+    """Attempt to repair a corrupted credentials store.
+
+    Steps:
+    1. If the in-memory cache is empty, force a reload from disk.
+    2. If disk is also empty, try restoring from the auto-backup (.bak).
+    3. Remove any records that have an empty key.
+
+    Returns a report dict with keys ``restored_backup``, ``removed``, ``kept``.
+    """
+    report: dict[str, Any] = {"restored_backup": False, "removed": [], "kept": []}
+
+    # Force a fresh disk read.
+    with _manager._cache_lock:
+        _manager._cache = None
+
+    try:
+        current = _manager.get_all_providers()
+    except Exception:
+        current = {}
+
+    if not current:
+        restored = _manager._attempt_backup_restore()
+        if restored:
+            with _manager._cache_lock:
+                _manager._cache = None
+            report["restored_backup"] = True
+            try:
+                current = _manager.get_all_providers()
+            except Exception:
+                current = {}
+
+    # Purge records with empty/missing keys.
+    to_remove = [pid for pid, rec in current.items() if not rec.get("key")]
+    for pid in to_remove:
+        _manager.delete_provider(pid)
+        report["removed"].append(pid)
+
+    report["kept"] = [pid for pid in current if pid not in to_remove]
+    return report

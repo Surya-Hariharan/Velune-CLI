@@ -14,9 +14,15 @@ from velune.core.types.model import ModelDescriptor
 
 logger = logging.getLogger("velune.providers.discovery.scanner")
 
-# Providers that run locally and need no API key
+# Providers that run locally and need no API key.
+# Sub-types produced by the enhanced openai_compat fingerprinting are included
+# so the _should_run() check doesn't gate them on a keystore lookup.
 _LOCAL_PROVIDERS: frozenset[str] = frozenset(
-    {"ollama", "lmstudio", "gguf", "llamacpp", "openai-compat"}
+    {
+        "ollama", "lmstudio", "gguf", "llamacpp",
+        "openai-compat", "vllm", "tgi", "localai",
+        "docker", "nvidia_nim_local",
+    }
 )
 
 
@@ -41,12 +47,14 @@ class ModelDiscoveryScanner:
     def _build_discoverers() -> list:
         """Import and instantiate every discovery backend (first-use only)."""
         from velune.providers.discovery.anthropic import AnthropicDiscovery
+        from velune.providers.discovery.docker import DockerDiscovery
         from velune.providers.discovery.fireworks import FireworksDiscovery
         from velune.providers.discovery.gguf import GGUFDiscovery
         from velune.providers.discovery.google import GoogleDiscovery
         from velune.providers.discovery.groq import GroqDiscovery
         from velune.providers.discovery.huggingface import HuggingFaceDiscovery
         from velune.providers.discovery.lmstudio import LMStudioDiscovery
+        from velune.providers.discovery.nvidia_nim import NVIDIANIMDiscovery
         from velune.providers.discovery.ollama import OllamaDiscovery
         from velune.providers.discovery.openai import OpenAIDiscovery
         from velune.providers.discovery.openai_compat import OpenAICompatDiscovery
@@ -58,6 +66,8 @@ class ModelDiscoveryScanner:
             OllamaDiscovery(),
             LMStudioDiscovery(),
             OpenAICompatDiscovery(),
+            DockerDiscovery(),       # Docker containers on local ports
+            NVIDIANIMDiscovery(),    # NVIDIA NIM cloud + local containers
             GGUFDiscovery(),
             HuggingFaceDiscovery(),
             OpenAIDiscovery(),
@@ -99,6 +109,8 @@ class ModelDiscoveryScanner:
         # gated here: its discoverer also reads on-disk manifest stores, so it
         # must run even when the daemon is down (to surface models on external
         # drives or an offline daemon) — it returns [] cheaply if nothing exists.
+        # Docker and NIM discoverers return [] cheaply when nothing is running,
+        # so they are also not pre-checked.
         from velune.providers.discovery.lmstudio import LMStudioDiscovery
         from velune.providers.discovery.openai_compat import OpenAICompatDiscovery
 
@@ -124,18 +136,25 @@ class ModelDiscoveryScanner:
                 all_models.extend(result)
 
         # Summary log
-        counts: dict[str, int] = {"gguf": 0, "ollama": 0, "lmstudio": 0, "cloud": 0}
+        counts: dict[str, int] = {
+            "gguf": 0, "ollama": 0, "lmstudio": 0,
+            "docker": 0, "nvidia_nim": 0, "cloud": 0,
+        }
         for m in all_models:
             if m.provider_id in counts:
                 counts[m.provider_id] += 1
-            elif m.provider_id not in _LOCAL_PROVIDERS:
+            elif m.provider_id in _LOCAL_PROVIDERS:
+                pass  # local sub-type (vllm/tgi/localai)
+            else:
                 counts["cloud"] += 1
 
         logger.info(
-            "Local: %d GGUF, %d Ollama, %d LM Studio | Cloud: %d models",
+            "Local: %d GGUF, %d Ollama, %d LM Studio, %d Docker | NIM: %d | Cloud: %d models",
             counts["gguf"],
             counts["ollama"],
             counts["lmstudio"],
+            counts["docker"],
+            counts["nvidia_nim"],
             counts["cloud"],
         )
 

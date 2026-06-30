@@ -49,6 +49,7 @@ class ModelCapabilityProfile(BaseModel):
     multimodal: CapabilityLevel = CapabilityLevel.NONE
     tool_use: CapabilityLevel = CapabilityLevel.NONE
     long_context: CapabilityLevel = CapabilityLevel.NONE
+    vision: CapabilityLevel = CapabilityLevel.NONE
 
 
 class ModelDescriptor(BaseModel):
@@ -70,3 +71,6 @@ class ModelDescriptor(BaseModel):
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     family: str | None = None  # Model family for prompt adaptation (e.g., "qwen", "claude")
+    health: str = "unknown"  # "healthy" | "degraded" | "offline" | "unknown"
+    location: str | None = None  # e.g. "http://localhost:11434", "/path/to/model.gguf", "cloud"
+    last_latency_ms: float | None = None

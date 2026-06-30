@@ -96,6 +96,15 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         _CORE,
         "Initialize Velune in the current workspace.",
     ),
+    CommandSpec(
+        "onboard",
+        "command",
+        "velune.cli.commands.onboard",
+        "onboard_command",
+        _CORE,
+        "Run the first-time setup wizard, or resume an incomplete run.",
+        bootstrap="light",
+    ),
     # ── Workspace & Sessions ──────────────────────────────────────────────
     CommandSpec(
         "project",
