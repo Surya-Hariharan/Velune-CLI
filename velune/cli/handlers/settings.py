@@ -172,10 +172,14 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
             f"[red]{failures} check(s) failed.[/red]  "
             "[dim]Run [cyan]velune doctor --fix[/cyan] to attempt automatic fixes.[/dim]"
         )
-        repl.console.print("[dim]→ /providers to add or fix API keys  ·  /settings to reconfigure[/dim]")
+        repl.console.print(
+            "[dim]→ /providers to add or fix API keys  ·  /settings to reconfigure[/dim]"
+        )
     else:
         repl.console.print("[green]All checks passed.[/green]")
-        repl.console.print("[dim]→ /models to see available models  ·  /run <task> to start working[/dim]")
+        repl.console.print(
+            "[dim]→ /models to see available models  ·  /run <task> to start working[/dim]"
+        )
 
 
 async def cmd_sandbox(repl: VeluneREPL, args: str) -> None:

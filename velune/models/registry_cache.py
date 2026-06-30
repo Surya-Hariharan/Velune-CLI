@@ -25,13 +25,21 @@ _log = logging.getLogger("velune.models.registry_cache")
 
 DEFAULT_CACHE_PATH = Path.home() / ".velune" / "model_registry_cache.json"
 
-_LOCAL_TTL_S: float = 300.0   # 5 min
+_LOCAL_TTL_S: float = 300.0  # 5 min
 _CLOUD_TTL_S: float = 3600.0  # 60 min
 
 # provider_id prefixes that identify local endpoints
 _LOCAL_PROVIDER_PREFIXES = (
-    "ollama", "lmstudio", "gguf", "llamacpp", "docker",
-    "openai-compat", "vllm", "tgi", "localai", "nvidia_nim_local",
+    "ollama",
+    "lmstudio",
+    "gguf",
+    "llamacpp",
+    "docker",
+    "openai-compat",
+    "vllm",
+    "tgi",
+    "localai",
+    "nvidia_nim_local",
 )
 
 
@@ -100,7 +108,9 @@ class ModelRegistryCache:
                 try:
                     valid.append(self._deserialize(raw))
                 except Exception as exc:
-                    _log.debug("Could not deserialize cached model %s: %s", raw.get("model_id"), exc)
+                    _log.debug(
+                        "Could not deserialize cached model %s: %s", raw.get("model_id"), exc
+                    )
 
         _log.debug("Registry cache loaded: %d/%d fresh models", len(valid), len(raw_models))
         return valid
@@ -133,8 +143,7 @@ class ModelRegistryCache:
             caps = d.get("capabilities") or {}
             if isinstance(caps, dict):
                 d["capabilities"] = {
-                    k: int(v) if hasattr(v, "__int__") else v
-                    for k, v in caps.items()
+                    k: int(v) if hasattr(v, "__int__") else v for k, v in caps.items()
                 }
             return d
         except Exception:

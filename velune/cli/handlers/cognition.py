@@ -194,7 +194,9 @@ async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool) -> None:
                 repl.console.print(f"[red]Cognition failed:[/red] {exc}")
                 return
         repl.console.print(f"[green]Cognition complete ({mode}).[/green]")
-        repl.console.print("[dim]→ /run <task> to start using the indexed context  ·  /graph to explore knowledge graph[/dim]")
+        repl.console.print(
+            "[dim]→ /run <task> to start using the indexed context  ·  /graph to explore knowledge graph[/dim]"
+        )
         return
 
     job_id = repl._job_registry.new_id()

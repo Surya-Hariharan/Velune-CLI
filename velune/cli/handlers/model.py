@@ -599,7 +599,9 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
     print_header(repl.console, "Available Models")
     repl.console.print(table)
     repl.console.print()
-    repl.console.print("[dim]→ /model connect <id> to activate a model  ·  /pull to download more from Ollama[/dim]")
+    repl.console.print(
+        "[dim]→ /model connect <id> to activate a model  ·  /pull to download more from Ollama[/dim]"
+    )
 
 
 async def activate_model(repl: VeluneREPL, model: ModelDescriptor) -> None:

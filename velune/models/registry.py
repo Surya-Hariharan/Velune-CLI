@@ -22,6 +22,7 @@ class ModelCapabilityRegistry:
         # Pre-populate from disk cache so `models list` works without a scan
         try:
             from velune.models.registry_cache import ModelRegistryCache
+
             self._registry_cache = ModelRegistryCache()
             for model in self._registry_cache.load():
                 key = f"{model.provider_id}/{model.model_id}"

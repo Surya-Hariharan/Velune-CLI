@@ -286,7 +286,10 @@ class OllamaDiscovery:
         if profile.instruction_following >= CapabilityLevel.INTERMEDIATE:
             profile.tool_use = CapabilityLevel.INTERMEDIATE
 
-        if any(name in model_lower for name in ["llava", "vision", "moondream", "vl", "minicpm-v", "bakllava"]):
+        if any(
+            name in model_lower
+            for name in ["llava", "vision", "moondream", "vl", "minicpm-v", "bakllava"]
+        ):
             profile.vision = CapabilityLevel.ADVANCED
             profile.multimodal = CapabilityLevel.ADVANCED
 

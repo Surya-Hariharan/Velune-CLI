@@ -250,9 +250,7 @@ def run_onboarding(
 def _stage_header(console: Console, n: int, total: int, name: str) -> None:
     """Print a numbered stage header with a horizontal rule."""
     console.print()
-    console.print(
-        f"[bold {design.ACCENT}]Stage {n}/{total} — {name}[/bold {design.ACCENT}]"
-    )
+    console.print(f"[bold {design.ACCENT}]Stage {n}/{total} — {name}[/bold {design.ACCENT}]")
     console.print(f"[{design.FAINT}]{'─' * 52}[/{design.FAINT}]")
 
 
@@ -528,16 +526,16 @@ def _step_health_check(console: Console) -> str:
                 result = {"name": name, "status": "warn", "message": str(exc)}
             results.append(result)
 
-    _STATUS_ICON = {
-        "ok":    (design.ICON_SUCCESS, design.OK),
-        "warn":  (design.ICON_WARNING, design.WARN),
-        "fail":  (design.ICON_ERROR,   design.DANGER),
-        "error": (design.ICON_ERROR,   design.DANGER),
+    status_icon = {
+        "ok": (design.ICON_SUCCESS, design.OK),
+        "warn": (design.ICON_WARNING, design.WARN),
+        "fail": (design.ICON_ERROR, design.DANGER),
+        "error": (design.ICON_ERROR, design.DANGER),
     }
 
-    for (check_name, _fn), res in zip(checks, results):
+    for (check_name, _fn), res in zip(checks, results, strict=False):
         status = res.get("status", "warn")
-        icon, color = _STATUS_ICON.get(status, (design.ICON_WARNING, design.WARN))
+        icon, color = status_icon.get(status, (design.ICON_WARNING, design.WARN))
         table.add_row(
             f"[{color}]{icon}[/{color}]",
             check_name,

@@ -19,6 +19,7 @@ def _cap_badge(level) -> str:
     """Return a Rich markup checkmark/dash based on CapabilityLevel."""
     try:
         from velune.core.types.model import CapabilityLevel
+
         return "[green]✓[/green]" if level and level > CapabilityLevel.NONE else "[dim]—[/dim]"
     except Exception:
         return "[dim]—[/dim]"
@@ -37,7 +38,7 @@ def _short_location(location: str | None, max_len: int = 28) -> str:
         return "[dim]—[/dim]"
     if location == "cloud":
         return "[blue]cloud[/blue]"
-    return location if len(location) <= max_len else "…" + location[-(max_len - 1):]
+    return location if len(location) <= max_len else "…" + location[-(max_len - 1) :]
 
 
 @models_cmd.command("scan")
@@ -284,7 +285,9 @@ def models_list(ctx: typer.Context) -> None:
 
     records = []
     if registry is None:
-        table.add_row("<uninitialized>", "Velune", "system", "[dim]?[/dim]", "[dim]—[/dim]", "bootstrap only")
+        table.add_row(
+            "<uninitialized>", "Velune", "system", "[dim]?[/dim]", "[dim]—[/dim]", "bootstrap only"
+        )
     else:
         from velune.core.types.model import CapabilityLevel
 
@@ -390,7 +393,9 @@ def models_assign(
 
     # Persist to ~/.velune/council_roles.json (same file the REPL /councilmodel uses)
     from pathlib import Path as _Path
+
     from velune.orchestration.role_assignments import CouncilRoleMap
+
     _assignments_path = _Path.home() / ".velune" / "council_roles.json"
     try:
         _role_map = CouncilRoleMap.load(_assignments_path)
@@ -403,7 +408,16 @@ def models_assign(
     if cli_context and cli_context.json_mode:
         import json
 
-        print(json.dumps({"success": True, "role": council_role.value, "model_id": model_id, "provider_id": provider_id}))
+        print(
+            json.dumps(
+                {
+                    "success": True,
+                    "role": council_role.value,
+                    "model_id": model_id,
+                    "provider_id": provider_id,
+                }
+            )
+        )
     else:
         console.print(
             f"[green]Assigned role '{council_role.value}' → '{model_id}' (persisted to council_roles.json)[/green]"
@@ -734,6 +748,7 @@ def models_health(ctx: typer.Context) -> None:
         return
 
     from velune.core.event_loop import submit
+
     submit(_models_health_async(cli_context, registry, all_models))
 
 
@@ -743,9 +758,12 @@ async def _models_health_async(
     models: list[Any],
 ) -> None:
     import asyncio
+
     from velune.models.probes import FastProbe
 
-    provider_registry = cli_context.container.get("runtime.provider_registry") if cli_context else None
+    provider_registry = (
+        cli_context.container.get("runtime.provider_registry") if cli_context else None
+    )
     fast_probe = FastProbe()
 
     # Identify models that have a live provider to ping
@@ -760,7 +778,7 @@ async def _models_health_async(
     responses = await asyncio.gather(*ping_tasks, return_exceptions=True) if ping_tasks else []
 
     pinged_keys = set()
-    for model, result in zip(pingable, responses):
+    for model, result in zip(pingable, responses, strict=False):
         key = (model.provider_id, model.model_id)
         pinged_keys.add(key)
         model.health = "healthy" if result is True else "offline"
@@ -817,12 +835,11 @@ def models_show(
 
     descriptor = registry.get(model_id)
     if descriptor is None:
-        console.print(
-            f"[red]Model '{model_id}' not found. Run 'velune models scan' first.[/red]"
-        )
+        console.print(f"[red]Model '{model_id}' not found. Run 'velune models scan' first.[/red]")
         raise typer.Exit(code=1)
 
     from rich.panel import Panel
+
     from velune.core.types.model import CapabilityLevel
 
     lines = [
@@ -843,11 +860,13 @@ def models_show(
     if descriptor.tags:
         lines.append(f"[bold]Tags:[/bold]          {', '.join(descriptor.tags)}")
 
-    console.print(Panel(
-        "\n".join(lines),
-        title=f"[bold cyan]{descriptor.model_id}[/bold cyan]",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=f"[bold cyan]{descriptor.model_id}[/bold cyan]",
+            expand=False,
+        )
+    )
 
     # Capability breakdown panel
     cap = descriptor.capabilities
@@ -860,11 +879,13 @@ def models_show(
             )
 
     if cap_lines:
-        console.print(Panel(
-            "\n".join(cap_lines),
-            title="Capabilities",
-            expand=False,
-        ))
+        console.print(
+            Panel(
+                "\n".join(cap_lines),
+                title="Capabilities",
+                expand=False,
+            )
+        )
     else:
         console.print(
             "[dim]No capability data. Run 'velune models scan --probe' to run empirical probes.[/dim]"

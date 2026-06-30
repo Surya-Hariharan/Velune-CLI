@@ -60,7 +60,9 @@ async def cmd_memory(repl: VeluneREPL, args: str) -> None:
         for t in recent:
             preview = t.content[:80].replace("\n", " ")
             repl.console.print(f"  [dim]{t.role}:[/dim] {preview}…")
-    repl.console.print("[dim]→ /graph to explore the knowledge graph  ·  /context to see token usage[/dim]")
+    repl.console.print(
+        "[dim]→ /graph to explore the knowledge graph  ·  /context to see token usage[/dim]"
+    )
 
 
 async def cmd_context(repl: VeluneREPL, args: str) -> None:

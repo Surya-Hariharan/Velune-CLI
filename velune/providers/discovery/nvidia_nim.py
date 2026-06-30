@@ -81,9 +81,7 @@ class NVIDIANIMDiscovery:
                 data = r.json()
                 items = data.get("data", [])
                 # Only claim this endpoint if it looks like a NIM container
-                if not any(
-                    i.get("id", "").startswith(_NIM_VENDOR_PREFIXES) for i in items
-                ):
+                if not any(i.get("id", "").startswith(_NIM_VENDOR_PREFIXES) for i in items):
                     return models
                 for item in items:
                     d = self._build_descriptor(

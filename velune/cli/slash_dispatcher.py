@@ -164,7 +164,14 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             usage="/index [init|quick|standard|deep|status|cancel|rebuild]",
             handler=repl._cmd_cognition,
             examples=("/index", "/index quick", "/index deep", "/index status"),
-            search_terms=("cognition", "understand code", "code context", "codebase", "ai context", "scan"),
+            search_terms=(
+                "cognition",
+                "understand code",
+                "code context",
+                "codebase",
+                "ai context",
+                "scan",
+            ),
             shortcut="/cog",
         )
     )
@@ -289,7 +296,14 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "/model use gpt-4o",
                 "/model status",
             ),
-            search_terms=("llm", "ai model", "switch model", "ollama", "connect model", "active model"),
+            search_terms=(
+                "llm",
+                "ai model",
+                "switch model",
+                "ollama",
+                "connect model",
+                "active model",
+            ),
             shortcut="/m",
         )
     )
@@ -368,7 +382,13 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "/council analyze security vulnerabilities in this codebase",
                 "/council review this architecture for scalability issues",
             ),
-            search_terms=("full council", "multi-agent", "complex task", "deep analysis", "best quality"),
+            search_terms=(
+                "full council",
+                "multi-agent",
+                "complex task",
+                "deep analysis",
+                "best quality",
+            ),
             shortcut="/c",
         )
     )
@@ -406,7 +426,14 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             usage="/session [list|resume <id>|summary <id>|save|export]",
             handler=repl._cmd_session,
             examples=("/session", "/session list", "/session resume", "/session save"),
-            search_terms=("history", "conversation", "resume", "save session", "past sessions", "switch session"),
+            search_terms=(
+                "history",
+                "conversation",
+                "resume",
+                "save session",
+                "past sessions",
+                "switch session",
+            ),
             shortcut="/s",
         )
     )
@@ -568,7 +595,14 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             usage="/mcp [servers|tools|resources|connect <name>|disconnect <name>|refresh <name>]",
             handler=repl._cmd_mcp,
             examples=("/mcp", "/mcp servers", "/mcp tools", "/mcp connect myserver"),
-            search_terms=("model context protocol", "tools", "server", "resources", "external tools", "integrations"),
+            search_terms=(
+                "model context protocol",
+                "tools",
+                "server",
+                "resources",
+                "external tools",
+                "integrations",
+            ),
         )
     )
     registry.register(
@@ -579,7 +613,13 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             usage="/plugin [list|enable <name>|disable <name>|reload [name]|show <name>]",
             handler=repl._cmd_plugin,
             examples=("/plugin list", "/plugin enable myplugin", "/plugin reload"),
-            search_terms=("extensions", "markdown commands", "custom commands", "SKILL.md", "plugins"),
+            search_terms=(
+                "extensions",
+                "markdown commands",
+                "custom commands",
+                "SKILL.md",
+                "plugins",
+            ),
             shortcut="/pl",
         )
     )
@@ -603,10 +643,17 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="pr",
             aliases=["pull-request", "mr"],
             description="Create a pull request / merge request on GitHub or GitLab",
-            usage='/pr <title> [--base <branch>] [--draft]',
+            usage="/pr <title> [--base <branch>] [--draft]",
             handler=repl._cmd_pr,
             examples=('/pr "Add user auth" --base main', "/pr my-feature --draft"),
-            search_terms=("pull request", "merge request", "github", "gitlab", "create pr", "open pr"),
+            search_terms=(
+                "pull request",
+                "merge request",
+                "github",
+                "gitlab",
+                "create pr",
+                "open pr",
+            ),
         )
     )
     registry.register(

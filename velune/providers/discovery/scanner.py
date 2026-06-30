@@ -19,9 +19,16 @@ logger = logging.getLogger("velune.providers.discovery.scanner")
 # so the _should_run() check doesn't gate them on a keystore lookup.
 _LOCAL_PROVIDERS: frozenset[str] = frozenset(
     {
-        "ollama", "lmstudio", "gguf", "llamacpp",
-        "openai-compat", "vllm", "tgi", "localai",
-        "docker", "nvidia_nim_local",
+        "ollama",
+        "lmstudio",
+        "gguf",
+        "llamacpp",
+        "openai-compat",
+        "vllm",
+        "tgi",
+        "localai",
+        "docker",
+        "nvidia_nim_local",
     }
 )
 
@@ -66,8 +73,8 @@ class ModelDiscoveryScanner:
             OllamaDiscovery(),
             LMStudioDiscovery(),
             OpenAICompatDiscovery(),
-            DockerDiscovery(),       # Docker containers on local ports
-            NVIDIANIMDiscovery(),    # NVIDIA NIM cloud + local containers
+            DockerDiscovery(),  # Docker containers on local ports
+            NVIDIANIMDiscovery(),  # NVIDIA NIM cloud + local containers
             GGUFDiscovery(),
             HuggingFaceDiscovery(),
             OpenAIDiscovery(),
@@ -137,8 +144,12 @@ class ModelDiscoveryScanner:
 
         # Summary log
         counts: dict[str, int] = {
-            "gguf": 0, "ollama": 0, "lmstudio": 0,
-            "docker": 0, "nvidia_nim": 0, "cloud": 0,
+            "gguf": 0,
+            "ollama": 0,
+            "lmstudio": 0,
+            "docker": 0,
+            "nvidia_nim": 0,
+            "cloud": 0,
         }
         for m in all_models:
             if m.provider_id in counts:

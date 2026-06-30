@@ -83,7 +83,10 @@ class LMStudioDiscovery:
         profile.instruction_following = CapabilityLevel.INTERMEDIATE
         profile.summarization = CapabilityLevel.BASIC
 
-        if any(name in model_lower for name in ["llava", "vision", "vl", "moondream", "minicpm-v", "bakllava"]):
+        if any(
+            name in model_lower
+            for name in ["llava", "vision", "vl", "moondream", "minicpm-v", "bakllava"]
+        ):
             profile.vision = CapabilityLevel.ADVANCED
             profile.multimodal = CapabilityLevel.ADVANCED
 

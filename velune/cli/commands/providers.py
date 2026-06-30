@@ -11,7 +11,6 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from velune.cli import design
 from velune.providers.keystore import (
@@ -646,7 +645,9 @@ def inspect_provider(
 
     # Identity
     lines.append(f"[{design.MUTED}]Label[/{design.MUTED}]          {meta['label']}")
-    lines.append(f"[{design.MUTED}]Type[/{design.MUTED}]           {'local' if is_local else 'cloud'}")
+    lines.append(
+        f"[{design.MUTED}]Type[/{design.MUTED}]           {'local' if is_local else 'cloud'}"
+    )
 
     if pid == default_pid:
         lines.append(
@@ -668,7 +669,9 @@ def inspect_provider(
         else:
             lines.append(f"[{design.MUTED}]API Key[/{design.MUTED}]        {masked}  (file)")
     else:
-        lines.append(f"[{design.MUTED}]API Key[/{design.MUTED}]        [{design.WARN}]not configured[/{design.WARN}]")
+        lines.append(
+            f"[{design.MUTED}]API Key[/{design.MUTED}]        [{design.WARN}]not configured[/{design.WARN}]"
+        )
 
     # Storage
     if not is_local:
@@ -701,7 +704,9 @@ def inspect_provider(
 
     # Live status
     if no_live:
-        lines.append(f"[{design.MUTED}](live check skipped — pass without --no-live to validate)[/{design.MUTED}]")
+        lines.append(
+            f"[{design.MUTED}](live check skipped — pass without --no-live to validate)[/{design.MUTED}]"
+        )
     elif not key and not is_local:
         lines.append(f"[{design.WARN}]Live check skipped: no key configured.[/{design.WARN}]")
     else:
@@ -711,7 +716,9 @@ def inspect_provider(
         latency_ms = int((time.monotonic() - t0) * 1000)
 
         if result.ok:
-            lines.append(f"[{design.OK}]✓ Healthy[/{design.OK}]  [{design.MUTED}]{latency_ms}ms[/{design.MUTED}]")
+            lines.append(
+                f"[{design.OK}]✓ Healthy[/{design.OK}]  [{design.MUTED}]{latency_ms}ms[/{design.MUTED}]"
+            )
             if result.models:
                 n = len(result.models)
                 preview = ", ".join(result.models[:4])
@@ -757,9 +764,7 @@ def provider_default(
         config_path = _find_config_path()
 
         if current:
-            console.print(
-                f"[{design.OK}]★ Default provider:[/{design.OK}] [bold]{current}[/bold]"
-            )
+            console.print(f"[{design.OK}]★ Default provider:[/{design.OK}] [bold]{current}[/bold]")
             if config_path:
                 console.print(f"  [{design.MUTED}]{config_path}[/{design.MUTED}]")
         else:
@@ -796,7 +801,7 @@ def provider_default(
     else:
         console.print(
             f"[{design.WARN}]Could not write to velune.toml.[/{design.WARN}]\n"
-            f"[{design.MUTED}]Add `default_provider = \"{pid}\"` under [providers] in velune.toml manually.[/{design.MUTED}]"
+            f'[{design.MUTED}]Add `default_provider = "{pid}"` under [providers] in velune.toml manually.[/{design.MUTED}]'
         )
         raise typer.Exit(1)
 
@@ -888,9 +893,7 @@ def restore_providers(
     imported, skipped = import_providers_json(records, overwrite=overwrite)
 
     if imported:
-        console.print(
-            f"[{design.OK}]Imported:[/{design.OK}] {', '.join(sorted(imported))}"
-        )
+        console.print(f"[{design.OK}]Imported:[/{design.OK}] {', '.join(sorted(imported))}")
     if skipped:
         hint = " (use --overwrite to replace existing keys)" if not overwrite else ""
         console.print(
@@ -920,7 +923,9 @@ def repair_providers_cmd() -> None:
     if report["restored_backup"]:
         console.print(f"[{design.OK}]✓ Restored from backup (.bak file)[/{design.OK}]")
     else:
-        console.print(f"[{design.MUTED}]Primary credential store loaded (no restore needed)[/{design.MUTED}]")
+        console.print(
+            f"[{design.MUTED}]Primary credential store loaded (no restore needed)[/{design.MUTED}]"
+        )
 
     if report["removed"]:
         console.print(
