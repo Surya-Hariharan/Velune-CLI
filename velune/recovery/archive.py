@@ -8,7 +8,8 @@ folder per subsystem:
     config/workspace_velune.toml
     config/workspace_config.toml
     config/home_velune.toml
-    providers/providers.json
+    providers/providers.json       (secrets excluded — keys masked as "***")
+    providers/providers.json.enc   (secrets included — AES-GCM, passphrase-derived key)
     memory/velune_cognitive_core.db
     memory/lancedb_semantic_store/...
     trust/trusted_dirs.json
@@ -19,6 +20,17 @@ machine that produced the backup — so a snapshot can be recovered onto a fresh
 install. A backup is staged into a temp directory and then tarred, rather than
 streamed, so the SQLite cognitive core can be copied with the consistent
 ``sqlite3.Connection.backup()`` API before it is added to the archive.
+
+Provider API keys are never written to an archive in the clear. By default
+they are excluded from ``providers.json`` entirely (masked as ``"***"``); the
+``with_secrets``/passphrase path in :func:`create_backup` instead encrypts
+them with AES-GCM using a key derived from a caller-supplied passphrase (see
+``velune.providers.crypto.encrypt_with_passphrase``) and writes the result to
+``providers.json.enc``. That passphrase is never stored — the caller must
+supply it again to :func:`restore_backup` to decrypt. This is deliberately a
+different key path than the OS-keyring-backed key that protects the live
+``credentials.json`` store, so an exported archive stays portable to a fresh
+install (which may have no keyring entry, or a different one).
 """
 
 from __future__ import annotations
@@ -53,6 +65,12 @@ SUBSYSTEMS: tuple[str, ...] = ("sessions", "config", "providers", "memory", "tru
 _CFG_WORKSPACE_TOML = "config/workspace_velune.toml"
 _CFG_WORKSPACE_DOT = "config/workspace_config.toml"
 _CFG_HOME_TOML = "config/home_velune.toml"
+
+# Provider export filenames (relative to the "providers/" folder in the
+# archive). The encrypted form is used whenever secrets are included; the
+# plain form only ever holds masked ("***") key fields.
+_PROVIDERS_ENC_NAME = "providers.json.enc"
+_PROVIDERS_PLAIN_NAME = "providers.json"
 
 
 @dataclass(slots=True)
@@ -109,14 +127,25 @@ def create_backup(
     dest: Path,
     include: set[str] | None = None,
     *,
-    with_secrets: bool = True,
+    with_secrets: bool = False,
+    secrets_passphrase: str | None = None,
     workspace: Path | None = None,
 ) -> BackupResult:
     """Snapshot the selected subsystems into a ``.tar.gz`` at *dest*.
 
-    *include* defaults to all of :data:`SUBSYSTEMS`. When *with_secrets* is
-    False, provider API keys are masked in the embedded provider export.
+    *include* defaults to all of :data:`SUBSYSTEMS`. Provider API keys are
+    masked (``"***"``) in the embedded provider export unless *with_secrets*
+    is True. When *with_secrets* is True, *secrets_passphrase* is required and
+    the provider export is AES-GCM encrypted with a key derived from it —
+    keys are never written to disk in the clear. The passphrase is not stored
+    anywhere; it must be supplied again on restore.
     """
+    if with_secrets and not secrets_passphrase:
+        raise ValueError(
+            "secrets_passphrase is required when with_secrets=True — "
+            "provider API keys are never written to an archive unencrypted."
+        )
+
     selected = _normalize_include(include)
     ws = (workspace or Path.cwd()).resolve()
     dest = Path(dest)
@@ -131,7 +160,9 @@ def create_backup(
         if "config" in selected:
             result.subsystems["config"] = _backup_config(stage, ws)
         if "providers" in selected:
-            result.subsystems["providers"] = _backup_providers(stage, with_secrets)
+            result.subsystems["providers"] = _backup_providers(
+                stage, with_secrets, secrets_passphrase
+            )
         if "memory" in selected:
             result.subsystems["memory"] = _backup_memory(stage, ws)
         if "trust" in selected:
@@ -176,20 +207,32 @@ def _backup_config(stage: Path, workspace: Path) -> dict:
     return {"files": sorted(files)}
 
 
-def _backup_providers(stage: Path, with_secrets: bool) -> dict:
-    from velune.providers.keystore import export_providers_json
+def _backup_providers(stage: Path, with_secrets: bool, passphrase: str | None) -> dict:
+    from velune.providers.crypto import encrypt_with_passphrase
+    from velune.providers.keystore import export_providers_json, list_configured_providers
 
-    snapshot = export_providers_json(include_keys=with_secrets)
     out = stage / "providers"
     out.mkdir(parents=True, exist_ok=True)
+
+    snapshot = export_providers_json(include_keys=with_secrets)
     payload = {
-        "version": "1.0",
+        "version": "2.0",
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "with_secrets": with_secrets,
         "providers": snapshot,
     }
-    (out / "providers.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return {"present": bool(snapshot), "providers": sorted(snapshot.keys())}
+
+    if with_secrets:
+        assert passphrase is not None  # enforced by create_backup
+        blob = encrypt_with_passphrase(json.dumps(payload), passphrase)
+        (out / _PROVIDERS_ENC_NAME).write_bytes(blob)
+    else:
+        (out / _PROVIDERS_PLAIN_NAME).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    # Sourced from a key-free API (never touches `snapshot`'s "key" values) so
+    # the manifest summary can never carry secret material, even in transit.
+    provider_ids = list_configured_providers(include_ollama=False)
+    return {"present": bool(provider_ids), "providers": sorted(provider_ids), "encrypted": with_secrets}
 
 
 def _backup_memory(stage: Path, workspace: Path) -> dict:
@@ -245,11 +288,16 @@ def restore_backup(
     overwrite: bool = False,
     dry_run: bool = False,
     workspace: Path | None = None,
+    secrets_passphrase: str | None = None,
 ) -> RestoreResult:
     """Restore selected subsystems from *archive* onto this machine.
 
     Existing session/config/trust files are kept unless *overwrite* is True.
     When *dry_run* is True nothing is written; the planned actions are returned.
+    If the archive holds an encrypted provider-secrets payload, it is only
+    decrypted when *secrets_passphrase* matches the one used at backup time;
+    otherwise the providers subsystem is skipped (other subsystems still
+    restore normally).
     """
     archive = Path(archive)
     if not archive.is_file():
@@ -274,14 +322,18 @@ def restore_backup(
         for name in SUBSYSTEMS:
             if name not in selected or name not in present:
                 continue
-            handler = {
-                "sessions": _restore_sessions,
-                "config": _restore_config,
-                "providers": _restore_providers,
-                "memory": _restore_memory,
-                "trust": _restore_trust,
-            }[name]
-            restored, skipped = handler(extract, ws, overwrite, dry_run)
+            if name == "providers":
+                restored, skipped = _restore_providers(
+                    extract, ws, overwrite, dry_run, secrets_passphrase
+                )
+            else:
+                handler = {
+                    "sessions": _restore_sessions,
+                    "config": _restore_config,
+                    "memory": _restore_memory,
+                    "trust": _restore_trust,
+                }[name]
+                restored, skipped = handler(extract, ws, overwrite, dry_run)
             result.restored[name] = restored
             if skipped:
                 result.skipped[name] = skipped
@@ -310,12 +362,31 @@ def _restore_config(
 
 
 def _restore_providers(
-    extract: Path, workspace: Path, overwrite: bool, dry_run: bool
+    extract: Path,
+    workspace: Path,
+    overwrite: bool,
+    dry_run: bool,
+    secrets_passphrase: str | None = None,
 ) -> tuple[list[str], list[str]]:
-    src = extract / "providers" / "providers.json"
-    if not src.is_file():
+    enc_src = extract / "providers" / _PROVIDERS_ENC_NAME
+    plain_src = extract / "providers" / _PROVIDERS_PLAIN_NAME
+
+    if enc_src.is_file():
+        if not secrets_passphrase:
+            return [], ["providers (passphrase required to decrypt secrets)"]
+        from velune.providers.crypto import DecryptionError, decrypt_with_passphrase
+
+        try:
+            payload = json.loads(decrypt_with_passphrase(enc_src.read_bytes(), secrets_passphrase))
+        except DecryptionError:
+            return [], ["providers (wrong passphrase)"]
+    elif plain_src.is_file():
+        # Legacy/no-secrets format: masked keys, or (pre-fix archives only)
+        # plaintext keys from a backup made before secrets were encrypted.
+        payload = json.loads(plain_src.read_text(encoding="utf-8"))
+    else:
         return [], []
-    payload = json.loads(src.read_text(encoding="utf-8"))
+
     records = payload.get("providers", {})
     if dry_run:
         return [f"import {pid}" for pid in sorted(records)], []
@@ -406,6 +477,17 @@ def _place_file(
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, target)
     restored.append(label)
+
+
+def archive_has_encrypted_secrets(archive: Path) -> bool:
+    """Return True if *archive* holds an encrypted provider-secrets payload.
+
+    Lets callers (CLI/REPL) decide whether to prompt for a passphrase before
+    calling :func:`restore_backup`, without extracting the whole archive.
+    """
+    with tarfile.open(archive, "r:gz") as tar:
+        suffix = f"providers/{_PROVIDERS_ENC_NAME}"
+        return any(name.endswith(suffix) for name in tar.getnames())
 
 
 def _safe_extract(tar: tarfile.TarFile, dest: Path) -> None:

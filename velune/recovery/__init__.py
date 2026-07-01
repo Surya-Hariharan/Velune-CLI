@@ -13,6 +13,7 @@ from velune.recovery.archive import (
     SUBSYSTEMS,
     BackupResult,
     RestoreResult,
+    archive_has_encrypted_secrets,
     create_backup,
     restore_backup,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "SUBSYSTEMS",
     "BackupResult",
     "RestoreResult",
+    "archive_has_encrypted_secrets",
     "create_backup",
     "restore_backup",
 ]

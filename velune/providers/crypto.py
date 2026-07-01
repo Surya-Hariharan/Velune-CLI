@@ -15,12 +15,23 @@ import logging
 import os
 import uuid
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger("velune.providers.crypto")
 
 _SERVICE = "velune"
 _USERNAME = "master_key"
+
+_PBKDF2_ITERATIONS = 390_000
+_SALT_LEN = 16
+_NONCE_LEN = 12
+
+
+class DecryptionError(Exception):
+    """Raised when passphrase-based decryption fails (wrong passphrase or corrupt data)."""
 
 
 def _get_machine_id() -> str:
@@ -96,4 +107,51 @@ def decrypt_credentials(data: bytes) -> str:
     ciphertext = data[12:]
 
     plaintext_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+    return plaintext_bytes.decode("utf-8")
+
+
+def _derive_key_from_passphrase(passphrase: str, salt: bytes) -> bytes:
+    """Derive a 256-bit AES key from *passphrase* using PBKDF2-HMAC-SHA256."""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=_PBKDF2_ITERATIONS,
+    )
+    return kdf.derive(passphrase.encode("utf-8"))
+
+
+def encrypt_with_passphrase(plaintext: str, passphrase: str) -> bytes:
+    """Encrypt *plaintext* with a key derived from *passphrase* (AES-GCM).
+
+    Unlike :func:`encrypt_credentials`, the key here is derived solely from the
+    passphrase — not the OS keyring or machine identity — so the result can be
+    decrypted on a different machine given the same passphrase. Used for
+    portable exports (e.g. backup archives) that must never carry secrets in
+    the clear but still need to survive a move to a new install.
+    """
+    salt = os.urandom(_SALT_LEN)
+    nonce = os.urandom(_NONCE_LEN)
+    key = _derive_key_from_passphrase(passphrase, salt)
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext.encode("utf-8"), None)
+    return salt + nonce + ciphertext
+
+
+def decrypt_with_passphrase(data: bytes, passphrase: str) -> str:
+    """Decrypt data produced by :func:`encrypt_with_passphrase`.
+
+    Raises :class:`DecryptionError` on a wrong passphrase or corrupt data.
+    """
+    if len(data) < _SALT_LEN + _NONCE_LEN:
+        raise DecryptionError("Encrypted data is too short to contain a salt and nonce.")
+
+    salt = data[:_SALT_LEN]
+    nonce = data[_SALT_LEN : _SALT_LEN + _NONCE_LEN]
+    ciphertext = data[_SALT_LEN + _NONCE_LEN :]
+    key = _derive_key_from_passphrase(passphrase, salt)
+
+    try:
+        plaintext_bytes = AESGCM(key).decrypt(nonce, ciphertext, None)
+    except InvalidTag as exc:
+        raise DecryptionError("Wrong passphrase or corrupted archive.") from exc
     return plaintext_bytes.decode("utf-8")

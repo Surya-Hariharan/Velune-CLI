@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from velune.cli import design
-from velune.recovery import SUBSYSTEMS, create_backup, restore_backup
+from velune.recovery import (
+    SUBSYSTEMS,
+    archive_has_encrypted_secrets,
+    create_backup,
+    restore_backup,
+)
 
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
@@ -35,10 +40,10 @@ def _parse_include(tokens: list[str]) -> set[str] | None:
 
 
 async def cmd_backup(repl: VeluneREPL, args: str) -> None:
-    """/backup [path] [--include a,b] [--no-secrets]"""
+    """/backup [path] [--include a,b] [--with-secrets]"""
     console = repl.console
     tokens = shlex.split(args) if args else []
-    no_secrets = "--no-secrets" in tokens
+    with_secrets = "--with-secrets" in tokens
     try:
         include = _parse_include(tokens)
     except ValueError as exc:
@@ -55,15 +60,30 @@ async def cmd_backup(repl: VeluneREPL, args: str) -> None:
     date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
     dest = Path(positional[0]) if positional else Path.cwd() / f"velune-backup-{date_str}.tar.gz"
 
+    passphrase = None
+    if with_secrets:
+        passphrase = console.input("Passphrase to encrypt provider API keys: ", password=True)
+        confirm = console.input("Confirm passphrase: ", password=True)
+        if passphrase != confirm:
+            console.print(f"[{design.DANGER}]Passphrases did not match.[/{design.DANGER}]")
+            return
+
     workspace = Path(str(repl.container.get("runtime.workspace") or Path.cwd()))
     console.print(f"[{design.MUTED}]Building backup...[/{design.MUTED}]")
-    result = create_backup(dest, include=include, with_secrets=not no_secrets, workspace=workspace)
+    result = create_backup(
+        dest,
+        include=include,
+        with_secrets=with_secrets,
+        secrets_passphrase=passphrase,
+        workspace=workspace,
+    )
 
     console.print(f"[{design.OK}]Backup written:[/{design.OK}] {result.path}")
     console.print(f"[{design.MUTED}]Size: {result.size_bytes / 1024:.1f} KB[/{design.MUTED}]")
     if result.with_secrets and "providers" in result.subsystems:
         console.print(
-            f"[{design.WARN}]Archive contains plaintext API keys — store it securely.[/{design.WARN}]"
+            f"[{design.WARN}]Provider API keys are encrypted with your passphrase — it is "
+            f"not stored anywhere, so keep it safe.[/{design.WARN}]"
         )
 
 
@@ -94,9 +114,23 @@ async def cmd_restore(repl: VeluneREPL, args: str) -> None:
 
     src = Path(positional[0])
     workspace = Path(str(repl.container.get("runtime.workspace") or Path.cwd()))
+
+    passphrase = None
+    if (include is None or "providers" in include) and archive_has_encrypted_secrets(src):
+        entered = console.input(
+            "Passphrase to decrypt provider API keys (blank to skip restoring them): ",
+            password=True,
+        )
+        passphrase = entered or None
+
     try:
         result = restore_backup(
-            src, include=include, overwrite=overwrite, dry_run=dry_run, workspace=workspace
+            src,
+            include=include,
+            overwrite=overwrite,
+            dry_run=dry_run,
+            workspace=workspace,
+            secrets_passphrase=passphrase,
         )
     except (ValueError, FileNotFoundError) as exc:
         console.print(f"[{design.DANGER}]{exc}[/{design.DANGER}]")

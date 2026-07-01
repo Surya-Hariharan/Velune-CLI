@@ -2,18 +2,43 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 import tarfile
+from unittest.mock import patch
 
 import pytest
 
 from velune.core.paths import cognitive_db_path
 from velune.core.trust import trust_file_path
-from velune.recovery import create_backup, restore_backup
+from velune.recovery import archive_has_encrypted_secrets, create_backup, restore_backup
 from velune.recovery.archive import MANIFEST_NAME
 
 ROUNDTRIP_SUBSYSTEMS = {"sessions", "config", "memory", "trust"}
+
+
+@pytest.fixture
+def mock_keystore(tmp_path):
+    """Isolate the provider credential store under tmp_path with a fixed key."""
+    from velune.providers.keystore import CredentialManager
+
+    with (
+        patch("velune.providers.keystore.user_config_dir", return_value=str(tmp_path)),
+        patch("velune.providers.crypto.get_or_create_master_key") as mock_get_key,
+    ):
+        mock_get_key.return_value = base64.b64decode(
+            "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE="
+        )
+        CredentialManager._instance = None
+        from velune.providers.keystore import _manager
+
+        _manager._init()
+
+        yield
+
+        CredentialManager._instance = None
+        _manager._init()
 
 
 @pytest.fixture
@@ -160,6 +185,145 @@ def test_unknown_subsystem_rejected(env):
 def test_restore_missing_archive(env):
     with pytest.raises(FileNotFoundError):
         restore_backup(env["workspace"] / "nope.tar.gz")
+
+
+# ── Provider secrets: never written in the clear ────────────────────────────
+
+
+def test_backup_defaults_to_masked_provider_keys(env, mock_keystore):
+    from velune.providers.keystore import save_key
+
+    save_key("openai", "sk-super-secret")
+    dest = env["workspace"] / "snap.tar.gz"
+
+    result = create_backup(dest, include={"providers"}, workspace=env["workspace"])
+
+    assert result.with_secrets is False
+    with tarfile.open(dest, "r:gz") as tar:
+        names = tar.getnames()
+        assert any(n.endswith("providers/providers.json") for n in names)
+        assert not any(n.endswith("providers.json.enc") for n in names)
+        payload = json.loads(tar.extractfile("./providers/providers.json").read())
+
+    assert payload["providers"]["openai"]["key"] == "***"
+    # The raw archive bytes must never contain the plaintext secret.
+    assert b"sk-super-secret" not in dest.read_bytes()
+
+
+def test_backup_with_secrets_requires_passphrase(env, mock_keystore):
+    from velune.providers.keystore import save_key
+
+    save_key("openai", "sk-super-secret")
+    dest = env["workspace"] / "snap.tar.gz"
+
+    with pytest.raises(ValueError):
+        create_backup(dest, include={"providers"}, with_secrets=True, workspace=env["workspace"])
+
+
+def test_backup_with_secrets_encrypts_keys(env, mock_keystore):
+    from velune.providers.keystore import save_key
+
+    save_key("openai", "sk-super-secret")
+    dest = env["workspace"] / "snap.tar.gz"
+
+    result = create_backup(
+        dest,
+        include={"providers"},
+        with_secrets=True,
+        secrets_passphrase="correct horse battery staple",
+        workspace=env["workspace"],
+    )
+
+    assert result.with_secrets is True
+    assert archive_has_encrypted_secrets(dest)
+    with tarfile.open(dest, "r:gz") as tar:
+        names = tar.getnames()
+        assert any(n.endswith("providers.json.enc") for n in names)
+        assert not any(n.endswith("providers/providers.json") for n in names)
+
+    # No plaintext trace of the secret anywhere in the archive bytes.
+    assert b"sk-super-secret" not in dest.read_bytes()
+
+    # The manifest summary must never carry the key material either.
+    with tarfile.open(dest, "r:gz") as tar:
+        manifest = json.loads(tar.extractfile(f"./{MANIFEST_NAME}").read())
+    assert manifest["subsystems"]["providers"]["providers"] == ["openai"]
+    assert "sk-super-secret" not in json.dumps(manifest)
+
+
+def test_restore_encrypted_secrets_roundtrip(env, mock_keystore):
+    from velune.providers.keystore import delete_key, get_key, save_key
+
+    save_key("openai", "sk-super-secret")
+    dest = env["workspace"] / "snap.tar.gz"
+    create_backup(
+        dest,
+        include={"providers"},
+        with_secrets=True,
+        secrets_passphrase="correct horse battery staple",
+        workspace=env["workspace"],
+    )
+
+    delete_key("openai")
+    assert get_key("openai") is None
+
+    result = restore_backup(
+        dest,
+        include={"providers"},
+        overwrite=True,
+        secrets_passphrase="correct horse battery staple",
+        workspace=env["workspace"],
+    )
+
+    assert "openai" in result.restored["providers"]
+    assert get_key("openai") == "sk-super-secret"
+
+
+def test_restore_encrypted_secrets_wrong_passphrase_skips(env, mock_keystore):
+    from velune.providers.keystore import delete_key, get_key, save_key
+
+    save_key("openai", "sk-super-secret")
+    dest = env["workspace"] / "snap.tar.gz"
+    create_backup(
+        dest,
+        include={"providers"},
+        with_secrets=True,
+        secrets_passphrase="correct horse battery staple",
+        workspace=env["workspace"],
+    )
+
+    delete_key("openai")
+
+    result = restore_backup(
+        dest,
+        include={"providers"},
+        overwrite=True,
+        secrets_passphrase="wrong passphrase",
+        workspace=env["workspace"],
+    )
+
+    assert not result.restored.get("providers")
+    assert result.skipped["providers"] == ["providers (wrong passphrase)"]
+    assert get_key("openai") is None
+
+
+def test_restore_encrypted_secrets_without_passphrase_skips(env, mock_keystore):
+    from velune.providers.keystore import save_key
+
+    save_key("openai", "sk-super-secret")
+    dest = env["workspace"] / "snap.tar.gz"
+    create_backup(
+        dest,
+        include={"providers"},
+        with_secrets=True,
+        secrets_passphrase="correct horse battery staple",
+        workspace=env["workspace"],
+    )
+
+    result = restore_backup(dest, include={"providers"}, overwrite=True, workspace=env["workspace"])
+
+    assert not result.restored.get("providers")
+    assert result.skipped["providers"] == ["providers (passphrase required to decrypt secrets)"]
 
 
 # ── Autosave / crash recovery ────────────────────────────────────────────────
