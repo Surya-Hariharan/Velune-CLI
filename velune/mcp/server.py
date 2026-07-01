@@ -596,9 +596,7 @@ class VeluneMCPServer:
             ]
         )
 
-    async def _prompt_session_context(
-        self, workspace_path: str | None = None
-    ) -> GetPromptResult:
+    async def _prompt_session_context(self, workspace_path: str | None = None) -> GetPromptResult:
         workspace = workspace_path or str(self.workspace_path)
         lines = [
             f"Workspace: {workspace}",
@@ -612,9 +610,7 @@ class VeluneMCPServer:
                 pass
         return self._make_prompt_result("\n".join(lines))
 
-    async def _prompt_memory_recall(
-        self, query: str = "", limit: int = 5
-    ) -> GetPromptResult:
+    async def _prompt_memory_recall(self, query: str = "", limit: int = 5) -> GetPromptResult:
         if not self.memory_manager:
             return self._make_prompt_result("Memory manager not available.")
         try:

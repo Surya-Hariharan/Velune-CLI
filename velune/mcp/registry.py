@@ -375,9 +375,7 @@ class MCPServerRegistry:
             logger.warning("MCP_SERVERS_JSON is not valid JSON: %s", exc)
             return 0
         if not isinstance(data, dict):
-            logger.warning(
-                "MCP_SERVERS_JSON must be a JSON object, got %s", type(data).__name__
-            )
+            logger.warning("MCP_SERVERS_JSON must be a JSON object, got %s", type(data).__name__)
             return 0
         count = 0
         for name, entry in data.items():
@@ -389,9 +387,7 @@ class MCPServerRegistry:
                     self._entries[name] = ServerEntry(config=cfg)
                 count += 1
             except Exception as exc:
-                logger.warning(
-                    "Skipping malformed MCP_SERVERS_JSON entry '%s': %s", name, exc
-                )
+                logger.warning("Skipping malformed MCP_SERVERS_JSON entry '%s': %s", name, exc)
         if count:
             logger.info("MCP_SERVERS_JSON: loaded %d server(s).", count)
         return count

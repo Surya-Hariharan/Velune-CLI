@@ -232,7 +232,11 @@ def _backup_providers(stage: Path, with_secrets: bool, passphrase: str | None) -
     # Sourced from a key-free API (never touches `snapshot`'s "key" values) so
     # the manifest summary can never carry secret material, even in transit.
     provider_ids = list_configured_providers(include_ollama=False)
-    return {"present": bool(provider_ids), "providers": sorted(provider_ids), "encrypted": with_secrets}
+    return {
+        "present": bool(provider_ids),
+        "providers": sorted(provider_ids),
+        "encrypted": with_secrets,
+    }
 
 
 def _backup_memory(stage: Path, workspace: Path) -> dict:
