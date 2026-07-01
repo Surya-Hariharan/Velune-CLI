@@ -24,6 +24,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from velune.repository._native import scan_directory as _native_scan_directory
+from velune.repository._native import sha256_file as _native_sha256_file
 from velune.repository.index_state import IndexedFile, IndexState
 
 logger = logging.getLogger("velune.repository.incremental_indexer")
@@ -293,13 +295,24 @@ class IncrementalIndexer:
         return IndexDelta(to_add=to_add, to_update=to_update, to_remove=to_remove)
 
     def _fallback_scan(self) -> list[Path]:
-        """Minimal walk used when FilesystemScanner is unavailable."""
+        """Minimal walk used when FilesystemScanner is unavailable.
+
+        Delegates the directory walk to the native extension (falls back to
+        pure Python automatically when the Rust wheel isn't installed — see
+        velune/repository/_native.py). ``scan_directory`` only prunes by exact
+        directory name, so ``_is_always_skip``'s suffix rules (``.egg-info``)
+        are still applied as a post-filter to keep results identical to the
+        previous pure-Python walk.
+        """
+        raw_paths = _native_scan_directory(
+            str(self.workspace_root), list(_CODE_EXTENSIONS), list(_ALWAYS_SKIP_DIRS)
+        )
         results: list[Path] = []
-        for path in self.workspace_root.rglob("*"):
+        for raw in raw_paths:
+            path = Path(raw)
             if any(_is_always_skip(part) for part in path.parts):
                 continue
-            if path.is_file() and path.suffix.lower() in _CODE_EXTENSIONS:
-                results.append(path)
+            results.append(path)
         return results
 
     def _parse_file(self, full_path: Path, content: str) -> tuple[list, str]:
@@ -316,12 +329,8 @@ class IncrementalIndexer:
 
     @staticmethod
     def _hash_file(path: Path) -> str:
-        """SHA-256 of a file's raw bytes, read in 8-KiB chunks."""
-        sha = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha.update(chunk)
-        return sha.hexdigest()
+        """SHA-256 hex digest of a file's raw bytes."""
+        return _native_sha256_file(path)
 
     @staticmethod
     def _hash_content(data: bytes) -> str:
