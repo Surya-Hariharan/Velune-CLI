@@ -31,7 +31,8 @@ def test_guidance_fills_placeholders():
     assert steps, "known outcome should yield steps"
     # The {model} placeholder is substituted into the suggested command.
     assert any("gpt-4o" in command for _, command, _ in steps)
-    assert any(command == "/models scan" for _, command, _ in steps)
+    # Guidance is surfaced to a shell by CLI commands, so it must be CLI-native.
+    assert any(command == "velune models scan" for _, command, _ in steps)
 
 
 def test_guidance_unknown_outcome_is_empty():
@@ -52,8 +53,8 @@ def test_next_steps_renders_summary_and_commands():
     out = console.export_text()
     assert "Models discovered" in out
     assert "5 models ready." in out
-    assert "/model llama3" in out
-    assert "/models benchmark" in out
+    assert "velune models use llama3" in out
+    assert "velune models benchmark" in out
 
 
 # ---------------------------------------------------------------------------

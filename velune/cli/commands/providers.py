@@ -174,6 +174,19 @@ def _set_default_provider_in_toml(provider_id: str) -> Path | None:
         return None
 
 
+def _maybe_set_first_default(pid: str) -> bool:
+    """Set *pid* as the default provider iff no default is configured yet.
+
+    A brand-new user's first provider should "just work" without a separate
+    ``velune provider default`` step, mirroring how git/gh adopt the first
+    configured remote/account. Returns ``True`` if this call set the default.
+    Never overrides an existing choice.
+    """
+    if _get_default_provider():
+        return False
+    return _set_default_provider_in_toml(pid) is not None
+
+
 def _is_configured(pid: str) -> bool:
     meta = _PROVIDER_META.get(pid, {})
     if meta.get("local"):
@@ -283,6 +296,10 @@ def add_provider(
             result = validate_provider_sync(pid, "")
         if result.ok:
             console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
+            if _maybe_set_first_default(pid):
+                console.print(
+                    f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
+                )
         else:
             console.print(f"[{design.WARN}]{result.human_message()}[/{design.WARN}]")
         return
@@ -303,6 +320,10 @@ def add_provider(
         console.print(
             f"[{design.WARN}]Key saved without validation (--no-validate was set).[/{design.WARN}]"
         )
+        if _maybe_set_first_default(pid):
+            console.print(
+                f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
+            )
         return
 
     with console.status(
@@ -317,6 +338,10 @@ def add_provider(
             _show_models_preview(console, result.models[:8], len(result.models))
         if result.account_info:
             _show_account_info(console, result.account_info, pid)
+        if _maybe_set_first_default(pid):
+            console.print(
+                f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
+            )
         _print_provider_next_steps(pid, result.models, validated=True)
     else:
         console.print(f"[{design.WARN}]{result.human_message()}[/{design.WARN}]")
@@ -325,6 +350,10 @@ def add_provider(
             if save_q:
                 save_key(pid, api_key)
                 console.print(f"[{design.WARN}]Key saved without validation.[/{design.WARN}]")
+                if _maybe_set_first_default(pid):
+                    console.print(
+                        f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
+                    )
                 _print_provider_next_steps(pid, result.models, validated=False)
         raise typer.Exit(1)
 

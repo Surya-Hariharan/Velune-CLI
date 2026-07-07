@@ -24,23 +24,23 @@ from velune.cli.ui import Step
 _GUIDANCE: dict[str, list[Step]] = {
     # ── Providers ────────────────────────────────────────────────────────────
     "provider_added": [
-        ("Discover available models", "/models scan", "probe each provider"),
-        ("Set your default model", "/model {model}", None),
-        ("See everything at a glance", "/status", "live system dashboard"),
+        ("Discover available models", "velune models scan", "probe each provider"),
+        ("Set your default model", "velune models use {model}", None),
+        ("See everything at a glance", "velune status", "workspace + provider health"),
     ],
     "provider_added_unvalidated": [
         ("Verify connectivity later", "velune doctor providers", "re-check health"),
-        ("Discover models once reachable", "/models scan", None),
+        ("Discover models once reachable", "velune models scan", None),
     ],
     # ── Models ───────────────────────────────────────────────────────────────
     "models_scanned": [
-        ("Assign a default model", "/model {model}", None),
-        ("Benchmark for the best fit", "/models benchmark", "empirical scoring"),
+        ("Set your default model", "velune models use {model}", None),
+        ("Benchmark for the best fit", "velune models benchmark", "empirical scoring"),
         ("Start working", "velune chat", None),
     ],
     "models_listed_multi": [
-        ("Pick a default model", "/model {model}", None),
-        ("Compare them empirically", "/models benchmark", None),
+        ("Set a default model", "velune models use {model}", None),
+        ("Compare them empirically", "velune models benchmark", None),
     ],
     # ── Council / planning ───────────────────────────────────────────────────
     "ask_completed": [
@@ -49,7 +49,7 @@ _GUIDANCE: dict[str, list[Step]] = {
     ],
     # ── Autonomous run ───────────────────────────────────────────────────────
     "run_succeeded": [
-        ("Review the changes", "/diff", None),
+        ("Review the changes", "git diff", None),
         ("Inspect what ran", "velune trace --run {run_id}", "execution trace"),
     ],
     "run_rolled_back": [

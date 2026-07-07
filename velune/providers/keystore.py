@@ -71,9 +71,15 @@ class CredentialManager:
             data = json.loads(json_str)
             return data.get("providers", {})
         except Exception as e:
-            logger.error("Failed to load credentials from disk: %s", e)
+            # Non-fatal: an unreadable credentials file degrades gracefully to
+            # environment variables / "no providers configured", and the CLI
+            # guides the user to `velune setup` downstream. Try a backup restore
+            # first; only if that also fails do we log — at debug, so a transient
+            # key change doesn't spam an ERROR line on every command. Use
+            # `velune doctor` or `--verbose` to surface it.
             if retry and self._attempt_backup_restore():
                 return self._load_disk(retry=False)
+            logger.debug("Could not load stored credentials: %s", e)
             return {}
 
     def _attempt_backup_restore(self) -> bool:

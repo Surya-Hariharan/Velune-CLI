@@ -95,7 +95,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "velune.cli.commands.init",
         "init_command",
         _CORE,
-        "Initialize Velune in the current workspace.",
+        "Set up Velune in a project — config, environment, and repository index.",
     ),
     CommandSpec(
         "onboard",
@@ -147,7 +147,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "velune.cli.commands.models",
         "models_cmd",
         _SETUP,
-        "Scan, list, and assign AI models.",
+        "Discover, pull, switch, assign, and remove AI models.",
     ),
     CommandSpec(
         "provider",

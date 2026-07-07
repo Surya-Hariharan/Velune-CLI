@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 from rich.box import ROUNDED
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from velune.cli import design
@@ -23,6 +24,9 @@ def session_list(
         False, "--all", "-a", help="Show sessions from all workspaces"
     ),
     limit: int = typer.Option(20, "--limit", "-n", help="Maximum sessions to display"),
+    archived: bool = typer.Option(
+        False, "--archived", help="Show only archived sessions instead of active ones"
+    ),
 ) -> None:
     """List saved chat sessions for the current workspace."""
     from velune.cli.sessions import SessionStore
@@ -33,7 +37,7 @@ def session_list(
 
     store = SessionStore()
     workspace = None if all_workspaces else str(cli_context.workspace.resolve())
-    sessions = store.list(workspace=workspace, limit=limit)
+    sessions = store.list(workspace=workspace, limit=limit, archived_only=archived)
 
     if cli_context.json_mode:
         import json
@@ -47,6 +51,7 @@ def session_list(
                         "project": m.project_name,
                         "updated_at": m.updated_at,
                         "turns": m.turn_count,
+                        "archived": m.archived,
                     }
                     for m in sessions
                 ]
@@ -56,8 +61,11 @@ def session_list(
 
     if not sessions:
         label = "any workspace" if all_workspaces else str(cli_context.workspace)
-        console.print(f"[{design.MUTED}]No sessions found for {label}.[/]")
-        console.print(f"[{design.MUTED}]Start one with:[/] [bold]velune chat[/bold]")
+        if archived:
+            console.print(f"[{design.MUTED}]No archived sessions for {label}.[/]")
+        else:
+            console.print(f"[{design.MUTED}]No sessions found for {label}.[/]")
+            console.print(f"[{design.MUTED}]Start one with:[/] [bold]velune chat[/bold]")
         return
 
     table = Table(box=ROUNDED, border_style=design.FAINT, expand=False)
@@ -78,7 +86,17 @@ def session_list(
 
     console.print(table)
     console.print()
-    console.print(f"[{design.MUTED}]Resume a session:[/] [bold]velune chat --session <id>[/bold]")
+    if archived:
+        console.print(
+            f"[{design.MUTED}]Restore a session:[/] [bold]velune session unarchive <id>[/bold]"
+        )
+    else:
+        console.print(
+            f"[{design.MUTED}]Resume a session:[/] [bold]velune session resume <id>[/bold]"
+        )
+        console.print(
+            f"[{design.MUTED}]Archive a session:[/] [bold]velune session archive <id>[/bold]"
+        )
     console.print(f"[{design.MUTED}]Delete a session: [/] [bold]velune session delete <id>[/bold]")
 
 
@@ -102,6 +120,165 @@ def session_delete(
 
     store.delete(session_id)
     console.print(f"[{design.OK}]Session [bold]{session_id}[/bold] deleted.[/{design.OK}]")
+
+
+def _resolve_session_id(store, cli_context: CLIContext, session_id: str | None) -> str | None:
+    """Resolve an explicit id, or ``last``/omitted to the newest session here."""
+    if session_id and session_id.lower() != "last":
+        return session_id
+    workspace = str(cli_context.workspace.resolve())
+    recent = store.list(workspace=workspace, limit=1, include_archived=True)
+    return recent[0].id if recent else None
+
+
+@session_cmd.command("resume")
+def session_resume(
+    ctx: typer.Context,
+    session_id: str = typer.Argument(
+        None, help="Session ID to resume. Omit (or 'last') to resume the most recent."
+    ),
+) -> None:
+    """Resume a saved chat session (the newest one if no ID is given)."""
+    from velune.cli.commands.chat import chat_command
+    from velune.cli.sessions import SessionStore
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    store = SessionStore()
+    resolved = _resolve_session_id(store, cli_context, session_id)
+    if resolved is None:
+        console.print(f"[{design.MUTED}]No sessions to resume in this workspace.[/]")
+        console.print(f"[{design.MUTED}]Start one with:[/] [bold]velune chat[/bold]")
+        raise typer.Exit(1)
+
+    if store.load_meta(resolved) is None:
+        console.print(f"[{design.DANGER}]Session '{resolved}' not found.[/]")
+        raise typer.Exit(1)
+
+    # Resuming an archived session brings it back into the active list.
+    store.set_archived(resolved, False)
+    chat_command(ctx, session_id=resolved)
+
+
+@session_cmd.command("show")
+def session_show(
+    ctx: typer.Context,
+    session_id: str = typer.Argument(..., help="Session ID to inspect"),
+    turns: int = typer.Option(6, "--turns", "-n", help="How many recent turns to preview"),
+) -> None:
+    """Show a session's metadata and a preview of its most recent turns."""
+    from velune.cli.sessions import SessionStore
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    store = SessionStore()
+    loaded = store.load(session_id)
+    if loaded is None:
+        console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
+        raise typer.Exit(1)
+    meta, conversation = loaded
+
+    if cli_context.json_mode:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "id": meta.id,
+                    "title": meta.title,
+                    "project": meta.project_name,
+                    "workspace": meta.workspace,
+                    "model_id": meta.model_id,
+                    "mode": meta.mode,
+                    "created_at": meta.created_at,
+                    "updated_at": meta.updated_at,
+                    "turns": meta.turn_count,
+                    "total_tokens": meta.total_tokens,
+                    "archived": meta.archived,
+                    "conversation": conversation,
+                }
+            )
+        )
+        return
+
+    header = (
+        f"[bold]{meta.title}[/bold]  [{design.MUTED}]{meta.id}[/]\n"
+        f"[{design.MUTED}]Project:[/] {meta.project_name}   "
+        f"[{design.MUTED}]Model:[/] {meta.model_id}   "
+        f"[{design.MUTED}]Mode:[/] {meta.mode}\n"
+        f"[{design.MUTED}]Updated:[/] {meta.updated_at.replace('T', ' ')}   "
+        f"[{design.MUTED}]Turns:[/] {meta.turn_count}   "
+        f"[{design.MUTED}]Tokens:[/] {meta.total_tokens:,}"
+    )
+    if meta.archived:
+        header += f"   [{design.WARN}](archived)[/]"
+    console.print(Panel(header, box=ROUNDED, border_style=design.FAINT))
+
+    recent = conversation[-turns:] if turns > 0 else conversation
+    for turn in recent:
+        role = turn.get("role", "unknown")
+        style = design.ACCENT if role == "user" else design.INFO
+        content = (turn.get("content", "") or "").strip()
+        if len(content) > 500:
+            content = content[:500].rstrip() + " …"
+        console.print(f"[bold {style}]{role.capitalize()}[/]")
+        console.print(content or f"[{design.MUTED}](empty)[/]")
+        console.print()
+
+    console.print(f"[{design.MUTED}]Resume:[/] [bold]velune session resume {meta.id}[/bold]")
+
+
+@session_cmd.command("archive")
+def session_archive(
+    ctx: typer.Context,
+    session_id: str = typer.Argument(..., help="Session ID to archive"),
+) -> None:
+    """Archive a session — hide it from the default list without deleting it.
+
+    Archiving is non-destructive: the conversation is untouched and project
+    memory/embeddings are unaffected. Reverse it with `velune session unarchive`.
+    """
+    from velune.cli.sessions import SessionStore
+
+    store = SessionStore()
+    meta = store.load_meta(session_id)
+    if meta is None:
+        console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
+        raise typer.Exit(1)
+    if meta.archived:
+        console.print(f"[{design.MUTED}]Session '{session_id}' is already archived.[/]")
+        return
+    store.set_archived(session_id, True)
+    console.print(
+        f"[{design.OK}]Archived[/{design.OK}] [bold]{session_id}[/bold] "
+        f"[{design.MUTED}]— restore with `velune session unarchive {session_id}`.[/]"
+    )
+
+
+@session_cmd.command("unarchive")
+def session_unarchive(
+    ctx: typer.Context,
+    session_id: str = typer.Argument(..., help="Session ID to restore from the archive"),
+) -> None:
+    """Restore an archived session back into the active list."""
+    from velune.cli.sessions import SessionStore
+
+    store = SessionStore()
+    meta = store.load_meta(session_id)
+    if meta is None:
+        console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
+        raise typer.Exit(1)
+    if not meta.archived:
+        console.print(f"[{design.MUTED}]Session '{session_id}' is not archived.[/]")
+        return
+    store.set_archived(session_id, False)
+    console.print(
+        f"[{design.OK}]Restored[/{design.OK}] [bold]{session_id}[/bold] to the active list."
+    )
 
 
 @session_cmd.command("export")

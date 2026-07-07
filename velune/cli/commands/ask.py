@@ -65,22 +65,26 @@ async def _ask_command_async(
 
     # 2. Boot subsystems
     if not cli_context.json_mode:
-        console.print("[bold cyan]Bootstrapping Cognitive Operating System kernel...[/bold cyan]")
+        console.print("[dim]Thinking…[/dim]")
     await lifecycle.startup()
     await model_registry.refresh()
 
-    # Onboarding preflight check gate
+    # Onboarding preflight gate. `ask` is a one-off question, so it works in any
+    # directory — no git repo or index required. Only a reachable model is
+    # enforced (require_workspace=False).
     from velune.cli.commands.preflight import run_preflight_check
 
-    if not await run_preflight_check(container, console if not cli_context.json_mode else None):
+    if not await run_preflight_check(
+        container,
+        console if not cli_context.json_mode else None,
+        require_workspace=False,
+    ):
         if cli_context.json_mode:
             import json
 
             print(
                 json.dumps(
-                    {
-                        "error": "Preflight check failed. Ensure workspace is initialized and models are scanned."
-                    }
+                    {"error": "No model available. Run `velune setup` to configure a provider."}
                 )
             )
         await lifecycle.shutdown()
@@ -101,15 +105,21 @@ async def _ask_command_async(
 
     firewall = CognitiveFirewall()
 
-    # 4. Ingest and Scan AST Snapshot
+    # 4. Ingest and Scan AST Snapshot — only when the current directory is
+    # actually a project. A one-off question asked from an empty directory
+    # should not index arbitrary files; it answers as a general question.
     snapshot: RepositorySnapshot | None = None
-    if not cli_context.json_mode:
-        with console.status("[bold magenta]Scanning codebase AST structure...[/bold magenta]"):
+    if _looks_like_project(cli_context.workspace):
+        if not cli_context.json_mode:
+            with console.status("[bold magenta]Scanning codebase AST structure...[/bold magenta]"):
+                snapshot = repo_cognition.index()
+        else:
             snapshot = repo_cognition.index()
-    else:
-        snapshot = repo_cognition.index()
 
-    formatted_snap = _format_snapshot_context_safe(snapshot, firewall)
+    if snapshot is not None:
+        formatted_snap = _format_snapshot_context_safe(snapshot, firewall)
+    else:
+        formatted_snap = "No repository context — answering as a general question."
 
     # 5. deliberating debate loop
     council_res = None
@@ -173,6 +183,22 @@ async def _ask_command_async(
 
     # 7. Shutdown
     await lifecycle.shutdown()
+
+
+# Markers that indicate the workspace is (probably) a real project root, in
+# which case repository context is worth indexing for the answer.
+_PROJECT_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml", "go.mod")
+
+
+def _looks_like_project(workspace: object) -> bool:
+    """Return True if *workspace* contains a recognizable project marker."""
+    from pathlib import Path
+
+    try:
+        root = Path(str(workspace))
+        return any((root / marker).exists() for marker in _PROJECT_MARKERS)
+    except Exception:
+        return False
 
 
 def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: CognitiveFirewall) -> str:

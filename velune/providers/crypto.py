@@ -106,7 +106,18 @@ def decrypt_credentials(data: bytes) -> str:
     nonce = data[:12]
     ciphertext = data[12:]
 
-    plaintext_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+    try:
+        plaintext_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+    except InvalidTag as exc:
+        # AES-GCM raises InvalidTag with an empty message, which surfaces
+        # downstream as a blank "Failed to load credentials" log. Translate it
+        # into an actionable error: this happens when the master key changed
+        # (new machine, reset OS keyring) or the file is corrupt.
+        raise DecryptionError(
+            "Stored credentials could not be decrypted — the encryption key "
+            "changed (new machine or reset OS keyring) or the file is corrupt. "
+            "Re-add your keys with `velune setup`."
+        ) from exc
     return plaintext_bytes.decode("utf-8")
 
 

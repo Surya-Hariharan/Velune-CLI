@@ -88,6 +88,26 @@ def test_corrupted_config_recovery(mock_config_dir, mock_keyring):
     assert get_key("openai") == "sk-good"
 
 
+def test_decrypt_wrong_key_raises_clear_error(mock_keyring):
+    """A wrong master key must raise a descriptive DecryptionError, not a blank
+    InvalidTag — otherwise the failure surfaces downstream as an empty
+    "Failed to load credentials" log line.
+    """
+    from velune.providers.crypto import DecryptionError, decrypt_credentials, encrypt_credentials
+
+    blob = encrypt_credentials('{"providers": {}}')
+    # Tamper the ciphertext so the GCM auth tag no longer verifies.
+    tampered = bytearray(blob)
+    tampered[-1] ^= 0xFF
+
+    with pytest.raises(DecryptionError) as exc_info:
+        decrypt_credentials(bytes(tampered))
+
+    # The message must be non-empty and actionable (the whole point of the fix).
+    assert str(exc_info.value).strip()
+    assert "velune setup" in str(exc_info.value)
+
+
 def test_interrupted_write(mock_config_dir, mock_keyring):
     """An interrupted write shouldn't destroy the existing file."""
     save_key("openai", "sk-first")

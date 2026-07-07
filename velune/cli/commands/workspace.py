@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     )
 
 console = Console()
-workspace_cmd = typer.Typer(help="Browse, index, and switch projects.")
+workspace_cmd = typer.Typer(help="Detect, index, remember, and resume projects.")
 
 
 @workspace_cmd.command("init")
@@ -35,7 +35,13 @@ def workspace_init(
     path: Path = typer.Argument(Path.cwd(), help="Workspace path"),
     force: bool = typer.Option(False, "--force", "-f", help="Force reinitialization and re-index"),
 ) -> None:
-    """Initialize a Velune workspace and build initial Tree-sitter AST parser indices."""
+    """(Re)build the Tree-sitter AST index for a workspace.
+
+    For first-time project setup prefer `velune init`, which also detects your
+    hardware, writes config, and updates .gitignore before delegating to this
+    same indexing routine. Use `velune workspace init` to re-index an existing
+    workspace (e.g. after large changes, or with `--force`).
+    """
     cli_context = ctx.obj
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
@@ -144,19 +150,16 @@ async def _workspace_init_async(
         console.print()
         console.print(
             Panel(
-                Text.assemble(
-                    ("[bold green]VELUNE WORKSPACE SUCCESSFULLY INDEXED[/bold green]\n\n"),
-                    (f"[bold]Workspace path:[/bold] {path}\n"),
-                    (f"[bold]Caches directory:[/bold] {velune_dir}\n"),
-                    (
-                        f"[bold]Indexed files:[/bold] {num_files} ({lang_summary or 'no code files found'})\n"
-                    ),
-                    (f"[bold]Parsed AST symbols:[/bold] {num_symbols} classes/functions/imports\n"),
-                    (f"[bold]Dependency edges:[/bold] {num_edges} import link(s)\n"),
-                    (f"[bold]Active branch:[/bold] [magenta]{git_branch}[/magenta]\n\n"),
-                    (
-                        "[dim]Velune repository cognitive engine is primed. Use 'velune run' to start autonomous edits.[/dim]"
-                    ),
+                Text.from_markup(
+                    "[bold green]VELUNE WORKSPACE SUCCESSFULLY INDEXED[/bold green]\n\n"
+                    f"[bold]Workspace path:[/bold] {path}\n"
+                    f"[bold]Caches directory:[/bold] {velune_dir}\n"
+                    f"[bold]Indexed files:[/bold] {num_files} ({lang_summary or 'no code files found'})\n"
+                    f"[bold]Parsed AST symbols:[/bold] {num_symbols} classes/functions/imports\n"
+                    f"[bold]Dependency edges:[/bold] {num_edges} import link(s)\n"
+                    f"[bold]Active branch:[/bold] [magenta]{git_branch}[/magenta]\n\n"
+                    "[dim]Velune repository cognitive engine is primed."
+                    " Use 'velune run' to start autonomous edits.[/dim]"
                 ),
                 border_style="green",
                 box=ROUNDED,
@@ -631,19 +634,73 @@ def workspace_list(ctx: typer.Context) -> None:
     )
 
 
+def _render_workspace_entry(info, *, title: str, extra: list[str] | None = None) -> None:
+    """Show a workspace's identity and the exact commands to work in it.
+
+    Each ``velune`` invocation resolves its own workspace from the working
+    directory (or ``--workspace``), so — unlike the in-process REPL ``/project``
+    switch — the CLI cannot change the parent shell's directory. Instead we hand
+    back copy-pasteable entry commands. ``extra`` appends context-specific lines
+    (e.g. a session to resume) above the generic tips.
+    """
+    lines: list[str] = [
+        f"[bold]Name:[/bold]   {info.name}\n",
+        f"[bold]Path:[/bold]   {info.path}\n",
+        f"[bold]Type:[/bold]   {info.project_type or 'unknown'}\n",
+        f"[bold]Git:[/bold]    {'yes' if info.is_git else 'no'}\n\n",
+    ]
+    for line in extra or []:
+        lines.append(line)
+    lines.extend(
+        [
+            f"[{design.MUTED}]To work in this workspace from any command:[/]\n",
+            f"  velune --workspace {info.path} chat\n",
+            f"  velune --workspace {info.path} run <task>\n\n",
+            f"[{design.MUTED}]Or cd into the project and run velune directly.[/]",
+        ]
+    )
+    console.print(
+        Panel(
+            Text.from_markup("".join(lines)),
+            border_style=design.ACCENT_SOFT,
+            box=ROUNDED,
+            title=f"[bold]{title}[/bold]",
+        )
+    )
+
+
+def _resolve_workspace_target(registry, target: str) -> Path | None:
+    """Resolve *target* as a registered workspace name first, else a path.
+
+    Mirrors the REPL's ``/project`` resolution so ``velune workspace open myproj``
+    works by name, not just by filesystem path. Returns ``None`` if neither a
+    known name nor an existing directory matches.
+    """
+    info = registry.find_by_name(target)
+    if info is not None:
+        return Path(info.path)
+    candidate = Path(target).expanduser()
+    if candidate.exists():
+        return candidate.resolve()
+    return None
+
+
 @workspace_cmd.command("open")
 def workspace_open(
     ctx: typer.Context,
-    path: Path = typer.Argument(..., help="Path to the project workspace"),
+    target: str = typer.Argument(
+        ..., help="Registered workspace name, or a path to the project directory"
+    ),
     init: bool = typer.Option(
         False, "--init", "-i", help="Also run workspace init to index the project"
     ),
 ) -> None:
-    """Register a workspace and print the command to use it.
+    """Register a workspace (by name or path) and print how to work in it.
 
-    Velune uses the working directory (or --workspace flag) to determine the
-    active workspace per invocation. This command registers the workspace in
-    the global registry and shows you how to target it in any velune command.
+    Velune resolves the active workspace per invocation from the working
+    directory (or ``--workspace``). This command registers the target in the
+    global registry and shows you how to target it in any velune command. The
+    target may be a previously-registered name or a filesystem path.
     """
     from velune.cli.workspaces import WorkspaceRegistry
 
@@ -651,31 +708,27 @@ def workspace_open(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
-    resolved = path.resolve()
-    if not resolved.exists():
-        console.print(f"[{design.DANGER}]Path does not exist: {resolved}[/]")
+    registry = WorkspaceRegistry()
+    resolved = _resolve_workspace_target(registry, target)
+    if resolved is None:
+        if cli_context.json_mode:
+            print(json.dumps({"error": f"Unknown workspace name or path: {target}"}))
+        else:
+            console.print(f"[{design.DANGER}]Unknown workspace name or path: {target}[/]")
+            console.print(
+                f"[{design.MUTED}]Run[/] [bold]velune workspace list[/bold] "
+                f"[{design.MUTED}]to see registered workspaces.[/]"
+            )
         raise typer.Exit(1)
 
-    registry = WorkspaceRegistry()
     info = registry.register(resolved)
 
-    console.print(
-        Panel(
-            Text.assemble(
-                (f"[bold]Name:[/bold]   {info.name}\n"),
-                (f"[bold]Path:[/bold]   {info.path}\n"),
-                (f"[bold]Type:[/bold]   {info.project_type or 'unknown'}\n"),
-                (f"[bold]Git:[/bold]    {'yes' if info.is_git else 'no'}\n\n"),
-                (f"[{design.MUTED}]To use this workspace in any command:[/]\n"),
-                (f"  velune --workspace {info.path} chat\n"),
-                (f"  velune --workspace {info.path} run <task>\n\n"),
-                (f"[{design.MUTED}]Or cd into the project and run velune directly.[/]"),
-            ),
-            border_style=design.ACCENT_SOFT,
-            box=ROUNDED,
-            title=f"[bold]Workspace registered — {info.name}[/bold]",
-        )
-    )
+    if cli_context.json_mode:
+        from dataclasses import asdict
+
+        print(json.dumps(asdict(info)))
+    else:
+        _render_workspace_entry(info, title=f"Workspace registered — {info.name}")
 
     if init:
         velune_dir = resolved / ".velune"
@@ -686,6 +739,84 @@ def workspace_open(
         from velune.core.event_loop import submit
 
         submit(_workspace_init_async(cli_context, resolved, velune_dir, force=False))
+
+
+@workspace_cmd.command("resume")
+def workspace_resume(
+    ctx: typer.Context,
+    name: str = typer.Argument(
+        None, help="Workspace name or path to resume. Omit to resume the most recent."
+    ),
+) -> None:
+    """Reopen a recent workspace and surface its latest session to continue.
+
+    With no argument this picks the most recently used workspace from the
+    registry. It marks the workspace as opened again and, if it has saved
+    sessions, prints the exact command to jump back into the last conversation —
+    tying workspace resume to session resume.
+    """
+    from velune.cli.workspaces import WorkspaceRegistry
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    registry = WorkspaceRegistry()
+
+    if name:
+        resolved = _resolve_workspace_target(registry, name)
+        info = registry.get(resolved) if resolved is not None else None
+        if info is None and resolved is not None:
+            # A real directory that wasn't registered yet — register it now.
+            info = registry.register(resolved)
+    else:
+        workspaces = registry.list()
+        info = workspaces[0] if workspaces else None
+
+    if info is None:
+        if cli_context.json_mode:
+            print(json.dumps({"error": "No workspace to resume"}))
+        else:
+            console.print(f"[{design.MUTED}]No workspace to resume.[/]")
+            console.print(
+                f"[{design.MUTED}]Run[/] [bold]velune init[/bold] "
+                f"[{design.MUTED}]inside a project first.[/]"
+            )
+        raise typer.Exit(1)
+
+    ws_path = Path(info.path)
+    registry.touch(ws_path)
+
+    # Tie into session resume: find the newest saved session for this workspace.
+    latest_session = None
+    try:
+        from velune.cli.sessions import SessionStore
+
+        recent = SessionStore().list(workspace=str(ws_path.resolve()), limit=1)
+        latest_session = recent[0] if recent else None
+    except Exception:
+        latest_session = None
+
+    if cli_context.json_mode:
+        from dataclasses import asdict
+
+        payload = asdict(info)
+        payload["latest_session"] = (
+            {"id": latest_session.id, "title": latest_session.title}
+            if latest_session is not None
+            else None
+        )
+        print(json.dumps(payload))
+        return
+
+    extra: list[str] = []
+    if latest_session is not None:
+        extra.append(f"[{design.MUTED}]Continue your last session:[/]\n")
+        extra.append(
+            f"  velune --workspace {info.path} chat --session {latest_session.id}"
+            f"   [{design.FAINT}]# {latest_session.title}[/]\n\n"
+        )
+    _render_workspace_entry(info, title=f"Resumed — {info.name}", extra=extra)
 
 
 @workspace_cmd.command("explain")

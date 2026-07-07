@@ -180,6 +180,25 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
             yes=yes,
         )
 
+        # Remember real usage. Any subcommand run inside an *indexed* Velune
+        # workspace touches the registry, so `velune workspace list`/`resume`
+        # reflect actual work — not just explicit `workspace open`/`init` calls.
+        # The predicate is `.velune/index` (written only by `velune init` /
+        # `workspace init`), not a bare `.velune/` — the runtime auto-creates
+        # `.velune/snapshots` for its own storage, so gating on `.velune` alone
+        # would register every random directory a one-off `ask` runs in. The bare
+        # REPL (no subcommand) touches itself once its session starts, so it is
+        # skipped here. Best-effort: a read-only/missing registry never breaks a
+        # command.
+        if ctx.invoked_subcommand is not None:
+            try:
+                if (workspace / ".velune" / "index").exists():
+                    from velune.cli.workspaces import WorkspaceRegistry
+
+                    WorkspaceRegistry().touch(workspace)
+            except Exception:
+                pass
+
         if ctx.invoked_subcommand is None:
             if json_mode:
                 import json

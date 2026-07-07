@@ -12,7 +12,9 @@ from velune.cli.context import CLIContext
 
 console = Console()
 
-models_cmd = typer.Typer(help="Scan, list, and assign AI models.")
+models_cmd = typer.Typer(
+    help="Discover, pull, switch, assign, and remove AI models.",
+)
 
 
 def _cap_badge(level) -> str:
@@ -449,6 +451,305 @@ def models_assign(
         console.print(
             f"[green]Assigned role '{council_role.value}' → '{model_id}' (persisted to council_roles.json)[/green]"
         )
+
+
+def _persist_default_provider_toml(cli_context: CLIContext | None, provider_id: str) -> None:
+    """Best-effort write of ``providers.default_provider`` into velune.toml.
+
+    Mirrors the REPL's ``activate_model`` persistence so ``velune models use``
+    and the interactive ``/model use`` converge on the same default. Failures
+    are swallowed — a missing/read-only config must never break model switching.
+    """
+    from pathlib import Path
+
+    try:
+        import toml
+
+        if cli_context is not None:
+            workspace = Path(cli_context.workspace)
+            config_path = getattr(cli_context, "config_path", None) or (workspace / "velune.toml")
+        else:
+            config_path = Path.cwd() / "velune.toml"
+        config_path = Path(config_path)
+        data = toml.load(config_path) if config_path.exists() else {}
+        data.setdefault("providers", {})["default_provider"] = provider_id
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as fh:
+            toml.dump(data, fh)
+    except Exception:
+        pass
+
+
+@models_cmd.command("use")
+def models_use(
+    ctx: typer.Context,
+    model_id: str = typer.Argument(
+        None, help="Model ID to make the default. Omit to show the current default."
+    ),
+) -> None:
+    """Set (or show) the default model used for new chat/run sessions.
+
+    This is the non-interactive twin of the REPL's ``/model use``: it persists
+    the choice to ``~/.velune/active_model.json`` (so the next launch restores
+    it) and records the provider as the workspace default in ``velune.toml``.
+    """
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    json_mode = bool(cli_context and cli_context.json_mode)
+    registry = cli_context.container.get("runtime.model_registry") if cli_context else None
+
+    from velune.cli.model_prefs import load_active_model, save_active_model
+
+    if not model_id:
+        pref = load_active_model()
+        if json_mode:
+            import json
+
+            print(
+                json.dumps(
+                    {"provider_id": pref.provider_id, "model_id": pref.model_id}
+                    if pref
+                    else {"provider_id": None, "model_id": None}
+                )
+            )
+            return
+        if pref:
+            console.print(
+                f"[green]Default model:[/green] [cyan]{pref.model_id}[/cyan] "
+                f"[dim]({pref.provider_id})[/dim]"
+            )
+        else:
+            console.print(
+                "[yellow]No default model set.[/yellow] "
+                "[dim]Run 'velune models use <model-id>' to choose one.[/dim]"
+            )
+        return
+
+    descriptor = registry.get(model_id) if registry else None
+    if descriptor is None:
+        if json_mode:
+            import json
+
+            print(json.dumps({"success": False, "error": f"Model '{model_id}' is not registered"}))
+        else:
+            console.print(
+                f"[red]Model '{model_id}' is not registered.[/red] "
+                "[dim]Run 'velune models scan' to discover it first.[/dim]"
+            )
+        raise typer.Exit(code=1)
+
+    save_active_model(descriptor.provider_id, descriptor.model_id)
+    _persist_default_provider_toml(cli_context, descriptor.provider_id)
+
+    if json_mode:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "success": True,
+                    "model_id": descriptor.model_id,
+                    "provider_id": descriptor.provider_id,
+                }
+            )
+        )
+    else:
+        console.print(
+            f"[green]Default model set:[/green] [cyan]{descriptor.model_id}[/cyan] "
+            f"[dim]{descriptor.provider_id} · ctx {descriptor.context_length:,} · "
+            f"{'local' if descriptor.is_local else 'cloud'}[/dim]"
+        )
+
+
+@models_cmd.command("refresh")
+def models_refresh(ctx: typer.Context) -> None:
+    """Re-scan every provider and rebuild the model catalog from scratch.
+
+    Unlike ``scan`` (which reports what it finds), ``refresh`` also clears and
+    repopulates the on-disk registry cache and applies any cached capability
+    probes — the same routine the REPL's ``/model discover`` runs.
+    """
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    registry = cli_context.container.get("runtime.model_registry") if cli_context else None
+
+    if registry is None:
+        if cli_context and cli_context.json_mode:
+            import json
+
+            print(json.dumps({"error": "Model registry is unavailable"}))
+        else:
+            console.print("[red]Model registry is unavailable.[/red]")
+        raise typer.Exit(code=1)
+
+    from velune.core.event_loop import submit
+
+    if not (cli_context and cli_context.json_mode):
+        with console.status("[cyan]Refreshing model catalog...[/cyan]"):
+            submit(registry.refresh())
+    else:
+        submit(registry.refresh())
+
+    total = len(registry.list_all())
+    if cli_context and cli_context.json_mode:
+        import json
+
+        print(json.dumps({"success": True, "models": total}))
+    else:
+        console.print(f"[green]Model catalog refreshed:[/green] {total} model(s) available.")
+
+
+@models_cmd.command("pull")
+def models_pull(
+    ctx: typer.Context,
+    model_id: str = typer.Argument(
+        None, help="Ollama model to download (e.g. 'qwen2.5-coder:7b'). Omit to list suggestions."
+    ),
+) -> None:
+    """Download a local model from the Ollama registry, then refresh the catalog.
+
+    The non-interactive twin of the REPL's ``/pull``. With no argument it prints
+    the curated recommendations (with sizes/RAM) instead of opening a picker, so
+    it stays scriptable.
+    """
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    json_mode = bool(cli_context and cli_context.json_mode)
+
+    from velune.providers.ollama_manager import RECOMMENDED_MODELS
+
+    if not model_id:
+        if json_mode:
+            import json
+
+            print(json.dumps(RECOMMENDED_MODELS))
+            return
+        table = Table(title="Recommended Ollama models")
+        table.add_column("Model", style="green")
+        table.add_column("Size", style="yellow", justify="right")
+        table.add_column("Skill", style="cyan")
+        table.add_column("RAM", style="magenta")
+        table.add_column("Description", style="dim")
+        for rec in RECOMMENDED_MODELS:
+            table.add_row(
+                rec["model_id"],
+                f"{rec['size_gb']:.1f} GB",
+                rec["skill"],
+                rec["ram_needed"],
+                rec["description"],
+            )
+        console.print(table)
+        console.print("[dim]Download one with:[/dim] [bold]velune models pull <model-id>[/bold]")
+        return
+
+    from velune.core.event_loop import submit
+
+    ok = submit(_models_pull_async(cli_context, model_id, json_mode))
+    raise typer.Exit(code=0 if ok else 1)
+
+
+async def _models_pull_async(
+    cli_context: CLIContext | None, model_id: str, json_mode: bool
+) -> bool:
+    import io
+
+    from velune.providers.ollama_manager import OllamaManager
+
+    manager = OllamaManager()
+    # In JSON mode the streaming progress bar would corrupt stdout, so render it
+    # into a throwaway buffer and emit only the structured result.
+    prog_console = Console(file=io.StringIO()) if json_mode else console
+    try:
+        if not await manager.is_running():
+            if json_mode:
+                import json
+
+                print(json.dumps({"success": False, "error": "Ollama is not running"}))
+            else:
+                console.print(
+                    "[red]Ollama is not running.[/red]\n[dim]Start it with: ollama serve[/dim]"
+                )
+            return False
+
+        ok = await manager.pull_model(model_id, prog_console)
+
+        registry = cli_context.container.get("runtime.model_registry") if cli_context else None
+        if ok and registry is not None:
+            await registry.refresh()
+
+        if json_mode:
+            import json
+
+            total = len(registry.list_all()) if registry is not None else None
+            print(json.dumps({"success": ok, "model_id": model_id, "models": total}))
+        elif ok and registry is not None:
+            console.print(
+                f"[dim]Registry refreshed: {len(registry.list_all())} model(s) available.[/dim]"
+            )
+        return ok
+    finally:
+        await manager.close()
+
+
+@models_cmd.command("delete")
+def models_delete(
+    ctx: typer.Context,
+    model_id: str = typer.Argument(..., help="Installed Ollama model to delete"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+) -> None:
+    """Delete an installed Ollama model and drop it from the catalog.
+
+    The non-interactive twin of the REPL's ``/delete``. Deletion is irreversible
+    (the blobs are removed from disk); re-download later with ``models pull``.
+    """
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    json_mode = bool(cli_context and cli_context.json_mode)
+
+    if not yes and not json_mode:
+        confirmed = typer.confirm(
+            f"Delete '{model_id}' from Ollama? This cannot be undone.", default=False
+        )
+        if not confirmed:
+            console.print("[dim]Aborted.[/dim]")
+            raise typer.Exit(code=0)
+
+    from velune.core.event_loop import submit
+
+    ok = submit(_models_delete_async(cli_context, model_id, json_mode))
+    raise typer.Exit(code=0 if ok else 1)
+
+
+async def _models_delete_async(
+    cli_context: CLIContext | None, model_id: str, json_mode: bool
+) -> bool:
+    from velune.providers.ollama_manager import OllamaManager
+
+    manager = OllamaManager()
+    try:
+        ok = await manager.delete_model(model_id)
+    finally:
+        await manager.close()
+
+    if ok and cli_context is not None:
+        registry = cli_context.container.get("runtime.model_registry")
+        if registry is not None:
+            registry.remove(model_id)
+        # Clear the default-model preference if it pointed at the deleted model.
+        from velune.cli.model_prefs import clear_active_model, load_active_model
+
+        pref = load_active_model()
+        if pref and pref.model_id == model_id:
+            clear_active_model()
+
+    if json_mode:
+        import json
+
+        print(json.dumps({"success": ok, "model_id": model_id}))
+    elif ok:
+        console.print(f"[green]Deleted:[/green] {model_id}")
+    else:
+        console.print(
+            f"[red]Failed to delete '{model_id}'.[/red] "
+            "[dim]Is Ollama running and is the model installed?[/dim]"
+        )
+    return ok
 
 
 @models_cmd.command("benchmark")

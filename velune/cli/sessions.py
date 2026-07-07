@@ -53,6 +53,7 @@ class SessionMeta:
     total_tokens: int = 0
     turn_count: int = 0
     summary: str | None = None
+    archived: bool = False
 
 
 def auto_title(conversation: list[dict], max_words: int = 6, max_chars: int = 48) -> str:
@@ -108,10 +109,14 @@ class SessionStore:
         now = datetime.now().isoformat(timespec="seconds")
         sid = session_id or uuid.uuid4().hex[:8]
         created = now
+        archived = False
         if session_id:
             existing = self.load_meta(session_id)
             if existing:
                 created = existing.created_at
+                # Re-saving an archived session (e.g. resuming it) must not
+                # silently un-archive it; preserve the flag unless unarchived.
+                archived = existing.archived
         meta = SessionMeta(
             id=sid,
             title=title or auto_title(conversation),
@@ -125,6 +130,7 @@ class SessionStore:
             total_tokens=total_tokens,
             turn_count=len(conversation),
             summary=summary,
+            archived=archived,
         )
         payload = {"meta": asdict(meta), "conversation": conversation}
         path = self.root / f"{sid}.json"
@@ -143,8 +149,20 @@ class SessionStore:
         data = self._read(session_id)
         return self._meta_from(data) if data is not None else None
 
-    def list(self, workspace: str | None = None, limit: int = 50) -> list[SessionMeta]:
-        """Sessions sorted newest-first, optionally filtered to one workspace."""
+    def list(
+        self,
+        workspace: str | None = None,
+        limit: int = 50,
+        *,
+        include_archived: bool = False,
+        archived_only: bool = False,
+    ) -> list[SessionMeta]:
+        """Sessions sorted newest-first, optionally filtered to one workspace.
+
+        Archived sessions are hidden by default so the active list stays focused;
+        pass ``include_archived=True`` to show everything or ``archived_only=True``
+        to show just the archive.
+        """
         if not self.root.exists():
             return []
         metas: list[SessionMeta] = []
@@ -152,8 +170,13 @@ class SessionStore:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 meta = self._meta_from(data)
-                if workspace is None or self._same_workspace(meta.workspace, workspace):
-                    metas.append(meta)
+                if workspace is not None and not self._same_workspace(meta.workspace, workspace):
+                    continue
+                if archived_only and not meta.archived:
+                    continue
+                if not include_archived and not archived_only and meta.archived:
+                    continue
+                metas.append(meta)
             except Exception:
                 continue
         metas.sort(key=lambda m: m.updated_at, reverse=True)
@@ -164,6 +187,24 @@ class SessionStore:
         if not path.exists():
             return False
         path.unlink()
+        return True
+
+    def set_archived(self, session_id: str, archived: bool) -> bool:
+        """Flip a session's archived flag in place. Returns False if not found.
+
+        Archiving never touches the conversation, project memory, or embeddings —
+        it only moves the session out of the default listing.
+        """
+        data = self._read(session_id)
+        if data is None:
+            return False
+        meta = self._meta_from(data)
+        meta.archived = archived
+        payload = {"meta": asdict(meta), "conversation": data.get("conversation", [])}
+        path = self.root / f"{session_id}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
         return True
 
     def export_markdown(self, session_id: str) -> str | None:

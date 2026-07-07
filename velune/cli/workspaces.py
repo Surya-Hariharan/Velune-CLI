@@ -105,7 +105,11 @@ class WorkspaceRegistry:
         info = WorkspaceInfo(
             name=resolved.name or str(resolved),
             path=str(resolved),
-            last_opened=datetime.now().isoformat(timespec="seconds"),
+            # Microsecond precision so "most recent" ordering (used by
+            # `workspace resume` and the `/project` picker) stays deterministic
+            # even when several workspaces are touched within the same second.
+            # Display slices this to the minute, so the extra precision is unseen.
+            last_opened=datetime.now().isoformat(timespec="microseconds"),
             is_git=(resolved / ".git").exists(),
             project_type=self._detect_project_type(resolved),
         )
@@ -117,7 +121,7 @@ class WorkspaceRegistry:
         """Update the last-opened timestamp, registering if unknown."""
         key = self._key(path)
         if key in self._entries:
-            self._entries[key].last_opened = datetime.now().isoformat(timespec="seconds")
+            self._entries[key].last_opened = datetime.now().isoformat(timespec="microseconds")
             self._save()
         else:
             self.register(path)

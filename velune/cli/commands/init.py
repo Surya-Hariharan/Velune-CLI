@@ -1,4 +1,22 @@
-"""velune init — workspace initialisation command."""
+"""velune init — the one-stop workspace initialisation command.
+
+``velune init`` is the canonical way to prepare a project for Velune. In one
+step it:
+
+* detects your hardware (so model recommendations fit the machine),
+* detects the project type and writes ``.velune/project_profile.json``,
+* scaffolds the ``.velune/`` tree and ``.veluneignore``,
+* writes ``.velune/config.toml`` (read by the runtime config loader),
+* adds ``.velune/`` to ``.gitignore``, and
+* builds the repository index so ``velune ask``/``run``/``chat`` work
+  immediately.
+
+The heavy indexing step is delegated to the *same* async routine that backs
+``velune workspace init`` (:func:`velune.cli.commands.workspace._workspace_init_async`),
+so the two commands can never drift: ``velune workspace init`` re-indexes an
+existing workspace, and ``velune init`` layers the first-run scaffolding +
+config on top of that shared core.
+"""
 
 from __future__ import annotations
 
@@ -9,12 +27,14 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-app_init = typer.Typer()
+from velune.cli import design
+from velune.cli.context import CLIContext
+
 console = Console()
 
 
-@app_init.command("init")
 def init_command(
+    ctx: typer.Context,
     path: Path = typer.Argument(
         default=None,
         help="Path to project root (defaults to current directory)",
@@ -30,18 +50,20 @@ def init_command(
         "--skip-hardware-check",
         help="Skip hardware detection",
     ),
+    no_index: bool = typer.Option(
+        False,
+        "--no-index",
+        help="Scaffold config only; skip building the repository index",
+    ),
 ) -> None:
-    """Initialize Velune in a project.
-
-    Creates .velune/ config, detects hardware, checks providers,
-    and prepares the workspace for first use.
-    """
+    """Initialize Velune in a project — scaffold config, detect environment, build the index."""
     workspace = (path or Path.cwd()).resolve()
 
     console.print(
         Panel(
-            f"[bold cyan]Velune Init[/bold cyan]\n[dim]Setting up workspace: {workspace}[/dim]",
-            border_style="cyan",
+            f"[bold {design.ACCENT}]Velune Init[/bold {design.ACCENT}]\n"
+            f"[{design.MUTED}]Setting up workspace: {workspace}[/{design.MUTED}]",
+            border_style=design.ACCENT,
             padding=(0, 1),
         )
     )
@@ -49,12 +71,11 @@ def init_command(
     if not skip_hardware:
         _run_hardware_check()
 
-    # .velune/ directory tree
+    # .velune/ directory tree — kept in sync with `velune workspace init`.
     velune_dir = workspace / ".velune"
-    velune_dir.mkdir(exist_ok=True)
-    (velune_dir / "sessions").mkdir(exist_ok=True)
-    (velune_dir / "index").mkdir(exist_ok=True)
-    console.print("[green]Created .velune/ directory[/green]")
+    for sub in ("", "sessions", "index", "memory", "retrieval", "snapshots"):
+        (velune_dir / sub).mkdir(parents=True, exist_ok=True)
+    console.print(f"[{design.OK}]Created .velune/ directory[/{design.OK}]")
 
     # Project type detection
     try:
@@ -77,9 +98,14 @@ def init_command(
                 indent=2,
             )
         )
-        console.print(f"[green]Detected project type:[/green] [cyan]{_profile.display_name}[/cyan]")
+        console.print(
+            f"[{design.OK}]Detected project type:[/{design.OK}]"
+            f" [{design.ACCENT}]{_profile.display_name}[/{design.ACCENT}]"
+        )
         if _profile.detected_frameworks:
-            console.print(f"  [dim]Frameworks: {', '.join(_profile.detected_frameworks)}[/dim]")
+            console.print(
+                f"  [{design.MUTED}]Frameworks: {', '.join(_profile.detected_frameworks)}[/{design.MUTED}]"
+            )
     except Exception:
         pass
 
@@ -89,7 +115,7 @@ def init_command(
         from velune.repository.scanner import DEFAULT_VELUNEIGNORE
 
         ignore_file.write_text(DEFAULT_VELUNEIGNORE)
-        console.print("[green]Created .veluneignore[/green]")
+        console.print(f"[{design.OK}]Created .veluneignore[/{design.OK}]")
 
     # config.toml
     config_path = velune_dir / "config.toml"
@@ -110,7 +136,10 @@ default_tier = "auto"
 enabled = true
 """
         config_path.write_text(config_content)
-        console.print(f"[green]Created .velune/config.toml[/green] (provider: {default_provider})")
+        console.print(
+            f"[{design.OK}]Created .velune/config.toml[/{design.OK}]"
+            f" [{design.MUTED}](provider: {default_provider})[/{design.MUTED}]"
+        )
 
     # .gitignore
     gitignore = workspace / ".gitignore"
@@ -119,13 +148,59 @@ enabled = true
         if ".velune/" not in content:
             with open(gitignore, "a") as f:
                 f.write("\n# Velune\n.velune/\n")
-            console.print("[green]Added .velune/ to .gitignore[/green]")
+            console.print(f"[{design.OK}]Added .velune/ to .gitignore[/{design.OK}]")
 
+    # Register in the global workspace registry so `velune project list` finds it.
+    try:
+        from velune.cli.workspaces import WorkspaceRegistry
+
+        WorkspaceRegistry().register(workspace)
+    except Exception:
+        pass
+
+    # Build the repository index by delegating to the shared workspace-init core.
+    # Skipped when --no-index is passed, or when no runtime container is available
+    # (defensive — e.g. a degraded bootstrap) in which case we finish scaffold-only.
+    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
+    if no_index or cli_context is None:
+        console.print()
+        console.print(f"[bold {design.OK}]Velune initialized.[/bold {design.OK}]")
+        if cli_context is None and not no_index:
+            console.print(
+                f"[{design.MUTED}]Index not built (runtime unavailable) —"
+                f" run [bold]velune workspace init[/bold] once a provider is configured.[/{design.MUTED}]"
+            )
+        _print_next_steps(indexed=False)
+        return
+
+    from velune.cli.commands.workspace import _workspace_init_async
+    from velune.core.event_loop import submit
+
+    # _workspace_init_async builds the AST index and prints its own success panel.
+    submit(_workspace_init_async(cli_context, workspace, velune_dir, force=False))
+    _print_next_steps(indexed=True)
+
+
+def _print_next_steps(*, indexed: bool) -> None:
     console.print()
-    console.print("[bold green]Velune initialized.[/bold green]")
-    console.print("[dim]Next steps:[/dim]")
-    console.print("  [cyan]velune[/cyan]          — start the REPL")
-    console.print("  [cyan]velune doctor[/cyan]   — verify configuration")
+    console.print(f"[{design.MUTED}]Next steps:[/{design.MUTED}]")
+    console.print(
+        f"  [{design.ACCENT}]velune[/{design.ACCENT}]"
+        f"          [{design.MUTED}]— start the interactive session[/{design.MUTED}]"
+    )
+    console.print(
+        f'  [{design.ACCENT}]velune ask "..."[/{design.ACCENT}]'
+        f" [{design.MUTED}]— ask a one-off question[/{design.MUTED}]"
+    )
+    if not indexed:
+        console.print(
+            f"  [{design.ACCENT}]velune workspace init[/{design.ACCENT}]"
+            f" [{design.MUTED}]— build the repository index for codebase-aware answers[/{design.MUTED}]"
+        )
+    console.print(
+        f"  [{design.ACCENT}]velune doctor[/{design.ACCENT}]"
+        f"   [{design.MUTED}]— verify configuration[/{design.MUTED}]"
+    )
 
 
 def _run_hardware_check() -> None:
@@ -133,9 +208,9 @@ def _run_hardware_check() -> None:
 
     profile = HardwareDetector().detect()
 
-    table = Table(border_style="dim", padding=(0, 1), show_header=False)
-    table.add_column("Key", style="dim", width=20)
-    table.add_column("Value", style="white")
+    table = Table(border_style=design.FAINT, padding=(0, 1), show_header=False)
+    table.add_column("Key", style=design.MUTED, width=20)
+    table.add_column("Value", style=design.WHITE)
 
     table.add_row("RAM", f"{profile.total_ram_gb:.0f} GB")
     table.add_row("GPU", profile.gpu_name or "None (CPU only)")
@@ -143,15 +218,15 @@ def _run_hardware_check() -> None:
         "VRAM",
         f"{profile.vram_total_gb:.0f} GB" if profile.vram_total_gb else "—",
     )
-    table.add_row("Tier", f"[cyan]{profile.tier.value}[/cyan]")
+    table.add_row("Tier", f"[{design.ACCENT}]{profile.tier.value}[/{design.ACCENT}]")
     table.add_row("Best local model", profile.recommended_model_size)
 
     console.print(table)
 
     for w in profile.warnings:
-        console.print(f"  [yellow]{w}[/yellow]")
+        console.print(f"  [{design.WARN}]{w}[/{design.WARN}]")
     for s in profile.suggestions:
-        console.print(f"  [dim]→ {s}[/dim]")
+        console.print(f"  [{design.MUTED}]→ {s}[/{design.MUTED}]")
 
 
 def _suggest_provider() -> str:

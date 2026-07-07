@@ -68,8 +68,8 @@ class NoModelsAvailableError(VeluneError):
     title = "No models available"
     cause = "No models are configured for any provider in this workspace."
     fix = [
-        "Run `velune models scan` to discover local Ollama models",
-        "Configure an API key with `velune config set providers.anthropic.api_key <key>`",
+        "Run `velune setup` for a 2-minute guided provider + model setup",
+        "Or run `velune models scan` to discover local Ollama / LM Studio models",
         "Run `velune doctor` to diagnose provider connectivity",
     ]
 
@@ -135,7 +135,7 @@ class WorkspaceNotInitializedError(VeluneError):
     title = "Workspace not initialized"
     cause = "This directory does not contain a Velune workspace (velune.toml not found)."
     fix = [
-        "Run `velune workspace init` to initialize this directory as a Velune workspace",
+        "Run `velune init` to initialize this directory as a Velune workspace",
         "Or change to a directory that already contains a velune.toml",
         "Use `--workspace <path>` to point to an existing workspace",
     ]
