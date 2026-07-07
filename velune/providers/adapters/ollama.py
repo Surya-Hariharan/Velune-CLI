@@ -22,6 +22,9 @@ logger = logging.getLogger("velune.providers.adapters.ollama")
 class OllamaProvider(ModelProvider):
     """Ollama provider for local models."""
 
+    # stream() surfaces message.tool_calls on a final tool-call chunk.
+    SUPPORTS_STREAMING_TOOL_CALLS = True
+
     def __init__(self, base_url: str | None = None) -> None:
         # Honour OLLAMA_HOST when no explicit URL is configured, so a daemon on
         # a non-default host/port (or a relocated setup) works out of the box.
@@ -206,7 +209,12 @@ class OllamaProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["options"]["stop"] = request.stop_sequences
+            if request.tools:
+                payload["tools"] = request.tools
 
+            # Ollama streams tool calls as complete objects on a message,
+            # not as fragments — collect them and emit one final chunk.
+            pending_tool_calls = []
             async with self.client.stream("POST", "/api/chat", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -215,12 +223,22 @@ class OllamaProvider(ModelProvider):
                     try:
                         data = json.loads(line)
                         if "message" in data:
+                            calls = parse_ollama_tool_calls(data["message"])
+                            if calls:
+                                pending_tool_calls.extend(calls)
                             yield StreamChunk(
-                                content=data["message"].get("content", ""),
+                                content=data["message"].get("content") or "",
                                 finish_reason=data.get("done_reason"),
                             )
                     except json.JSONDecodeError:
                         continue
+
+            if pending_tool_calls:
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": pending_tool_calls},
+                )
         except httpx.HTTPError as e:
             raise InferenceError(f"Ollama streaming failed: {e}")
 

@@ -6,6 +6,7 @@ round-trip: connect → list_tools → call_tool → disconnect.
 Run with: pytest tests/integration/ -v -m integration
 Exclude with: pytest -m 'not integration'
 """
+
 import sys
 from pathlib import Path
 

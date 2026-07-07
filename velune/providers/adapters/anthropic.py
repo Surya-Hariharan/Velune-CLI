@@ -23,6 +23,10 @@ from velune.providers.keystore import get_key
 class AnthropicProvider(ModelProvider):
     """Anthropic provider for Claude models."""
 
+    # stream() accumulates tool_use blocks (input_json_delta) and emits a
+    # final tool-call chunk — the tool loop may stream turns with tools.
+    SUPPORTS_STREAMING_TOOL_CALLS = True
+
     def __init__(
         self, api_key: str | SecretStr | None = None, base_url: str = "https://api.anthropic.com"
     ) -> None:
@@ -169,6 +173,9 @@ class AnthropicProvider(ModelProvider):
         assert self.client is not None
         start = time.perf_counter()
         first_token = True
+        from velune.providers.adapters._toolcalls import AnthropicStreamToolAccumulator
+
+        accumulator = AnthropicStreamToolAccumulator()
         try:
             payload = self._build_payload(request)
             payload["stream"] = True
@@ -181,14 +188,24 @@ class AnthropicProvider(ModelProvider):
                         try:
                             data = json.loads(data_str)
                             d_type = data.get("type")
-                            if d_type == "content_block_delta":
+                            if d_type == "content_block_start":
+                                accumulator.on_block_start(
+                                    data.get("index", 0), data.get("content_block", {})
+                                )
+                            elif d_type == "content_block_delta":
+                                delta = data.get("delta", {})
+                                if delta.get("type") == "input_json_delta":
+                                    accumulator.on_input_json_delta(
+                                        data.get("index", 0), delta.get("partial_json", "")
+                                    )
+                                    continue
                                 # Record latency at first token
                                 if first_token:
                                     latency = (time.perf_counter() - start) * 1000.0
                                     self._record_latency_to_monitor(latency)
                                     first_token = False
                                 yield StreamChunk(
-                                    content=data["delta"].get("text", ""),
+                                    content=delta.get("text", ""),
                                 )
                             elif d_type == "message_delta":
                                 yield StreamChunk(
@@ -197,6 +214,14 @@ class AnthropicProvider(ModelProvider):
                                 )
                         except (json.JSONDecodeError, KeyError):
                             continue
+
+            tool_calls = accumulator.finalize()
+            if tool_calls:
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": tool_calls},
+                )
         except httpx.HTTPError as e:
             raise InferenceError(f"Anthropic stream failed: {e}")
 

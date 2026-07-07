@@ -12,6 +12,7 @@ class MockResponse:
     def __init__(self, status_code):
         self.status_code = status_code
 
+
 @pytest.mark.asyncio
 async def test_openai_health_check_success():
     with patch("velune.providers.adapters.openai.get_key", return_value="fake-key"):

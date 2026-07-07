@@ -138,6 +138,12 @@ async def run_tool_chat(
         ui.close()
 
     repl._tool_call_count += len(result.invocations)
+    # Final answer: already on screen if the last turn streamed; otherwise
+    # (non-streaming provider) render it now. The caller never prints.
+    if result.content.strip() and not ui.last_turn_streamed:
+        from velune.cli.rendering import CustomMarkdown
+
+        repl.console.print(CustomMarkdown(result.content))
     return result
 
 
@@ -210,20 +216,36 @@ async def _prompt_approval(
 
 
 class _ToolActivityUI:
-    """Console feedback for loop events: spinner during model turns, one line
-    per tool call. Deliberately dumb — M3 (streaming) replaces the spinner."""
+    """Console feedback for loop events.
+
+    Model turns show a spinner until the first streamed token arrives, then a
+    live-updating markdown render (same throttling approach as
+    :class:`velune.cli.stream_renderer.StreamRenderer`). Tool calls render as
+    one activity line each. ``last_turn_streamed`` tells the caller whether
+    the final answer was already rendered live (so it must not print again).
+    """
+
+    _MIN_UPDATE_INTERVAL = 0.08  # seconds between Live refreshes
 
     def __init__(self, repl: VeluneREPL) -> None:
         self._console = repl.console
         self._status: Any | None = None
+        self._live: Any | None = None
+        self._stream_buffer: Any | None = None
+        self._last_live_update = 0.0
         self.any_tool_ran = False
+        self.last_turn_streamed = False
 
     # Runner events are synchronous callbacks on the loop task.
     def on_event(self, event: str, data: dict[str, Any]) -> None:
         if event == "turn":
+            self.last_turn_streamed = False
             label = "Thinking…" if data.get("turn", 1) == 1 else "Continuing…"
             self._start_status(f"[dim]{label}[/dim]")
+        elif event == "content_delta":
+            self._render_delta(data.get("text", ""))
         elif event == "turn_end":
+            self._finish_live()
             self.pause_status()
         elif event == "tool_start":
             self.any_tool_ran = True
@@ -240,6 +262,56 @@ class _ToolActivityUI:
     def note(self, markup: str) -> None:
         self.pause_status()
         self._console.print(f"  {markup}")
+
+    # ── Streaming text ───────────────────────────────────────────────
+
+    def _render_delta(self, text: str) -> None:
+        if not text:
+            return
+        import time as _time
+
+        self.last_turn_streamed = True
+        if self._live is None:
+            self.pause_status()
+            try:
+                from rich.live import Live
+
+                from velune.cli.rendering import MarkdownStreamBuffer
+
+                self._stream_buffer = MarkdownStreamBuffer()
+                self._live = Live(
+                    "",
+                    console=self._console,
+                    refresh_per_second=12,
+                    vertical_overflow="visible",
+                )
+                self._live.start()
+            except Exception:
+                self._live = None
+                self._stream_buffer = None
+        if self._stream_buffer is None or self._live is None:
+            return
+        self._stream_buffer.append(text)
+        now = _time.perf_counter()
+        if now - self._last_live_update >= self._MIN_UPDATE_INTERVAL:
+            try:
+                self._live.update(self._stream_buffer.get_renderable())
+            except Exception:
+                pass
+            self._last_live_update = now
+
+    def _finish_live(self) -> None:
+        if self._live is not None:
+            try:
+                if self._stream_buffer is not None:
+                    self._live.update(self._stream_buffer.get_renderable())
+                self._live.stop()
+            except Exception:
+                pass
+        self._live = None
+        self._stream_buffer = None
+
+    # ── Spinner ──────────────────────────────────────────────────────
 
     def _start_status(self, label: str) -> None:
         self.pause_status()
@@ -258,4 +330,5 @@ class _ToolActivityUI:
             self._status = None
 
     def close(self) -> None:
+        self._finish_live()
         self.pause_status()

@@ -4,12 +4,12 @@ Exposes one tool: add(a: int, b: int) -> int.
 
 Run directly: python simple_mcp_server.py
 """
-import asyncio
-import json
 
+import asyncio
+
+import mcp.server.stdio
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
-import mcp.server.stdio
 from mcp.types import TextContent, Tool
 
 server = Server("simple-test-server")

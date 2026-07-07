@@ -63,6 +63,104 @@ def parse_openai_tool_calls(message: dict[str, Any]) -> list[ToolCall] | None:
     return calls or None
 
 
+class OpenAIStreamToolAccumulator:
+    """Accumulates OpenAI SSE ``delta.tool_calls`` fragments into ToolCalls.
+
+    OpenAI streams tool calls as indexed fragments: the ``id`` and function
+    ``name`` arrive on the first fragment for an index, and ``arguments``
+    arrives as a sequence of partial JSON strings to be concatenated.
+    """
+
+    def __init__(self) -> None:
+        self._slots: dict[int, dict[str, str]] = {}
+
+    def add(self, delta_tool_calls: list[dict[str, Any]] | None) -> None:
+        for frag in delta_tool_calls or []:
+            idx = frag.get("index", 0)
+            slot = self._slots.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+            if frag.get("id"):
+                slot["id"] = frag["id"]
+            fn = frag.get("function", {}) or {}
+            if fn.get("name"):
+                slot["name"] += fn["name"]
+            if fn.get("arguments"):
+                slot["arguments"] += fn["arguments"]
+
+    @property
+    def has_calls(self) -> bool:
+        return bool(self._slots)
+
+    def finalize(self) -> list[ToolCall] | None:
+        if not self._slots:
+            return None
+        calls: list[ToolCall] = []
+        for _, slot in sorted(self._slots.items()):
+            args_raw = slot["arguments"]
+            try:
+                args = json.loads(args_raw) if args_raw else {}
+            except json.JSONDecodeError:
+                args = {"_raw_arguments": args_raw}
+            if not isinstance(args, dict):
+                args = {"_raw_arguments": args}
+            calls.append(
+                ToolCall(
+                    id=slot["id"] or f"call_{uuid.uuid4().hex[:12]}",
+                    name=slot["name"],
+                    arguments=args,
+                )
+            )
+        return calls
+
+
+class AnthropicStreamToolAccumulator:
+    """Accumulates Anthropic ``tool_use`` blocks from Messages-API SSE events.
+
+    ``content_block_start`` (type ``tool_use``) opens a call with id/name;
+    ``input_json_delta`` events append ``partial_json`` fragments for that
+    block index; ``finalize`` parses each accumulated JSON document.
+    """
+
+    def __init__(self) -> None:
+        self._blocks: dict[int, dict[str, str]] = {}
+
+    def on_block_start(self, index: int, block: dict[str, Any]) -> None:
+        if (block or {}).get("type") == "tool_use":
+            self._blocks[index] = {
+                "id": block.get("id", ""),
+                "name": block.get("name", ""),
+                "partial_json": "",
+            }
+
+    def on_input_json_delta(self, index: int, partial_json: str) -> None:
+        if index in self._blocks:
+            self._blocks[index]["partial_json"] += partial_json or ""
+
+    @property
+    def has_calls(self) -> bool:
+        return bool(self._blocks)
+
+    def finalize(self) -> list[ToolCall] | None:
+        if not self._blocks:
+            return None
+        calls: list[ToolCall] = []
+        for _, block in sorted(self._blocks.items()):
+            raw = block["partial_json"]
+            try:
+                args = json.loads(raw) if raw.strip() else {}
+            except json.JSONDecodeError:
+                args = {"_raw_arguments": raw}
+            if not isinstance(args, dict):
+                args = {"_raw_arguments": args}
+            calls.append(
+                ToolCall(
+                    id=block["id"] or f"call_{uuid.uuid4().hex[:12]}",
+                    name=block["name"],
+                    arguments=args,
+                )
+            )
+        return calls
+
+
 def parse_ollama_tool_calls(message: dict[str, Any]) -> list[ToolCall] | None:
     """Normalize Ollama ``message.tool_calls`` (arguments are already dicts).
 

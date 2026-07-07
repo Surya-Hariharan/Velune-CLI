@@ -279,8 +279,54 @@ class ToolLoopRunner:
     # ── Execution ────────────────────────────────────────────────────────
 
     async def _infer_turn(self, req: InferenceRequest) -> InferenceResponse:
-        """One model turn. Isolated so a streaming variant can override it."""
-        return await self._provider.infer(req)
+        """One model turn — streamed when the provider supports streaming tool
+        calls, so text deltas reach the UI in real time via ``content_delta``
+        events; otherwise a plain blocking ``infer()``.
+
+        The opt-in is the adapter class attribute
+        ``SUPPORTS_STREAMING_TOOL_CALLS``: only adapters that accumulate
+        tool-call deltas and emit a final ``metadata["tool_calls"]`` chunk set
+        it. Streaming through an adapter without that support would silently
+        drop the model's tool calls, so absence means "don't stream".
+        """
+        if not self._can_stream():
+            return await self._provider.infer(req)
+
+        start = time.perf_counter()
+        parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        finish_reason: str | None = None
+        async for chunk in self._provider.stream(req):
+            if chunk.content:
+                parts.append(chunk.content)
+                self._emit("content_delta", {"text": chunk.content})
+            metadata_calls = (chunk.metadata or {}).get("tool_calls")
+            if metadata_calls:
+                for item in metadata_calls:
+                    tool_calls.append(item if isinstance(item, ToolCall) else ToolCall(**item))
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
+
+        content = "".join(parts)
+        return InferenceResponse(
+            content=content,
+            model_id=req.model_id,
+            finish_reason="tool_calls" if tool_calls else (finish_reason or "stop"),
+            # Streaming chunks carry no usage data; estimate like the legacy
+            # render path (~4 chars/token) so cost display stays populated.
+            tokens_used=len(content) // 4,
+            latency_ms=(time.perf_counter() - start) * 1000.0,
+            tool_calls=tool_calls or None,
+        )
+
+    def _can_stream(self) -> bool:
+        if not getattr(self._provider, "SUPPORTS_STREAMING_TOOL_CALLS", False):
+            return False
+        try:
+            caps = self._provider.get_capabilities()
+        except Exception:
+            return False
+        return bool(getattr(caps, "supports_streaming", False))
 
     async def _execute_call(self, call: ToolCall) -> ToolInvocation:
         start = time.perf_counter()

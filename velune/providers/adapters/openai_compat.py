@@ -18,12 +18,20 @@ from velune.core.errors.provider import InferenceError, ProviderConnectionError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.providers.adapters._toolcalls import attach_openai_tools, parse_openai_tool_calls
+from velune.providers.adapters._toolcalls import (
+    OpenAIStreamToolAccumulator,
+    attach_openai_tools,
+    parse_openai_tool_calls,
+)
 from velune.providers.base import ModelProvider
 
 
 class OpenAICompatProvider(ModelProvider):
     """Provider for generic OpenAI-compatible local endpoints."""
+
+    # stream() accumulates delta.tool_calls fragments (vLLM, LM Studio, and
+    # llama.cpp server all speak the OpenAI streaming tool-call format).
+    SUPPORTS_STREAMING_TOOL_CALLS = True
 
     def __init__(self, base_url: str = "http://localhost:8000/v1") -> None:
         self._base_url = base_url
@@ -121,6 +129,7 @@ class OpenAICompatProvider(ModelProvider):
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         await self.initialize()
         assert self.client is not None
+        accumulator = OpenAIStreamToolAccumulator()
         try:
             payload = {
                 "model": request.model_id,
@@ -132,6 +141,7 @@ class OpenAICompatProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["stop"] = request.stop_sequences
+            attach_openai_tools(payload, request)
 
             async with self.client.stream("POST", "/chat/completions", json=payload) as response:
                 response.raise_for_status()
@@ -143,12 +153,21 @@ class OpenAICompatProvider(ModelProvider):
                         try:
                             data = json.loads(data_str)
                             delta = data["choices"][0]["delta"]
+                            accumulator.add(delta.get("tool_calls"))
                             yield StreamChunk(
-                                content=delta.get("content", ""),
+                                content=delta.get("content") or "",
                                 finish_reason=data["choices"][0].get("finish_reason"),
                             )
                         except (json.JSONDecodeError, KeyError):
                             continue
+
+            tool_calls = accumulator.finalize()
+            if tool_calls:
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": tool_calls},
+                )
         except httpx.HTTPError as e:
             raise InferenceError(f"OpenAI-compatible stream failed: {e}")
 

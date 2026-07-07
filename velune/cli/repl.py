@@ -1008,10 +1008,7 @@ class VeluneREPL:
                     "produced a final answer. Partial work may have been applied — "
                     "see the tool activity above."
                 )
-            if assistant_text.strip():
-                from velune.cli.rendering import CustomMarkdown
-
-                self.console.print(CustomMarkdown(assistant_text))
+                self.console.print(f"[yellow]{assistant_text}[/yellow]")
         else:
             render = await self._stream_renderer.render(provider, request)
             full_content = render.full_content

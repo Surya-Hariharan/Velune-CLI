@@ -27,9 +27,7 @@ def mock_keystore(tmp_path):
         patch("velune.providers.keystore.user_config_dir", return_value=str(tmp_path)),
         patch("velune.providers.crypto.get_or_create_master_key") as mock_get_key,
     ):
-        mock_get_key.return_value = base64.b64decode(
-            "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE="
-        )
+        mock_get_key.return_value = base64.b64decode("QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=")
         CredentialManager._instance = None
         from velune.providers.keystore import _manager
 

@@ -16,13 +16,22 @@ from velune.core.errors.provider import (
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.providers.adapters._toolcalls import attach_openai_tools, parse_openai_tool_calls
+from velune.providers.adapters._toolcalls import (
+    OpenAIStreamToolAccumulator,
+    attach_openai_tools,
+    parse_openai_tool_calls,
+)
 from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
 
 
 class OpenAIProvider(ModelProvider):
     """OpenAI provider for GPT chat and embedding models."""
+
+    # stream() accumulates delta.tool_calls fragments and emits a final
+    # tool-call chunk — the tool loop may stream turns with tools attached.
+    # Inherited by the Groq/OpenRouter adapters, which share this stream().
+    SUPPORTS_STREAMING_TOOL_CALLS = True
 
     def __init__(
         self, api_key: str | SecretStr | None = None, base_url: str = "https://api.openai.com/v1"
@@ -150,9 +159,16 @@ class OpenAIProvider(ModelProvider):
             raise InferenceError(f"OpenAI completion failed: {e}")
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
-        """Streaming chat completions."""
+        """Streaming chat completions.
+
+        When the request carries tools, ``delta.tool_calls`` fragments are
+        accumulated and surfaced once complete on a final chunk with
+        ``finish_reason="tool_calls"`` and ``metadata["tool_calls"]`` set to
+        the normalized :class:`ToolCall` list.
+        """
         await self.initialize()
         assert self.client is not None
+        accumulator = OpenAIStreamToolAccumulator()
         try:
             payload = {
                 "model": request.model_id,
@@ -164,6 +180,7 @@ class OpenAIProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["stop"] = request.stop_sequences
+            attach_openai_tools(payload, request)
 
             async with self.client.stream("POST", "/chat/completions", json=payload) as response:
                 response.raise_for_status()
@@ -175,12 +192,21 @@ class OpenAIProvider(ModelProvider):
                         try:
                             data = json.loads(data_str)
                             delta = data["choices"][0]["delta"]
+                            accumulator.add(delta.get("tool_calls"))
                             yield StreamChunk(
-                                content=delta.get("content", ""),
+                                content=delta.get("content") or "",
                                 finish_reason=data["choices"][0].get("finish_reason"),
                             )
                         except (json.JSONDecodeError, KeyError):
                             continue
+
+            tool_calls = accumulator.finalize()
+            if tool_calls:
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": tool_calls},
+                )
         except httpx.HTTPError as e:
             raise InferenceError(f"OpenAI stream failed: {e}")
 
