@@ -61,6 +61,12 @@ class WorkspaceInfo:
     last_opened: str
     is_git: bool = False
     project_type: str | None = None
+    # Strictly-increasing tiebreaker for recency ordering. `last_opened` alone
+    # is not reliable: two `register()`/`touch()` calls in quick succession can
+    # land in the same clock tick on coarser system clocks, and a stable sort
+    # over equal timestamps would then fall back to dict insertion order
+    # (oldest-first) instead of true recency.
+    seq: int = 0
 
 
 class WorkspaceRegistry:
@@ -99,6 +105,9 @@ class WorkspaceRegistry:
 
     # ── Public API ───────────────────────────────────────────────────────
 
+    def _next_seq(self) -> int:
+        return max((info.seq for info in self._entries.values()), default=0) + 1
+
     def register(self, path: Path) -> WorkspaceInfo:
         """Register (or refresh) *path* as a known project workspace."""
         resolved = path.resolve()
@@ -112,6 +121,7 @@ class WorkspaceRegistry:
             last_opened=datetime.now().isoformat(timespec="microseconds"),
             is_git=(resolved / ".git").exists(),
             project_type=self._detect_project_type(resolved),
+            seq=self._next_seq(),
         )
         self._entries[self._key(resolved)] = info
         self._save()
@@ -122,6 +132,7 @@ class WorkspaceRegistry:
         key = self._key(path)
         if key in self._entries:
             self._entries[key].last_opened = datetime.now().isoformat(timespec="microseconds")
+            self._entries[key].seq = self._next_seq()
             self._save()
         else:
             self.register(path)
@@ -137,9 +148,15 @@ class WorkspaceRegistry:
         return None
 
     def list(self) -> list[WorkspaceInfo]:
-        """All workspaces, most recently opened first; prunes deleted paths."""
+        """All workspaces, most recently opened first; prunes deleted paths.
+
+        Sorts by `seq` first (a strictly-increasing counter, immune to clock
+        resolution) and falls back to `last_opened` to order legacy entries
+        loaded from a registry written before `seq` existed (they all default
+        to 0 and tie).
+        """
         alive = [w for w in self._entries.values() if Path(w.path).exists()]
-        return sorted(alive, key=lambda w: w.last_opened, reverse=True)
+        return sorted(alive, key=lambda w: (w.seq, w.last_opened), reverse=True)
 
     def remove(self, name: str) -> bool:
         info = self.find_by_name(name)

@@ -28,6 +28,21 @@ class MockDelayConnection:
         return "Delayed"
 
 
+async def _timeout_without_awaiting(coro, *args, **kwargs):
+    """Stand-in for `asyncio.wait_for` in these tests.
+
+    Patching `asyncio.wait_for` with a bare `side_effect=asyncio.TimeoutError`
+    intercepts the call before the real `wait_for` ever touches its coroutine
+    argument (e.g. `conn.connect()`), so that coroutine object is created but
+    never awaited or closed — hence "coroutine was never awaited". Real
+    `wait_for` always schedules/cancels the coroutine it's given; this closes
+    it too, just without waiting out `delay`, so the warning reflects a test
+    mocking gap rather than a real asyncio bug in the client/registry code.
+    """
+    coro.close()
+    raise asyncio.TimeoutError
+
+
 @pytest.mark.asyncio
 async def test_mcp_client_connect_timeout():
     client = VeluneMCPClient("http://mock", "mock_server")
@@ -35,7 +50,7 @@ async def test_mcp_client_connect_timeout():
     with patch("velune.mcp.client.make_connection", return_value=MockDelayConnection(20.0)):
         with pytest.raises(RuntimeError, match="handshake timed out"):
             # Mock wait_for to trigger timeout immediately
-            with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+            with patch("asyncio.wait_for", side_effect=_timeout_without_awaiting):
                 await client.connect()
 
 
@@ -46,7 +61,7 @@ async def test_mcp_registry_timeout():
     registry.register(config)
 
     with patch("velune.mcp.registry.make_connection", return_value=MockDelayConnection(20.0)):
-        with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+        with patch("asyncio.wait_for", side_effect=_timeout_without_awaiting):
             success = await registry.connect("mock_server")
             assert success is False
 
@@ -68,7 +83,7 @@ async def test_mcp_registry_call_tool_timeout():
     entry.connection = MockDelayConnection(20.0)
     registry._tool_to_server["mock_server_test_tool"] = "mock_server"
 
-    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+    with patch("asyncio.wait_for", side_effect=_timeout_without_awaiting):
         from velune.mcp.transports.base import MCPTransportError
 
         with pytest.raises(MCPTransportError, match="timed out"):

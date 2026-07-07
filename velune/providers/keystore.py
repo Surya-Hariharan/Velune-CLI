@@ -275,16 +275,54 @@ def credentials_file_path() -> Path:
     return _manager._credentials_file
 
 
-def export_providers_json(include_keys: bool = True) -> dict[str, Any]:
-    """Produce a serialisable snapshot of all configured providers.
+def export_provider_metadata() -> dict[str, Any]:
+    """Produce a secrets-free snapshot of all configured providers.
 
-    Used by ``velune provider backup`` to write a portable JSON export.
+    Every "key" field is the fixed literal ``"***"`` — this function contains
+    no expression anywhere that reads a real stored or env-sourced key value,
+    so its return value is safe to serialise to a plaintext file or log. This
+    is the only export path :func:`velune.recovery.archive._backup_providers`
+    uses for the unencrypted ``providers.json`` and for the backup manifest's
+    provider-id summary, so neither can ever carry secret material — not just
+    "in practice", but because the read never happens in this call graph.
     """
     snap: dict[str, Any] = {}
 
     for pid, rec in _manager.get_all_providers().items():
         snap[pid] = {
-            "key": rec.get("key", "") if include_keys else "***",
+            "key": "***",
+            "status": rec.get("status", "unknown"),
+            "last_verified": rec.get("last_verified", ""),
+            "source": "file",
+        }
+
+    for pid, env_var in PROVIDER_ENV_VARS.items():
+        if pid not in snap and os.getenv(env_var):
+            snap[pid] = {
+                "key": "***",
+                "status": "env",
+                "last_verified": "dynamic",
+                "source": "environment",
+                "env_var": env_var,
+            }
+
+    return snap
+
+
+def export_provider_secrets() -> dict[str, Any]:
+    """Produce a snapshot of all configured providers *including* real keys.
+
+    Callers must encrypt the return value before writing it anywhere and must
+    never merge it with data that reaches a plaintext sink — this function
+    exists precisely so those two concerns stay in separate call graphs.
+    Used only by :func:`velune.recovery.archive._backup_providers`'s
+    ``with_secrets=True`` path, which AES-GCM-encrypts the result immediately.
+    """
+    snap: dict[str, Any] = {}
+
+    for pid, rec in _manager.get_all_providers().items():
+        snap[pid] = {
+            "key": rec.get("key", ""),
             "status": rec.get("status", "unknown"),
             "last_verified": rec.get("last_verified", ""),
             "source": "file",
@@ -295,7 +333,7 @@ def export_providers_json(include_keys: bool = True) -> dict[str, Any]:
             val = os.getenv(env_var)
             if val:
                 snap[pid] = {
-                    "key": val if include_keys else "***",
+                    "key": val,
                     "status": "env",
                     "last_verified": "dynamic",
                     "source": "environment",
@@ -303,6 +341,19 @@ def export_providers_json(include_keys: bool = True) -> dict[str, Any]:
                 }
 
     return snap
+
+
+def export_providers_json(include_keys: bool = True) -> dict[str, Any]:
+    """Produce a serialisable snapshot of all configured providers.
+
+    Kept for backward compatibility with existing callers (e.g. ``velune
+    provider backup``). New code should call :func:`export_provider_metadata`
+    or :func:`export_provider_secrets` directly instead of branching on a
+    boolean here — that keeps the secret-reading and secret-free code paths
+    statically distinguishable, which is what lets static analysis prove a
+    given call site can never observe real key material.
+    """
+    return export_provider_secrets() if include_keys else export_provider_metadata()
 
 
 def import_providers_json(

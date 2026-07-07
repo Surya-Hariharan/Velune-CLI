@@ -209,32 +209,46 @@ def _backup_config(stage: Path, workspace: Path) -> dict:
 
 def _backup_providers(stage: Path, with_secrets: bool, passphrase: str | None) -> dict:
     from velune.providers.crypto import encrypt_with_passphrase
-    from velune.providers.keystore import export_providers_json, list_configured_providers
+    from velune.providers.keystore import export_provider_metadata, export_provider_secrets
 
     out = stage / "providers"
     out.mkdir(parents=True, exist_ok=True)
 
-    snapshot = export_providers_json(include_keys=with_secrets)
-    payload = {
-        "version": "2.0",
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "with_secrets": with_secrets,
-        "providers": snapshot,
-    }
+    # `metadata` is built by a function that has no expression anywhere in its
+    # body reading a real key value (see its docstring) — every "key" field is
+    # the literal "***". It is the *only* source of `provider_ids` below, in
+    # both branches, so the manifest summary this function returns can never
+    # carry secret material regardless of `with_secrets`. The real key values
+    # (from `export_provider_secrets()`) are fetched only inside the `if`
+    # branch and flow solely into `encrypt_with_passphrase()` — they are never
+    # in scope where a plaintext write happens.
+    metadata = export_provider_metadata()
 
     if with_secrets:
         assert passphrase is not None  # enforced by create_backup
-        blob = encrypt_with_passphrase(json.dumps(payload), passphrase)
+        secrets_payload = {
+            "version": "2.0",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "with_secrets": True,
+            "providers": export_provider_secrets(),
+        }
+        blob = encrypt_with_passphrase(json.dumps(secrets_payload), passphrase)
         (out / _PROVIDERS_ENC_NAME).write_bytes(blob)
     else:
-        (out / _PROVIDERS_PLAIN_NAME).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        plain_payload = {
+            "version": "2.0",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "with_secrets": False,
+            "providers": metadata,
+        }
+        (out / _PROVIDERS_PLAIN_NAME).write_text(
+            json.dumps(plain_payload, indent=2), encoding="utf-8"
+        )
 
-    # Sourced from a key-free API (never touches `snapshot`'s "key" values) so
-    # the manifest summary can never carry secret material, even in transit.
-    provider_ids = list_configured_providers(include_ollama=False)
+    provider_ids = sorted(metadata)
     return {
         "present": bool(provider_ids),
-        "providers": sorted(provider_ids),
+        "providers": provider_ids,
         "encrypted": with_secrets,
     }
 
