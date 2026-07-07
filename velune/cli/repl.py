@@ -85,6 +85,11 @@ class VeluneREPL:
         from velune.tools.safety import ApprovalMode
 
         self._approval_mode: ApprovalMode = ApprovalMode.ASK
+        # Native tool-loop session state: models whose provider rejected the
+        # tool payload (skip retrying every turn), and tools the user granted
+        # "always allow" for this session.
+        self._tools_unsupported_models: set[str] = set()
+        self._tool_session_grants: set[str] = set()
         from velune.orchestration.role_assignments import CouncilRoleMap
 
         self._assignments_path = Path.home() / ".velune" / "council_roles.json"
@@ -958,7 +963,15 @@ class VeluneREPL:
 
         retrieved_context = await self._retrieve_semantic_context(text)
 
-        base_messages = self._conversation[-50:]
+        # Budget the turn from the session mode and the model's real context
+        # window (replaces the old fixed [-50:] slice and max_tokens=4096):
+        # small local models never overflow their window; large models keep
+        # far more history and get a properly sized reply reservation.
+        from velune.context.budget import ContextBudget
+        from velune.context.window import fit_messages
+
+        budget = ContextBudget.for_chat(self._mode_manager.current, model.context_length)
+        base_messages = fit_messages(self._conversation, budget.usable_tokens)
         if retrieved_context:
             effective_messages = base_messages[:-1] + [
                 {"role": "system", "content": retrieved_context},
@@ -971,28 +984,54 @@ class VeluneREPL:
             model_id=model.model_id,
             messages=effective_messages,
             temperature=mode_config.temperature,
-            max_tokens=4096,
+            max_tokens=budget.output_reservation,
         )
 
-        render = await self._stream_renderer.render(provider, request)
-        full_content = render.full_content
-        tokens_used = render.tokens_used
-        interrupted = render.interrupted
+        # Native tool loop first (models that support function calling can act
+        # on the workspace); returns None when unsupported/disabled, in which
+        # case the legacy streaming path below is used unchanged.
+        from velune.cli.handlers.tool_chat import run_tool_chat
 
-        if interrupted:
-            self.console.print()
-            self._print_interrupted_frame()
-            partial = "".join(full_content)
-            if partial.strip():
-                self._conversation.append(
-                    {"role": "assistant", "content": partial + "\n\n[response interrupted]"}
-                )
-            else:
+        loop_result = await run_tool_chat(self, model, provider, request)
+        if loop_result is not None:
+            if loop_result.stop_reason == "interrupted":
+                self.console.print()
+                self._print_interrupted_frame()
                 if self._conversation and self._conversation[-1].get("role") == "user":
                     self._conversation.pop()
-            return
+                return
+            assistant_text = loop_result.content
+            tokens_used = loop_result.tokens_used
+            if loop_result.stop_reason == "max_turns" and not assistant_text.strip():
+                assistant_text = (
+                    "[Velune] The tool loop reached its turn limit before the model "
+                    "produced a final answer. Partial work may have been applied — "
+                    "see the tool activity above."
+                )
+            if assistant_text.strip():
+                from velune.cli.rendering import CustomMarkdown
 
-        assistant_text = "".join(full_content)
+                self.console.print(CustomMarkdown(assistant_text))
+        else:
+            render = await self._stream_renderer.render(provider, request)
+            full_content = render.full_content
+            tokens_used = render.tokens_used
+            interrupted = render.interrupted
+
+            if interrupted:
+                self.console.print()
+                self._print_interrupted_frame()
+                partial = "".join(full_content)
+                if partial.strip():
+                    self._conversation.append(
+                        {"role": "assistant", "content": partial + "\n\n[response interrupted]"}
+                    )
+                else:
+                    if self._conversation and self._conversation[-1].get("role") == "user":
+                        self._conversation.pop()
+                return
+
+            assistant_text = "".join(full_content)
 
         try:
             _hook_msg = await self._hook_dispatcher.dispatch_message_display(

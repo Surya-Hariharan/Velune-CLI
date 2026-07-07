@@ -61,3 +61,55 @@ class ContextWindowTracker:
     def _recalculate(self) -> None:
         self.current_tokens = sum(self.segments.values())
         logger.debug("Recalculated tokens: %d/%d", self.current_tokens, self.max_tokens)
+
+
+# ── Chat-turn conversation windowing ────────────────────────────────────────
+
+# Per-message wire overhead (role tags, separators) in tokens — the OpenAI
+# chat-format constant; close enough for every provider Velune targets.
+_MESSAGE_OVERHEAD_TOKENS = 4
+
+
+def _message_tokens(message: dict) -> int:
+    content = message.get("content")
+    text = content if isinstance(content, str) else str(content or "")
+    # Assistant tool_calls entries carry their payload outside `content`.
+    if message.get("tool_calls"):
+        text += str(message["tool_calls"])
+    return estimate_tokens(text) + _MESSAGE_OVERHEAD_TOKENS
+
+
+def fit_messages(messages: list[dict], max_input_tokens: int) -> list[dict]:
+    """Return the newest suffix of *messages* that fits *max_input_tokens*.
+
+    Replaces the old fixed ``conversation[-50:]`` slice: history is fitted to
+    the model's actual input budget (see
+    :meth:`velune.context.budget.ContextBudget.for_chat`) so small local
+    models never overflow their window and large models keep far more history
+    than 50 messages.
+
+    Walks backwards from the most recent message, keeping whole messages until
+    the budget is exhausted. The final message (the prompt being answered) is
+    always kept even if it alone exceeds the budget — the provider is the
+    right place to fail on a single oversized message, not silent truncation.
+
+    The returned window never *starts* with an orphaned ``role="tool"``
+    result (whose assistant ``tool_calls`` antecedent was cut), so provider
+    message-ordering validation always passes.
+    """
+    if not messages:
+        return []
+
+    kept: list[dict] = []
+    remaining = max(0, max_input_tokens)
+    for message in reversed(messages):
+        cost = _message_tokens(message)
+        if kept and cost > remaining:
+            break
+        kept.append(message)
+        remaining -= cost
+    kept.reverse()
+
+    while kept and kept[0].get("role") == "tool":
+        kept.pop(0)
+    return kept

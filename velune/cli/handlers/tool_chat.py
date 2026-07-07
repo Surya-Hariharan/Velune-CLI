@@ -1,0 +1,261 @@
+"""Native tool-calling glue for the REPL chat path.
+
+Runs :class:`velune.orchestration.tool_loop.ToolLoopRunner` for a chat turn,
+with the REPL's interactive approval UX and live tool-activity rendering.
+Returns ``None`` whenever the tool path should not (or cannot) run, so the
+caller falls back to the legacy streaming render — chat never breaks because
+tools are unavailable.
+
+Approval policy (per call):
+
+- read-only scopes (``filesystem.read``, ``git.read``) — always auto-approved.
+- ``execute_command`` — classified by :func:`velune.tools.safety.classify_command`:
+  BLOCK verdicts are denied outright; SAFE verdicts auto-run when the session
+  approval mode is ``safe``; everything else prompts.
+- ``/approve block`` — denies every non-read-only call without prompting.
+- everything else (writes, git mutations, network, MCP) — prompts, with a
+  per-session "always allow this tool" option.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from velune.cli.repl import VeluneREPL
+    from velune.core.types.inference import InferenceRequest
+    from velune.core.types.model import ModelDescriptor
+    from velune.orchestration.tool_loop import ToolLoopResult
+
+_log = logging.getLogger("velune.cli.handlers.tool_chat")
+
+
+def tool_loop_available(repl: VeluneREPL, model: ModelDescriptor, provider: Any) -> bool:
+    """Cheap gate: should this chat turn attempt the native tool loop?"""
+    config = getattr(repl.runtime, "config", None)
+    execution = getattr(config, "execution", None)
+    if execution is not None and not getattr(execution, "native_tools", True):
+        return False
+    if model.model_id in repl._tools_unsupported_models:
+        return False
+    try:
+        caps = provider.get_capabilities()
+        if not getattr(caps, "supports_function_calling", False):
+            return False
+    except Exception:
+        return False
+    # Model-level signal, when present. Absence is not a veto — the
+    # first-turn fallback handles providers that reject tool payloads.
+    try:
+        from velune.core.types.model import CapabilityLevel
+
+        level = (model.capabilities or {}).get("tool_use")
+        if level == CapabilityLevel.NONE:
+            return False
+    except Exception:
+        pass
+    # Tool registry is a Tier-1 (background) subsystem; before it's warm,
+    # chat proceeds on the legacy path.
+    try:
+        return repl.container.get("runtime.tool_registry") is not None
+    except Exception:
+        return False
+
+
+async def run_tool_chat(
+    repl: VeluneREPL,
+    model: ModelDescriptor,
+    provider: Any,
+    request: InferenceRequest,
+) -> ToolLoopResult | None:
+    """Run the chat turn through the tool loop; None means "use legacy path".
+
+    A provider/model that rejects the tool payload on the *first* turn (HTTP
+    400 from servers without tool support) is remembered for the session and
+    the caller silently falls back. Errors after tools have already executed
+    are surfaced — silently rerunning the prompt could repeat side effects.
+    """
+    from velune._compat import uncancel_task
+    from velune.core.errors.provider import InferenceError
+    from velune.orchestration.tool_loop import ToolLoopResult, ToolLoopRunner
+    from velune.tools.base.tool import ToolCallContext
+
+    if not tool_loop_available(repl, model, provider):
+        return None
+
+    registry = repl.container.get("runtime.tool_registry")
+    workspace = repl.container.get("runtime.workspace")
+    config = getattr(repl.runtime, "config", None)
+    max_turns = getattr(getattr(config, "execution", None), "max_tool_turns", 10)
+
+    from pathlib import Path
+
+    ctx = ToolCallContext(
+        run_id=repl._session_id,
+        actor="repl",
+        workspace=Path(workspace) if workspace else None,
+        hook_dispatcher=repl._hook_dispatcher,
+        session_id=repl._episodic_session_id or repl._session_id,
+    )
+
+    ui = _ToolActivityUI(repl)
+    runner = ToolLoopRunner(
+        provider,
+        registry,
+        mcp_registry=repl._mcp_registry,
+        approver=_make_approver(repl, ui),
+        ctx=ctx,
+        max_turns=max_turns,
+        on_event=ui.on_event,
+    )
+
+    try:
+        async with repl._interrupts.foreground():
+            result = await runner.run(request)
+    except asyncio.CancelledError:
+        if not repl._interrupts.consume_user_cancelled():
+            raise
+        task = asyncio.current_task()
+        if task is not None:
+            uncancel_task(task)
+        ui.close()
+        return ToolLoopResult(content="", turns=0, stop_reason="interrupted")
+    except InferenceError as exc:
+        ui.close()
+        if ui.any_tool_ran:
+            # Tools already had side effects; do not silently replay the turn.
+            raise
+        repl._tools_unsupported_models.add(model.model_id)
+        _log.info(
+            "Provider rejected tool payload for %s; falling back to plain chat: %s",
+            model.model_id,
+            exc,
+        )
+        return None
+    finally:
+        ui.close()
+
+    repl._tool_call_count += len(result.invocations)
+    return result
+
+
+# ── Approval UX ─────────────────────────────────────────────────────────────
+
+
+def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI):
+    from velune.orchestration.tool_loop import READONLY_PERMISSIONS
+    from velune.tools.safety import ApprovalMode, classify_command
+
+    async def approver(name: str, arguments: dict[str, Any], permissions: set) -> bool:
+        if permissions and permissions <= READONLY_PERMISSIONS:
+            return True
+        if repl._approval_mode is ApprovalMode.BLOCK:
+            ui.note(f"[red]✗[/red] {name} denied (approval mode: block)")
+            return False
+        if name == "execute_command" and isinstance(arguments.get("command"), str):
+            verdict = classify_command(arguments["command"])
+            if verdict.mode is ApprovalMode.BLOCK:
+                ui.note(f"[red]✗[/red] {name} blocked: {verdict.reason}")
+                return False
+            if verdict.mode is ApprovalMode.SAFE and repl._approval_mode is ApprovalMode.SAFE:
+                return True
+        if name in repl._tool_session_grants:
+            return True
+        return await _prompt_approval(repl, ui, name, arguments)
+
+    return approver
+
+
+async def _prompt_approval(
+    repl: VeluneREPL, ui: _ToolActivityUI, name: str, arguments: dict[str, Any]
+) -> bool:
+    """Interactive y/n/a prompt. Fails closed when no interactive stdin."""
+    import json
+
+    from rich.panel import Panel
+    from rich.prompt import Prompt
+
+    ui.pause_status()
+    args_preview = json.dumps(arguments, default=str, ensure_ascii=False)
+    if len(args_preview) > 400:
+        args_preview = args_preview[:400] + "…"
+    repl.console.print(
+        Panel(
+            f"[bold]{name}[/bold]\n[dim]{args_preview}[/dim]",
+            title="[yellow]Tool approval required[/yellow]",
+            border_style="yellow",
+            padding=(0, 2),
+        )
+    )
+    try:
+        answer = await asyncio.to_thread(
+            Prompt.ask,
+            "  Allow? [bold]y[/bold]es / [bold]n[/bold]o / [bold]a[/bold]lways this session",
+            choices=["y", "n", "a"],
+            default="n",
+            console=repl.console,
+        )
+    except (EOFError, KeyboardInterrupt, Exception) as exc:
+        _log.debug("Approval prompt unavailable (%s); denying %s", exc, name)
+        return False
+    if answer == "a":
+        repl._tool_session_grants.add(name)
+        return True
+    return answer == "y"
+
+
+# ── Live activity rendering ─────────────────────────────────────────────────
+
+
+class _ToolActivityUI:
+    """Console feedback for loop events: spinner during model turns, one line
+    per tool call. Deliberately dumb — M3 (streaming) replaces the spinner."""
+
+    def __init__(self, repl: VeluneREPL) -> None:
+        self._console = repl.console
+        self._status: Any | None = None
+        self.any_tool_ran = False
+
+    # Runner events are synchronous callbacks on the loop task.
+    def on_event(self, event: str, data: dict[str, Any]) -> None:
+        if event == "turn":
+            label = "Thinking…" if data.get("turn", 1) == 1 else "Continuing…"
+            self._start_status(f"[dim]{label}[/dim]")
+        elif event == "turn_end":
+            self.pause_status()
+        elif event == "tool_start":
+            self.any_tool_ran = True
+            args = str(data.get("arguments", ""))
+            if len(args) > 120:
+                args = args[:120] + "…"
+            self._console.print(
+                f"  [cyan]●[/cyan] [bold]{data.get('name')}[/bold] [dim]{args}[/dim]"
+            )
+        elif event == "tool_end":
+            mark = "[red]✗[/red]" if data.get("error") else "[green]✓[/green]"
+            self._console.print(f"    {mark} [dim]{data.get('duration_ms', 0):.0f} ms[/dim]")
+
+    def note(self, markup: str) -> None:
+        self.pause_status()
+        self._console.print(f"  {markup}")
+
+    def _start_status(self, label: str) -> None:
+        self.pause_status()
+        try:
+            self._status = self._console.status(label)
+            self._status.start()
+        except Exception:
+            self._status = None
+
+    def pause_status(self) -> None:
+        if self._status is not None:
+            try:
+                self._status.stop()
+            except Exception:
+                pass
+            self._status = None
+
+    def close(self) -> None:
+        self.pause_status()

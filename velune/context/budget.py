@@ -70,6 +70,50 @@ class ContextBudget:
             output_reservation=output_reserve,
         )
 
+    @classmethod
+    def for_chat(cls, mode: SessionMode, model_context_window: int) -> ContextBudget:
+        """Create a budget for an interactive chat turn.
+
+        Chat differs from council context assembly in one way: the output
+        reservation must be generous enough for a full assistant reply (the
+        council's 2048-token cap is tuned for structured phase outputs). The
+        input side (``usable_tokens``) bounds how much conversation history +
+        retrieved context may be sent, so a small local model is never handed
+        more than its window and a large model is not artificially capped.
+
+        Args:
+            mode: SessionMode (OPTIMUS, NORMAL, or GODLY)
+            model_context_window: Model's reported context length in tokens
+
+        Returns:
+            ContextBudget sized for a chat turn in the given mode.
+        """
+        from velune.cli.modes import SessionMode
+
+        window = max(1024, int(model_context_window or 8192))
+        if mode == SessionMode.OPTIMUS:
+            total = min(4096, window)
+        elif mode == SessionMode.GODLY:
+            total = window
+        else:  # NORMAL or unknown
+            total = min(16384, window)
+
+        system_alloc = 512
+        output_reserve = min(4096, max(256, total // 4))
+        usable = total - output_reserve - system_alloc
+        if usable < 256:
+            # Tiny windows: shrink the reply reservation before starving input.
+            output_reserve = max(256, total // 2 - system_alloc)
+            usable = max(128, total - output_reserve - system_alloc)
+
+        return cls(
+            total_tokens=total,
+            retrieval_allocation=int(usable * 0.55),
+            working_memory_allocation=int(usable * 0.35),
+            system_allocation=system_alloc,
+            output_reservation=output_reserve,
+        )
+
     @property
     def usable_tokens(self) -> int:
         """Total tokens available for context (minus output and system)."""

@@ -88,9 +88,9 @@ async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
     """Open the live system dashboard (session, state, jobs, alerts, health)."""
     from pathlib import Path
 
+    from velune._compat import uncancel_task
     from velune.cli.display.dashboard import ProgressDashboard
     from velune.cli.display.system_snapshot import LiveSessionState, build_system_snapshot
-    from velune.kernel.async_utils import uncancel_task
 
     health_monitor = None
     try:
@@ -229,8 +229,8 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
     from rich.live import Live
     from rich.panel import Panel
 
+    from velune._compat import uncancel_task
     from velune.cli.display.pipeline import PipelineTracker
-    from velune.kernel.async_utils import uncancel_task
 
     if not task.strip():
         repl.console.print("[yellow]Usage: /run <task>  or  /council <task>[/yellow]")

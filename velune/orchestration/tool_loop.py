@@ -232,8 +232,12 @@ class ToolLoopRunner:
                 }
             )
             self._emit("turn", {"turn": turn, "max_turns": self._max_turns})
-            response: InferenceResponse = await self._provider.infer(req)
+            response: InferenceResponse = await self._infer_turn(req)
             tokens_used += response.tokens_used
+            self._emit(
+                "turn_end",
+                {"turn": turn, "tool_calls": len(response.tool_calls or [])},
+            )
 
             if not response.tool_calls:
                 self._emit("final", {"turn": turn})
@@ -273,6 +277,10 @@ class ToolLoopRunner:
         )
 
     # ── Execution ────────────────────────────────────────────────────────
+
+    async def _infer_turn(self, req: InferenceRequest) -> InferenceResponse:
+        """One model turn. Isolated so a streaming variant can override it."""
+        return await self._provider.infer(req)
 
     async def _execute_call(self, call: ToolCall) -> ToolInvocation:
         start = time.perf_counter()

@@ -77,6 +77,14 @@ class ExecutionConfig(BaseModel):
     # Requires Docker Desktop / Docker Engine to be running.
     docker_sandbox: bool = False
     docker_image: str = "python:3.12-slim"
+    # Native tool calling in chat — when True (default), models that support
+    # function calling can invoke workspace tools mid-conversation through the
+    # permission-gated tool loop. Read-only tools run without prompting;
+    # write/exec tools follow the session approval mode (/approve). Disable
+    # with VELUNE_EXECUTION__NATIVE_TOOLS=0 or [execution] native_tools=false.
+    native_tools: bool = True
+    # Upper bound on model turns per prompt inside the tool loop.
+    max_tool_turns: int = Field(default=10, ge=1, le=50)
     allowed_executables: list[str] = Field(
         default_factory=lambda: [
             "python",
