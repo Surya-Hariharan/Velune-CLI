@@ -10,13 +10,25 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
 import structlog
 
 logger = structlog.get_logger()
+
+
+def _utcnow_naive() -> datetime:
+    """Current UTC time as a *naive* datetime.
+
+    Stored timestamps are compared lexically against these values, so the
+    ISO format must stay identical to the historical ``datetime.utcnow()``
+    output (no ``+00:00`` offset suffix). This is the deprecation-safe
+    equivalent, not a behavior change.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 # Cost per 1M tokens (input, output) in USD — updated June 2026
 PROVIDER_COSTS: dict[str, dict[str, dict[str, float]]] = {
@@ -119,7 +131,7 @@ class UsageEvent:
     success: bool = True
     error_code: str | None = None
     cost_usd: float | None = None
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: _utcnow_naive().isoformat())
 
     def __post_init__(self) -> None:
         if self.cost_usd is None:
@@ -365,7 +377,7 @@ class SessionUsageTracker:
                     """,
                     (
                         session_id,
-                        datetime.utcnow().isoformat(),
+                        _utcnow_naive().isoformat(),
                         provider_id,
                         model,
                         input_tokens,
@@ -444,7 +456,7 @@ class SessionUsageTracker:
 
     def get_provider_usage(self, days: int = 30) -> list[ProviderUsage]:
         """Return per-provider usage aggregated over the last *days* days."""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute(
                 """
@@ -495,7 +507,7 @@ class SessionUsageTracker:
 
     def get_model_usage(self, days: int = 30) -> list[ModelUsage]:
         """Return per-model usage aggregated over the last *days* days."""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute(
                 """
@@ -532,7 +544,7 @@ class SessionUsageTracker:
 
     def get_total_cost(self, days: int = 30) -> float:
         """Return total estimated cost over *days* days."""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 "SELECT SUM(estimated_cost) FROM usage_records WHERE timestamp > ?",
@@ -542,7 +554,7 @@ class SessionUsageTracker:
 
     def get_cache_stats(self, days: int = 30) -> dict:
         """Return aggregated cache token statistics over *days* days."""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 """
@@ -569,7 +581,7 @@ class SessionUsageTracker:
     # ------------------------------------------------------------------
 
     def get_recent_sessions(self, days: int = 7) -> list[UsageSummary]:
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             session_ids = [
                 row[0]
@@ -581,7 +593,7 @@ class SessionUsageTracker:
         return [s for s_id in session_ids if (s := self.get_session_summary(s_id))]
 
     def get_stats_last_n_days(self, days: int = 7) -> dict:
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 """
@@ -611,7 +623,7 @@ class SessionUsageTracker:
         }
 
     def cleanup_old_records(self, days: int = 90) -> int:
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute("DELETE FROM usage_records WHERE timestamp < ?", (cutoff,))
