@@ -25,6 +25,7 @@ from velune.providers.keystore import (
     repair_keystore,
     save_key,
 )
+from velune.providers.crypto import encrypt_credentials
 from velune.providers.validation import (
     ValidationStatus,
     validate_provider_sync,
@@ -893,10 +894,12 @@ def backup_providers(
         "providers": snapshot,
     }
 
-    dest.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    serialized = json.dumps(payload, separators=(",", ":"))
+    encrypted_payload = encrypt_credentials(serialized)
+    dest.write_text(encrypted_payload, encoding="utf-8")
     console.print(
-        f"[{design.OK}]Backup written:[/{design.OK}] {dest}\n"
-        f"[{design.WARN}]This file contains plaintext API keys — store it securely.[/{design.WARN}]"
+        f"[{design.OK}]Encrypted backup written:[/{design.OK}] {dest}\n"
+        f"[{design.MUTED}]Credentials are encrypted at rest in this backup file.[/{design.MUTED}]"
     )
     console.print(
         f"[{design.MUTED}]Providers: {', '.join(sorted(snapshot.keys()))}[/{design.MUTED}]"
