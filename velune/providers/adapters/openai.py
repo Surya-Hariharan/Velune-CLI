@@ -16,6 +16,7 @@ from velune.core.errors.provider import (
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._toolcalls import attach_openai_tools, parse_openai_tool_calls
 from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
 
@@ -122,21 +123,28 @@ class OpenAIProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["stop"] = request.stop_sequences
+            attach_openai_tools(payload, request)
 
             response = await self.client.post("/chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
             latency = (time.perf_counter() - start) * 1000.0
 
+            message = data["choices"][0]["message"]
+            tool_calls = parse_openai_tool_calls(message)
             usage = data.get("usage", {})
             return InferenceResponse(
-                content=data["choices"][0]["message"]["content"],
+                # content is null on pure tool-call turns
+                content=message.get("content") or "",
                 model_id=request.model_id,
-                finish_reason=data["choices"][0]["finish_reason"] or "stop",
+                finish_reason=(
+                    "tool_calls" if tool_calls else (data["choices"][0]["finish_reason"] or "stop")
+                ),
                 tokens_used=usage.get("total_tokens", 0),
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 latency_ms=latency,
+                tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
             raise InferenceError(f"OpenAI completion failed: {e}")

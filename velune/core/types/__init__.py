@@ -2,7 +2,7 @@
 
 from velune.core.types.agent import AgentMessage, AgentMessageType, AgentResult, AgentRole
 from velune.core.types.context import ContextChunk, ContextPriority, ContextWindow
-from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
+from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk, ToolCall
 from velune.core.types.memory import MemoryQuery, MemoryRecord, MemoryType
 from velune.core.types.model import (
     CapabilityLevel,
@@ -26,6 +26,7 @@ __all__ = [
     "InferenceRequest",
     "StreamChunk",
     "InferenceResponse",
+    "ToolCall",
     "MemoryType",
     "MemoryRecord",
     "MemoryQuery",

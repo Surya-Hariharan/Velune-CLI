@@ -13,7 +13,7 @@ from velune.core.errors.provider import (
     InferenceError,
     ProviderAuthenticationError,
 )
-from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
+from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk, ToolCall
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
 from velune.providers.base import ModelProvider
@@ -127,9 +127,21 @@ class AnthropicProvider(ModelProvider):
             data = response.json()
             latency = (time.perf_counter() - start) * 1000.0
 
-            content = ""
-            if data.get("content"):
-                content = data["content"][0].get("text", "")
+            # Concatenate all text blocks and normalize tool_use blocks.
+            text_parts: list[str] = []
+            tool_calls: list[ToolCall] = []
+            for block in data.get("content") or []:
+                if block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+                elif block.get("type") == "tool_use":
+                    tool_calls.append(
+                        ToolCall(
+                            id=block.get("id", ""),
+                            name=block.get("name", ""),
+                            arguments=block.get("input") or {},
+                        )
+                    )
+            content = "".join(text_parts)
 
             # Record latency in health monitor if available
             self._record_latency_to_monitor(latency)
@@ -138,12 +150,15 @@ class AnthropicProvider(ModelProvider):
             return InferenceResponse(
                 content=content,
                 model_id=request.model_id,
-                finish_reason=data.get("stop_reason") or "end_turn",
+                finish_reason=(
+                    "tool_calls" if tool_calls else (data.get("stop_reason") or "end_turn")
+                ),
                 tokens_used=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
                 latency_ms=latency,
                 cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
                 cache_read_tokens=usage.get("cache_read_input_tokens", 0),
                 metadata={"raw_usage": usage},
+                tool_calls=tool_calls or None,
             )
         except httpx.HTTPError as e:
             raise InferenceError(f"Anthropic message completion failed: {e}")
@@ -212,7 +227,7 @@ class AnthropicProvider(ModelProvider):
                 if msg.get("role") == "system":
                     system_prompt = msg.get("content", "")
                 else:
-                    anth_messages.append({"role": msg.get("role"), "content": msg.get("content")})
+                    anth_messages.append(self._translate_message(msg))
             payload = {
                 "model": request.model_id,
                 "messages": anth_messages,
@@ -225,7 +240,74 @@ class AnthropicProvider(ModelProvider):
 
         if request.stop_sequences:
             payload["stop_sequences"] = request.stop_sequences
+        if request.tools:
+            payload["tools"] = [self._translate_tool(t) for t in request.tools]
+            if request.tool_choice == "required":
+                payload["tool_choice"] = {"type": "any"}
+            elif request.tool_choice == "none":
+                payload["tool_choice"] = {"type": "none"}
+            elif isinstance(request.tool_choice, dict):
+                name = request.tool_choice.get("function", {}).get("name")
+                if name:
+                    payload["tool_choice"] = {"type": "tool", "name": name}
         return payload
+
+    @staticmethod
+    def _translate_tool(tool: dict) -> dict:
+        """OpenAI function-format tool definition → Anthropic tool definition."""
+        fn = tool.get("function", tool)
+        return {
+            "name": fn.get("name", ""),
+            "description": fn.get("description", ""),
+            "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+        }
+
+    @staticmethod
+    def _translate_message(msg: dict) -> dict:
+        """One OpenAI-normal-form message → Anthropic Messages API format.
+
+        Velune's internal normal form is the OpenAI chat shape (see
+        ``InferenceRequest``): assistant ``tool_calls`` become ``tool_use``
+        content blocks and role ``tool`` results become user ``tool_result``
+        blocks. Plain string messages pass through unchanged.
+        """
+        role = msg.get("role")
+        if role == "assistant" and msg.get("tool_calls"):
+            blocks: list[dict] = []
+            if msg.get("content"):
+                blocks.append({"type": "text", "text": msg["content"]})
+            for call in msg["tool_calls"]:
+                fn = call.get("function", {}) or {}
+                args_raw = fn.get("arguments", {})
+                if isinstance(args_raw, str):
+                    try:
+                        args = json.loads(args_raw) if args_raw else {}
+                    except json.JSONDecodeError:
+                        args = {"_raw_arguments": args_raw}
+                else:
+                    args = args_raw or {}
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": call.get("id", ""),
+                        "name": fn.get("name", ""),
+                        "input": args,
+                    }
+                )
+            return {"role": "assistant", "content": blocks}
+        if role == "tool":
+            return {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": msg.get("tool_call_id", ""),
+                        "content": str(msg.get("content", "")),
+                        **({"is_error": True} if msg.get("is_error") else {}),
+                    }
+                ],
+            }
+        return {"role": role, "content": msg.get("content")}
 
     async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         raise NotImplementedError("Anthropic provider does not support embeddings.")

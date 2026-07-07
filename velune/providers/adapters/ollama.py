@@ -13,6 +13,7 @@ from velune.core.errors.provider import InferenceError, ProviderConnectionError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._toolcalls import parse_ollama_tool_calls
 from velune.providers.base import ModelProvider
 
 logger = logging.getLogger("velune.providers.adapters.ollama")
@@ -158,6 +159,10 @@ class OllamaProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["options"]["stop"] = request.stop_sequences
+            # Ollama (>=0.3) accepts OpenAI-format tool definitions natively.
+            # Tool calling requires the non-streaming chat endpoint, which this is.
+            if request.tools:
+                payload["tools"] = request.tools
 
             response = await self.client.post("/api/chat", json=payload)
             response.raise_for_status()
@@ -171,12 +176,15 @@ class OllamaProvider(ModelProvider):
                     latency / 1000.0,
                 )
 
+            message = data.get("message", {})
+            tool_calls = parse_ollama_tool_calls(message)
             return InferenceResponse(
-                content=data["message"]["content"],
+                content=message.get("content") or "",
                 model_id=request.model_id,
-                finish_reason=data.get("done_reason", "stop"),
+                finish_reason="tool_calls" if tool_calls else data.get("done_reason", "stop"),
                 tokens_used=data.get("eval_count", 0) + data.get("prompt_eval_count", 0),
                 latency_ms=latency,
+                tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
             raise InferenceError(f"Ollama inference failed: {e}")

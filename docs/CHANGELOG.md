@@ -10,6 +10,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **Native tool calling (foundation)** — `InferenceRequest`/`InferenceResponse`
+  now carry OpenAI-format `tools`, `tool_choice`, and normalized `tool_calls`
+  (`velune.core.types.inference.ToolCall`). The OpenAI, Groq/OpenRouter
+  (inherited), OpenAI-compatible, Ollama, and Anthropic adapters send tool
+  definitions and parse tool-call turns; the Anthropic adapter translates
+  between the OpenAI normal form and Messages-API `tool_use`/`tool_result`
+  blocks. Fully backward-compatible — requests without tools produce
+  identical payloads to before.
+- **`ToolLoopRunner`** (`velune/orchestration/tool_loop.py`) — bounded agentic
+  infer → execute-tools → feed-results loop over the local `ToolRegistry` and
+  (optionally) connected MCP servers, making MCP tools reachable by models for
+  the first time. Every execution goes through `authorize_and_execute`
+  (permission + hook enforcement); the default approval policy auto-allows
+  read-only tools only and fails closed on approver errors, unknown tools, and
+  oversized output. Covered by 16 contract tests with a scripted fake provider.
+- **v1.0 readiness audit** — `docs/AUDIT_2026-07-07_V1_READINESS.md`:
+  full-system audit with severities and the prioritized roadmap the tool-loop
+  work implements.
 - **NVIDIA NIM provider** — discovery backend for NVIDIA NIM cloud models
   (`velune/providers/discovery/nvidia_nim.py`), surfaced in `velune setup`
   and the provider catalogue.
