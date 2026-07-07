@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from velune.cli import design
+from velune.providers.crypto import encrypt_credentials
 from velune.providers.keystore import (
     credentials_file_path,
     delete_key,
@@ -25,7 +26,6 @@ from velune.providers.keystore import (
     repair_keystore,
     save_key,
 )
-from velune.providers.crypto import encrypt_credentials
 from velune.providers.validation import (
     ValidationStatus,
     validate_provider_sync,
