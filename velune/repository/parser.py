@@ -121,6 +121,17 @@ class RepositorySnapshotParser:
 
         return self._parse_regex(file_path, code, lang)
 
+    def parse_file(
+        self, file_path: Path, code: str
+    ) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
+        """Backward-compatible alias for :meth:`parse`.
+
+        Older callers and some integration tests used ``parse_file`` before
+        ``RepositorySnapshotParser`` settled on ``parse`` as the canonical API.
+        Keep the alias additive so external integrations do not break.
+        """
+        return self.parse(file_path, code)
+
     def _detect_language(self, file_path: Path) -> RepositoryLanguage:
         """Detect language from file path extension."""
         suffix = file_path.suffix.lower()
@@ -132,6 +143,14 @@ class RepositorySnapshotParser:
             ".tsx": RepositoryLanguage.TYPESCRIPT,
             ".go": RepositoryLanguage.GO,
             ".rs": RepositoryLanguage.RUST,
+            ".java": RepositoryLanguage.JAVA,
+            ".cpp": RepositoryLanguage.CPP,
+            ".cc": RepositoryLanguage.CPP,
+            ".cxx": RepositoryLanguage.CPP,
+            ".hpp": RepositoryLanguage.CPP,
+            ".hh": RepositoryLanguage.CPP,
+            ".c": RepositoryLanguage.CPP,
+            ".h": RepositoryLanguage.CPP,
         }
         return mapping.get(suffix, RepositoryLanguage.UNKNOWN)
 
@@ -435,6 +454,28 @@ class RepositorySnapshotParser:
                 (r"(?:pub\s+)?struct\s+(\w+)", RepositorySymbolKind.CLASS),
                 (r"(?:pub\s+)?(?:async\s+)?fn\s+(\w+)", RepositorySymbolKind.FUNCTION),
                 (r"use\s+([^;]+);", RepositorySymbolKind.IMPORT),
+            ],
+            RepositoryLanguage.JAVA: [
+                (
+                    r"(?:public\s+|final\s+|abstract\s+)*(?:class|interface|record|enum)\s+(\w+)",
+                    RepositorySymbolKind.CLASS,
+                ),
+                (
+                    # method: modifiers + return type + name(  — conservative,
+                    # anchored on an opening brace to skip declarations.
+                    r"(?:public|protected|private|static)[\w\s<>\[\],]*?\s(\w+)\s*\([^;{)]*\)[\w\s,]*\{",
+                    RepositorySymbolKind.FUNCTION,
+                ),
+                (r"import\s+(?:static\s+)?([\w.]+(?:\.\*)?);", RepositorySymbolKind.IMPORT),
+            ],
+            RepositoryLanguage.CPP: [
+                (r"(?:class|struct)\s+(\w+)\s*[:{]", RepositorySymbolKind.CLASS),
+                (
+                    # free function / method definition: name( ... ) {
+                    r"[\w:<>*&~\]\[]+\s+([\w:~]+)\s*\([^;{)]*\)\s*(?:const\s*)?(?:noexcept\s*)?\{",
+                    RepositorySymbolKind.FUNCTION,
+                ),
+                (r"#include\s+[<\"]([^>\"]+)[>\"]", RepositorySymbolKind.IMPORT),
             ],
         }
 

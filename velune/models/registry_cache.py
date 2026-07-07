@@ -174,7 +174,7 @@ class ModelRegistryCache:
         caps_raw = raw.pop("capabilities", None) or {}
         if isinstance(caps_raw, dict):
             profile_kwargs = {
-                k: CapabilityLevel(int(v)) if isinstance(v, (int, float)) else v
+                k: CapabilityLevel(int(v)) if isinstance(v, int | float) else v
                 for k, v in caps_raw.items()
                 if k in ModelCapabilityProfile.model_fields
             }

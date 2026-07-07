@@ -20,6 +20,11 @@ def configure(auto_accept: bool) -> None:
     _auto_accept = auto_accept
 
 
+def set_auto_accept(auto_accept: bool) -> None:
+    """Backward-compatible alias for tests and older integrations."""
+    configure(auto_accept)
+
+
 def is_auto_accept() -> bool:
     return _auto_accept
 

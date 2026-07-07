@@ -46,6 +46,10 @@ class RepositoryLanguage(StrEnum):
     TYPESCRIPT = "typescript"
     GO = "go"
     RUST = "rust"
+    JAVA = "java"
+    # C and C++ share one bucket: headers are indistinguishable by extension
+    # and the regex symbol patterns overlap.
+    CPP = "cpp"
     UNKNOWN = "unknown"
 
 

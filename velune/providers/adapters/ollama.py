@@ -42,7 +42,7 @@ class OllamaProvider(ModelProvider):
         self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(
             supports_streaming=True,
-            supports_function_calling=False,
+            supports_function_calling=True,
             supports_embeddings=True,
             max_context_window=8192,
         )
@@ -130,7 +130,7 @@ class OllamaProvider(ModelProvider):
                             "embedding": CapabilityLevel.INTERMEDIATE,
                             "instruction_following": CapabilityLevel.INTERMEDIATE,
                             "multimodal": CapabilityLevel.NONE,
-                            "tool_use": CapabilityLevel.NONE,
+                            "tool_use": CapabilityLevel.BASIC,
                             "long_context": (
                                 CapabilityLevel.INTERMEDIATE
                                 if ctx_len > 32768
