@@ -8,8 +8,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-07-08
+
 ### Added
 
+- **Resource Connector Framework** (`velune/resources/`) — reusable subsystem
+  for connecting to local development resources (Docker, databases,
+  Supabase), mirroring the provider/tool architecture so new connectors
+  (Redis, Firebase, K8s, AWS) are a single subclass + `register()` call.
+  `ResourceManager` is the single authorization choke point, integrating with
+  the REPL `ApprovalMode` and the encrypted keystore; SQL statements are
+  classified by risk (`SELECT` → READ, DDL → WRITE, `DROP` → ADMIN, with
+  multi-statement batches escalated to prevent hidden-DROP injection).
+  Ships with Docker (CLI-driven), PostgreSQL and MySQL/MariaDB (local-host-only
+  enforced), and Supabase (SSRF-safe REST) connectors, plus a `/resource` REPL
+  command (`list`/`discover`/`connect`/`disconnect`/`status`/`info`).
 - **Native tool calling (foundation)** — `InferenceRequest`/`InferenceResponse`
   now carry OpenAI-format `tools`, `tool_choice`, and normalized `tool_calls`
   (`velune.core.types.inference.ToolCall`). The OpenAI, Groq/OpenRouter

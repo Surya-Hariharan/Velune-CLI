@@ -80,10 +80,17 @@ jobs:
           bandit -c pyproject.toml -r velune/ --severity-level medium --confidence-level medium
 
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-          GITLEAKS_ENABLE_SUMMARY: "true"
+        # Run the gitleaks CLI directly rather than gitleaks/gitleaks-action:
+        # the action calls the GitHub API to classify the account as an org
+        # vs. individual, and when that call is rate-limited it fails closed
+        # by demanding a paid license, even for personal/public repos.
+        run: |
+          GITLEAKS_VERSION="8.30.1"
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks detect --source . --redact -v
+          rm -f gitleaks gitleaks.tar.gz
 
       - name: Check for shell=True usage (P0-2 regression)
         run: |
