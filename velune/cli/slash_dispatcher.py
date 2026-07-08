@@ -61,6 +61,8 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "hooks": "Tools",
     # MCP
     "mcp": "MCP",
+    # Resources
+    "resource": "Resources",
     # Git
     "diff": "Git",
     "undo": "Git",
@@ -660,6 +662,32 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "server",
                 "resources",
                 "external tools",
+                "integrations",
+            ),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="resource",
+            aliases=["resources", "res"],
+            description="Connect and inspect local resources — Docker, PostgreSQL, MySQL, Supabase",
+            usage="/resource [list|discover|connect <id>|disconnect <id>|status|info <id>]",
+            handler=repl._cmd_resource,
+            examples=(
+                "/resource discover",
+                "/resource connect docker",
+                "/resource info postgres",
+                "/resource status",
+            ),
+            search_terms=(
+                "docker",
+                "postgres",
+                "postgresql",
+                "mysql",
+                "mariadb",
+                "supabase",
+                "database",
+                "connectors",
                 "integrations",
             ),
         )

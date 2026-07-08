@@ -180,6 +180,29 @@ class CognitionConfig(BaseModel):
     default_tier_override: str = "auto"  # auto, instant, minimal, standard, full
 
 
+class ResourceEntry(BaseModel):
+    """Per-connector settings for the Resource Connector Framework."""
+
+    #: When False the connector is hidden from discovery, status, and execution.
+    enabled: bool = True
+    #: When True the REPL connects the resource at startup (if it's available).
+    auto_connect: bool = False
+
+
+class ResourcesConfig(BaseModel):
+    """Configuration for external resource connectors (Docker, DBs, Supabase).
+
+    Each connector has its own ``enabled`` / ``auto_connect`` entry. Secrets
+    (DB passwords, Supabase keys) are never stored here — they live in the
+    encrypted keystore. This section only carries non-sensitive toggles.
+    """
+
+    docker: ResourceEntry = Field(default_factory=lambda: ResourceEntry(enabled=True))
+    postgres: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
+    mysql: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
+    supabase: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
+
+
 class VeluneConfig(BaseSettings):
     """Root configuration tree.
 
@@ -209,6 +232,7 @@ class VeluneConfig(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
+    resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
 
     # ---------------------------------------------------------------------------
     # Startup validation
@@ -339,6 +363,7 @@ def _hardcoded_defaults() -> dict:
         telemetry=TelemetryConfig(),
         mcp=MCPConfig(),
         cognition=CognitionConfig(),
+        resources=ResourcesConfig(),
     )
     return instance.model_dump()
 

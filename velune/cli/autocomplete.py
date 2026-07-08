@@ -33,6 +33,7 @@ CATEGORY_ORDER: list[str] = [
     "Memory",
     "Tools",
     "MCP",
+    "Resources",
     "Git",
     "Settings",
     "System",

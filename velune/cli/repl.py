@@ -122,6 +122,7 @@ class VeluneREPL:
         self._plugin_manager = PluginManager(
             workspace=Path(workspace_path) if workspace_path else None,
         )
+        self._resource_manager = self._build_resource_manager(workspace_path)
         try:
             self._job_registry = self.container.get("runtime.job_registry")
         except Exception:
@@ -636,6 +637,11 @@ class VeluneREPL:
             await self._mcp_registry.disconnect_all()
         except Exception as exc:
             _log.debug("MCP disconnect error (non-fatal): %s", exc)
+
+        try:
+            await self._resource_manager.disconnect_all()
+        except Exception as exc:
+            _log.debug("Resource disconnect error (non-fatal): %s", exc)
 
         self.console.print("[dim]Stopping background tasks...[/dim]")
         try:
@@ -1296,6 +1302,40 @@ class VeluneREPL:
         from velune.cli.handlers.plugins import cmd_plugin
 
         await cmd_plugin(self, args)
+
+    def _build_resource_manager(self, workspace_path):
+        """Construct the ResourceManager with config, workspace, and approver.
+
+        Isolated in a try/except so a resources-config problem can never block
+        the REPL from starting — a bare manager (all connectors, fail-closed
+        approver) is always a safe fallback.
+        """
+        from velune.resources.manager import build_default_manager
+
+        resources_cfg: dict = {}
+        try:
+            config = self.container.get("runtime.config")
+            if config is not None and hasattr(config, "resources"):
+                resources_cfg = config.resources.model_dump()
+        except Exception as exc:
+            _log.debug("Could not load resources config (using defaults): %s", exc)
+
+        manager = build_default_manager(
+            config=resources_cfg,
+            workspace=Path(workspace_path) if workspace_path else None,
+        )
+        try:
+            from velune.cli.handlers.resources import make_resource_approver
+
+            manager.set_approver(make_resource_approver(self))
+        except Exception as exc:
+            _log.debug("Could not install interactive resource approver: %s", exc)
+        return manager
+
+    async def _cmd_resource(self, args: str) -> None:
+        from velune.cli.handlers.resources import cmd_resource
+
+        await cmd_resource(self, args)
 
     async def _cmd_lint(self, args: str) -> None:
         from velune.cli.handlers.code_intel import cmd_lint
