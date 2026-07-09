@@ -156,9 +156,25 @@ async def _drive(controller: WizardController, start_stage: int, workspace: Path
                 logic.save_stage_progress("ready")
                 logic.mark_onboarding_complete()
 
+            if idx != 7:
+                await _stage_transition(controller, idx)
             idx += 1
         except WizardCancelled:
             raise
+
+
+async def _stage_transition(controller: WizardController, idx: int) -> None:
+    """Brief 'Loading next step...' frame between stages (spec item 5)."""
+    title = STAGES[idx].title
+    await controller.show_transient(
+        [
+            [
+                ("fg:#ff7fb6", f"  ✓ {title} complete\n\n"),
+                ("fg:#d9a8c0", "  Loading next step..."),
+            ]
+        ],
+        delay=0.35,
+    )
 
 
 # ── Stage 1: Welcome ─────────────────────────────────────────────────────────
@@ -240,107 +256,39 @@ async def _stage_environment(controller: WizardController) -> Any:
 
 
 async def _stage_providers(controller: WizardController, mode: str) -> Any:
-    configured: list[str] = []
+    """One alphabetical checklist mixing local and cloud providers — selecting a
+    local row (Ollama, LM Studio) triggers a connectivity check, selecting a
+    cloud row triggers the key-entry sub-flow. Filtered by the mode chosen in
+    Welcome so "local"/"cloud" only show the relevant rows.
+    """
+    from velune.providers.keystore import has_key, is_ollama_live
 
-    if mode in ("local", "hybrid"):
-        local_result = await _detect_local_providers(controller)
-        if local_result is BACK:
-            return BACK
-        configured.extend(local_result)
+    if mode == "local":
+        providers = catalog.list_local_providers_alphabetical()
+    elif mode == "cloud":
+        providers = catalog.list_cloud_providers_alphabetical()
+    else:
+        providers = catalog.list_providers_alphabetical()
 
-    if mode in ("cloud", "hybrid"):
-        cloud_result = await _configure_cloud_providers(controller)
-        if cloud_result is BACK:
-            return BACK
-        configured.extend(cloud_result)
+    ollama_live = await asyncio.to_thread(is_ollama_live, 1.0)
 
-    return configured
+    def _is_configured(pid: str) -> bool:
+        return ollama_live if pid == "ollama" else has_key(pid)
 
-
-async def _detect_local_providers(controller: WizardController) -> Any:
-    from velune.providers.keystore import is_ollama_live
-    from velune.providers.validation import validate_provider
-
-    attempt = 0
-    while True:
-        await controller.show_transient(
-            [[("fg:#d9a8c0", "  Scanning for local AI servers...")]], delay=0.3
-        )
-        ollama_live = await asyncio.to_thread(is_ollama_live, 1.0)
-        if ollama_live:
-            result = await validate_provider("ollama", "")
-            if result.ok:
-                n = len(result.models)
-                await _continue_screen(
-                    controller,
-                    2,
-                    "Local AI",
-                    f"Ollama detected — {n} model{'s' if n != 1 else ''} available.",
-                )
-                return ["ollama"]
-        else:
-            result = await validate_provider("lmstudio", "")
-            if result.ok:
-                n = len(result.models)
-                await _continue_screen(
-                    controller,
-                    2,
-                    "Local AI",
-                    f"LM Studio detected — {n} model{'s' if n != 1 else ''} available.",
-                )
-                return ["lmstudio"]
-
-        if attempt >= 3:
-            await _continue_screen(
-                controller,
-                2,
-                "Local AI",
-                "No local AI server found after 3 attempts. Continuing without one —"
-                " install Ollama any time from https://ollama.com.",
-            )
-            return []
-
-        choice = await controller.run_widget(
-            SelectWidget(
-                title="No local AI server detected",
-                subtitle=(
-                    "Ollama is a free local AI server that runs models on this machine.\n"
-                    "Install: https://ollama.com   Then run: ollama serve"
-                ),
-                options=[
-                    Option("retry", "Retry"),
-                    Option("skip", "Skip"),
-                    Option("quit", "Quit setup"),
-                ],
-            ),
-            stage_index=2,
-        )
-        if choice is BACK or choice == "skip":
-            return []
-        if choice == "quit":
-            controller.request_cancel()
-            raise WizardCancelled()
-        attempt += 1
-
-
-async def _configure_cloud_providers(controller: WizardController) -> Any:
-    from velune.providers.keystore import has_key
-
-    cloud = catalog.list_cloud_providers_alphabetical()
-    checked = {p.id for p in cloud if has_key(p.id)}
+    checked = {p.id for p in providers if _is_configured(p.id)}
 
     while True:
         options = [
             Option(
                 p.id,
                 p.display_name,
-                meta="free tier" if p.free_tier else "paid",
-                badge="✓ already configured" if has_key(p.id) else None,
+                meta="free tier" if p.free_tier else ("local" if not p.requires_key else "paid"),
+                badge="✓ already configured" if _is_configured(p.id) else None,
             )
-            for p in cloud
+            for p in providers
         ]
         recommended = ", ".join(
-            catalog.get(pid).display_name for pid in catalog.RECOMMENDED_FREE_START if catalog.get(pid) and catalog.get(pid).requires_key
+            catalog.get(pid).display_name for pid in catalog.RECOMMENDED_FREE_START if catalog.get(pid)
         )
         subtitle = f"Recommended free start: {recommended}" if recommended else ""
 
@@ -358,12 +306,17 @@ async def _configure_cloud_providers(controller: WizardController) -> Any:
             return BACK
 
         selected: list[str] = result
-        need_key = [pid for pid in selected if pid not in {p.id for p in cloud if has_key(p.id)}]
-        already = [pid for pid in selected if pid in {p.id for p in cloud if has_key(p.id)}]
+        configured_now = {p.id for p in providers if _is_configured(p.id)}
+        need_setup = [pid for pid in selected if pid not in configured_now]
+        already = [pid for pid in selected if pid in configured_now]
 
         went_back = False
-        for pid in need_key:
-            outcome = await _configure_one_provider_key(controller, pid)
+        for pid in need_setup:
+            meta = catalog.get(pid)
+            if meta is not None and not meta.requires_key:
+                outcome = await _detect_one_local_provider(controller, pid)
+            else:
+                outcome = await _configure_one_provider_key(controller, pid)
             if outcome is BACK:
                 checked = set(selected)
                 went_back = True
@@ -371,7 +324,88 @@ async def _configure_cloud_providers(controller: WizardController) -> Any:
         if went_back:
             continue
 
-        return already + need_key
+        replace_outcome = await _offer_replace_existing(controller, already)
+        if replace_outcome is BACK:
+            checked = set(selected)
+            continue
+
+        return already + need_setup
+
+
+async def _detect_one_local_provider(controller: WizardController, pid: str) -> Any:
+    from velune.providers.validation import validate_provider
+
+    meta = catalog.get(pid)
+    name = meta.display_name if meta else pid
+
+    for _attempt in range(3):
+        await controller.show_transient(
+            [[("fg:#d9a8c0", f"  Checking {name}...")]], delay=0.3
+        )
+        result = await validate_provider(pid, "")
+        if result.ok:
+            n = len(result.models)
+            await controller.show_transient(
+                [[("fg:#ff7fb6", f"  ✓ {name} detected — {n} model{'s' if n != 1 else ''} available.")]],
+                delay=0.4,
+            )
+            return pid
+
+        choice = await controller.run_widget(
+            SelectWidget(
+                title=f"{name} not detected",
+                subtitle=(
+                    f"Get it running, then retry: {meta.get_key_url}" if meta else ""
+                ),
+                options=[
+                    Option("retry", "Retry"),
+                    Option("skip", "Skip"),
+                    Option("back", "Back"),
+                ],
+            ),
+            stage_index=2,
+        )
+        if choice is BACK or choice == "back":
+            return BACK
+        if choice == "skip":
+            return None
+
+    return None
+
+
+async def _offer_replace_existing(controller: WizardController, already_configured: list[str]) -> Any:
+    """Spec item 9: never re-ask for a configured provider's key by default —
+    only offer to replace it if the user explicitly asks."""
+    remaining = list(already_configured)
+    while True:
+        options = [
+            Option(pid, f"Replace {catalog.get(pid).display_name} key")
+            for pid in remaining
+            if catalog.get(pid) and catalog.get(pid).requires_key
+        ]
+        if not options:
+            return None
+        options.append(Option("none", "No changes"))
+
+        choice = await controller.run_widget(
+            SelectWidget(
+                title="Replace an existing key?",
+                subtitle="Already configured — leave as-is, or replace a key.",
+                options=options,
+            ),
+            stage_index=2,
+        )
+        if choice is BACK:
+            return BACK
+        if choice == "none":
+            return None
+
+        outcome = await _configure_one_provider_key(controller, choice)
+        if outcome is BACK:
+            return BACK
+        remaining = [pid for pid in remaining if pid != choice]
+        if not remaining:
+            return None
 
 
 async def _configure_one_provider_key(controller: WizardController, pid: str) -> Any:

@@ -215,8 +215,15 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                     )
                 )
             else:
-                if not sys.stdin.isatty():
-                    # Non-interactive (piped stdin, CI, cron): check providers and exit if none.
+                from velune.cli.interactive.tty import is_interactive_tty
+
+                if not is_interactive_tty():
+                    # Non-interactive (piped stdin, CI, cron, or a non-native
+                    # console such as Git Bash/MSYS2/Cygwin): the REPL is a
+                    # full-screen prompt_toolkit Application and needs a real
+                    # console to build its output — launching it here would
+                    # crash with a raw traceback (NoConsoleScreenBufferError)
+                    # instead of a clean message, regardless of provider state.
                     from velune.providers.keystore import list_configured_providers
 
                     if not list_configured_providers():
@@ -226,37 +233,45 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                                 f"[{design.MUTED}]Run velune setup to configure a provider.[/{design.MUTED}]"
                             )
                         )
-                        raise typer.Exit()
-                else:
-                    # Interactive: run state-machine onboarding.
-                    from velune.cli.onboarding import (
-                        onboarding_state,
-                        run_onboarding,
-                    )
-
-                    state = onboarding_state()
-
-                    if state == "returning":
-                        # Advisory repo detection for returning users — hint only (Rule 12).
-                        repo_name = _detect_repo_marker(workspace)
-                        if repo_name:
-                            logging.getLogger("velune").debug(
-                                "Detected project marker before REPL launch: %s", repo_name
-                            )
-                    elif state == "partial":
-                        # Providers configured but no model selected — show a hint.
-                        # Don't silently launch model discovery; direct to the named command
-                        # so the user understands what's happening.
+                    else:
                         runtime.console.print(
                             Text.from_markup(
-                                f"\n  [{design.WARN}]{design.ICON_WARNING}  Setup incomplete.[/{design.WARN}]"
-                                f"  [{design.MUTED}]Run [bold]velune onboard[/bold]"
-                                f" to finish selecting your default model.[/{design.MUTED}]\n"
+                                f"[{design.WARN}]Velune's REPL needs an interactive terminal.[/{design.WARN}]  "
+                                f"[{design.MUTED}]Try Windows Terminal, PowerShell, or cmd.exe"
+                                f" (under Git Bash/MSYS2/Cygwin, run with winpty).[/{design.MUTED}]"
                             )
                         )
-                    else:
-                        # Fresh install — run the full guided wizard.
-                        run_onboarding(runtime, skip_to=None)
+                    raise typer.Exit()
+
+                # Interactive: run state-machine onboarding.
+                from velune.cli.onboarding import (
+                    onboarding_state,
+                    run_onboarding,
+                )
+
+                state = onboarding_state()
+
+                if state == "returning":
+                    # Advisory repo detection for returning users — hint only (Rule 12).
+                    repo_name = _detect_repo_marker(workspace)
+                    if repo_name:
+                        logging.getLogger("velune").debug(
+                            "Detected project marker before REPL launch: %s", repo_name
+                        )
+                elif state == "partial":
+                    # Providers configured but no model selected — show a hint.
+                    # Don't silently launch model discovery; direct to the named command
+                    # so the user understands what's happening.
+                    runtime.console.print(
+                        Text.from_markup(
+                            f"\n  [{design.WARN}]{design.ICON_WARNING}  Setup incomplete.[/{design.WARN}]"
+                            f"  [{design.MUTED}]Run [bold]velune onboard[/bold]"
+                            f" to finish selecting your default model.[/{design.MUTED}]\n"
+                        )
+                    )
+                else:
+                    # Fresh install — run the full guided wizard.
+                    run_onboarding(runtime)
 
                 _startup_mark("REPL handoff (prompt visible)")
                 from velune.kernel.entrypoint import launch

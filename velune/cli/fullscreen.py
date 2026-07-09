@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from prompt_toolkit.application import Application
@@ -14,7 +15,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
+from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.history import History
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import FloatContainer, Layout
@@ -29,17 +30,43 @@ from rich.console import Console
 
 from velune.cli import design
 from velune.cli.banner import _LOGO_ART
+from velune.cli.rendering.markdown import CustomMarkdown, MarkdownStreamBuffer
+from velune.cli.rendering.segments_to_pt import render_to_fragments
 from velune.cli.statusbar import render_status_bar
 
+# General-purpose "is there any escape sequence at all" check, used only to
+# decide whether a console line needs the ANSI() parse path in
+# append_console_line(); the actual stripping in _ConsoleSink is more
+# selective (SGR color codes are preserved, not stripped — see below).
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# OSC sequences (hyperlinks, window title) — never meaningful in this pane.
+_OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
+# Full CSI grammar (same as _ANSI_RE) — matches a *complete* sequence so we
+# can decide whether to keep it based on its final byte. A naive
+# "match everything up to a non-'m' char" pattern would backtrack into the
+# middle of a legitimate SGR sequence and truncate it, leaking a stray 'm'.
+_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _strip_non_sgr_csi(text: str) -> str:
+    """Remove CSI sequences that aren't SGR (color/style) — cursor movement,
+    erase-line, show/hide-cursor, etc. prompt_toolkit's ANSI() bridge only
+    reliably handles SGR; these must not reach it."""
+    return _CSI_RE.sub(lambda m: m.group(0) if m.group(0).endswith("m") else "", text)
 _MAX_TRANSCRIPT_LINES = 4000
 _PROMPT_MAX_LINES = 5
+_MARKDOWN_STREAM_THROTTLE_S = 0.08
 
 
 @dataclass
 class _Line:
     text: str
     style: str = "class:conversation"
+    # Pre-rendered (style, text) segments — set when this line carries real
+    # color/formatting (a parsed console line, or a markdown-rendered
+    # streaming line). None means "render `text`/`style` flat," the original
+    # behavior.
+    fragments: list[tuple[str, str]] | None = field(default=None)
 
 
 class _ConsoleSink:
@@ -60,7 +87,18 @@ class _ConsoleSink:
     def write(self, data: str) -> int:
         if not data:
             return 0
-        self._pending += _ANSI_RE.sub("", data).replace("\r", "")
+        # Best-effort width sync: Rich's Console doesn't know about this
+        # app's own terminal-size polling, so a stale console.size would
+        # pre-wrap panels/tables to the wrong width before we ever see them.
+        # This can only correct the *next* print (Rich buffers segments
+        # before flushing to file.write), not the one currently in flight.
+        try:
+            self._ui.console.size = (self._ui._width(), self._ui._height())
+        except Exception:
+            pass
+        data = _OSC_RE.sub("", data)
+        data = _strip_non_sgr_csi(data)
+        self._pending += data.replace("\r", "")
         while "\n" in self._pending:
             line, self._pending = self._pending.split("\n", 1)
             self._ui.append_console_line(line.rstrip())
@@ -70,6 +108,35 @@ class _ConsoleSink:
         if self._pending:
             self._ui.append_console_line(self._pending.rstrip())
             self._pending = ""
+
+
+def _build_floats(command_palette: Any | None) -> list[Float]:
+    """The CompletionsMenu float (model-id/@@symbol completion), plus the
+    command palette's float when one is supplied.
+
+    The palette (`command_palette.CommandPalette`) already has its key
+    bindings wired by the caller (`add_bindings`) and its own
+    `ConditionalContainer` that only renders while a bare `/command` is being
+    typed (`container()`, self-gated on `is_active()`) — the only piece that
+    was missing was composing that container into this Application's actual
+    layout, which `.attach()` does for a `PromptSession` but has no equivalent
+    for a hand-built `Application` like this one. Same Float geometry
+    `.attach()` uses internally.
+    """
+    floats = [Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=12))]
+    if command_palette is not None:
+        floats.append(
+            Float(
+                content=command_palette.container(),
+                left=2,
+                right=2,
+                top=1,
+                height=18,
+                allow_cover_cursor=True,
+                z_index=20,
+            )
+        )
+    return floats
 
 
 class FullscreenREPLUI:
@@ -86,6 +153,9 @@ class FullscreenREPLUI:
         key_bindings: KeyBindings,
         on_interrupt: Any,
         on_status_render: Any | None = None,
+        command_palette: Any | None = None,
+        input: Any | None = None,
+        output: Any | None = None,
     ) -> None:
         self._status_state = status_state
         self._on_status_render = on_status_render
@@ -93,6 +163,7 @@ class FullscreenREPLUI:
         self._lines: list[_Line] = []
         self._stream_start: int | None = None
         self._stream_text = ""
+        self._last_stream_render: float = 0.0
         self._running = False
         self._app: Application[None] | None = None
         self._logo_offset: float = 0.0
@@ -140,8 +211,16 @@ class FullscreenREPLUI:
 
         self.console = Console(
             file=_ConsoleSink(self),
-            force_terminal=False,
-            color_system=None,
+            force_terminal=True,
+            color_system="truecolor",
+            # `force_interactive=False` keeps Live/console.status() from
+            # emitting cursor-repositioning redraw sequences (this pane isn't
+            # a real terminal, so "redraw in place" is meaningless here) —
+            # without also losing color, which force_terminal=False used to
+            # cost us: every Panel/Table/spinner rendered anywhere in the app
+            # was rendering as flat, colorless text the instant it passed
+            # through this console during a live session.
+            force_interactive=False,
             highlight=False,
             soft_wrap=True,
         )
@@ -162,6 +241,8 @@ class FullscreenREPLUI:
                 "prompt": f"bg:{design.BACKGROUND} {design.WHITE}",
                 "prompt.prefix": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
                 "prompt.placeholder": f"bg:{design.BACKGROUND} {design.SECONDARY}",
+                "prompt.border": f"bg:{design.BACKGROUND} {design.FAINT}",
+                "prompt.hint": f"bg:{design.BACKGROUND} {design.FAINT} italic",
             }
         )
 
@@ -208,7 +289,7 @@ class FullscreenREPLUI:
                         always_hide_cursor=True,
                     ),
                     Window(
-                        FormattedTextControl(self._render_separator),
+                        FormattedTextControl(self._render_prompt_top_border),
                         height=1,
                         always_hide_cursor=True,
                     ),
@@ -234,15 +315,16 @@ class FullscreenREPLUI:
                         height=Dimension(min=1, max=_PROMPT_MAX_LINES, preferred=1),
                         wrap_lines=True,
                         style="class:prompt",
+                        get_line_prefix=self._prompt_line_prefix,
                     ),
                     Window(
-                        FormattedTextControl(self._render_separator),
+                        FormattedTextControl(self._render_prompt_bottom_border),
                         height=1,
                         always_hide_cursor=True,
                     ),
                 ]
             ),
-            floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=12))],
+            floats=_build_floats(command_palette),
         )
 
         self._app = Application(
@@ -255,6 +337,8 @@ class FullscreenREPLUI:
             min_redraw_interval=0.016,
             max_render_postpone_time=0.01,
             refresh_interval=0.25,
+            input=input,
+            output=output,
         )
 
     async def run(self) -> None:
@@ -318,7 +402,16 @@ class FullscreenREPLUI:
     def append_console_line(self, line: str) -> None:
         if not line and (not self._lines or not self._lines[-1].text):
             return
-        self._lines.append(_Line(line, "class:conversation.system"))
+        if "\x1b" in line:
+            # Parse once, at append time, not on every _render_conversation()
+            # call (which can run many times/sec under min_redraw_interval).
+            plain = _ANSI_RE.sub("", line)
+            fragments = to_formatted_text(ANSI(line))
+            self._lines.append(
+                _Line(plain, "class:conversation.system", fragments=fragments)
+            )
+        else:
+            self._lines.append(_Line(line, "class:conversation.system"))
         self._trim()
         self.invalidate()
 
@@ -357,8 +450,15 @@ class FullscreenREPLUI:
                 self._thinking_task = None
 
         self._stream_text = text
-        style = "class:conversation.assistant" if final else "class:conversation"
-        self._replace_stream_lines(text or "...", style)
+
+        # Throttle the markdown parse + syntax-highlight pass — it's real
+        # work (not a flat string split), so doing it on every raw chunk
+        # would be wasteful. `final` always renders immediately.
+        now = time.perf_counter()
+        if not final and (now - self._last_stream_render) < _MARKDOWN_STREAM_THROTTLE_S:
+            return
+        self._last_stream_render = now
+        self._render_stream_markdown(final=final)
         self.invalidate()
 
     def finish_assistant(self) -> None:
@@ -367,10 +467,41 @@ class FullscreenREPLUI:
             self._thinking_task = None
 
         if self._stream_start is not None:
-            self._replace_stream_lines(self._stream_text, "class:conversation.assistant")
+            self._render_stream_markdown(final=True)
         self._stream_start = None
         self._stream_text = ""
         self.invalidate()
+
+    def _render_stream_markdown(self, *, final: bool) -> None:
+        """Render the in-flight streamed response as real markdown + syntax-
+        highlighted code, using `MarkdownStreamBuffer`'s flicker-safe partial-
+        fence stabilization. Falls back to flat text if rendering fails —
+        streaming must never break because of a markdown-parse edge case.
+        """
+        start = self._stream_start
+        if start is None:
+            return
+        text = self._stream_text or "..."
+        style = "class:conversation.assistant" if final else "class:conversation"
+        try:
+            stabilized = MarkdownStreamBuffer._stabilize(text)
+            line_fragments = render_to_fragments(
+                self.console, CustomMarkdown(stabilized), self._width()
+            )
+        except Exception:
+            self._lines[start:] = []
+            self._append_wrapped(text, style)
+            self._trim()
+            return
+
+        self._lines[start:] = []
+        if not line_fragments:
+            self._lines.append(_Line("", style))
+        else:
+            for frags in line_fragments:
+                plain = "".join(t for _s, t in frags)
+                self._lines.append(_Line(plain, style, fragments=frags))
+        self._trim()
 
     def clear(self) -> None:
         self._lines.clear()
@@ -406,9 +537,31 @@ class FullscreenREPLUI:
             self._on_status_render()
         return render_status_bar(self._status_state)
 
-    def _render_separator(self) -> AnyFormattedText:
+    def _render_prompt_top_border(self) -> AnyFormattedText:
         width = self._width()
-        return FormattedText([("class:separator", "─" * max(1, width))])
+        return FormattedText([("class:prompt.border", "╭" + "─" * max(1, width - 2) + "╮")])
+
+    def _render_prompt_bottom_border(self) -> AnyFormattedText:
+        width = self._width()
+        hint = "Enter send  ·  Shift+Enter newline  ·  / commands"
+        fill = width - 5 - len(hint)
+        if fill >= 1:
+            return FormattedText(
+                [
+                    ("class:prompt.border", "╰─ "),
+                    ("class:prompt.hint", hint),
+                    ("class:prompt.border", " " + "─" * fill + "╯"),
+                ]
+            )
+        return FormattedText([("class:prompt.border", "╰" + "─" * max(1, width - 2) + "╯")])
+
+    def _prompt_line_prefix(self, line_number: int, wrap_count: int) -> AnyFormattedText:
+        # First visual line gets the prompt glyph; wrapped/continuation
+        # lines get matching blank padding so multi-line input stays aligned
+        # inside the border instead of flush against the left edge.
+        if line_number == 0 and wrap_count == 0:
+            return FormattedText([("class:prompt.border", "│ "), ("class:prompt.arrow", "❯ ")])
+        return FormattedText([("class:prompt.border", "│ "), ("", "  ")])
 
     def _render_conversation(self) -> AnyFormattedText:
         if not self._lines and not self._logo_animating:
@@ -420,9 +573,14 @@ class FullscreenREPLUI:
         tail = self._lines[-available:]
         fragments: list[tuple[str, str]] = []
         for idx, line in enumerate(tail):
-            fragments.append((line.style, line.text))
+            if line.fragments is not None:
+                fragments.extend(line.fragments)
+                sep_style = ""
+            else:
+                fragments.append((line.style, line.text))
+                sep_style = line.style
             if idx < len(tail) - 1:
-                fragments.append((line.style, "\n"))
+                fragments.append((sep_style, "\n"))
         return FormattedText(fragments)
 
     def _render_logo(self) -> AnyFormattedText:

@@ -128,6 +128,7 @@ class RepositoryIndexer:
         all_symbols: list[RepositorySymbol] = []
         new_cache: dict[str, dict] = {}
         excluded_paths: list[str] = []
+        sanitized_paths: list[str] = []
 
         # Scan code files
         code_files = self.scanner.scan_code_files()
@@ -177,12 +178,18 @@ class RepositoryIndexer:
                 file_metadata = {}
                 scan_result = self.firewall.scan_file_for_injection(str(file_path), code)
                 if not scan_result["is_safe"]:
-                    logger.warning(
-                        "SECURITY: Potential prompt injection in %s — using sanitized version",
+                    # DEBUG per-file, not WARNING: scanning Velune's own
+                    # source (e.g. the firewall's own pattern definitions)
+                    # trips this near-100% of the time as a false positive.
+                    # A single summarized count is logged after the loop
+                    # instead of flooding stdout per file during indexing.
+                    logger.debug(
+                        "Potential prompt injection in %s — using sanitized version",
                         rel_path,
                     )
                     code = scan_result["neutralized_content"]
                     file_metadata["injection_risk"] = True
+                    sanitized_paths.append(rel_path)
 
                 symbols, edges = self.parser.parse(file_path, code)
 
@@ -221,12 +228,20 @@ class RepositoryIndexer:
         except Exception:
             pass
 
+        if sanitized_paths:
+            logger.warning(
+                "%d file(s) sanitized during indexing due to suspected prompt"
+                " injection patterns — run with --verbose for the file list.",
+                len(sanitized_paths),
+            )
+
         # Assemble summary
         summary = {
             "total_files": len(files),
             "total_symbols": len(all_symbols),
             "languages": self._compile_language_summary(files),
             "excluded_paths": excluded_paths,
+            "sanitized_paths": sanitized_paths,
         }
 
         return RepositorySnapshot(

@@ -30,7 +30,12 @@ def _footer_window(widget: Widget | TextInputWidget) -> Window:
     return Window(FormattedTextControl(_render), dont_extend_height=True)
 
 
-async def run_standalone(widget: Widget | TextInputWidget) -> Any:
+async def run_standalone(
+    widget: Widget | TextInputWidget,
+    *,
+    input: Any | None = None,
+    output: Any | None = None,
+) -> Any:
     """Run *widget* full-screen-off in its own ``Application``.
 
     Returns whatever the widget submits, or the ``BACK``/``CANCEL`` sentinel
@@ -38,6 +43,11 @@ async def run_standalone(widget: Widget | TextInputWidget) -> Any:
     ``on_back`` was left at its no-op default — callers that want "no back
     target" simply don't override it, and Esc still resolves to ``BACK`` so
     the caller can decide whether that's meaningful.
+
+    ``input``/``output`` are forwarded to ``Application`` as-is (``None``
+    keeps prompt_toolkit's own defaults) — the seam exists so tests can drive
+    a real widget through synthetic key events via
+    ``prompt_toolkit.input.create_pipe_input`` instead of mocking the widget.
     """
     result: dict[str, Any] = {}
 
@@ -75,6 +85,8 @@ async def run_standalone(widget: Widget | TextInputWidget) -> Any:
         key_bindings=kb,
         full_screen=False,
         mouse_support=True,
+        input=input,
+        output=output,
     )
     await app.run_async()
     return result.get("value", CANCEL)

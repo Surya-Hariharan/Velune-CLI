@@ -32,12 +32,13 @@ PROVIDER_COSTS: dict[str, dict[str, float]] = {
         "gemini-2.0-flash-thinking-exp": 0.0,
     },
     "groq": {
-        # All free tier
+        # All free tier. mixtral-8x7b-32768, gemma2-9b-it, and
+        # llama-3.2-11b-vision-preview were decommissioned by Groq (2026-07)
+        # and removed — see providers/adapters/groq.py.
         "llama-3.3-70b-versatile": 0.0,
         "llama-3.1-8b-instant": 0.0,
-        "mixtral-8x7b-32768": 0.0,
-        "gemma2-9b-it": 0.0,
-        "llama-3.2-11b-vision-preview": 0.0,
+        "openai/gpt-oss-120b": 0.0,
+        "qwen/qwen3-32b": 0.0,
     },
     "together": {
         "meta-llama/Llama-3.3-70B-Instruct-Turbo": 0.00088,

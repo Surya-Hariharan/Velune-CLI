@@ -56,11 +56,13 @@ PROVIDER_COSTS: dict[str, dict[str, dict[str, float]]] = {
         "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
     },
     "groq": {
-        # Groq free tier — $0 for public models
+        # Groq free tier — $0 for public models. mixtral-8x7b-32768,
+        # gemma2-9b-it, and llama-3.2-11b-vision-preview were decommissioned
+        # by Groq (2026-07) and removed — see providers/adapters/groq.py.
         "llama-3.3-70b-versatile": {"input": 0.0, "output": 0.0},
         "llama-3.1-8b-instant": {"input": 0.0, "output": 0.0},
-        "mixtral-8x7b-32768": {"input": 0.0, "output": 0.0},
-        "gemma2-9b-it": {"input": 0.0, "output": 0.0},
+        "openai/gpt-oss-120b": {"input": 0.0, "output": 0.0},
+        "qwen/qwen3-32b": {"input": 0.0, "output": 0.0},
     },
     "xai": {
         "grok-2": {"input": 2.0, "output": 10.0},

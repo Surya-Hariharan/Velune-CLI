@@ -155,12 +155,17 @@ async def _ask_command_async(
             )
         )
     else:
-        # 6. Render reports
-        display.render_step_header("Council Reviewer")
-        display.render_reviewer_report(council_res["reviewer_report"])
+        # 6. Render reports. Reviewer/Challenger are skipped entirely (not
+        # just their content) below tier 3 — CouncilOrchestrator's early
+        # return for those tiers leaves both as None by design, and showing
+        # a "deliberating..." header for a step that never ran is misleading.
+        if council_res["reviewer_report"] is not None:
+            display.render_step_header("Council Reviewer")
+            display.render_reviewer_report(council_res["reviewer_report"])
 
-        display.render_step_header("Council Challenger")
-        display.render_challenger_report(council_res["challenger_report"])
+        if council_res["challenger_report"] is not None:
+            display.render_step_header("Council Challenger")
+            display.render_challenger_report(council_res["challenger_report"])
 
         display.render_step_header("Arbitration Engine")
         display.render_arbitration_result(arbitration)

@@ -229,6 +229,14 @@ class _ToolActivityUI:
 
     def __init__(self, repl: VeluneREPL) -> None:
         self._console = repl.console
+        # When a fullscreen UI owns the terminal, `Live`/`console.status()`
+        # render nothing visible at all (force_interactive=False suppresses
+        # their redraw output) — route streaming/status through the
+        # fullscreen UI's own begin_assistant/update_assistant/finish_assistant
+        # instead, which is also how it gets the same markdown+syntax-
+        # highlighted rendering as regular chat streaming, for free.
+        self._fullscreen_ui = getattr(repl, "_fullscreen_ui", None)
+        self._stream_text = ""
         self._status: Any | None = None
         self._live: Any | None = None
         self._stream_buffer: Any | None = None
@@ -241,7 +249,10 @@ class _ToolActivityUI:
         if event == "turn":
             self.last_turn_streamed = False
             label = "Thinking…" if data.get("turn", 1) == 1 else "Continuing…"
-            self._start_status(f"[dim]{label}[/dim]")
+            if self._fullscreen_ui is not None:
+                self._fullscreen_ui.begin_assistant(label)
+            else:
+                self._start_status(f"[dim]{label}[/dim]")
         elif event == "content_delta":
             self._render_delta(data.get("text", ""))
         elif event == "turn_end":
@@ -268,9 +279,15 @@ class _ToolActivityUI:
     def _render_delta(self, text: str) -> None:
         if not text:
             return
+        self.last_turn_streamed = True
+
+        if self._fullscreen_ui is not None:
+            self._stream_text += text
+            self._fullscreen_ui.update_assistant(self._stream_text)
+            return
+
         import time as _time
 
-        self.last_turn_streamed = True
         if self._live is None:
             self.pause_status()
             try:
@@ -301,6 +318,12 @@ class _ToolActivityUI:
             self._last_live_update = now
 
     def _finish_live(self) -> None:
+        if self._fullscreen_ui is not None:
+            if self._stream_text:
+                self._fullscreen_ui.update_assistant(self._stream_text, final=True)
+            self._fullscreen_ui.finish_assistant()
+            self._stream_text = ""
+            return
         if self._live is not None:
             try:
                 if self._stream_buffer is not None:

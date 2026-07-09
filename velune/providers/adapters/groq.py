@@ -51,10 +51,31 @@ GROQ_MODELS: list[ModelDescriptor] = [
         metadata={"free_tier": True},
     ),
     ModelDescriptor(
-        model_id="mixtral-8x7b-32768",
+        model_id="openai/gpt-oss-120b",
         provider_id="groq",
-        display_name="Mixtral 8x7B",
-        context_length=32768,
+        display_name="GPT-OSS 120B",
+        context_length=131072,
+        is_local=False,
+        free_tier=True,
+        cost_per_1k_tokens=0.0,
+        speed_tier="fast",
+        capabilities=ModelCapabilityProfile(
+            coding=CapabilityLevel.ADVANCED,
+            reasoning=CapabilityLevel.ADVANCED,
+            planning=CapabilityLevel.ADVANCED,
+            summarization=CapabilityLevel.ADVANCED,
+            instruction_following=CapabilityLevel.ADVANCED,
+            tool_use=CapabilityLevel.ADVANCED,
+            long_context=CapabilityLevel.ADVANCED,
+        ),
+        tags=["cloud", "groq", "free", "gpt-oss"],
+        metadata={"free_tier": True},
+    ),
+    ModelDescriptor(
+        model_id="qwen/qwen3-32b",
+        provider_id="groq",
+        display_name="Qwen3 32B",
+        context_length=131072,
         is_local=False,
         free_tier=True,
         cost_per_1k_tokens=0.0,
@@ -66,54 +87,21 @@ GROQ_MODELS: list[ModelDescriptor] = [
             summarization=CapabilityLevel.ADVANCED,
             instruction_following=CapabilityLevel.ADVANCED,
             tool_use=CapabilityLevel.INTERMEDIATE,
-            long_context=CapabilityLevel.INTERMEDIATE,
+            long_context=CapabilityLevel.ADVANCED,
         ),
-        tags=["cloud", "groq", "free", "mixtral"],
-        metadata={"free_tier": True},
-    ),
-    ModelDescriptor(
-        model_id="gemma2-9b-it",
-        provider_id="groq",
-        display_name="Gemma 2 9B Instruct",
-        context_length=8192,
-        is_local=False,
-        free_tier=True,
-        cost_per_1k_tokens=0.0,
-        speed_tier="fast",
-        capabilities=ModelCapabilityProfile(
-            coding=CapabilityLevel.INTERMEDIATE,
-            reasoning=CapabilityLevel.INTERMEDIATE,
-            planning=CapabilityLevel.BASIC,
-            summarization=CapabilityLevel.ADVANCED,
-            instruction_following=CapabilityLevel.ADVANCED,
-            tool_use=CapabilityLevel.BASIC,
-            long_context=CapabilityLevel.BASIC,
-        ),
-        tags=["cloud", "groq", "free", "gemma"],
-        metadata={"free_tier": True},
-    ),
-    ModelDescriptor(
-        model_id="llama-3.2-11b-vision-preview",
-        provider_id="groq",
-        display_name="Llama 3.2 11B Vision",
-        context_length=8192,
-        is_local=False,
-        free_tier=True,
-        cost_per_1k_tokens=0.0,
-        speed_tier="fast",
-        capabilities=ModelCapabilityProfile(
-            coding=CapabilityLevel.INTERMEDIATE,
-            reasoning=CapabilityLevel.INTERMEDIATE,
-            planning=CapabilityLevel.BASIC,
-            summarization=CapabilityLevel.INTERMEDIATE,
-            instruction_following=CapabilityLevel.ADVANCED,
-            tool_use=CapabilityLevel.BASIC,
-            long_context=CapabilityLevel.BASIC,
-        ),
-        tags=["cloud", "groq", "free", "llama", "vision"],
+        tags=["cloud", "groq", "free", "qwen"],
         metadata={"free_tier": True},
     ),
 ]
+# Note on this list: `mixtral-8x7b-32768`, `gemma2-9b-it`, and
+# `llama-3.2-11b-vision-preview` were removed 2026-07 — Groq decommissioned
+# all three (confirmed via a live GET /v1/models call; requests to them now
+# 400). A stale entry here isn't cosmetic: the Council role-mapper scores
+# roles against this static list and will happily assign a role to a model
+# that no longer exists, crashing that agent's turn. list_models() is static
+# rather than a live query because the curated CapabilityProfile scores
+# below aren't available from Groq's API — but that means this list needs a
+# periodic manual check against a real `GET /v1/models` call.
 
 
 class GroqProvider(OpenAIProvider):

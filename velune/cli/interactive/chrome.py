@@ -64,7 +64,14 @@ class WizardCancelled(Exception):
 class WizardController:
     """Owns the single full-screen ``Application`` for a wizard run."""
 
-    def __init__(self, brand: str, stages: list[StageInfo]) -> None:
+    def __init__(
+        self,
+        brand: str,
+        stages: list[StageInfo],
+        *,
+        input: Any | None = None,
+        output: Any | None = None,
+    ) -> None:
         self.brand = brand
         self.stages = stages
         self.completed: set[str] = set()
@@ -75,6 +82,10 @@ class WizardController:
         self._transient_frame: StyleAndTextTuples | None = None
         self._app: Application | None = None
         self._cancel_event = asyncio.Event()
+        # None keeps prompt_toolkit's own defaults; tests inject a pipe input
+        # + DummyOutput to drive real key events without a real terminal.
+        self._input = input
+        self._output = output
 
     # -- public: called from stage-authoring code --------------------------
 
@@ -208,13 +219,14 @@ class WizardController:
             )
 
         def _get_key_bindings() -> KeyBindings:
-            on_back = None
-            if self._widget is not None and not isinstance(self._widget, TextInputWidget):
-                on_back = self._widget.on_back
-            common = common_bindings(on_cancel=self._cancel_event.set, on_back=on_back)
-            if self._widget is not None and not isinstance(self._widget, TextInputWidget):
-                return merge_key_bindings([self._widget.key_bindings(), common])
-            return common
+            if self._widget is None:
+                return common_bindings(on_cancel=self._cancel_event.set, on_back=None)
+            common = common_bindings(
+                on_cancel=self._cancel_event.set, on_back=self._widget.on_back
+            )
+            if isinstance(self._widget, TextInputWidget):
+                return common
+            return merge_key_bindings([self._widget.key_bindings(), common])
 
         body = DynamicContainer(_get_container)
         body_kb = DynamicKeyBindings(_get_key_bindings)
@@ -259,6 +271,8 @@ class WizardController:
             full_screen=True,
             mouse_support=True,
             terminal_size_polling_interval=0.5,
+            input=self._input,
+            output=self._output,
         )
         return self._app
 

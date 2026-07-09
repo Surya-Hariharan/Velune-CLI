@@ -26,18 +26,19 @@ class CouncilDisplayView:
     def render_header(self, task: str) -> None:
         """Display an eye-catching header for the council run."""
         self.console.print()
+        # Parse the static markup labels, then append `task` as literal
+        # styled text (not through markup parsing) — task is user-controlled
+        # and may itself contain '[' characters that would otherwise be
+        # misread as markup tags.
+        body = Text.from_markup(
+            f"[bold {design.ACCENT}]VELUNE COGNITIVE OS[/bold {design.ACCENT}]"
+            f" — [{design.INFO}]Reasoning Council Active[/{design.INFO}]\n"
+            f"[{design.MUTED}]Objective:[/{design.MUTED}] "
+        )
+        body.append(task, style="italic white")
         self.console.print(
             Panel(
-                Text.assemble(
-                    (
-                        f"[bold {design.ACCENT}]VELUNE COGNITIVE OS[/bold {design.ACCENT}]"
-                        f" — [{design.INFO}]Reasoning Council Active[/{design.INFO}]\n"
-                    ),
-                    (
-                        f"[{design.MUTED}]Objective:[/{design.MUTED}] ",
-                        f"[italic white]{task}[/italic white]",
-                    ),
-                ),
+                body,
                 border_style=design.ACCENT,
                 box=ROUNDED,
                 title="[bold white]Cognitive Deliberation[/bold white]",
@@ -118,6 +119,15 @@ class CouncilDisplayView:
 
     def render_reviewer_report(self, report: Any) -> None:
         """Render the Reviewer's static audit, showing passed status and critical issues."""
+        if report is None:
+            # A legitimate result, not an error: lower council tiers skip the
+            # Reviewer phase entirely (see CouncilOrchestrator's tier<3 early
+            # return), and a Reviewer deliberation that fails outright (e.g. a
+            # decommissioned model) can also surface as None from the runner.
+            self.console.print(
+                f"[{design.MUTED}]Reviewer did not run for this tier/request.[/{design.MUTED}]"
+            )
+            return
         if isinstance(report, dict):
             passed = report.get("passed", True)
             confidence = report.get("confidence_rating", 0.8)
@@ -161,6 +171,13 @@ class CouncilDisplayView:
 
     def render_challenger_report(self, report: Any) -> None:
         """Render the Challenger's adversarial audit and failure vector probes."""
+        if report is None:
+            # See render_reviewer_report — None is a legitimate "did not run
+            # for this tier/request" state, not necessarily an error.
+            self.console.print(
+                f"[{design.MUTED}]Challenger did not run for this tier/request.[/{design.MUTED}]"
+            )
+            return
         if isinstance(report, dict):
             severity = report.get("severity_rating", 0.0)
             vectors = report.get("failure_vectors", [])

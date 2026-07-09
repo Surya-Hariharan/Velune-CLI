@@ -26,6 +26,7 @@ from __future__ import annotations
 import typer
 
 from velune.cli.context import CLIContext
+from velune.cli.interactive.tty import is_interactive_tty
 from velune.cli.onboarding import _STAGE_NAMES, load_stage_progress, run_onboarding
 
 
@@ -49,6 +50,13 @@ def onboard_command(
     cli_ctx: CLIContext = ctx.obj
     if not isinstance(cli_ctx, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
+
+    if not is_interactive_tty():
+        typer.echo(
+            "velune onboard needs an interactive terminal. Set provider API keys via"
+            " environment variables instead (see `velune doctor` for what's missing)."
+        )
+        raise typer.Exit(1)
 
     runtime = cli_ctx.runtime
 

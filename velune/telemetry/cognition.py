@@ -260,7 +260,13 @@ class CognitivePerformanceAnalytics:
             pattern,
         )
         self.sqlite_manager.execute_write(query, params)
-        logger.warning(
+        # DEBUG, not WARNING: the event is durably recorded in the
+        # injection_attempts table above regardless of log level. Firing at
+        # WARNING here floods stdout during ordinary repository indexing —
+        # scanning Velune's own firewall/prompt source files trips this
+        # near-100% of the time, since those files contain the detection
+        # patterns themselves as string literals.
+        logger.debug(
             "Recorded prompt injection attempt from source '%s' matching pattern: %s",
             source,
             pattern,

@@ -153,7 +153,13 @@ class CognitiveFirewall:
                 padding = (4 - len(chunk) % 4) % 4
                 decoded = base64.b64decode(chunk + "=" * padding).decode("utf-8", errors="ignore")
                 if decoded and not self.scan_text(decoded):
-                    logger.warning("Base64-encoded prompt injection detected in workspace content")
+                    # DEBUG, not WARNING: the event is durably recorded via
+                    # record_injection_attempt() below regardless of log
+                    # level. This scan runs during ordinary repository
+                    # indexing too, where it floods stdout with near-100%
+                    # self-referential false positives (Velune's own
+                    # firewall/prompt source matching its own patterns).
+                    logger.debug("Base64-encoded prompt injection detected in workspace content")
                     try:
                         from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
@@ -181,7 +187,10 @@ class CognitiveFirewall:
         for check_text in [text, normalized, homoglyph_normalized, ascii_folded]:
             for pattern in self.injection_patterns:
                 if re.search(pattern, check_text):
-                    logger.warning(
+                    # DEBUG, not WARNING — see the comment on the base64
+                    # check above: this fires near-100% as a false positive
+                    # during ordinary repository indexing.
+                    logger.debug(
                         "Potential prompt injection attempt blocked by Cognitive Firewall: %s",
                         pattern,
                     )
@@ -213,7 +222,8 @@ class CognitiveFirewall:
 
         for pattern in multi_turn_patterns:
             if re.search(pattern, combined):
-                logger.warning("Multi-turn split prompt injection attempt blocked: %s", pattern)
+                # DEBUG, not WARNING — see the comment in scan_text() above.
+                logger.debug("Multi-turn split prompt injection attempt blocked: %s", pattern)
                 try:
                     from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
@@ -332,7 +342,10 @@ class CognitiveFirewall:
                 for check_s in (s, normalized_s, homoglyph_s):
                     for pattern in MULTILINE_INJECTION_PATTERNS:
                         if re.search(pattern, check_s):
-                            logger.warning(
+                            # DEBUG, not WARNING — see the comment in
+                            # scan_text() above; indexer.py logs one
+                            # summarized WARNING per index() run instead.
+                            logger.debug(
                                 "SECURITY: Multi-line injection detected in %s: %s",
                                 file_path,
                                 pattern[:50],
