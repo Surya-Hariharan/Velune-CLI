@@ -8,6 +8,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-07-10
+
+### Added
+
+- **`/resource configure <postgres|mysql|supabase>`** — the missing piece of
+  0.9.5's Resource Connector Framework: an interactive, encrypted credential
+  prompt (pre-filled from `/resource discover` hints where available) that
+  closes the gap where those three connectors were registered but had no way
+  to ever receive credentials, so `/resource connect` always failed. Docker
+  needs no configuration and continues to connect directly.
+- Repository cognition actually runs end-to-end: `RepositoryIntelligenceEngine`
+  and the `KnowledgeGraph` are now constructed and initialized (previously
+  registered in a `module.py` no bootstrap path imported), and the workspace
+  auto-index + "Repository Detected" banner fire on REPL entry.
+- CLI onboarding restructured into a `velune/cli/onboarding/` package
+  (`stages.py` / `logic.py`), with a dedicated `velune onboard` entry point
+  that can resume an interrupted wizard run.
+- Destructive slash commands are gated by a new `SlashCommand.permissions`
+  "confirm" flag; `/memory clear` now asks before wiping memory.
+- Command palette surfaces recently-used commands.
+- Telemetry tracking for cognition, tokens, and usage; 8 new UI/widget/indexing
+  integration tests.
+
+### ![Fixed](https://img.shields.io/badge/-Fixed-informational?style=flat-square)
+
+- **Model picker showed unconfigured cloud providers as "installed."** Five
+  call sites (`/model`, `/model discover`, `/councilmodel`, mode-based
+  auto-selection) checked provider availability with
+  `provider_registry.get(id) is not None`, which is always true for every
+  built-in cloud provider regardless of whether an API key exists. Switched
+  to the registry's real `check_provider_available()` (an API-key check),
+  while exempting local models so Ollama isn't hidden by the same fix.
+- Plain chat turns silently skipped semantic context retrieval — the REPL
+  called a `HybridRetriever` method that didn't exist, and the failure was
+  swallowed by a bare `except`.
+- Plugin slash commands raised a silently-logged `ModuleNotFoundError` on
+  every invocation (wrong import path).
+- `VectorRetriever` derived Qdrant point IDs from Python's salted `hash()`,
+  so re-indexing the same file could never overwrite its own prior vector;
+  now a stable id, with a real `delete_by_ids()` wired into file removal.
+- Filesystem scanner had no symlink-cycle guard.
+- An `asyncio.run()` regression in CLI onboarding bypassed the single
+  sanctioned `run_async()` entry point (caught by CI's own P0-1 regression
+  guard, which was otherwise green on a stale cached run).
+- Assorted CI-only failures now caught pre-merge: import-sort/`UP035` lint
+  violations, 9 files with formatting drift the Lint job's fail-fast
+  ordering had never actually reached, and a pyright `reportReturnType`
+  error in the wizard chrome's key-binding merge.
+- Deleted ~1500 lines of fully dead parallel retrieval/orchestration
+  infrastructure with zero callers and zero tests.
+
 ## [0.9.5] - 2026-07-08
 
 ### Added
