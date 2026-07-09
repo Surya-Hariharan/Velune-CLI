@@ -8,6 +8,7 @@ cheap to test without a terminal.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -34,19 +35,35 @@ if TYPE_CHECKING:
     from prompt_toolkit.shortcuts import PromptSession
 
 
+_RECENT_GROUP = "Recent"
+_MAX_RECENT_SHOWN = 5
+
+
 @dataclass(frozen=True, slots=True)
 class PaletteMatch:
     command: SlashCommand
     score: int
+    # Display/sort group. Usually command.category, but the browsing
+    # (empty-query) view breaks recently-used commands out into their own
+    # "Recent" group at the top — see CommandPaletteModel.matches().
+    group: str
 
 
 class CommandPaletteModel:
     """Fuzzy command search, grouping, and keyboard selection state."""
 
-    def __init__(self, commands: list[SlashCommand]) -> None:
+    def __init__(
+        self,
+        commands: list[SlashCommand],
+        recency_source: Callable[[], list[str]] | None = None,
+    ) -> None:
         self.commands: list[SlashCommand] = []
         self.selected_index = 0
         self._last_query: str | None = None
+        # Optional callable returning most-recent-first command names, shared
+        # with SlashCompleter (velune.cli.autocomplete) so Tab-completion and
+        # the palette agree on "recently used" from one source of truth.
+        self._recency_source = recency_source
         self.set_commands(commands)
 
     def set_commands(self, commands: list[SlashCommand]) -> None:
@@ -85,40 +102,65 @@ class CommandPaletteModel:
         )
         return max(name_score, alias_score, term_score, detail_score)
 
+    def _recent_names(self) -> list[str]:
+        if self._recency_source is None:
+            return []
+        try:
+            return self._recency_source()[:_MAX_RECENT_SHOWN]
+        except Exception:
+            return []
+
     def matches(self, query: str) -> list[PaletteMatch]:
         if query != self._last_query:
             self.selected_index = 0
             self._last_query = query
 
-        scored = [
-            PaletteMatch(command=command, score=self._field_score(query, command))
-            for command in self.commands
-        ]
-        scored = [match for match in scored if match.score > 0]
-
         category_rank = {name: index for index, name in enumerate(CATEGORY_ORDER)}
+
         if not query:
-            scored.sort(
+            # Browsing view: pull recently-used commands into their own group
+            # at the top (recency order), then the rest grouped by category
+            # as before. A command appears in exactly one group.
+            recent_names = self._recent_names()
+            recent_rank = {name: i for i, name in enumerate(recent_names)}
+            by_name = {cmd.name: cmd for cmd in self.commands}
+
+            recent_matches = [
+                PaletteMatch(command=by_name[name], score=1, group=_RECENT_GROUP)
+                for name in recent_names
+                if name in by_name
+            ]
+            rest_matches = [
+                PaletteMatch(command=cmd, score=1, group=cmd.category)
+                for cmd in self.commands
+                if cmd.name not in recent_rank
+            ]
+            rest_matches.sort(
                 key=lambda match: (
-                    category_rank.get(match.command.category, len(CATEGORY_ORDER)),
-                    match.command.category,
+                    category_rank.get(match.group, len(CATEGORY_ORDER)),
+                    match.group,
                     match.command.name,
                 )
             )
+            scored = recent_matches + rest_matches
         else:
+            scored = [
+                PaletteMatch(command=command, score=self._field_score(query, command), group=command.category)
+                for command in self.commands
+            ]
+            scored = [match for match in scored if match.score > 0]
+
             # Keep results grouped while ordering the groups themselves by
             # their strongest match. This preserves scanning structure without
             # hiding the most relevant result below a fixed category order.
             group_score: dict[str, int] = {}
             for match in scored:
-                group_score[match.command.category] = max(
-                    group_score.get(match.command.category, 0), match.score
-                )
+                group_score[match.group] = max(group_score.get(match.group, 0), match.score)
             scored.sort(
                 key=lambda match: (
-                    -group_score[match.command.category],
-                    category_rank.get(match.command.category, len(CATEGORY_ORDER)),
-                    match.command.category,
+                    -group_score[match.group],
+                    category_rank.get(match.group, len(CATEGORY_ORDER)),
+                    match.group,
                     -match.score,
                     match.command.name,
                 )
@@ -145,8 +187,12 @@ class CommandPaletteModel:
 class CommandPalette:
     """prompt_toolkit renderer and key bindings for :class:`CommandPaletteModel`."""
 
-    def __init__(self, commands: list[SlashCommand]) -> None:
-        self.model = CommandPaletteModel(commands)
+    def __init__(
+        self,
+        commands: list[SlashCommand],
+        recency_source: Callable[[], list[str]] | None = None,
+    ) -> None:
+        self.model = CommandPaletteModel(commands, recency_source=recency_source)
         self._dismissed_text: str | None = None
 
     def set_commands(self, commands: list[SlashCommand]) -> None:
@@ -194,15 +240,15 @@ class CommandPalette:
         limit = 9
         start = self._window_start(count, self.model.selected_index, limit)
         visible = matches[start : start + limit]
-        previous_category: str | None = None
+        previous_group: str | None = None
         for offset, match in enumerate(visible):
             index = start + offset
             command = match.command
-            if command.category != previous_category:
-                if previous_category is not None:
+            if match.group != previous_group:
+                if previous_group is not None:
                     lines.append(("", "\n"))
-                lines.append(("class:palette.group", f"  {command.category.upper()}\n"))
-                previous_category = command.category
+                lines.append(("class:palette.group", f"  {match.group.upper()}\n"))
+                previous_group = match.group
             selected = index == self.model.selected_index
             marker = ">" if selected else " "
             style = "class:palette.selected" if selected else "class:palette.command"

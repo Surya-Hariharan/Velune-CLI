@@ -1,6 +1,5 @@
 """Production orchestration subsystem for Velune."""
 
-from velune.orchestration.engine import ContextOrchestrationEngine
 from velune.orchestration.schemas import (
     ExecutionStatus,
     OrchestrationRequest,
@@ -9,8 +8,6 @@ from velune.orchestration.schemas import (
 )
 
 __all__ = [
-    # Engine
-    "ContextOrchestrationEngine",
     # Schemas
     "ExecutionStatus",
     "OrchestrationRequest",

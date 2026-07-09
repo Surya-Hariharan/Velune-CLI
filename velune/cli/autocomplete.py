@@ -174,6 +174,11 @@ class SlashCompleter(Completer):
             self._recent.remove(command_name)
         self._recent.appendleft(command_name)
 
+    def recent_commands(self) -> list[str]:
+        """Most-recent-first list of executed command names (shared with the
+        command palette so both surfaces agree on "recently used")."""
+        return list(self._recent)
+
     def set_model_ids(self, model_ids: list[str]) -> None:
         self._model_ids = list(model_ids)
 

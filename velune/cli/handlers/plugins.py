@@ -124,7 +124,7 @@ async def cmd_plugin(repl: VeluneREPL, args: str) -> None:
 
 def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
     """Inject plugin slash commands into the live REPL registry."""
-    from velune.cli.slash_registry import SlashCommand
+    from velune.cli.slash_commands import SlashCommand
 
     for plugin in plugins:
         for cmd in plugin.commands:
@@ -166,3 +166,27 @@ def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
         repl._completer.set_commands(entries)
     if repl._command_palette is not None:
         repl._command_palette.set_commands(repl._registry.all_unique())
+
+
+async def load_and_register_plugins(repl: VeluneREPL) -> None:
+    """Load plugins and wire their commands/hooks/MCP servers into the REPL.
+
+    Called once from ``VeluneREPL.run()`` at startup. A failure here (a bad
+    plugin, a broken import) must never be fatal to the session, but it also
+    must never be invisible: it's logged at WARNING (the app's default log
+    threshold) and printed to the console, not swallowed at DEBUG.
+    """
+    try:
+        new_plugins = repl._plugin_manager.load()
+        if new_plugins:
+            register_plugin_commands(repl, new_plugins)
+            repl._plugin_manager.wire_hooks(repl._hook_dispatcher)
+            repl._plugin_manager.wire_mcp(repl._mcp_registry)
+    except Exception as exc:
+        from velune.cli import design
+
+        _log.warning("Plugin load error (non-fatal): %s", exc)
+        repl.console.print(
+            f"[{design.WARN}]Plugin load failed:[/{design.WARN}] {exc}  "
+            f"[{design.MUTED}](plugins disabled for this session; run /plugin reload to retry)[/{design.MUTED}]"
+        )

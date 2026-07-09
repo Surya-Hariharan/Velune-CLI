@@ -27,6 +27,14 @@ class SlashCommand:
     examples: tuple[str, ...] = ()
     search_terms: tuple[str, ...] = ()
     shortcut: str | None = None
+    # Free-form permission tags gating dispatch (see
+    # VeluneREPL._handle_slash_command). Only "confirm" is currently
+    # interpreted — it asks the user (honoring --yes/auto-accept) before the
+    # handler runs. Use this only for commands that are destructive in their
+    # entirety; a command whose destructive behavior lives behind one
+    # subcommand (e.g. "/memory clear" vs. "/memory stats") should confirm
+    # inline in its handler instead, via velune.cli.handlers.confirm.
+    permissions: tuple[str, ...] = ()
 
 
 class SlashCommandRegistry:

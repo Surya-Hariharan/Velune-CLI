@@ -7,6 +7,7 @@ single Qdrant connection (two clients on the same local path would deadlock the
 store) without forcing that connection to open at startup.
 """
 
+import hashlib
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -21,6 +22,20 @@ def _qmodels() -> Any:
     from qdrant_client.http import models as qmodels
 
     return qmodels
+
+
+def _point_id(doc_id: str) -> int:
+    """Map a document ID to a stable uint64 Qdrant point ID.
+
+    Must be deterministic *across processes*, not just within one: Python's
+    built-in ``hash()`` is salted with a random seed per interpreter start
+    (PYTHONHASHSEED), so the same ``doc_id`` previously mapped to a different
+    point on every run — upserts could never overwrite their own prior point
+    (silently doubling storage) and deletes computed from a re-derived ID
+    could never find the point they meant to remove (silent orphan).
+    """
+    digest = hashlib.sha256(doc_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % (2**63 - 1)
 
 
 class VectorRetriever:
@@ -116,7 +131,7 @@ class VectorRetriever:
                 collection_name=self.collection_name,
                 points=[
                     qmodels.PointStruct(
-                        id=hash(doc.id) % (2**63 - 1),  # Map string ID to uint64
+                        id=_point_id(doc.id),
                         vector=doc.embedding,  # exact length, no padding
                         payload={
                             "doc_id": doc.id,
@@ -129,6 +144,28 @@ class VectorRetriever:
             )
         except Exception as e:
             logger.error("Failed to upsert document: %s", e)
+
+    def delete_by_ids(self, doc_ids: list[str]) -> None:
+        """Removes the points for *doc_ids* (as passed to :meth:`upsert`).
+
+        A no-op, not an error, when the collection doesn't exist yet or a
+        given ID was never upserted — callers (e.g. incremental re-indexing
+        reacting to deleted files) don't need to know whether anything was
+        ever embedded for that document.
+        """
+        if not doc_ids:
+            return
+        client = self.client
+        if client is None:
+            return
+        qmodels = _qmodels()
+        try:
+            client.delete(
+                collection_name=self.collection_name,
+                points_selector=qmodels.PointIdsList(points=[_point_id(d) for d in doc_ids]),
+            )
+        except Exception as e:
+            logger.debug("Vector delete skipped (collection likely absent): %s", e)
 
     def retrieve(
         self, query_vector: list[float], top_k: int = 10, namespace: str | None = None

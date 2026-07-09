@@ -231,7 +231,11 @@ class FilesystemScanner:
     def scan(self, extensions: list[str] | None = None) -> list[Path]:
         """Scan the workspace recursively and return all valid files."""
         files: list[Path] = []
-        self._recursive_scan(self.root_path, extensions, files)
+        # Tracks resolved real directory paths already entered, so a symlink
+        # cycle (or two links into the same real directory) can't recurse
+        # forever or double-count files.
+        visited_dirs: set[Path] = {self.root_path}
+        self._recursive_scan(self.root_path, extensions, files, visited_dirs)
         return files
 
     def scan_code_files(self) -> list[Path]:
@@ -317,15 +321,26 @@ class FilesystemScanner:
         return found
 
     def _recursive_scan(
-        self, current_dir: Path, extensions: list[str] | None, accumulator: list[Path]
+        self,
+        current_dir: Path,
+        extensions: list[str] | None,
+        accumulator: list[Path],
+        visited_dirs: set[Path],
     ) -> None:
-        """Recurse through directories, skipping ignored items."""
+        """Recurse through directories, skipping ignored items and symlink cycles."""
         try:
             for item in sorted(current_dir.iterdir()):  # sorted for deterministic order
                 if self.is_ignored(item):
                     continue
                 if item.is_dir():
-                    self._recursive_scan(item, extensions, accumulator)
+                    try:
+                        real_dir = item.resolve()
+                    except OSError:
+                        continue  # broken symlink
+                    if real_dir in visited_dirs:
+                        continue  # symlink cycle, or already reached via another path
+                    visited_dirs.add(real_dir)
+                    self._recursive_scan(item, extensions, accumulator, visited_dirs)
                 elif item.is_file():
                     if extensions is None or item.suffix.lower() in extensions:
                         accumulator.append(item)

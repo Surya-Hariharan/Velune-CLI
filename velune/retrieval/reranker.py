@@ -1,17 +1,9 @@
 """Cross-encoder style reranking (simple scoring for Phase 2a).
 
-The reranker is shared by two callers that pass differently-shaped objects:
-
-* :class:`~velune.retrieval.pipeline.RetrievalPipeline` passes mutable
-  ``ContextChunk`` dataclasses (``.relevance_score``, ``.content``, ``.source``);
-  downstream orchestration reads the ``.combined_score`` this writes back.
-* :class:`~velune.retrieval.hybrid.HybridRetriever` passes immutable
-  ``RetrievalHit`` pydantic models (``.score``, ``.document.content``).
-
-To serve both without crashing, scoring reads through duck-typed accessors and
-ranking is driven by a per-call score map rather than by mutating the inputs.
-``combined_score`` is still written back when the object accepts it, preserving
-the ``ContextChunk`` contract.
+Scoring reads through duck-typed accessors so it can rerank the
+:class:`~velune.retrieval.hybrid.HybridRetriever` caller's immutable
+``RetrievalHit`` pydantic models (``.score``, ``.document.content``) without
+assuming a single concrete input shape.
 """
 
 from __future__ import annotations

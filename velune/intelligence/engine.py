@@ -104,6 +104,7 @@ class RepositoryIntelligenceEngine:
         knowledge_graph: KnowledgeGraph,
         bus: CognitiveBus,
         *,
+        retrieval: Any | None = None,
         change_poll_interval: float = _DEFAULT_CHANGE_POLL,
         git_poll_interval: float = _DEFAULT_GIT_POLL,
     ) -> None:
@@ -111,6 +112,10 @@ class RepositoryIntelligenceEngine:
         self._cognition = cognition
         self._graph = knowledge_graph
         self._bus = bus
+        # Optional: HybridRetriever, used only to purge vector-store entries for
+        # files removed since the last index (see _handle_graph_patch). None
+        # is a normal, fully-supported state — vector cleanup is then just skipped.
+        self._retrieval = retrieval
         self._change_poll = change_poll_interval
         self._git_poll = git_poll_interval
 
@@ -142,8 +147,16 @@ class RepositoryIntelligenceEngine:
         except Exception as exc:
             logger.warning("KnowledgeGraph init failed (non-fatal): %s", exc)
 
-        # Seed git state before loops start so the first diff is accurate
-        self._git_state = await asyncio.to_thread(self._read_git_state)
+        # Seed git state before loops start so the first diff is accurate. This
+        # engine is registered as a Tier-1 lifecycle component (see
+        # velune/intelligence/module.py); LifecycleCoordinator.startup() aborts
+        # the *entire* app if a registered component's initialize() raises, so
+        # a transient git failure (no git binary, detached worktree, ...) here
+        # must never escape.
+        try:
+            self._git_state = await asyncio.to_thread(self._read_git_state)
+        except Exception as exc:
+            logger.warning("Git state seed failed (non-fatal): %s", exc)
 
         self._tasks = [
             asyncio.create_task(self._change_detection_loop(), name="rie-change-detection"),
@@ -291,7 +304,9 @@ class RepositoryIntelligenceEngine:
     # ------------------------------------------------------------------
 
     async def _handle_graph_patch(self, delta: IndexDelta) -> None:
-        """Apply the delta surgically to the KnowledgeGraph."""
+        """Apply the delta surgically to the KnowledgeGraph, and purge vector
+        entries for any removed files so the vector store never accumulates
+        stale embeddings for files that no longer exist."""
         result = await self._patcher.patch(delta)
         await self._emit(
             make_knowledge_graph_patched(
@@ -300,6 +315,14 @@ class RepositoryIntelligenceEngine:
                 edges_added=result.edges_added,
             )
         )
+
+        if self._retrieval is not None and delta.to_remove:
+            try:
+                await asyncio.to_thread(
+                    self._retrieval.vector_retriever.delete_by_ids, delta.to_remove
+                )
+            except Exception as exc:
+                logger.debug("Vector cleanup for removed files failed (non-fatal): %s", exc)
 
     async def _handle_profile_refresh(self) -> None:
         """Refresh repository metadata and emit profile_refreshed."""

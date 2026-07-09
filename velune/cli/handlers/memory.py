@@ -19,6 +19,11 @@ async def cmd_memory(repl: VeluneREPL, args: str) -> None:
     episodic = repl.container.get("runtime.episodic_memory")
 
     if sub == "clear":
+        from velune.cli.handlers.confirm import confirm_destructive
+
+        if not confirm_destructive(repl, "  Clear working memory? This cannot be undone."):
+            repl.console.print("[dim]Cancelled.[/dim]")
+            return
         working.clear()
         repl.console.print("[green]Working memory cleared.[/green]")
         return

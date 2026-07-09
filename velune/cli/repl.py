@@ -233,7 +233,7 @@ class VeluneREPL:
         )
         self._completer = completer
 
-        palette = CommandPalette(self._registry.all_unique())
+        palette = CommandPalette(self._registry.all_unique(), recency_source=completer.recent_commands)
         self._command_palette = palette
 
         kb = KeyBindings()
@@ -328,7 +328,7 @@ class VeluneREPL:
         )
         self._completer = completer
 
-        palette = CommandPalette(self._registry.all_unique())
+        palette = CommandPalette(self._registry.all_unique(), recency_source=completer.recent_commands)
         self._command_palette = palette
 
         kb = KeyBindings()
@@ -349,6 +349,7 @@ class VeluneREPL:
             key_bindings=kb,
             on_interrupt=_interrupt,
             on_status_render=self._refresh_status_state,
+            command_palette=palette,
         )
 
     def _render_toolbar(self):
@@ -471,7 +472,6 @@ class VeluneREPL:
 
     async def run(self) -> None:
         from velune.cli.handlers.model import restore_active_model
-        from velune.cli.handlers.plugins import register_plugin_commands
 
         ui = self._build_fullscreen_ui()
         self._fullscreen_ui = ui
@@ -509,14 +509,13 @@ class VeluneREPL:
         except Exception as exc:
             _log.debug("MCP auto-connect error (non-fatal): %s", exc)
 
-        try:
-            new_plugins = self._plugin_manager.load()
-            if new_plugins:
-                register_plugin_commands(self, new_plugins)
-                self._plugin_manager.wire_hooks(self._hook_dispatcher)
-                self._plugin_manager.wire_mcp(self._mcp_registry)
-        except Exception as exc:
-            _log.debug("Plugin load error (non-fatal): %s", exc)
+        from velune.cli.handlers.plugins import load_and_register_plugins
+
+        await load_and_register_plugins(self)
+
+        from velune.cli.handlers.cognition import auto_detect_on_entry
+
+        asyncio.create_task(auto_detect_on_entry(self), name="velune.auto_index")
 
         self._interrupts.install()
         try:
@@ -740,6 +739,13 @@ class VeluneREPL:
         if self._completer is not None:
             self._completer.record_use(cmd.name)
 
+        if "confirm" in cmd.permissions:
+            from velune.cli.handlers.confirm import confirm_destructive
+
+            if not confirm_destructive(self, f"  Run /{cmd.name}?", default=False):
+                self.console.print("[dim]Cancelled.[/dim]")
+                return
+
         try:
             await cmd.handler(args)
         except SystemExit:
@@ -859,13 +865,18 @@ class VeluneREPL:
         try:
             import asyncio as _asyncio
 
+            from velune.retrieval.schemas import RetrievalQuery
+
             retrieval = self.container.get("runtime.retrieval")
             if not retrieval:
                 return None
-            results = await _asyncio.wait_for(retrieval.search(text, limit=3), timeout=2.0)
-            if not results:
+            query = RetrievalQuery(text=text, top_k=3)
+            result = await _asyncio.wait_for(retrieval.retrieve(query), timeout=2.0)
+            if not result or not result.hits:
                 return None
-            snippets = "\n\n".join(r.content for r in results if r.content)
+            snippets = "\n\n".join(
+                hit.document.content for hit in result.hits if hit.document.content
+            )
             return f"[Relevant past context]\n{snippets}" if snippets else None
         except Exception:
             return None

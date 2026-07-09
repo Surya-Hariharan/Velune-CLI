@@ -27,7 +27,6 @@ Register ``KNOWLEDGE_MODULES`` with the ``RuntimeBootstrapper`` to get
 
 from velune.knowledge.builder import KnowledgeGraphBuilder
 from velune.knowledge.graph import KnowledgeGraph
-from velune.knowledge.module import KNOWLEDGE_MODULES
 from velune.knowledge.query import FileContext, KnowledgeQuery, SubgraphContext
 from velune.knowledge.schemas import (
     EdgeType,
@@ -36,6 +35,7 @@ from velune.knowledge.schemas import (
     KnowledgeNode,
     NodeType,
 )
+from velune.knowledge.subsystems import KNOWLEDGE_MODULES
 
 __all__ = [
     # Core graph

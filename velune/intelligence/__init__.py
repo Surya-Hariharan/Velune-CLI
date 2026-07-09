@@ -45,7 +45,7 @@ from velune.intelligence.events import (
     make_profile_refreshed,
 )
 from velune.intelligence.graph_patcher import KnowledgeGraphPatcher, PatchResult
-from velune.intelligence.module import INTELLIGENCE_MODULES
+from velune.intelligence.subsystems import INTELLIGENCE_MODULES
 
 __all__ = [
     # Engine

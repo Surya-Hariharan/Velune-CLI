@@ -179,7 +179,7 @@ def _format_duration(seconds) -> str:
     return f"~{m}m {s:02d}s"
 
 
-async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool) -> None:
+async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool, silent: bool = False) -> None:
     from velune.core.task_registry import JobRecord, JobStatus, track
 
     mode = "deep" if deep else "standard"
@@ -193,10 +193,11 @@ async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool) -> None:
             except Exception as exc:
                 repl.console.print(f"[red]Cognition failed:[/red] {exc}")
                 return
-        repl.console.print(f"[green]Cognition complete ({mode}).[/green]")
-        repl.console.print(
-            "[dim]→ /run <task> to start using the indexed context  ·  /graph to explore knowledge graph[/dim]"
-        )
+        if not silent:
+            repl.console.print(f"[green]Cognition complete ({mode}).[/green]")
+            repl.console.print(
+                "[dim]→ /run <task> to start using the indexed context  ·  /graph to explore knowledge graph[/dim]"
+            )
         return
 
     job_id = repl._job_registry.new_id()
@@ -241,13 +242,14 @@ async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool) -> None:
     task_obj = asyncio.create_task(_run_cognition(), name=f"cognition-{job_id}")
     repl._job_registry.update(job_id, task=task_obj)
     track(task_obj)
-    repl.console.print(
-        f"[green]Cognition job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
-    )
-    repl.console.print(
-        "[dim]Track with [bold]/index status[/bold], [bold]/jobs[/bold], "
-        "or [bold]/dashboard[/bold].[/dim]"
-    )
+    if not silent:
+        repl.console.print(
+            f"[green]Cognition job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
+        )
+        repl.console.print(
+            "[dim]Track with [bold]/index status[/bold], [bold]/jobs[/bold], "
+            "or [bold]/dashboard[/bold].[/dim]"
+        )
 
 
 def _cognition_status(repl: VeluneREPL) -> None:
@@ -296,3 +298,84 @@ def _cognition_cancel(repl: VeluneREPL) -> None:
                 repl.console.print(f"[yellow]Cancelled cognition job {j.job_id}.[/yellow]")
                 return
     repl.console.print("[dim]No running cognition job to cancel.[/dim]")
+
+
+def _workspace_cognition_settings(repl: VeluneREPL) -> tuple[bool, bool]:
+    """Return (index_on_init, watch_files) from ``VeluneConfig.workspace``.
+
+    Defaults to (True, True) — matching the config schema's own defaults —
+    whenever config isn't available, so a missing/partial config never
+    silently disables the feature it's supposed to gate.
+    """
+    try:
+        config = repl.container.get("runtime.config")
+        return bool(config.workspace.index_on_init), bool(config.workspace.watch_files)
+    except Exception:
+        return True, True
+
+
+def _render_repo_detected_banner(repl: VeluneREPL, summary: dict) -> list[str]:
+    """Print a compact 'Repository Detected' banner; return the badge labels shown."""
+    from velune.cli import design
+
+    badges: list[str] = []
+    if summary.get("project_type"):
+        badges.append(str(summary["project_type"]))
+    tech = summary.get("tech_stack")
+    if isinstance(tech, dict):
+        for val in tech.values():
+            if not val:
+                continue
+            if isinstance(val, list | tuple):
+                badges.extend(str(v) for v in val)
+            elif isinstance(val, dict):
+                badges.extend(str(k) for k in val)
+            else:
+                badges.append(str(val))
+    seen: set[str] = set()
+    unique_badges = [b for b in badges if not (b in seen or seen.add(b))]
+    if not unique_badges:
+        return unique_badges
+
+    checks = "  ".join(f"[{design.OK}]✓[/{design.OK}] {b}" for b in unique_badges[:8])
+    repl.console.print(f"[bold]Repository detected[/bold]  {checks}")
+    repl.console.print(
+        f"[{design.MUTED}]Indexing in the background — /index status to track, "
+        f"/index rebuild to force a full re-index.[/{design.MUTED}]"
+    )
+    return unique_badges
+
+
+async def auto_detect_on_entry(repl: VeluneREPL) -> None:
+    """Fire-and-forget: detect a project on REPL entry, show a banner, and run
+    the first index in the background. Never blocks the prompt — every failure
+    mode here degrades to "say nothing, do nothing" rather than surfacing an
+    error for something the user never explicitly asked for.
+
+    Continuous re-indexing after this point is owned by
+    ``RepositoryIntelligenceEngine`` (see velune/intelligence/subsystems.py),
+    which is lifecycle-managed and starts its own change-detection loop
+    automatically during Tier-1 background warm-up — this function only needs
+    to trigger the *first* index so a brand-new session isn't stale until the
+    engine's own poll interval ticks.
+    """
+    cog = _get_cognition_service(repl)
+    if cog is None or repl._job_registry is None:
+        return
+    if cog.unsafe_reason():
+        return
+
+    index_on_init, _watch_files = _workspace_cognition_settings(repl)
+    if not index_on_init:
+        return
+
+    try:
+        summary = await asyncio.to_thread(cog.quick_summary)
+    except Exception as exc:
+        _log.debug("auto_detect_on_entry: quick_summary failed: %s", exc)
+        return
+
+    if not _render_repo_detected_banner(repl, summary):
+        return  # nothing recognizable here — stay quiet in unrelated directories
+
+    await _submit_cognition_job(repl, cog, deep=False, silent=True)
