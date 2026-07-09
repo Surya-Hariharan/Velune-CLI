@@ -17,7 +17,7 @@ bindings) has bound for the same key.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from prompt_toolkit.key_binding import KeyBindings
 

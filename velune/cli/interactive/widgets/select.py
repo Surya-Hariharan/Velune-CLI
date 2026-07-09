@@ -67,9 +67,7 @@ class SelectWidget(Widget):
         if not self.filterable or not self._filter:
             return [o for o in self.options if not o.disabled]
         q = self._filter.lower()
-        scored = [
-            (fuzzy_score(q, opt.label), opt) for opt in self.options if not opt.disabled
-        ]
+        scored = [(fuzzy_score(q, opt.label), opt) for opt in self.options if not opt.disabled]
         return [opt for score, opt in sorted(scored, key=lambda t: -t[0]) if score > 0]
 
     def _move(self, delta: int) -> None:
@@ -130,7 +128,9 @@ class SelectWidget(Widget):
 
             if self.multiple:
                 box = "[x]" if opt.id in self._checked else "[ ]"
-                box_style = f"bold fg:{design.OK}" if opt.id in self._checked else f"fg:{design.FAINT}"
+                box_style = (
+                    f"bold fg:{design.OK}" if opt.id in self._checked else f"fg:{design.FAINT}"
+                )
                 lines.append((row_style, f"  {prefix}"))
                 lines.append((box_style, box))
                 lines.append((row_style, f" {opt.label}"))

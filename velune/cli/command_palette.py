@@ -145,7 +145,9 @@ class CommandPaletteModel:
             scored = recent_matches + rest_matches
         else:
             scored = [
-                PaletteMatch(command=command, score=self._field_score(query, command), group=command.category)
+                PaletteMatch(
+                    command=command, score=self._field_score(query, command), group=command.category
+                )
                 for command in self.commands
             ]
             scored = [match for match in scored if match.score > 0]

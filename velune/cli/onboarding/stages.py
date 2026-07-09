@@ -288,7 +288,9 @@ async def _stage_providers(controller: WizardController, mode: str) -> Any:
             for p in providers
         ]
         recommended = ", ".join(
-            catalog.get(pid).display_name for pid in catalog.RECOMMENDED_FREE_START if catalog.get(pid)
+            catalog.get(pid).display_name
+            for pid in catalog.RECOMMENDED_FREE_START
+            if catalog.get(pid)
         )
         subtitle = f"Recommended free start: {recommended}" if recommended else ""
 
@@ -339,14 +341,19 @@ async def _detect_one_local_provider(controller: WizardController, pid: str) -> 
     name = meta.display_name if meta else pid
 
     for _attempt in range(3):
-        await controller.show_transient(
-            [[("fg:#d9a8c0", f"  Checking {name}...")]], delay=0.3
-        )
+        await controller.show_transient([[("fg:#d9a8c0", f"  Checking {name}...")]], delay=0.3)
         result = await validate_provider(pid, "")
         if result.ok:
             n = len(result.models)
             await controller.show_transient(
-                [[("fg:#ff7fb6", f"  ✓ {name} detected — {n} model{'s' if n != 1 else ''} available.")]],
+                [
+                    [
+                        (
+                            "fg:#ff7fb6",
+                            f"  ✓ {name} detected — {n} model{'s' if n != 1 else ''} available.",
+                        )
+                    ]
+                ],
                 delay=0.4,
             )
             return pid
@@ -354,9 +361,7 @@ async def _detect_one_local_provider(controller: WizardController, pid: str) -> 
         choice = await controller.run_widget(
             SelectWidget(
                 title=f"{name} not detected",
-                subtitle=(
-                    f"Get it running, then retry: {meta.get_key_url}" if meta else ""
-                ),
+                subtitle=(f"Get it running, then retry: {meta.get_key_url}" if meta else ""),
                 options=[
                     Option("retry", "Retry"),
                     Option("skip", "Skip"),
@@ -373,7 +378,9 @@ async def _detect_one_local_provider(controller: WizardController, pid: str) -> 
     return None
 
 
-async def _offer_replace_existing(controller: WizardController, already_configured: list[str]) -> Any:
+async def _offer_replace_existing(
+    controller: WizardController, already_configured: list[str]
+) -> Any:
     """Spec item 9: never re-ask for a configured provider's key by default —
     only offer to replace it if the user explicitly asks."""
     remaining = list(already_configured)
@@ -490,7 +497,10 @@ async def _stage_discover_models(controller: WizardController) -> Any:
     provider_counts: dict[str, int] = {}
     for m in models:
         provider_counts[m.provider_id] = provider_counts.get(m.provider_id, 0) + 1
-    lines = [f"  {pid}: {count} model{'s' if count != 1 else ''}" for pid, count in sorted(provider_counts.items())]
+    lines = [
+        f"  {pid}: {count} model{'s' if count != 1 else ''}"
+        for pid, count in sorted(provider_counts.items())
+    ]
     lines.append(f"\n  {len(models)} model(s) available total.")
 
     result = await _continue_screen(controller, 3, "Discover Models", "\n".join(lines))
@@ -511,7 +521,10 @@ async def _stage_select_model(
 
     if not models:
         result = await _continue_screen(
-            controller, 4, "Select Default Model", "No models available — use /model connect in the REPL later."
+            controller,
+            4,
+            "Select Default Model",
+            "No models available — use /model connect in the REPL later.",
         )
         return BACK if result is BACK else True
 

@@ -19,14 +19,15 @@ widget currently has focus.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, TypeVar
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
-from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
-from prompt_toolkit.key_binding.key_bindings import DynamicKeyBindings
+from prompt_toolkit.key_binding import merge_key_bindings
+from prompt_toolkit.key_binding.key_bindings import DynamicKeyBindings, KeyBindingsBase
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import (
     ConditionalContainer,
@@ -218,12 +219,10 @@ class WizardController:
                 wrap_lines=True,
             )
 
-        def _get_key_bindings() -> KeyBindings:
+        def _get_key_bindings() -> KeyBindingsBase:
             if self._widget is None:
                 return common_bindings(on_cancel=self._cancel_event.set, on_back=None)
-            common = common_bindings(
-                on_cancel=self._cancel_event.set, on_back=self._widget.on_back
-            )
+            common = common_bindings(on_cancel=self._cancel_event.set, on_back=self._widget.on_back)
             if isinstance(self._widget, TextInputWidget):
                 return common
             return merge_key_bindings([self._widget.key_bindings(), common])
@@ -248,8 +247,9 @@ class WizardController:
         )
 
         wide_enough = Condition(
-            lambda: (self._app.output.get_size().columns if self._app else 999)
-            >= SIDEBAR_MIN_COLUMNS
+            lambda: (
+                (self._app.output.get_size().columns if self._app else 999) >= SIDEBAR_MIN_COLUMNS
+            )
         )
 
         main_row = VSplit(

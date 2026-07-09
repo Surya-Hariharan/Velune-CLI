@@ -39,7 +39,9 @@ def _create_intelligence_engine(env: RuntimeEnvironment):
 
     # Soft dependency: enables vector-store cleanup for removed files
     # (see engine.py::_handle_graph_patch). Absence just skips that step.
-    retrieval = env.container.get("runtime.retrieval") if env.container.has("runtime.retrieval") else None
+    retrieval = (
+        env.container.get("runtime.retrieval") if env.container.has("runtime.retrieval") else None
+    )
 
     return RepositoryIntelligenceEngine(
         workspace=env.workspace,

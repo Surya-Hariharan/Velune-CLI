@@ -10,12 +10,18 @@ host them inside persistent sidebar/header chrome instead.
 
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
 
 from velune.cli.interactive.result import BACK, CANCEL, WidgetResult
 from velune.cli.interactive.runner import run_standalone
 from velune.cli.interactive.tty import is_interactive_tty
-from velune.cli.interactive.widgets import ConfirmWidget, Option, PickItem, SelectWidget, TextInputWidget
+from velune.cli.interactive.widgets import (
+    ConfirmWidget,
+    Option,
+    PickItem,
+    SelectWidget,
+    TextInputWidget,
+)
 
 __all__ = [
     "BACK",

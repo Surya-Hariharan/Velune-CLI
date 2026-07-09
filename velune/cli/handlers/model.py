@@ -237,7 +237,7 @@ async def _show_model_picker(
         connected_providers = set()
         provider_registry = repl.container.get("runtime.provider_registry")
         for m in all_models:
-            if provider_registry.get(m.provider_id) is not None:
+            if provider_registry.check_provider_available(m.provider_id):
                 connected_providers.add(m.provider_id)
 
         for m in filtered:
@@ -358,7 +358,7 @@ async def _show_model_picker(
         provider_registry = repl.container.get("runtime.provider_registry")
         connected_providers = set()
         for m in models:
-            if provider_registry.get(m.provider_id) is not None:
+            if provider_registry.check_provider_available(m.provider_id):
                 connected_providers.add(m.provider_id)
 
         for i, item in enumerate(flat_items):
@@ -682,7 +682,9 @@ async def _model_discover(repl: VeluneREPL) -> None:
         return
     restore_active_model(repl)
     provider_registry = repl.container.get("runtime.provider_registry")
-    available = [m for m in models if provider_registry.get(m.provider_id) is not None]
+    available = [
+        m for m in models if m.is_local or provider_registry.check_provider_available(m.provider_id)
+    ]
     pool = available or models
     repl.console.print(f"[dim]Discovered {len(pool)} model(s). Select one (Esc to skip):[/dim]")
     selected = await _show_model_picker(repl, pool)

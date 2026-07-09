@@ -9,8 +9,6 @@ moving without breaking those call sites.
 
 from __future__ import annotations
 
-import asyncio
-
 from velune.cli.onboarding.logic import (
     _STAGE_NAMES,
     load_stage_progress,
@@ -29,8 +27,10 @@ def run_onboarding(runtime: object, start_stage: int = 0) -> None:
     """Synchronous entry point: run the full-screen wizard to completion.
 
     Every caller is a plain ``typer`` command body (no event loop already
-    running), so driving the async wizard with ``asyncio.run`` is safe.
+    running). Routes through ``run_async()`` — the single sanctioned
+    ``asyncio.run`` call site — instead of calling it directly.
     """
     from velune.cli.onboarding import stages
+    from velune.kernel.entrypoint import run_async
 
-    asyncio.run(stages.run(runtime, start_stage=start_stage))
+    run_async(stages.run(runtime, start_stage=start_stage))

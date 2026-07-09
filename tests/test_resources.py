@@ -1285,3 +1285,87 @@ async def test_manager_disconnect_all_swallows_errors():
     m.register("fake", BadDisconnect)
     await m.connect("fake")
     await m.disconnect_all()  # must not raise
+
+
+# ── REPL /resource configure handler ─────────────────────────────────────────
+
+
+class _FakeResourceManager:
+    async def discover(self):
+        return []
+
+
+class _FakeRepl:
+    def __init__(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        self.console = Console(file=StringIO())
+        self._resource_manager = _FakeResourceManager()
+
+
+def _canned_prompt(monkeypatch, answers: list[str]):
+    """Feed successive canned answers to every Prompt.ask() call in order."""
+    it = iter(answers)
+    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(it))
+
+
+async def test_configure_postgres_saves_encrypted_config(monkeypatch, fake_keystore):
+    from velune.cli.handlers.resources import _configure
+    from velune.resources.secrets import load_resource_secret
+
+    _canned_prompt(monkeypatch, ["myhost", "5555", "mydb", "myuser", "mypass"])
+    await _configure(_FakeRepl(), "postgres")
+
+    cfg = load_resource_secret("postgres", "postgres")
+    assert cfg == {
+        "host": "myhost",
+        "port": 5555,
+        "database": "mydb",
+        "username": "myuser",
+        "password": "mypass",
+    }
+
+
+async def test_configure_supabase_saves_encrypted_config(monkeypatch, fake_keystore):
+    from velune.cli.handlers.resources import _configure
+    from velune.resources.secrets import load_resource_secret
+
+    _canned_prompt(monkeypatch, ["https://abc.supabase.co", "anon123", ""])
+    await _configure(_FakeRepl(), "supabase")
+
+    cfg = load_resource_secret("supabase", "supabase")
+    assert cfg == {"url": "https://abc.supabase.co", "anon_key": "anon123"}
+
+
+async def test_configure_docker_is_a_noop(monkeypatch, fake_keystore):
+    from velune.cli.handlers.resources import _configure
+    from velune.resources.secrets import load_resource_secret
+
+    def boom(*a, **k):
+        raise AssertionError("docker must not prompt for configuration")
+
+    monkeypatch.setattr("rich.prompt.Prompt.ask", boom)
+    await _configure(_FakeRepl(), "docker")
+    assert load_resource_secret("docker", "docker") is None
+
+
+async def test_configure_unknown_resource_does_not_save(monkeypatch, fake_keystore):
+    from velune.cli.handlers.resources import _configure
+    from velune.resources.secrets import load_resource_secret
+
+    def boom(*a, **k):
+        raise AssertionError("an unknown resource id must not prompt")
+
+    monkeypatch.setattr("rich.prompt.Prompt.ask", boom)
+    await _configure(_FakeRepl(), "redis")
+    assert load_resource_secret("redis", "redis") is None
+
+
+async def test_configure_no_id_does_not_save(fake_keystore):
+    from velune.cli.handlers.resources import _configure
+    from velune.resources.secrets import load_resource_secret
+
+    await _configure(_FakeRepl(), "")
+    assert load_resource_secret("postgres", "postgres") is None

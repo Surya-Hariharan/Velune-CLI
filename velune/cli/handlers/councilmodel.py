@@ -46,7 +46,9 @@ async def cmd_councilmodel(repl: VeluneREPL, args: str) -> None:
     model_registry = repl.container.get("runtime.model_registry")
     provider_registry = repl.container.get("runtime.provider_registry")
     available = [
-        m for m in model_registry.list_all() if provider_registry.get(m.provider_id) is not None
+        m
+        for m in model_registry.list_all()
+        if m.is_local or provider_registry.check_provider_available(m.provider_id)
     ]
     if not available:
         from velune.cli.rendering.error_panel import render_error

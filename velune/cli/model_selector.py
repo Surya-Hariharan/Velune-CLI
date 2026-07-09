@@ -32,7 +32,7 @@ class ModeAwareModelSelector:
         all_models = [
             m
             for m in self.model_registry.list_all()
-            if self.provider_registry.get(m.provider_id) is not None
+            if m.is_local or self.provider_registry.check_provider_available(m.provider_id)
         ]
         if not all_models:
             return current_model

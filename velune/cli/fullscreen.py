@@ -53,6 +53,8 @@ def _strip_non_sgr_csi(text: str) -> str:
     erase-line, show/hide-cursor, etc. prompt_toolkit's ANSI() bridge only
     reliably handles SGR; these must not reach it."""
     return _CSI_RE.sub(lambda m: m.group(0) if m.group(0).endswith("m") else "", text)
+
+
 _MAX_TRANSCRIPT_LINES = 4000
 _PROMPT_MAX_LINES = 5
 _MARKDOWN_STREAM_THROTTLE_S = 0.08
@@ -407,9 +409,7 @@ class FullscreenREPLUI:
             # call (which can run many times/sec under min_redraw_interval).
             plain = _ANSI_RE.sub("", line)
             fragments = to_formatted_text(ANSI(line))
-            self._lines.append(
-                _Line(plain, "class:conversation.system", fragments=fragments)
-            )
+            self._lines.append(_Line(plain, "class:conversation.system", fragments=fragments))
         else:
             self._lines.append(_Line(line, "class:conversation.system"))
         self._trim()

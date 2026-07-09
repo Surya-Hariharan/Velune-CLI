@@ -233,7 +233,9 @@ class VeluneREPL:
         )
         self._completer = completer
 
-        palette = CommandPalette(self._registry.all_unique(), recency_source=completer.recent_commands)
+        palette = CommandPalette(
+            self._registry.all_unique(), recency_source=completer.recent_commands
+        )
         self._command_palette = palette
 
         kb = KeyBindings()
@@ -328,7 +330,9 @@ class VeluneREPL:
         )
         self._completer = completer
 
-        palette = CommandPalette(self._registry.all_unique(), recency_source=completer.recent_commands)
+        palette = CommandPalette(
+            self._registry.all_unique(), recency_source=completer.recent_commands
+        )
         self._command_palette = palette
 
         kb = KeyBindings()

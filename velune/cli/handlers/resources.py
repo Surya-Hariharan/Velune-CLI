@@ -38,6 +38,8 @@ async def cmd_resource(repl: VeluneREPL, args: str) -> None:
         _show_status(repl)
     elif sub == "discover":
         await _discover(repl)
+    elif sub in ("configure", "set", "config"):
+        await _configure(repl, rest)
     elif sub == "connect":
         await _connect(repl, rest)
     elif sub == "disconnect":
@@ -46,8 +48,8 @@ async def cmd_resource(repl: VeluneREPL, args: str) -> None:
         _info(repl, rest)
     else:
         repl.console.print(
-            "[yellow]Unknown sub-command. Try: /resource "
-            "list | discover | connect <id> | disconnect <id> | status | info <id>[/yellow]"
+            "[yellow]Unknown sub-command. Try: /resource list | discover | "
+            "configure <id> | connect <id> | disconnect <id> | status | info <id>[/yellow]"
         )
 
 
@@ -74,7 +76,8 @@ def _show_status(repl: VeluneREPL) -> None:
     print_header(repl.console, "Resources")
     repl.console.print(table)
     repl.console.print(
-        "\n[dim]Sub-commands: /resource discover | connect <id> | disconnect <id> | info <id>[/dim]"
+        "\n[dim]Sub-commands: /resource discover | configure <id> | connect <id> | "
+        "disconnect <id> | info <id>[/dim]"
     )
 
 
@@ -99,9 +102,122 @@ async def _discover(repl: VeluneREPL) -> None:
     repl.console.print(table)
 
     ids = sorted({h.resource_id for h in hints})
+    commands = [
+        f"[cyan]/resource connect {rid}[/cyan]"
+        if rid == "docker"
+        else f"[cyan]/resource configure {rid}[/cyan]"
+        for rid in ids
+    ]
+    repl.console.print("\n[dim]Get started:[/dim] " + " ".join(commands))
+
+
+_SQL_DEFAULT_PORT = {"postgres": 5432, "mysql": 3306}
+
+
+async def _configure(repl: VeluneREPL, resource_id: str) -> None:
+    """Interactively collect and store credentials for a connector.
+
+    Docker needs nothing — ``/resource connect docker`` works with no prior
+    setup. PostgreSQL/MySQL/Supabase have no other way to become reachable:
+    they refuse to connect until a config exists in the encrypted keystore.
+    """
+    from rich.prompt import Prompt
+
+    if not resource_id:
+        repl.console.print("[yellow]Usage: /resource configure <postgres|mysql|supabase>[/yellow]")
+        return
+    if resource_id == "docker":
+        repl.console.print(
+            "[dim]Docker needs no configuration — run "
+            "[cyan]/resource connect docker[/cyan] directly.[/dim]"
+        )
+        return
+    if resource_id not in ("postgres", "mysql", "supabase"):
+        repl.console.print(
+            f"[yellow]'{resource_id}' is not configurable. Try: postgres, mysql, supabase.[/yellow]"
+        )
+        return
+
+    suggested: dict[str, object] = {}
+    try:
+        for hint in await repl._resource_manager.discover():
+            if hint.resource_id == resource_id and hint.suggested:
+                suggested = hint.suggested
+                break
+    except Exception as exc:
+        _log.debug("Pre-fill discovery for '%s' failed: %s", resource_id, exc)
+
+    repl.console.print(f"[dim]Configuring {resource_id} — values are encrypted at rest.[/dim]")
+    try:
+        if resource_id == "supabase":
+            url = await asyncio.to_thread(
+                Prompt.ask,
+                "  Project URL",
+                default=str(suggested.get("url", "")),
+                console=repl.console,
+            )
+            if not url:
+                repl.console.print("[yellow]Cancelled — a project URL is required.[/yellow]")
+                return
+            anon_key = await asyncio.to_thread(
+                Prompt.ask, "  Anon key", password=True, console=repl.console
+            )
+            service_role_key = await asyncio.to_thread(
+                Prompt.ask,
+                "  Service-role key (optional — enables privileged actions)",
+                password=True,
+                default="",
+                console=repl.console,
+            )
+            config: dict[str, object] = {"url": url, "anon_key": anon_key}
+            if service_role_key:
+                config["service_role_key"] = service_role_key
+        else:
+            default_port = _SQL_DEFAULT_PORT[resource_id]
+            host = await asyncio.to_thread(
+                Prompt.ask,
+                "  Host",
+                default=str(suggested.get("host", "localhost")),
+                console=repl.console,
+            )
+            port_str = await asyncio.to_thread(
+                Prompt.ask,
+                "  Port",
+                default=str(suggested.get("port", default_port)),
+                console=repl.console,
+            )
+            database = await asyncio.to_thread(
+                Prompt.ask,
+                "  Database",
+                default=str(suggested.get("database", "")),
+                console=repl.console,
+            )
+            username = await asyncio.to_thread(
+                Prompt.ask,
+                "  Username",
+                default=str(suggested.get("username", "")),
+                console=repl.console,
+            )
+            password = await asyncio.to_thread(
+                Prompt.ask, "  Password", password=True, default="", console=repl.console
+            )
+            config = {
+                "host": host,
+                "port": int(port_str) if port_str.strip().isdigit() else default_port,
+                "database": database,
+                "username": username,
+                "password": password,
+            }
+    except (EOFError, KeyboardInterrupt):
+        repl.console.print("\n[yellow]Cancelled.[/yellow]")
+        return
+
+    from velune.resources.secrets import save_resource_secret
+
+    save_resource_secret(resource_id, resource_id, config)
     repl.console.print(
-        "\n[dim]Connect one with:[/dim] "
-        + " ".join(f"[cyan]/resource connect {rid}[/cyan]" for rid in ids)
+        f"[green]Saved {resource_id} configuration.[/green] "
+        f"[dim]Connect with /resource connect {resource_id}[/dim]"
     )
 
 
