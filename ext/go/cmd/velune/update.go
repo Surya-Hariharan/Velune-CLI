@@ -45,7 +45,7 @@ func runUpdate(args []string) {
 	if err != nil {
 		// PyPI is unreachable — don't fail hard, just warn.
 		fmt.Fprintf(os.Stderr, "velune update: could not reach PyPI: %v\n", err)
-		fmt.Fprintf(os.Stderr, "  Run manually: pip install --upgrade velune\n")
+		fmt.Fprintf(os.Stderr, "  Run manually: pip install --upgrade velune-cli\n")
 		os.Exit(1)
 	}
 
@@ -107,9 +107,9 @@ func fetchLatestVersionFromURL(url string) (string, error) {
 	return release.Info.Version, nil
 }
 
-// upgradePip runs `pip install --upgrade velune` using the discovered Python.
+// upgradePip runs `pip install --upgrade velune-cli` using the discovered Python.
 func upgradePip(python string) error {
-	args := []string{"-m", "pip", "install", "--upgrade", "velune"}
+	args := []string{"-m", "pip", "install", "--upgrade", "velune-cli"}
 	cmd := exec.Command(python, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

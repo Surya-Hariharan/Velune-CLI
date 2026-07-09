@@ -173,6 +173,11 @@ def create_backup(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "velune_version": _velune_version(),
             "workspace": str(ws),
+            # `with_secrets` here is the *boolean flag* (were secrets requested
+            # for this backup), never the passphrase or a key value — CodeQL's
+            # py/clear-text-storage-sensitive-data query name-matches "secret"
+            # and flags this bool as if it carried the credential itself; see
+            # the module docstring for the actual (already-encrypted) path.
             "with_secrets": with_secrets,
             "subsystems": result.subsystems,
         }

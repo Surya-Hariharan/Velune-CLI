@@ -412,7 +412,11 @@ Velune runs natively on Windows (supporting native command execution sandboxing,
 | [SECURITY.md](SECURITY.md) | Security posture, trust boundaries, reporting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup and contribution workflow |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Full version history |
-| [docs/RELEASE_NOTES_v0.9.4.md](docs/RELEASE_NOTES_v0.9.4.md) | v0.9.4 release notes |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System layers and component overview |
+| [docs/ARCHITECTURE_STARTUP.md](docs/ARCHITECTURE_STARTUP.md) | Instant-startup / on-demand cognition design |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local dev setup, build, and test workflow |
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Attacker model, trust boundaries, controls |
+| [docs/mcp.md](docs/mcp.md) | MCP server + client integration guide |
 
 ---
 

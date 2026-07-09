@@ -1,7 +1,0 @@
-# Fingerprints of confirmed false positives: synthetic tokens used as test
-# fixtures for the secret-redaction test suite (tests/test_redaction.py,
-# tests/test_week1_integration.py). Not real credentials.
-49c9d65d0d30a40103f863eeafa906109fda08ac:tests/test_redaction.py:generic-api-key:36
-49c9d65d0d30a40103f863eeafa906109fda08ac:tests/test_redaction.py:generic-api-key:56
-b71578d6a7af168eff311086cbb4a00014f12825:tests/test_week1_integration.py:generic-api-key:66
-b71578d6a7af168eff311086cbb4a00014f12825:tests/test_week1_integration.py:generic-api-key:69

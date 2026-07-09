@@ -114,19 +114,13 @@ mod tests {
         f.flush().unwrap();
 
         // echo -n "hello world" | sha256sum
-        let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576c2b552b6dd27b5f0";
-        // Note: this is sha256 of "hello world" without trailing newline
-        // Recompute: sha256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576c2b552b6dd27b5f0... let me verify
-        // Actually sha256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576c2b552b6dd27b5f0 is wrong
-        // correct: b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576c2b552b6dd27b5f0
-        // Let me just test that the length is right and it's hex
+        let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
         let got = sha256_file(f.path().to_str().unwrap()).unwrap();
-        assert_eq!(got.len(), 64, "SHA-256 hex digest must be 64 chars");
-        assert!(got.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(got, expected);
+
         // Deterministic: same content → same hash
         let got2 = sha256_file(f.path().to_str().unwrap()).unwrap();
         assert_eq!(got, got2);
-        let _ = expected; // suppress unused warning
     }
 
     #[test]

@@ -56,10 +56,8 @@ func TestFetchLatestVersion_MockServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Patch the global URL for this test.
-	orig := pypiURL
-	_ = orig // pypiURL is a const; we test via a direct HTTP call instead
-	// Directly call the HTTP client logic with the test server URL.
+	// pypiURL is a const, so we exercise the HTTP client logic directly
+	// against the test server rather than patching the global.
 	got, err := fetchLatestVersionFromURL(srv.URL)
 	if err != nil {
 		t.Fatalf("fetchLatestVersionFromURL error: %v", err)
