@@ -40,7 +40,7 @@ async def cmd_help(repl: VeluneREPL, args: str) -> None:
         "[dim]"
         "  [bold]Tab[/bold] autocomplete"
         "  ·  type [bold]/[/bold] to open command palette"
-        "  ·  [bold]@@file.py[/bold] to mention files in prompts"
+        "  ·  [bold]@file.py[/bold] to mention files in prompts"
         "  ·  [bold]/help --all[/bold] for dev commands"
         "[/dim]"
     )

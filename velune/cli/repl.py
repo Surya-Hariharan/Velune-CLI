@@ -831,26 +831,27 @@ class VeluneREPL:
 
         # PrePrompt hook — may inject context or transform the user message
         try:
-            from velune.context.mention_resolver import MentionResolver
+            from velune.context.mentions import build_mention_context, parse_mentions
 
-            resolver = MentionResolver(
-                workspace=Path(self.container.get("runtime.workspace") or "."),
-                conversation=self._conversation,
-            )
-            resolved_text, mentioned_files = await resolver.resolve(text)
-            if resolved_text != text:
-                text = resolved_text
+            workspace = Path(self.container.get("runtime.workspace") or ".")
+            cleaned_text, mentioned_files, _unresolved = parse_mentions(text, workspace)
+            if mentioned_files:
+                text = cleaned_text
+                mention_context = build_mention_context(mentioned_files)
+                if mention_context:
+                    self._conversation.append(
+                        {"role": "system", "content": mention_context}
+                    )
 
-            _hook_pre = await self._hook_dispatcher.dispatch_pre_prompt(
-                user_message=text,
+            _hook_pre = await self._hook_dispatcher.dispatch_user_prompt(
+                user_prompt=text,
                 session_id=self._episodic_session_id or self._hook_dispatcher.session_id,
-                mentioned_files=[str(mf.resolved_path) for mf in mentioned_files],
             )
-            if _hook_pre.transformed_message:
-                text = _hook_pre.transformed_message
-            if _hook_pre.additional_context:
+            if _hook_pre.transformed_prompt:
+                text = _hook_pre.transformed_prompt
+            if _hook_pre.system_message:
                 self._conversation.append(
-                    {"role": "system", "content": _hook_pre.additional_context}
+                    {"role": "system", "content": _hook_pre.system_message}
                 )
             if _hook_pre.blocked:
                 if _hook_pre.block_reason:

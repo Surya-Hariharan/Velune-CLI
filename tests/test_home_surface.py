@@ -103,7 +103,7 @@ def test_narrow_terminal_clips_values_instead_of_overflowing():
 def test_hint_line_teaches_palette_and_file_mentions():
     text = _text(render_home(_full_state(), width=100))
     assert "/ commands" in text
-    assert "@@file" in text
+    assert "@file" in text
 
 
 # ── Fullscreen wiring ────────────────────────────────────────────────────────

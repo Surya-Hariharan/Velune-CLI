@@ -161,7 +161,7 @@ def render_home(state: HomeState, width: int) -> FormattedText:
         )
 
     blank()
-    hint = "/ commands  ·  @@file to mention  ·  Tab complete  ·  /help"
+    hint = "/ commands  ·  @file to mention  ·  Tab complete  ·  /help"
     if len(hint) > usable:
         hint = "/ commands  ·  /help"
     line(("class:home.hint", _clip(hint, usable)))

@@ -10,12 +10,49 @@ from unittest.mock import patch
 
 import pytest
 
+from velune.cli.handlers.recovery import _split_args
 from velune.core.paths import cognitive_db_path
 from velune.core.trust import trust_file_path
 from velune.recovery import archive_has_encrypted_secrets, create_backup, restore_backup
 from velune.recovery.archive import MANIFEST_NAME
 
 ROUNDTRIP_SUBSYSTEMS = {"sessions", "config", "memory", "trust"}
+
+
+# ── Windows path argument splitting ──────────────────────────────────────────
+#
+# shlex.split() defaults to POSIX mode, where backslash is an escape
+# character. On Windows that silently deletes the backslashes from paths
+# like `/backup C:\Users\me\backup.tar.gz`, so the command reports success
+# against a mangled path instead of the one the user asked for.
+
+
+def test_split_args_preserves_windows_backslash_path(monkeypatch):
+    monkeypatch.setattr("velune.cli.handlers.recovery.os.name", "nt")
+    tokens = _split_args(r"C:\Users\surya\AppData\Temp\velune-backup.tar.gz")
+    assert tokens == [r"C:\Users\surya\AppData\Temp\velune-backup.tar.gz"]
+
+
+def test_split_args_strips_quotes_around_windows_path(monkeypatch):
+    monkeypatch.setattr("velune.cli.handlers.recovery.os.name", "nt")
+    tokens = _split_args(r'"C:\Users\surya\My Backups\velune-backup.tar.gz"')
+    assert tokens == [r"C:\Users\surya\My Backups\velune-backup.tar.gz"]
+
+
+def test_split_args_still_parses_flags_on_windows(monkeypatch):
+    monkeypatch.setattr("velune.cli.handlers.recovery.os.name", "nt")
+    tokens = _split_args(r"C:\backup.tar.gz --include sessions,config --overwrite")
+    assert tokens == [r"C:\backup.tar.gz", "--include", "sessions,config", "--overwrite"]
+
+
+def test_split_args_empty_string_returns_empty_list():
+    assert _split_args("") == []
+
+
+def test_split_args_posix_paths_unaffected(monkeypatch):
+    monkeypatch.setattr("velune.cli.handlers.recovery.os.name", "posix")
+    tokens = _split_args("/home/user/backup.tar.gz --overwrite")
+    assert tokens == ["/home/user/backup.tar.gz", "--overwrite"]
 
 
 @pytest.fixture

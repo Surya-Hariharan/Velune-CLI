@@ -6,6 +6,7 @@ REPL surface stays in lockstep with the top-level CLI commands.
 
 from __future__ import annotations
 
+import os
 import shlex
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,23 @@ from velune.recovery import (
 
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
+
+
+def _split_args(args: str) -> list[str]:
+    """Split slash-command arguments, preserving Windows-style paths.
+
+    ``shlex.split`` defaults to POSIX mode, where backslash is an escape
+    character — this silently deletes the backslashes in paths like
+    ``C:\\Users\\...``. Fall back to non-POSIX splitting on Windows, which
+    leaves backslashes intact, then strip any surrounding quotes that mode
+    doesn't remove on its own.
+    """
+    if not args:
+        return []
+    tokens = shlex.split(args, posix=(os.name != "nt"))
+    if os.name == "nt":
+        tokens = [t[1:-1] if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'" else t for t in tokens]
+    return tokens
 
 
 def _parse_include(tokens: list[str]) -> set[str] | None:
@@ -42,7 +60,7 @@ def _parse_include(tokens: list[str]) -> set[str] | None:
 async def cmd_backup(repl: VeluneREPL, args: str) -> None:
     """/backup [path] [--include a,b] [--with-secrets]"""
     console = repl.console
-    tokens = shlex.split(args) if args else []
+    tokens = _split_args(args)
     with_secrets = "--with-secrets" in tokens
     try:
         include = _parse_include(tokens)
@@ -90,7 +108,7 @@ async def cmd_backup(repl: VeluneREPL, args: str) -> None:
 async def cmd_restore(repl: VeluneREPL, args: str) -> None:
     """/restore <archive> [--include a,b] [--overwrite] [--dry-run]"""
     console = repl.console
-    tokens = shlex.split(args) if args else []
+    tokens = _split_args(args)
     if not tokens:
         console.print(
             f"[{design.WARN}]Usage:[/{design.WARN}] /restore <archive> [--dry-run] [--overwrite]"
@@ -154,7 +172,7 @@ async def cmd_recover(repl: VeluneREPL, args: str) -> None:
     """/recover [id] [--all]"""
     console = repl.console
     store = repl._session_store
-    tokens = shlex.split(args) if args else []
+    tokens = _split_args(args)
     recover_all = "--all" in tokens or "-a" in tokens
     positional = [t for t in tokens if not t.startswith("-")]
 
