@@ -1,15 +1,15 @@
 """Central design tokens for the Velune CLI.
 
-Pink/White brand palette — a soft, modern, high-contrast look built around hot
-pink accents on clean white text. The design language pairs a vivid magenta
-brand hue with rose and blush tints for secondary elements, keeping warnings and
-errors functionally distinct for readability.
+Monochrome palette — grayscale text and structure on a near-black background,
+with a single restrained accent (soft steel-blue) reserved for the logo,
+prompt, and active/selected state. Semantic colors (ok/warn/danger) stay
+desaturated so they read as "muted amber" or "muted rust" rather than neon,
+while remaining functionally distinct for legibility.
 
 Palette:
-- Hot pink (primary brand, logo, prompt prefix)
-- Blush / rose (secondary elements, active states)
-- Deep magenta (emphasis, highlights)
-- White & soft mauve neutrals (body text, separators)
+- Grayscale neutrals (body text, separators, panels)
+- One accent hue, used sparingly (logo, prompt prefix, active states)
+- Desaturated semantic colors (success / warning / danger)
 
 Nothing here probes the terminal at import time; :func:`color_enabled` is
 evaluated lazily so the palette degrades gracefully under ``NO_COLOR`` and on
@@ -21,39 +21,44 @@ from __future__ import annotations
 import os
 import sys
 
-# --- Brand palette: Pink & White -------------------------------------------
-# Primary: Hot Pink — the signature brand hue (logo, prompt prefix, headings)
-ACCENT = "#ff5fa2"  # hot pink (logo, primary brand, prompt prefix)
-ACCENT_SOFT = "#ffa6cf"  # soft blush pink (secondary elements, arrows)
+# --- Brand palette: Monochrome + single accent ------------------------------
+# The one hue in the whole theme — used sparingly (logo, prompt prefix,
+# headings, active/selected state). Everything else is grayscale.
+ACCENT = "#8fb4c9"  # soft steel-blue (logo, primary brand, prompt prefix)
+ACCENT_SOFT = "#5f7d8f"  # dimmer accent (secondary elements, arrows)
 
-# Secondary: Deep Magenta — emphasis and strong highlights
-PRIMARY_GREEN = "#e91e8c"  # deep magenta-pink (emphasis, highlights)
-GREEN = "#ff7fb6"  # rose pink (accents, active states, success)
+# Reuses of the single accent — kept as separate names because other modules
+# reference them by role, not because they carry a distinct hue.
+PRIMARY_GREEN = "#5f7d8f"  # = ACCENT_SOFT (emphasis, highlights)
+GREEN = "#7a9b82"  # = OK (accents, active states, success)
 
-# Tertiary: Vivid Pink — modes, energy, forward motion
-HIGHLIGHT = "#ff2d95"  # vivid magenta-pink (modes, indicators)
-ENERGY = "#ffb3d9"  # light pink (active processes)
+HIGHLIGHT = "#8fb4c9"  # = ACCENT (modes, indicators)
+ENERGY = "#5f7d8f"  # = ACCENT_SOFT (active processes)
 
-# Info & feedback
-INFO = "#ff9ec7"  # soft pink for informational text
-SUBTLE = "#c97a9c"  # muted mauve for subtle elements
+# Info & feedback — desaturated, accent-tinted gray rather than a new hue.
+INFO = "#96a8ae"  # muted steel-gray for informational text
+SUBTLE = "#7a7a78"  # muted gray for subtle elements
 
-# Semantic state colors (shared by status bar, badges, diffs). Warnings/errors
-# stay functionally legible while sitting comfortably inside the pink theme.
-OK = "#ff7fb6"  # rose pink — success
-WARN = "#ffb86b"  # warm peach — warning (kept distinct for legibility)
-DANGER = "#ff4d6d"  # hot red-pink — danger
+# Semantic state colors (shared by status bar, badges, diffs). Desaturated so
+# they sit quietly in the monochrome theme while staying legible.
+OK = "#7a9b82"  # muted sage — success
+WARN = "#b3966e"  # muted amber — warning
+DANGER = "#b3706e"  # muted brick red — danger
 
 # Neutrals.
-BACKGROUND = "#0b0b0b"  # fullscreen REPL background
-WHITE = "#ffffff"  # primary body text
-SECONDARY = "#bbbbbb"  # neutral secondary text
-MUTED = "#d9a8c0"  # secondary text (soft mauve-pink)
-FAINT = "#9a6f82"  # frame glyphs, separators (dim mauve)
-SURFACE = "#1a0d14"  # very dark plum background
-LIGHT_BG = "#2a1520"  # slightly lighter plum panels
+BACKGROUND = "#0a0a0a"  # fullscreen REPL background
+WHITE = "#e8e8e6"  # primary body text (soft off-white, not pure #fff)
+SECONDARY = "#a3a3a1"  # neutral secondary text
+MUTED = "#7a7a78"  # secondary/dim text
+FAINT = "#4a4a48"  # frame glyphs, separators
+SURFACE = "#131311"  # panel background
+LIGHT_BG = "#1e1e1c"  # slightly lighter panels
 
 # --- Semantic role aliases -------------------------------------------------
+# NOTE: "PINK" is a legacy name from the previous brand palette — it now
+# points at the single monochrome accent, not an actual pink hue. Left
+# unrenamed to avoid a mass rename across every importer for a recolor-only
+# pass; rename if this theme becomes permanent.
 PINK = ACCENT
 SUCCESS = OK
 ERROR = DANGER

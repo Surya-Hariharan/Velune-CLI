@@ -19,6 +19,7 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from velune.cli import design
 from velune.cli.interactive.chrome import StageInfo, WizardCancelled, WizardController
 from velune.cli.interactive.result import BACK
 from velune.cli.interactive.widgets import ConfirmWidget, Option, SelectWidget, TextInputWidget
@@ -169,8 +170,8 @@ async def _stage_transition(controller: WizardController, idx: int) -> None:
     await controller.show_transient(
         [
             [
-                ("fg:#ff7fb6", f"  ✓ {title} complete\n\n"),
-                ("fg:#d9a8c0", "  Loading next step..."),
+                (f"fg:{design.OK}", f"  ✓ {title} complete\n\n"),
+                (f"fg:{design.MUTED}", "  Loading next step..."),
             ]
         ],
         delay=0.35,
@@ -208,18 +209,18 @@ async def _stage_environment(controller: WizardController) -> Any:
     check_names = ["CPU", "RAM", "GPU", "Ollama", "Environment"]
     frames = []
     for i in range(len(check_names)):
-        lines = [("bold fg:#ff5fa2", "  Checking hardware...\n\n")]
+        lines = [(f"bold fg:{design.ACCENT}", "  Checking hardware...\n\n")]
         for j, name in enumerate(check_names):
             if j < i:
-                lines.append(("fg:#ff7fb6", f"  ✓ {name}\n"))
+                lines.append((f"fg:{design.OK}", f"  ✓ {name}\n"))
             elif j == i:
-                lines.append(("fg:#d9a8c0", f"  … {name}\n"))
+                lines.append((f"fg:{design.MUTED}", f"  … {name}\n"))
             else:
-                lines.append(("fg:#9a6f82", f"    {name}\n"))
+                lines.append((f"fg:{design.FAINT}", f"    {name}\n"))
         frames.append(lines)
-    final_lines = [("bold fg:#ff5fa2", "  Checking hardware...\n\n")]
+    final_lines = [(f"bold fg:{design.ACCENT}", "  Checking hardware...\n\n")]
     for name in check_names:
-        final_lines.append(("fg:#ff7fb6", f"  ✓ {name}\n"))
+        final_lines.append((f"fg:{design.OK}", f"  ✓ {name}\n"))
     frames.append(final_lines)
 
     detect_task = asyncio.ensure_future(asyncio.to_thread(HardwareDetector().detect))
@@ -341,7 +342,9 @@ async def _detect_one_local_provider(controller: WizardController, pid: str) -> 
     name = meta.display_name if meta else pid
 
     for _attempt in range(3):
-        await controller.show_transient([[("fg:#d9a8c0", f"  Checking {name}...")]], delay=0.3)
+        await controller.show_transient(
+            [[(f"fg:{design.MUTED}", f"  Checking {name}...")]], delay=0.3
+        )
         result = await validate_provider(pid, "")
         if result.ok:
             n = len(result.models)
@@ -349,7 +352,7 @@ async def _detect_one_local_provider(controller: WizardController, pid: str) -> 
                 [
                     [
                         (
-                            "fg:#ff7fb6",
+                            f"fg:{design.OK}",
                             f"  ✓ {name} detected — {n} model{'s' if n != 1 else ''} available.",
                         )
                     ]
@@ -439,7 +442,7 @@ async def _configure_one_provider_key(controller: WizardController, pid: str) ->
         if not key:
             return None  # skipped
 
-        await controller.show_transient([[("fg:#d9a8c0", "  Validating...")]], delay=0.2)
+        await controller.show_transient([[(f"fg:{design.MUTED}", "  Validating...")]], delay=0.2)
         result = await validate_provider(pid, key)
 
         if result.ok:
@@ -448,7 +451,7 @@ async def _configure_one_provider_key(controller: WizardController, pid: str) ->
             except Exception:
                 pass
             await controller.show_transient(
-                [[("fg:#ff7fb6", f"  ✓ Connected — {result.human_message()}")]],
+                [[(f"fg:{design.OK}", f"  ✓ Connected — {result.human_message()}")]],
                 delay=0.4,
             )
             return pid
@@ -481,7 +484,7 @@ async def _stage_discover_models(controller: WizardController) -> Any:
     from velune.providers.discovery.scanner import ModelDiscoveryScanner
 
     await controller.show_transient(
-        [[("fg:#d9a8c0", "  Discovering available models...")]], delay=0.3
+        [[(f"fg:{design.MUTED}", "  Discovering available models...")]], delay=0.3
     )
     try:
         models = await ModelDiscoveryScanner().scan_all()
@@ -589,14 +592,14 @@ async def _stage_health_check(controller: WizardController) -> Any:
 
     frames = []
     for i in range(len(names)):
-        lines = [("bold fg:#ff5fa2", "  Running health checks...\n\n")]
+        lines = [(f"bold fg:{design.ACCENT}", "  Running health checks...\n\n")]
         for j, name in enumerate(names):
             if j < i:
-                lines.append(("fg:#ff7fb6", f"  ✓ {name}\n"))
+                lines.append((f"fg:{design.OK}", f"  ✓ {name}\n"))
             elif j == i:
-                lines.append(("fg:#d9a8c0", f"  … {name}\n"))
+                lines.append((f"fg:{design.MUTED}", f"  … {name}\n"))
             else:
-                lines.append(("fg:#9a6f82", f"    {name}\n"))
+                lines.append((f"fg:{design.FAINT}", f"    {name}\n"))
         frames.append(lines)
 
     results: list[dict] = []

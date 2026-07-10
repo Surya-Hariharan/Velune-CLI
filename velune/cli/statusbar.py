@@ -75,9 +75,9 @@ def _format_tokens(n: int) -> str:
 
 
 def _context_bar(pct: float) -> str:
-    """Visual context usage bar: ▮▮▮▯▯▯▯▯▯▯"""
+    """Visual context usage bar: ███░░░░░░░"""
     filled = int(pct / 10)
-    return "▮" * filled + "▯" * (10 - filled)
+    return "█" * filled + "░" * (10 - filled)
 
 
 def render_status_bar(state: StatusBarState) -> FormattedText:
