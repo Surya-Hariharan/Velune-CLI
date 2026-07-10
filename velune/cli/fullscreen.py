@@ -29,7 +29,7 @@ from prompt_toolkit.validation import Validator
 from rich.console import Console
 
 from velune.cli import design
-from velune.cli.banner import _LOGO_ART
+from velune.cli.home import HOME_STYLES, HomeState, render_home
 from velune.cli.rendering.markdown import CustomMarkdown, MarkdownStreamBuffer
 from velune.cli.rendering.segments_to_pt import render_to_fragments
 from velune.cli.statusbar import render_status_bar
@@ -156,11 +156,15 @@ class FullscreenREPLUI:
         on_interrupt: Any,
         on_status_render: Any | None = None,
         command_palette: Any | None = None,
+        home_provider: Any | None = None,
         input: Any | None = None,
         output: Any | None = None,
     ) -> None:
         self._status_state = status_state
         self._on_status_render = on_status_render
+        # Callable returning a fresh HomeState; rendered while the transcript
+        # is empty. None falls back to a minimal wordmark line.
+        self._home_provider = home_provider
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._lines: list[_Line] = []
         self._stream_start: int | None = None
@@ -168,8 +172,6 @@ class FullscreenREPLUI:
         self._last_stream_render: float = 0.0
         self._running = False
         self._app: Application[None] | None = None
-        self._logo_offset: float = 0.0
-        self._logo_animating = False
         self._thinking_task: asyncio.Task | None = None
         self._thinking_idx: int = 0
         self._thinking_words = [
@@ -237,8 +239,7 @@ class FullscreenREPLUI:
                 "conversation.assistant": f"bg:{design.BACKGROUND} {design.WHITE}",
                 "conversation.system": f"bg:{design.BACKGROUND} {design.SECONDARY}",
                 "conversation.thinking": f"bg:{design.BACKGROUND} {design.SECONDARY} italic",
-                "logo.pink": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                "logo.white": f"bg:{design.BACKGROUND} {design.WHITE} bold",
+                **HOME_STYLES,
                 "separator": f"bg:{design.BACKGROUND} {design.BACKGROUND}",  # Hide separators for minimal look
                 "prompt": f"bg:{design.BACKGROUND} {design.WHITE}",
                 "prompt.prefix": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
@@ -363,31 +364,13 @@ class FullscreenREPLUI:
         self._queue.put_nowait("/exit")
 
     def submit(self, text: str) -> None:
-        if not self._lines and not self._logo_animating:
-            self._logo_animating = True
-            asyncio.create_task(self._animate_logo_out(text))
-        else:
-            self.append_user(text)
-            self._queue.put_nowait(text)
-            self.invalidate()
+        if not self._lines:
+            # First message of the session — vary the thinking verbs once.
+            import random
 
-    async def _animate_logo_out(self, text: str) -> None:
-        import random
-
-        # Randomize thinking words at the start of the session
-        random.shuffle(self._thinking_words)
-
-        # Slide up animation (200-350ms)
-        steps = 15
-        delay = 0.25 / steps
-        for _i in range(steps):
-            self._logo_offset += 1.5
-            self.invalidate()
-            await asyncio.sleep(delay)
-
+            random.shuffle(self._thinking_words)
         self.append_user(text)
         self._queue.put_nowait(text)
-        self._logo_animating = False
         self.invalidate()
 
     def invalidate(self) -> None:
@@ -543,7 +526,7 @@ class FullscreenREPLUI:
 
     def _render_prompt_bottom_border(self) -> AnyFormattedText:
         width = self._width()
-        hint = "Enter send  ·  Shift+Enter newline  ·  / commands"
+        hint = "Enter send  ·  Shift+Enter newline  ·  / commands  ·  @@ files"
         fill = width - 5 - len(hint)
         if fill >= 1:
             return FormattedText(
@@ -564,10 +547,8 @@ class FullscreenREPLUI:
         return FormattedText([("class:prompt.border", "│ "), ("", "  ")])
 
     def _render_conversation(self) -> AnyFormattedText:
-        if not self._lines and not self._logo_animating:
-            return self._render_logo()
-        elif self._logo_animating and not self._lines:
-            return self._render_logo()
+        if not self._lines:
+            return self._render_home()
 
         available = max(1, self._height() - (_PROMPT_MAX_LINES + 3))
         tail = self._lines[-available:]
@@ -583,40 +564,16 @@ class FullscreenREPLUI:
                 fragments.append((sep_style, "\n"))
         return FormattedText(fragments)
 
-    def _render_logo(self) -> AnyFormattedText:
-        width = self._width()
-        height = self._height()
-
-        max(len(line) for letter in _LOGO_ART for line in letter)  # Approximate
-        logo_lines = [""] * 6
-        for row in range(6):
-            for _i, letter in enumerate(_LOGO_ART):
-                logo_lines[row] += letter[row]
-
-        actual_logo_width = max(len(line) for line in logo_lines)
-        left = " " * max(0, (width - actual_logo_width) // 2)
-
-        # Calculate base top, then subtract animation offset
-        base_top_lines = max(0, (height - len(logo_lines) - 7) // 2)
-        anim_top_lines = max(0, int(base_top_lines - self._logo_offset))
-
-        top = "\n" * anim_top_lines
-
-        fragments: list[tuple[str, str]] = [("class:conversation", top)]
-
-        for _row, line in enumerate(logo_lines):
-            fragments.append(("class:conversation", left))
-
-            # The 'V' is the first letter, which is 9 chars wide in _LOGO_ART[0]
-            # _LOGO_ART[0] lines are 9 chars. We color the V pink, rest white.
-            v_part = line[:9]
-            rest_part = line[9:]
-
-            fragments.append(("class:logo.pink", v_part))
-            fragments.append(("class:logo.white", rest_part))
-            fragments.append(("class:conversation", "\n"))
-
-        return FormattedText(fragments)
+    def _render_home(self) -> AnyFormattedText:
+        """Compact upper-left header + runtime summary for the empty transcript."""
+        if self._home_provider is not None:
+            try:
+                state = self._home_provider()
+                if state is not None:
+                    return render_home(state, self._width())
+            except Exception:
+                pass
+        return render_home(HomeState(), self._width())
 
     def _width(self) -> int:
         if self._app is None:

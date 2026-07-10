@@ -3,7 +3,7 @@
 All ``_cmd_*`` handler implementations have been extracted into focused modules
 under ``velune/cli/handlers/``.  This file owns:
   - State initialisation (``__init__``)
-  - prompt_toolkit session setup (``_build_prompt_session``)
+  - Fullscreen UI setup (``_build_fullscreen_ui``)
   - Main event loop (``run``)
   - Lifecycle helpers (``_shutdown_repl``, ``_archive_current_session``, …)
   - Slash command dispatch (``_handle_slash_command``)
@@ -20,9 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 _log = logging.getLogger("velune.cli.repl")
-
-from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import FormattedText
 
 from velune._compat import uncancel_task
 from velune.cli.slash_commands import SlashCommandRegistry
@@ -177,108 +174,8 @@ class VeluneREPL:
         return False
 
     # ------------------------------------------------------------------
-    # prompt_toolkit session
+    # Fullscreen UI
     # ------------------------------------------------------------------
-
-    def _build_prompt_session(self) -> PromptSession:
-        from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-        from prompt_toolkit.history import FileHistory
-        from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.styles import Style
-
-        from velune.cli import design
-        from velune.cli.autocomplete import CommandEntry, SlashCompleter
-        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette
-        from velune.cli.statusbar import STATUS_BAR_STYLES
-        from velune.cli.validators import InlineSyntaxValidator
-
-        style = Style.from_dict(
-            {
-                "prompt.frame": design.FAINT,
-                "prompt.prefix": f"{design.ACCENT} bold",
-                "prompt.branch": design.MUTED,
-                "prompt.model": design.FAINT,
-                "prompt.mode": design.HIGHLIGHT,
-                "prompt.arrow": f"{design.ACCENT_SOFT} bold",
-                "ctx.ok": f"{design.OK} bold",
-                "ctx.warn": f"{design.WARN} bold",
-                "ctx.danger": f"{design.DANGER} bold",
-                "mode.godly": f"{design.ENERGY} bold",
-                "mode.optimus": f"{design.WARN} bold",
-                **STATUS_BAR_STYLES,
-                **PALETTE_STYLES,
-            }
-        )
-
-        try:
-            models = self.container.get("runtime.model_registry").list_all()
-            model_ids = [m.model_id for m in models]
-        except Exception:
-            model_ids = []
-
-        entries = [
-            CommandEntry(
-                name=cmd.name,
-                description=cmd.description,
-                category=cmd.category,
-                aliases=tuple(cmd.aliases),
-            )
-            for cmd in self._registry.all_unique()
-            if not cmd.hidden
-        ]
-        completer = SlashCompleter(
-            commands=entries,
-            model_ids=model_ids,
-            show_command_completions=False,
-        )
-        self._completer = completer
-
-        palette = CommandPalette(
-            self._registry.all_unique(), recency_source=completer.recent_commands
-        )
-        self._command_palette = palette
-
-        kb = KeyBindings()
-
-        @kb.add("c-c")
-        def _(event):
-            buffer = event.app.current_buffer
-            if buffer.text:
-                buffer.text = ""
-                buffer.cursor_position = 0
-                self._interrupts.reset_exit_window()
-            elif self._interrupts.note_interrupt():
-                event.app.exit(exception=KeyboardInterrupt)
-            else:
-                event.app.invalidate()
-
-        @kb.add("escape", "enter")
-        def _insert_newline_meta(event):
-            event.app.current_buffer.insert_text("\n")
-
-        @kb.add("c-j")
-        def _insert_newline_ctrl_j(event):
-            event.app.current_buffer.insert_text("\n")
-
-        palette.add_bindings(kb)
-
-        session = PromptSession(
-            history=FileHistory(str(self._history_file)),
-            auto_suggest=AutoSuggestFromHistory(),
-            completer=completer,
-            complete_while_typing=True,
-            complete_in_thread=True,
-            validator=InlineSyntaxValidator(),
-            validate_while_typing=True,
-            style=style,
-            mouse_support=False,
-            wrap_lines=True,
-            key_bindings=kb,
-            bottom_toolbar=self._render_toolbar,
-            reserve_space_for_menu=19,
-        )
-        palette.attach(session)
-        return session
 
     def _build_fullscreen_ui(self):
         from prompt_toolkit.history import FileHistory
@@ -286,23 +183,13 @@ class VeluneREPL:
 
         from velune.cli import design
         from velune.cli.autocomplete import CommandEntry, SlashCompleter
-        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette
+        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
         from velune.cli.fullscreen import FullscreenREPLUI
         from velune.cli.statusbar import STATUS_BAR_STYLES
         from velune.cli.validators import InlineSyntaxValidator
 
         style_fragments = {
-            "prompt.frame": design.FAINT,
-            "prompt.prefix": f"{design.ACCENT} bold",
-            "prompt.branch": design.MUTED,
-            "prompt.model": design.FAINT,
-            "prompt.mode": design.HIGHLIGHT,
             "prompt.arrow": f"{design.ACCENT_SOFT} bold",
-            "ctx.ok": f"{design.OK} bold",
-            "ctx.warn": f"{design.WARN} bold",
-            "ctx.danger": f"{design.DANGER} bold",
-            "mode.godly": f"{design.ENERGY} bold",
-            "mode.optimus": f"{design.WARN} bold",
             **STATUS_BAR_STYLES,
             **PALETTE_STYLES,
         }
@@ -331,7 +218,9 @@ class VeluneREPL:
         self._completer = completer
 
         palette = CommandPalette(
-            self._registry.all_unique(), recency_source=completer.recent_commands
+            self._registry.all_unique(),
+            recency_source=completer.recent_commands,
+            favorites=FavoritesStore(),
         )
         self._command_palette = palette
 
@@ -354,13 +243,8 @@ class VeluneREPL:
             on_interrupt=_interrupt,
             on_status_render=self._refresh_status_state,
             command_palette=palette,
+            home_provider=self._home_state,
         )
-
-    def _render_toolbar(self):
-        from velune.cli.statusbar import render_status_bar
-
-        self._refresh_status_state()
-        return render_status_bar(self._status_state)
 
     def _refresh_status_state(self) -> None:
         workspace_path = self.container.get("runtime.workspace")
@@ -387,69 +271,22 @@ class VeluneREPL:
         if self._job_registry is not None:
             self._status_state.bg_job_count = self._job_registry.active_count()
 
-    def _get_prompt_tokens(self) -> FormattedText:
+        self._status_state.provider_id = (
+            self.active_model.provider_id if self.active_model else None
+        )
+        self._status_state.git_branch = self._active_branch()
+        entries = list(self._mcp_registry._entries.values())
+        self._status_state.mcp_total = len(entries)
+        self._status_state.mcp_connected = sum(1 for e in entries if e.is_connected)
+
+        # Context threshold crossings feed the proactive watcher (was emitted
+        # from the old per-prompt token renderer; the status bar refresh is
+        # the surviving per-turn hook).
         from velune.cli import design
-        from velune.cli.modes import SessionMode
-
-        workspace_path = self.container.get("runtime.workspace")
-        if workspace_path:
-            workspace_dir = Path(workspace_path)
-            folder_name = workspace_dir.name
-            now = time.monotonic()
-            if self._cached_branch is None or (now - self._branch_last_checked) > 5.0:
-                from velune.repository.tracker import GitTracker
-
-                try:
-                    self._cached_branch = GitTracker(workspace_dir).get_active_branch()
-                except Exception:
-                    self._cached_branch = "unknown"
-                self._branch_last_checked = now
-            active_branch = self._cached_branch
-        else:
-            folder_name = "velune"
-            active_branch = "non-git"
-
-        tokens: list[tuple[str, str]] = [
-            ("class:prompt.frame", "╭ "),
-            ("class:prompt.prefix", folder_name),
-        ]
-
-        if active_branch and active_branch not in ("non-git", "unknown"):
-            tokens.append(("class:prompt.branch", f" ({active_branch})"))
-
-        if not self._mode_manager.is_normal():
-            label = self._mode_manager.current.value.upper()
-            if self._mode_manager.current == SessionMode.GODLY:
-                tokens.append(("class:mode.godly", f" [{label}]"))
-            elif self._mode_manager.current == SessionMode.OPTIMUS:
-                tokens.append(("class:mode.optimus", f" [{label}]"))
-            else:
-                tokens.append(("class:prompt.mode", f" [{label}]"))
-
-        if self.active_model:
-            tokens.append(("class:prompt.model", f" · {self.active_model.model_id}"))
-
-            self._context_tracker.max_tokens = self.active_model.context_length
-            self._context_tracker.update(self._conversation)
-
-            pct = self._context_tracker.percentage
-
-            if pct < design.CTX_WARN_PCT:
-                bar_style = "class:ctx.ok"
-            elif pct < design.CTX_DANGER_PCT:
-                bar_style = "class:ctx.warn"
-            else:
-                bar_style = "class:ctx.danger"
-            tokens.append((bar_style, f" · {pct:.0f}%"))
-
-        tokens.append(("class:prompt.frame", "\n╰"))
-        tokens.append(("class:prompt.arrow", "❯ "))
-
-        self._refresh_status_state()
 
         pct = self._status_state.context_pct
         prev_pct = self._prev_ctx_pct
-        for threshold in (70, 90):
+        for threshold in (design.CTX_WARN_PCT, design.CTX_DANGER_PCT):
             if prev_pct < threshold <= pct:
                 try:
                     from velune.events import Event
@@ -468,7 +305,107 @@ class VeluneREPL:
                     pass
         self._prev_ctx_pct = pct
 
-        return FormattedText(tokens)
+    def _active_branch(self) -> str | None:
+        """Current git branch, refreshed at most every 5s. None outside a repo."""
+        workspace_path = self.container.get("runtime.workspace")
+        if not workspace_path:
+            return None
+        now = time.monotonic()
+        if self._cached_branch is None or (now - self._branch_last_checked) > 5.0:
+            from velune.repository.tracker import GitTracker
+
+            try:
+                self._cached_branch = GitTracker(Path(workspace_path)).get_active_branch()
+            except Exception:
+                self._cached_branch = "unknown"
+            self._branch_last_checked = now
+        return self._cached_branch
+
+    # ------------------------------------------------------------------
+    # Home surface (empty-transcript header + runtime summary)
+    # ------------------------------------------------------------------
+
+    def _home_state(self):
+        """Build the HomeState shown while the transcript is empty.
+
+        Called on every redraw of the empty home screen, so everything here
+        must be cheap: live in-memory attributes plus two TTL-cached
+        filesystem probes (memory size, index summary).
+        """
+        from velune import __version__
+        from velune.cli.home import HomeState
+        from velune.providers.keystore import list_configured_providers
+
+        workspace = self.container.get("runtime.workspace")
+        workspace_path = str(Path(workspace).resolve()) if workspace else ""
+
+        try:
+            configured = tuple(list_configured_providers())
+        except Exception:
+            configured = ()
+        local = next((p.title() for p in configured if p in ("ollama", "lmstudio")), None)
+        cloud = tuple(p for p in configured if p not in ("ollama", "lmstudio"))
+
+        project_type = None
+        if self._project_profile:
+            if isinstance(self._project_profile, dict):
+                project_type = self._project_profile.get("display_name")
+            else:
+                project_type = getattr(self._project_profile, "display_name", None)
+
+        entries = list(self._mcp_registry._entries.values())
+
+        return HomeState(
+            version=__version__,
+            model_id=self.active_model.model_id if self.active_model else None,
+            provider=self.active_model.provider_id if self.active_model else None,
+            workspace_path=workspace_path,
+            git_branch=self._active_branch(),
+            project_type=project_type,
+            indexed_files=self._indexed_file_count(workspace_path),
+            memory_label=self._memory_label(workspace_path),
+            mcp_connected=sum(1 for e in entries if e.is_connected),
+            mcp_total=len(entries),
+            providers=cloud,
+            local_runtime=local,
+        )
+
+    def _indexed_file_count(self, workspace_path: str) -> int | None:
+        """Number of files in .velune/index_state.json, cached for 60s."""
+        now = time.monotonic()
+        cached = getattr(self, "_index_count_cache", None)
+        if cached is not None and (now - cached[1]) < 60.0:
+            return cached[0]
+        count: int | None = None
+        try:
+            import json
+
+            state_path = Path(workspace_path) / ".velune" / "index_state.json"
+            if state_path.exists():
+                data = json.loads(state_path.read_text(encoding="utf-8"))
+                count = len(data.get("file_index", {}))
+        except Exception:
+            count = None
+        self._index_count_cache = (count, now)
+        return count
+
+    def _memory_label(self, workspace_path: str) -> str | None:
+        """Cognitive-memory size summary, cached for 60s."""
+        now = time.monotonic()
+        cached = getattr(self, "_memory_label_cache", None)
+        if cached is not None and (now - cached[1]) < 60.0:
+            return cached[0]
+        label: str | None = None
+        try:
+            from velune.core.paths import cognitive_db_path
+
+            db_path = cognitive_db_path(Path(workspace_path) if workspace_path else Path.cwd())
+            if db_path.exists():
+                label = f"cognitive {db_path.stat().st_size / (1024 * 1024):.1f} MB"
+        except Exception:
+            label = None
+        self._memory_label_cache = (label, now)
+        return label
 
     # ------------------------------------------------------------------
     # Main loop
@@ -691,37 +628,6 @@ class VeluneREPL:
         )
         # Clean exit — drop the crash-guard sidecar so it isn't flagged as orphaned.
         self._session_store.clear_autosave(self._session_id)
-
-    def _print_startup_banner(self) -> None:
-        from velune import __version__
-        from velune.cli.banner import render_startup_banner
-        from velune.providers.keystore import list_configured_providers
-
-        hardware = self.container.get("runtime.hardware")
-        configured = list_configured_providers()
-        ollama_live = "ollama" in configured
-        workspace = self.container.get("runtime.workspace")
-        workspace_path = str(Path(workspace).resolve()) if workspace else "unknown"
-        model_id = self.active_model.model_id if self.active_model else None
-
-        pt_name = None
-        if self._project_profile:
-            if isinstance(self._project_profile, dict):
-                pt_name = self._project_profile.get("display_name")
-            else:
-                pt_name = getattr(self._project_profile, "display_name", None)
-
-        render_startup_banner(
-            console=self.console,
-            hardware_profile=hardware,
-            configured_providers=configured,
-            ollama_live=ollama_live,
-            workspace_path=workspace_path,
-            active_model_id=model_id,
-            version=__version__,
-            project_type_name=pt_name,
-            runtime_profile_label=self._runtime_profile.label if self._runtime_profile else None,
-        )
 
     # ------------------------------------------------------------------
     # Slash command dispatch

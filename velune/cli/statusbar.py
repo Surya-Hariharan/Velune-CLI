@@ -6,8 +6,8 @@ latency / throughput.  All values are read from a small mutable state object
 the REPL updates as it works — rendering never probes hardware or providers.
 
 Information hierarchy (left to right):
-  exit hint  |  model  |  mode  |  ctx bar  |  [latency]  |  [throughput]
-  [bg jobs]  |  [alerts]  |  [provider issue]
+  exit hint  |  provider·model  |  mode  |  ctx bar  |  [branch]  |  [mcp]
+  [bg jobs]  |  [alerts]  |  [provider issue]  |  [latency]  |  [throughput]
 
 Removed vs. previous version:
   - workspace  (visible in the two-line prompt)
@@ -60,6 +60,10 @@ class StatusBarState:
     provider_health: str | None = None  # "ok" | "degraded" | "down"
     bg_job_count: int = 0
     alert_count: int = 0
+    provider_id: str | None = None  # active model's provider (e.g. "groq")
+    git_branch: str | None = None  # active branch; None/non-git stays silent
+    mcp_connected: int = 0
+    mcp_total: int = 0  # 0 = no servers configured, row stays silent
 
 
 def _format_tokens(n: int) -> str:
@@ -84,9 +88,13 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
         parts.append(("class:bottom-toolbar.hint", " Ctrl+C again to exit"))
         parts.append(_SEP)
 
-    # Model name — primary information
+    # Provider + model — primary information
     if state.model_id:
-        parts.append(("class:bottom-toolbar.model", f" {state.model_id}"))
+        if state.provider_id:
+            parts.append(("class:bottom-toolbar.key", f" {state.provider_id}·"))
+            parts.append(("class:bottom-toolbar.model", state.model_id))
+        else:
+            parts.append(("class:bottom-toolbar.model", f" {state.model_id}"))
     else:
         parts.append(("class:bottom-toolbar.model", " no model"))
 
@@ -115,6 +123,21 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
     else:
         ctx_label = f"ctx {pct:.0f}%"
     parts.append((ctx_style, f"{ctx_bar} {ctx_label}"))
+
+    # Git branch — only inside a repository
+    if state.git_branch and state.git_branch not in ("non-git", "unknown"):
+        parts.append(_SEP)
+        parts.append(("class:bottom-toolbar.project", state.git_branch))
+
+    # MCP — only when servers are configured; degraded counts get warn color
+    if state.mcp_total > 0:
+        parts.append(_SEP)
+        mcp_style = (
+            "class:bottom-toolbar.ok"
+            if state.mcp_connected == state.mcp_total
+            else "class:bottom-toolbar.warn"
+        )
+        parts.append((mcp_style, f"mcp {state.mcp_connected}/{state.mcp_total}"))
 
     # Background jobs — only when running
     if state.bg_job_count > 0:

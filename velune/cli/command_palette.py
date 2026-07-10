@@ -8,8 +8,10 @@ cheap to test without a terminal.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from prompt_toolkit.application.current import get_app
@@ -36,7 +38,44 @@ if TYPE_CHECKING:
 
 
 _RECENT_GROUP = "Recent"
+_FAVORITES_GROUP = "Favorites"
 _MAX_RECENT_SHOWN = 5
+
+
+class FavoritesStore:
+    """Persistent set of pinned command names (~/.velune/palette_favorites.json).
+
+    All disk IO is best-effort: a corrupt or unwritable file degrades to
+    "no favorites", never to a broken palette.
+    """
+
+    def __init__(self, path: Path | None = None) -> None:
+        self._path = path or (Path.home() / ".velune" / "palette_favorites.json")
+        self._names: set[str] | None = None
+
+    def names(self) -> set[str]:
+        if self._names is None:
+            try:
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                self._names = {str(n) for n in data} if isinstance(data, list) else set()
+            except Exception:
+                self._names = set()
+        return self._names
+
+    def toggle(self, name: str) -> bool:
+        """Pin/unpin *name*; returns True when it is now pinned."""
+        names = self.names()
+        pinned = name not in names
+        if pinned:
+            names.add(name)
+        else:
+            names.discard(name)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(sorted(names)), encoding="utf-8")
+        except Exception:
+            pass
+        return pinned
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +95,7 @@ class CommandPaletteModel:
         self,
         commands: list[SlashCommand],
         recency_source: Callable[[], list[str]] | None = None,
+        favorites_source: Callable[[], set[str]] | None = None,
     ) -> None:
         self.commands: list[SlashCommand] = []
         self.selected_index = 0
@@ -64,6 +104,8 @@ class CommandPaletteModel:
         # with SlashCompleter (velune.cli.autocomplete) so Tab-completion and
         # the palette agree on "recently used" from one source of truth.
         self._recency_source = recency_source
+        # Optional callable returning pinned command names (FavoritesStore).
+        self._favorites_source = favorites_source
         self.set_commands(commands)
 
     def set_commands(self, commands: list[SlashCommand]) -> None:
@@ -110,6 +152,14 @@ class CommandPaletteModel:
         except Exception:
             return []
 
+    def favorite_names(self) -> set[str]:
+        if self._favorites_source is None:
+            return set()
+        try:
+            return set(self._favorites_source())
+        except Exception:
+            return set()
+
     def matches(self, query: str) -> list[PaletteMatch]:
         if query != self._last_query:
             self.selected_index = 0
@@ -118,13 +168,19 @@ class CommandPaletteModel:
         category_rank = {name: index for index, name in enumerate(CATEGORY_ORDER)}
 
         if not query:
-            # Browsing view: pull recently-used commands into their own group
-            # at the top (recency order), then the rest grouped by category
-            # as before. A command appears in exactly one group.
-            recent_names = self._recent_names()
+            # Browsing view: pinned favorites first, then recently-used, then
+            # the rest grouped by category. A command appears in exactly one
+            # group (favorites win over recents).
+            favorite_names = self.favorite_names()
+            recent_names = [n for n in self._recent_names() if n not in favorite_names]
             recent_rank = {name: i for i, name in enumerate(recent_names)}
             by_name = {cmd.name: cmd for cmd in self.commands}
 
+            favorite_matches = [
+                PaletteMatch(command=by_name[name], score=1, group=_FAVORITES_GROUP)
+                for name in sorted(favorite_names)
+                if name in by_name
+            ]
             recent_matches = [
                 PaletteMatch(command=by_name[name], score=1, group=_RECENT_GROUP)
                 for name in recent_names
@@ -133,7 +189,7 @@ class CommandPaletteModel:
             rest_matches = [
                 PaletteMatch(command=cmd, score=1, group=cmd.category)
                 for cmd in self.commands
-                if cmd.name not in recent_rank
+                if cmd.name not in recent_rank and cmd.name not in favorite_names
             ]
             rest_matches.sort(
                 key=lambda match: (
@@ -142,7 +198,7 @@ class CommandPaletteModel:
                     match.command.name,
                 )
             )
-            scored = recent_matches + rest_matches
+            scored = favorite_matches + recent_matches + rest_matches
         else:
             scored = [
                 PaletteMatch(
@@ -193,8 +249,16 @@ class CommandPalette:
         self,
         commands: list[SlashCommand],
         recency_source: Callable[[], list[str]] | None = None,
+        favorites: FavoritesStore | None = None,
     ) -> None:
-        self.model = CommandPaletteModel(commands, recency_source=recency_source)
+        # No default store: tests and callers that don't pass one get a
+        # palette with favorites disabled instead of surprise disk reads.
+        self._favorites = favorites
+        self.model = CommandPaletteModel(
+            commands,
+            recency_source=recency_source,
+            favorites_source=favorites.names if favorites else None,
+        )
         self._dismissed_text: str | None = None
 
     def set_commands(self, commands: list[SlashCommand]) -> None:
@@ -242,6 +306,7 @@ class CommandPalette:
         limit = 9
         start = self._window_start(count, self.model.selected_index, limit)
         visible = matches[start : start + limit]
+        favorite_names = self.model.favorite_names()
         previous_group: str | None = None
         for offset, match in enumerate(visible):
             index = start + offset
@@ -253,6 +318,7 @@ class CommandPalette:
                 previous_group = match.group
             selected = index == self.model.selected_index
             marker = ">" if selected else " "
+            star = "★" if command.name in favorite_names else " "
             style = "class:palette.selected" if selected else "class:palette.command"
             # Name + a short description so the grouped, empty-query view reads as a
             # browseable feature menu, not just a list of command names.
@@ -260,7 +326,7 @@ class CommandPalette:
             desc = command.description
             if len(desc) > 52:
                 desc = desc[:51].rstrip() + "…"
-            lines.append((style, f"  {marker} {name_cell:<16}"))
+            lines.append((style, f" {marker}{star} {name_cell:<16}"))
             lines.append(("class:palette.muted", f"{desc}\n"))
         return FormattedText(lines)
 
@@ -293,7 +359,9 @@ class CommandPalette:
                 ("class:palette.code", f"  {shortcut}\n\n"),
                 (
                     "class:palette.muted",
-                    "  Up/Down navigate  Enter run  Tab complete  Esc close",
+                    "  Up/Down navigate  Enter run  Tab complete  "
+                    + ("Ctrl+F pin  " if self._favorites else "")
+                    + "Esc close",
                 ),
             ]
         )
@@ -335,6 +403,16 @@ class CommandPalette:
         def _close(event) -> None:
             self.dismiss()
             event.app.invalidate()
+
+        if self._favorites is not None:
+
+            @bindings.add("c-f", filter=active, eager=True)
+            def _toggle_favorite(event) -> None:
+                command = self._selected()
+                if command is None:
+                    return
+                self._favorites.toggle(command.name)
+                event.app.invalidate()
 
     def container(self) -> ConditionalContainer:
         left = Window(
