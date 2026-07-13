@@ -447,7 +447,7 @@ async def _configure_one_provider_key(controller: WizardController, pid: str) ->
 
         if result.ok:
             try:
-                save_key(pid, key)
+                save_key(pid, key, verified=True)
             except Exception:
                 pass
             await controller.show_transient(
@@ -682,7 +682,7 @@ async def _stage_ready(controller: WizardController, workspace: Path) -> None:
         for p in configured:
             lines.append(f"  ✓ {p.title()}")
     else:
-        lines.append("  none configured — type /setup in the REPL")
+        lines.append("  none configured — type /login in the REPL")
     lines.append("")
     lines.append("Model")
     if model_pref:
@@ -712,7 +712,7 @@ async def _stage_degraded(controller: WizardController) -> None:
             title="No AI providers configured",
             subtitle=(
                 "Velune is starting without a provider. You can:\n"
-                "  Type /setup in the REPL to configure providers\n"
+                "  Type /login in the REPL to connect one\n"
                 "  Run velune setup in a new terminal\n"
                 "  Set environment variables (e.g. GROQ_API_KEY) and restart"
             ),

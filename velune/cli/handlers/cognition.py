@@ -96,7 +96,7 @@ def _render_quick_summary(repl: VeluneREPL, summary: dict) -> None:
             elif isinstance(val, dict):
                 val = ", ".join(f"{k}={v}" for k, v in val.items())
             lines.append(f"[bold]{str(key).capitalize()}[/bold] {val}")
-    repl.console.print(Panel("\n".join(lines), title="Quick Cognition", border_style=design.ACCENT))
+    repl.console.print(Panel("\n".join(lines), title="Quick Index", border_style=design.ACCENT))
     repl.console.print(
         "[dim]→ Run [bold]/index standard[/bold] to build a full symbol index.[/dim]"
     )
@@ -105,7 +105,7 @@ def _render_quick_summary(repl: VeluneREPL, summary: dict) -> None:
 async def _cognition_run(repl: VeluneREPL, cog, *, deep: bool, intro: bool = False) -> None:
     if intro:
         repl.console.print(
-            "[bold]Cognition[/bold] — index this workspace so Velune understands its code."
+            "[bold]Index[/bold] — scan this workspace so Velune understands its code."
         )
     if not _cognition_model_ready(repl):
         return
@@ -121,45 +121,39 @@ async def _cognition_run(repl: VeluneREPL, cog, *, deep: bool, intro: bool = Fal
     if preview.get("file_count", 0) == 0:
         repl.console.print("[yellow]No source files found to index.[/yellow]")
         return
-    if not _confirm_cognition(repl, preview, deep=deep):
+    if not await _confirm_cognition(repl, preview, deep=deep):
         repl.console.print("[dim]Cancelled.[/dim]")
         return
     await _submit_cognition_job(repl, cog, deep=deep)
 
 
-def _confirm_cognition(repl: VeluneREPL, preview: dict, *, deep: bool) -> bool:
+async def _confirm_cognition(repl: VeluneREPL, preview: dict, *, deep: bool) -> bool:
     from pathlib import Path
 
     from rich.panel import Panel
-    from rich.prompt import Confirm
 
     from velune.cli import design
+    from velune.cli.handlers.confirm import confirm_destructive
 
     workspace = Path(repl.container.get("runtime.workspace")).name
     files = preview.get("file_count", 0)
     tokens = preview.get("est_tokens", 0)
-    secs = files * (0.06 if deep else 0.025) + 1.0
     repl.console.print(
         Panel(
-            f"[bold]Workspace[/bold]          {workspace}\n"
-            f"[bold]Mode[/bold]               {'deep' if deep else 'standard'}\n"
-            f"[bold]Files[/bold]              {files:,}\n"
-            f"[bold]Estimated Tokens[/bold]   {_humanize_count(tokens)}\n"
-            f"[bold]Estimated Cost[/bold]     Local Processing\n"
-            f"[bold]Estimated Duration[/bold] {_format_duration(secs)}",
-            title="Cognition Preview",
+            f"[bold]Workspace[/bold]        {workspace}\n"
+            f"[bold]Mode[/bold]             {'deep' if deep else 'standard'}\n"
+            f"[bold]Files[/bold]            {files:,}\n"
+            f"[bold]Estimated Tokens[/bold] {_humanize_count(tokens)}\n"
+            f"[bold]Cost[/bold]             Local processing — free",
+            title="Index Preview",
             border_style=design.ACCENT,
         )
     )
-    try:
-        if bool(repl.container.get("runtime.auto_accept")):
-            return True
-    except Exception:
-        pass
-    try:
-        return Confirm.ask("  Proceed?", default=True)
-    except Exception:
-        return False
+    # The old panel also showed an "Estimated Duration", computed as
+    # files * 0.06|0.025 + 1.0 — a made-up constant presented to the user as a
+    # measurement. Dropped rather than dressed up; we don't know how long it
+    # takes, and /index status reports real progress.
+    return await confirm_destructive(repl, "Proceed?", default=True)
 
 
 def _humanize_count(n) -> str:
@@ -171,30 +165,22 @@ def _humanize_count(n) -> str:
     return str(n)
 
 
-def _format_duration(seconds) -> str:
-    seconds = max(1, round(seconds))
-    if seconds < 60:
-        return f"~{seconds}s"
-    m, s = divmod(seconds, 60)
-    return f"~{m}m {s:02d}s"
-
-
 async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool, silent: bool = False) -> None:
     from velune.core.task_registry import JobRecord, JobStatus, track
 
     mode = "deep" if deep else "standard"
     if repl._job_registry is None:
-        with repl.console.status(f"[dim]Cognition ({mode})...[/dim]"):
+        with repl.console.status(f"[dim]Indexing ({mode})...[/dim]"):
             try:
                 if deep:
                     await cog.run_deep()
                 else:
                     await cog.run_incremental()
             except Exception as exc:
-                repl.console.print(f"[red]Cognition failed:[/red] {exc}")
+                repl.console.print(f"[red]Index failed:[/red] {exc}")
                 return
         if not silent:
-            repl.console.print(f"[green]Cognition complete ({mode}).[/green]")
+            repl.console.print(f"[green]Index complete ({mode}).[/green]")
             repl.console.print(
                 "[dim]→ /run <task> to start using the indexed context  ·  /graph to explore knowledge graph[/dim]"
             )
@@ -244,7 +230,7 @@ async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool, silent: bo
     track(task_obj)
     if not silent:
         repl.console.print(
-            f"[green]Cognition job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
+            f"[green]Index job submitted:[/green] [cyan]{job_id}[/cyan] [dim]({mode})[/dim]"
         )
         repl.console.print(
             "[dim]Track with [bold]/index status[/bold], [bold]/jobs[/bold], "

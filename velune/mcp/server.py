@@ -506,7 +506,9 @@ class VeluneMCPServer:
             if not self.repository_cognition:
                 return {"symbols": []}
 
-            snapshot = self.repository_cognition.index(force=False)
+            # index() is synchronous and heavy — off-load it so an MCP tool call
+            # doesn't stall the server's event loop for the length of a tree walk.
+            snapshot = await asyncio.to_thread(self.repository_cognition.index, False)
             if not snapshot:
                 return {"symbols": []}
 
@@ -633,7 +635,7 @@ class VeluneMCPServer:
         workspace = Path(workspace_path or self.workspace_path)
         try:
             if self.repository_cognition:
-                snapshot = self.repository_cognition.index(force=False)
+                snapshot = await asyncio.to_thread(self.repository_cognition.index, False)
                 if snapshot:
                     lang_counts: dict[str, int] = {}
                     for f in snapshot.files:

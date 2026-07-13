@@ -39,6 +39,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "mode": "AI",
     # Providers
     "providers": "Providers",
+    "login": "Providers",
     # Models
     "model": "Models",
     "models": "Models",
@@ -214,6 +215,25 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "add key",
             ),
             shortcut="/prov",
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="login",
+            aliases=["auth"],
+            category="Providers",
+            description="Connect an AI provider — pick one, paste your API key, get it verified",
+            usage="/login [provider-id]",
+            handler=repl._cmd_login,
+            examples=("/login", "/login anthropic"),
+            search_terms=(
+                "api key",
+                "sign in",
+                "authenticate",
+                "connect provider",
+                "add key",
+                "paste key",
+            ),
         )
     )
     registry.register(

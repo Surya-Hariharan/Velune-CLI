@@ -275,20 +275,23 @@ class CouncilOrchestrator:
                 # when nothing has changed.
                 await repository_cognition.probe_for_changes()
 
-                snapshot = repository_cognition.index(force=False)
+                # index() is synchronous and heavy (tree walk + SHA-256 of every
+                # file + tree-sitter parse + git subprocesses). Calling it
+                # directly here froze the REPL on *every prompt* for as long as
+                # the walk took. Off-load it.
+                snapshot = await asyncio.to_thread(repository_cognition.index, False)
                 if snapshot:
                     from velune.repository.context_builder import WorkspaceContextBuilder
 
                     builder = WorkspaceContextBuilder()
-                    # Pass the live api_map object if it was attached by the pipeline.
-                    api_map = getattr(snapshot, "api_map", None)
+                    # Take the delta and clear it in one step, so the next run
+                    # doesn't re-announce the same changes.
+                    delta = repository_cognition.consume_delta()
                     snapshot_text, drift_text = builder.build(
                         snapshot,
-                        delta=repository_cognition.last_delta,
-                        api_map=api_map,
+                        delta=delta,
+                        api_map=snapshot.api_map,
                     )
-                    # Clear the consumed delta so the next run doesn't re-announce it.
-                    repository_cognition._last_delta = None
 
                     # Firewall: scan for prompt injection in workspace-derived content.
                     scan_res = self.firewall.scan_file_for_injection("repo_context", snapshot_text)

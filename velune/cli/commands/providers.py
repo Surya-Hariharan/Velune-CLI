@@ -333,7 +333,7 @@ def add_provider(
         result = validate_provider_sync(pid, api_key)
 
     if result.ok:
-        save_key(pid, api_key)
+        save_key(pid, api_key, verified=True)
         console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
         if result.models:
             _show_models_preview(console, result.models[:8], len(result.models))

@@ -131,13 +131,13 @@ FIXTURES: dict[str, LangFixture] = {
             'package calc\n\nimport "fmt"\n\n'
             "type Calculator struct{}\n\n"
             "func Add(a, b int) int { return a - b }\n\n"
-            "func Describe() { fmt.Println(\"calc\") }\n"
+            'func Describe() { fmt.Println("calc") }\n'
         ),
         fixed_source=(
             'package calc\n\nimport "fmt"\n\n'
             "type Calculator struct{}\n\n"
             "func Add(a, b int) int { return a + b }\n\n"
-            "func Describe() { fmt.Println(\"calc\") }\n"
+            'func Describe() { fmt.Println("calc") }\n'
         ),
         expect_class="Calculator",
         expect_function="Add",
@@ -147,9 +147,7 @@ FIXTURES: dict[str, LangFixture] = {
     "rust": LangFixture(
         lang="rust",
         language=RepositoryLanguage.RUST,
-        manifest={
-            "Cargo.toml": '[package]\nname = "calc"\nversion = "0.1.0"\nedition = "2021"\n'
-        },
+        manifest={"Cargo.toml": '[package]\nname = "calc"\nversion = "0.1.0"\nedition = "2021"\n'},
         source_name="src/lib.rs",
         buggy_source=(
             "use std::fmt;\n\npub struct Calculator;\n\n"
@@ -195,9 +193,7 @@ FIXTURES: dict[str, LangFixture] = {
     "cpp": LangFixture(
         lang="cpp",
         language=RepositoryLanguage.CPP,
-        manifest={
-            "CMakeLists.txt": "cmake_minimum_required(VERSION 3.20)\nproject(calc)\n"
-        },
+        manifest={"CMakeLists.txt": "cmake_minimum_required(VERSION 3.20)\nproject(calc)\n"},
         source_name="src/calc.cpp",
         buggy_source=(
             "#include <cmath>\n\nclass Calculator {\npublic:\n"
@@ -365,7 +361,7 @@ async def test_agentic_fix_loop(lang, tmp_path):
     set_auto_accept(True)
     try:
         runner = ToolLoopRunner(
-                ScriptedFixer(fixture, root), registry, approver=_allow_all, max_turns=6
+            ScriptedFixer(fixture, root), registry, approver=_allow_all, max_turns=6
         )
         result = await runner.run(
             InferenceRequest(

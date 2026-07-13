@@ -64,6 +64,10 @@ class StatusBarState:
     git_branch: str | None = None  # active branch; None/non-git stays silent
     mcp_connected: int = 0
     mcp_total: int = 0  # 0 = no servers configured, row stays silent
+    # Providers whose stored key the provider itself has rejected. Surfaced
+    # here rather than printed, so a background re-verification never writes
+    # over the user's transcript mid-session. Empty = row stays silent.
+    invalid_keys: tuple[str, ...] = ()
 
 
 def _format_tokens(n: int) -> str:
@@ -148,6 +152,13 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
     if state.alert_count > 0:
         parts.append(_SEP)
         parts.append(("class:bottom-toolbar.warn", f"alerts:{state.alert_count}"))
+
+    # Rejected API keys — only when the provider has actually refused one.
+    # Named, because "1 key invalid" leaves the user hunting for which.
+    if state.invalid_keys:
+        parts.append(_SEP)
+        names = ", ".join(state.invalid_keys)
+        parts.append(("class:bottom-toolbar.danger", f"{names} key invalid — /login"))
 
     # Provider health — only when there is an issue ("ok" is silent)
     if state.provider_health == "degraded":

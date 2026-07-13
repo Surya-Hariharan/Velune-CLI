@@ -11,16 +11,53 @@ import json
 import logging
 import os
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
 from platformdirs import user_config_dir
 
+from velune._compat import StrEnum
 from velune.providers.crypto import decrypt_credentials, encrypt_credentials
 
 logger = logging.getLogger("velune.providers.keystore")
+
+# How long a successful verification is trusted before the key is considered
+# STALE and re-checked in the background. Stale never means unusable — see
+# KeyState below.
+VERIFY_TTL_SECONDS = 86_400  # 24h
+
+
+class KeyState(StrEnum):
+    """Lifecycle state of a provider credential, as surfaced to the user.
+
+    This is the single predicate the UI should ask about. It is deliberately
+    richer than the old ``has_key()`` boolean, which reported a revoked key as
+    "configured".
+    """
+
+    VERIFIED = "verified"  # stored, accepted by the provider within the TTL
+    UNVERIFIED = "unverified"  # stored, but never validated (save-anyway/--no-validate)
+    STALE = "stale"  # was verified, but the TTL has elapsed — usable, re-check pending
+    INVALID = "invalid"  # the provider actively rejected it
+    MISSING = "missing"  # no key at all
+    ENV = "env"  # supplied via environment variable; we don't own its lifecycle
+
+
+# On-disk ``status`` values. Legacy records written before the lifecycle existed
+# used "valid" (hardcoded on every save, including unvalidated ones) and
+# "imported"; both are mapped on read rather than migrated, so an older
+# credentials.json keeps working.
+_STATUS_VERIFIED = "verified"
+_STATUS_UNVERIFIED = "unverified"
+_STATUS_INVALID = "invalid"
+
+_LEGACY_STATUS_MAP: dict[str, str] = {
+    "valid": _STATUS_VERIFIED,
+    "imported": _STATUS_UNVERIFIED,
+    "unknown": _STATUS_UNVERIFIED,
+}
 
 PROVIDER_ENV_VARS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -141,17 +178,51 @@ class CredentialManager:
                 self._cache = self._load_disk()
             return self._cache.get(provider_id)
 
-    def save_provider(self, provider_id: str, key: str, status: str = "valid") -> None:
-        """Save a provider's key and metadata."""
+    def save_provider(self, provider_id: str, key: str, status: str = _STATUS_UNVERIFIED) -> None:
+        """Save a provider's key and its verification *status*.
+
+        ``status`` defaults to UNVERIFIED, not VERIFIED: a caller that has not
+        actually seen the provider accept this key must not be able to record it
+        as verified by omission. Callers that *have* validated pass
+        ``_STATUS_VERIFIED`` (or go through :func:`mark_verified`).
+
+        ``last_verified`` is only stamped for a verified save — for an
+        unverified or invalid one there is no verification to date, and writing
+        "now" there would make a never-checked key look freshly checked.
+        """
+        # Accept the legacy spellings ("valid"/"imported") so an older caller or
+        # a restored backup lands in the right state rather than silently
+        # skipping the timestamp below and reading back as STALE forever.
+        status = _LEGACY_STATUS_MAP.get(status, status)
+
         with self._cache_lock:
             if self._cache is None:
                 self._cache = self._load_disk()
 
-            self._cache[provider_id] = {
-                "key": key,
-                "status": status,
-                "last_verified": datetime.now(timezone.utc).isoformat(),
-            }
+            record: dict[str, Any] = {"key": key, "status": status}
+            if status == _STATUS_VERIFIED:
+                record["last_verified"] = datetime.now(timezone.utc).isoformat()
+            self._cache[provider_id] = record
+            self._save_disk(self._cache)
+
+    def update_status(self, provider_id: str, status: str, **extra: Any) -> None:
+        """Rewrite a provider's verification status without touching its key."""
+        with self._cache_lock:
+            if self._cache is None:
+                self._cache = self._load_disk()
+
+            record = self._cache.get(provider_id)
+            if record is None:
+                return
+
+            record = dict(record)
+            record["status"] = status
+            record.pop("last_error", None)
+            if status == _STATUS_VERIFIED:
+                record["last_verified"] = datetime.now(timezone.utc).isoformat()
+            record.update(extra)
+
+            self._cache[provider_id] = record
             self._save_disk(self._cache)
 
     def delete_provider(self, provider_id: str) -> None:
@@ -175,9 +246,93 @@ class CredentialManager:
 _manager = CredentialManager()
 
 
-def save_key(provider_id: str, api_key: str) -> None:
-    """Persist *api_key* for *provider_id*."""
-    _manager.save_provider(provider_id, api_key)
+def save_key(provider_id: str, api_key: str, *, verified: bool = False) -> None:
+    """Persist *api_key* for *provider_id*.
+
+    ``verified`` must be True only when the provider itself has just accepted
+    this key. It defaults to False so that a caller which skipped validation —
+    ``--no-validate``, or the "Save anyway" branch taken when the network is
+    down — cannot silently record an unchecked key as verified.
+    """
+    _manager.save_provider(
+        provider_id,
+        api_key,
+        status=_STATUS_VERIFIED if verified else _STATUS_UNVERIFIED,
+    )
+
+
+def mark_verified(provider_id: str, *, model_count: int = 0) -> None:
+    """Record that the provider accepted this key just now."""
+    _manager.update_status(provider_id, _STATUS_VERIFIED, model_count=model_count)
+
+
+def mark_invalid(provider_id: str, *, reason: str = "") -> None:
+    """Record that the provider actively rejected this key.
+
+    Reserved for verdicts that say something about the *key* — rejected,
+    expired, revoked, forbidden. A network failure or a rate-limit says nothing
+    about the key and must not land here; see ``providers/verifier.py``.
+    """
+    _manager.update_status(provider_id, _STATUS_INVALID, last_error=reason[:200])
+
+
+def _stored_state(record: dict[str, Any]) -> KeyState:
+    """Map an on-disk record to a :class:`KeyState`, honouring the TTL."""
+    raw = str(record.get("status", "")).lower()
+    status = _LEGACY_STATUS_MAP.get(raw, raw)
+
+    if status == _STATUS_INVALID:
+        return KeyState.INVALID
+    if status != _STATUS_VERIFIED:
+        return KeyState.UNVERIFIED
+
+    stamp = record.get("last_verified")
+    if not stamp:
+        return KeyState.STALE
+    try:
+        seen = datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return KeyState.STALE
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=timezone.utc)
+
+    age_ok = datetime.now(timezone.utc) - seen < timedelta(seconds=VERIFY_TTL_SECONDS)
+    return KeyState.VERIFIED if age_ok else KeyState.STALE
+
+
+def verification_state(provider_id: str) -> KeyState:
+    """Return the lifecycle state of *provider_id*'s credential.
+
+    The one predicate the UI should ask. Unlike :func:`has_key`, this
+    distinguishes a key the provider has accepted from one that was never
+    checked, one that has gone stale, and one that has been rejected.
+
+    A key sourced from the environment reports :attr:`KeyState.ENV`: we cannot
+    manage a lifecycle we don't own, and re-verifying it on a timer would be
+    surprising.
+    """
+    env_var = PROVIDER_ENV_VARS.get(provider_id)
+    if env_var and os.getenv(env_var):
+        return KeyState.ENV
+
+    record = _manager.get_provider(provider_id)
+    if not record or not record.get("key"):
+        return KeyState.MISSING
+    return _stored_state(record)
+
+
+def list_stale_providers() -> list[str]:
+    """Provider IDs whose stored key is due a background re-check."""
+    return [
+        pid for pid in _manager.get_all_providers() if verification_state(pid) is KeyState.STALE
+    ]
+
+
+def list_invalid_providers() -> list[str]:
+    """Provider IDs whose stored key the provider has rejected."""
+    return [
+        pid for pid in _manager.get_all_providers() if verification_state(pid) is KeyState.INVALID
+    ]
 
 
 def get_key(provider_id: str) -> str | None:
@@ -247,7 +402,7 @@ def get_provider_status(provider_id: str) -> dict[str, Any]:
         return {
             "stored": True,
             "source": "environment",
-            "status": "valid",
+            "status": str(KeyState.ENV),
             "last_verified": "dynamic",
             "location": f"${env_var}",
         }
@@ -256,15 +411,16 @@ def get_provider_status(provider_id: str) -> dict[str, Any]:
         return {
             "stored": True,
             "source": "config",
-            "status": record.get("status", "unknown"),
-            "last_verified": record.get("last_verified", "unknown"),
+            "status": str(verification_state(provider_id)),
+            "last_verified": record.get("last_verified", "never"),
+            "last_error": record.get("last_error", ""),
             "location": str(_manager._credentials_file),
         }
 
     return {
         "stored": False,
         "source": "none",
-        "status": "missing",
+        "status": str(KeyState.MISSING),
         "last_verified": "n/a",
         "location": "n/a",
     }
@@ -374,7 +530,10 @@ def import_providers_json(
         if not overwrite and has_key(pid):
             skipped.append(pid)
             continue
-        _manager.save_provider(pid, key, status=entry.get("status", "imported"))
+        # An imported key has not been checked against the provider *by us*,
+        # whatever the archive claims, so it enters as UNVERIFIED and the
+        # background re-verifier picks it up.
+        _manager.save_provider(pid, key, status=_STATUS_UNVERIFIED)
         imported.append(pid)
 
     return imported, skipped

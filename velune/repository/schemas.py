@@ -105,3 +105,16 @@ class RepositorySnapshot(BaseModel):
     symbols: list[RepositorySymbol] = Field(default_factory=list)
     edges: list[RepositoryEdge] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
+
+    # The API connection map (routes, frontend calls, DB queries) built by
+    # repository/api_mapper.py. Declared here because it must be: this is a
+    # Pydantic v2 model, so the previous `snapshot.api_map = api_map` assignment
+    # on an undeclared attribute raised ValueError on *every* index run. The
+    # raise was swallowed by a broad `except Exception` upstream, so the whole
+    # API-map feature was silently dead.
+    #
+    # Typed `Any` rather than `APIConnectionMap` on purpose: that type lives in
+    # api_mapper.py, a heavy regex-laden module, and schemas.py is imported
+    # nearly everywhere. The map is only ever read back via attribute access,
+    # never validated or serialised, so the import cost buys nothing.
+    api_map: Any = None

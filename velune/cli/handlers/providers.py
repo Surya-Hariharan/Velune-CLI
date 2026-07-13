@@ -1,4 +1,4 @@
-"""Provider management slash command handler: /providers."""
+"""Provider management slash command handlers: /providers and /login."""
 
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ if TYPE_CHECKING:
 _log = logging.getLogger("velune.cli.handlers.providers")
 
 
+def _palette(repl: VeluneREPL):
+    from velune.cli.provider_ui import ProviderPalette
+
+    return ProviderPalette(console=repl.console, container=repl.container)
+
+
 async def cmd_providers(repl: VeluneREPL, args: str) -> None:
     """Open the interactive provider management palette.
 
@@ -18,16 +24,20 @@ async def cmd_providers(repl: VeluneREPL, args: str) -> None:
       /providers                — open the interactive palette
       /providers add [id]       — connect a cloud provider
       /providers manage [id]    — view / update / remove a provider
-      /providers test [id]      — test connection(s)
+      /providers test [id]      — re-verify connection(s)
       /providers discover       — re-scan models from all providers
-      /providers refresh        — alias for discover
       /providers remove <id>    — remove a provider's API key
-      /providers status         — print a status table for every provider
+      /providers status         — status table for every provider
     """
-    from velune.cli.provider_ui import ProviderPalette
+    await _palette(repl).run(args)
 
-    palette = ProviderPalette(console=repl.console, container=repl.container)
-    await palette.run(args)
-    repl.console.print(
-        "[dim]→ /models to see available models  ·  /model connect <id> to activate one[/dim]"
-    )
+
+async def cmd_login(repl: VeluneREPL, args: str) -> None:
+    """Connect a provider: pick one, paste the key, watch it verify.
+
+    The shortest path to "I want to paste a key" — it lands directly on the
+    provider picker rather than a management menu. ``/login anthropic`` skips
+    the picker entirely.
+    """
+    target = args.strip().split(None, 1)[0].lower() if args.strip() else ""
+    await _palette(repl).run(f"add {target}".strip())

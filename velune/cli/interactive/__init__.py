@@ -13,13 +13,14 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 from velune.cli.interactive.result import BACK, CANCEL, WidgetResult
-from velune.cli.interactive.runner import run_standalone
+from velune.cli.interactive.runner import run_standalone, run_with_status
 from velune.cli.interactive.tty import is_interactive_tty
 from velune.cli.interactive.widgets import (
     ConfirmWidget,
     Option,
     PickItem,
     SelectWidget,
+    StatusWidget,
     TextInputWidget,
 )
 
@@ -29,11 +30,13 @@ __all__ = [
     "WidgetResult",
     "Option",
     "PickItem",
+    "StatusWidget",
     "is_interactive_tty",
     "single_select",
     "multi_select",
     "text_input",
     "confirm",
+    "run_with_status",
 ]
 
 

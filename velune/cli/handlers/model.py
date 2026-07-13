@@ -5,11 +5,24 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from velune.cli import design
+
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
     from velune.core.types.model import ModelDescriptor
 
 _log = logging.getLogger("velune.cli.handlers.model")
+
+# Row styles for the model picker. Previously each of these was a hardcoded
+# ANSI name (ansicyan/ansiyellow/ansimagenta/ansigray), which is why the picker
+# never matched the monochrome theme the rest of the CLI uses — and one of them,
+# "ansicenter", was not a real color at all and raised on parse.
+_SEL_BG = f"bg:{design.LIGHT_BG} "
+
+
+def _sel(style: str, selected: bool) -> str:
+    """Apply the selected-row background to *style*."""
+    return f"{_SEL_BG}{style}" if selected else style
 
 
 async def cmd_model(repl: VeluneREPL, args: str) -> None:
@@ -288,7 +301,9 @@ async def _show_model_picker(
                     "type": "header",
                     "category": cat_name,
                     "model": None,
-                    "text": FormattedText([("bold fg:ansiyellow", f"\n  — {cat_name} —\n")]),
+                    "text": FormattedText(
+                        [(f"bold fg:{design.ACCENT_SOFT}", f"\n  — {cat_name} —\n")]
+                    ),
                 }
             )
             if not models_in_cat:
@@ -302,7 +317,7 @@ async def _show_model_picker(
                         "type": "placeholder",
                         "category": cat_name,
                         "model": None,
-                        "text": FormattedText([("fg:ansidarkgray", placeholder_text)]),
+                        "text": FormattedText([(f"fg:{design.FAINT}", placeholder_text)]),
                     }
                 )
             else:
@@ -329,29 +344,30 @@ async def _show_model_picker(
             )
         )
         if filter_text[0]:
-            lines.append(("fg:ansicyan", f"  Filter: {filter_text[0]}\n"))
+            lines.append((f"fg:{design.INFO}", f"  Filter: {filter_text[0]}\n"))
 
-        # Table Column Headers
-        lines.append(("fg:ansidarkgray", "  " + "—" * 115 + "\n"))
-        lines.append(("bold fg:ansicyan", f"  {'Model ID / Name':<34}"))
-        lines.append(("fg:ansidarkgray", "  "))
-        lines.append(("bold fg:ansiyellow", f"{'Provider':<12}"))
-        lines.append(("fg:ansidarkgray", "  "))
-        lines.append(("bold fg:ansicenter", f"{'Context':<8}"))
-        lines.append(("fg:ansidarkgray", "  "))
-        lines.append(("bold fg:ansimagenta", f"{'Speed':<8}"))
-        lines.append(("fg:ansidarkgray", "  "))
-        lines.append(("bold fg:ansigreen", f"{'Reasoning':<14}"))
-        lines.append(("fg:ansidarkgray", "  "))
-        lines.append(("bold fg:ansigreen", f"{'Vision':<11}"))
-        lines.append(("fg:ansidarkgray", "  "))
-        lines.append(("bold fg:ansiblue", f"{'Status':<12}"))
-        lines.append(("fg:ansidarkgray", "  "))
-        lines.append(("bold fg:ansiwhite", "Capabilities\n"))
-        lines.append(("fg:ansidarkgray", "  " + "—" * 115 + "\n"))
+        # Table Column Headers — one accent for the primary column, the rest
+        # neutral, matching the design system rather than a rainbow of ANSI hues.
+        rule = (f"fg:{design.FAINT}", "  " + "—" * 115 + "\n")
+        gap = (f"fg:{design.FAINT}", "  ")
+        lines.append(rule)
+        lines.append((f"bold fg:{design.ACCENT}", f"  {'Model ID / Name':<34}"))
+        for header, width in (
+            ("Provider", 12),
+            ("Context", 8),
+            ("Speed", 8),
+            ("Reasoning", 14),
+            ("Vision", 11),
+            ("Status", 12),
+        ):
+            lines.append(gap)
+            lines.append((f"bold fg:{design.SECONDARY}", f"{header:<{width}}"))
+        lines.append(gap)
+        lines.append((f"bold fg:{design.SECONDARY}", "Capabilities\n"))
+        lines.append(rule)
 
         if not selectable_indexes:
-            lines.append(("fg:ansiyellow", "\n  No models match your query.\n"))
+            lines.append((f"fg:{design.WARN}", "\n  No models match your query.\n"))
             return FormattedText(lines)
 
         favorites = load_favorites()
@@ -382,49 +398,29 @@ async def _show_model_picker(
 
             status = "active" if is_cur else ("installed" if is_installed else "downloadable")
 
-            # Determine row styles
-            if is_sel:
-                prefix = "❯ "
-                row_bg = "bg:ansigray fg:ansiblack"
-                model_name_style = "bold fg:ansicyan bg:ansigray fg:ansiblack"
-                star_style = "fg:ansiyellow bg:ansigray fg:ansiblack"
-                provider_style = "fg:ansiyellow bg:ansigray fg:ansiblack"
-                ctx_style = "fg:ansicenter bg:ansigray fg:ansiblack"
-                speed_style = "fg:ansimagenta bg:ansigray fg:ansiblack"
-                status_style = (
-                    "fg:ansigreen bg:ansigray fg:ansiblack"
-                    if status == "active"
-                    else (
-                        "fg:ansicenter bg:ansigray fg:ansiblack"
-                        if status == "installed"
-                        else "fg:ansidarkgray bg:ansigray fg:ansiblack"
-                    )
-                )
-                caps_style = "fg:ansiblue bg:ansigray fg:ansiblack"
-            else:
-                prefix = "  "
-                row_bg = ""
-                model_name_style = "bold fg:ansicyan"
-                star_style = "fg:ansiyellow"
-                provider_style = "fg:ansiyellow"
-                ctx_style = "fg:ansicenter"
-                speed_style = "fg:ansimagenta"
-                status_style = (
-                    "fg:ansigreen"
-                    if status == "active"
-                    else ("fg:ansicenter" if status == "installed" else "fg:ansidarkgray")
-                )
-                caps_style = "fg:ansidarkgray"
+            # Row styles — design tokens throughout, with the selected row
+            # carrying a surface background instead of an inverted ANSI block.
+            prefix = "❯ " if is_sel else "  "
+            row_bg = _SEL_BG if is_sel else ""
+
+            status_color = {
+                "active": design.OK,
+                "installed": design.SECONDARY,
+            }.get(status, design.FAINT)
+
+            model_name_style = _sel(f"bold fg:{design.ACCENT}", is_sel)
+            star_style = _sel(f"fg:{design.ACCENT}", is_sel)
+            provider_style = _sel(f"fg:{design.MUTED}", is_sel)
+            ctx_style = _sel(f"fg:{design.SECONDARY}", is_sel)
+            speed_style = _sel(f"fg:{design.INFO}", is_sel)
+            status_style = _sel(f"fg:{status_color}", is_sel)
+            caps_style = _sel(f"fg:{design.FAINT}", is_sel)
 
             has_reasoning = check_reasoning(m)
             has_vision = check_vision(m)
 
-            r_style = "fg:ansigreen" if has_reasoning else "fg:ansidarkgray"
-            v_style = "fg:ansigreen" if has_vision else "fg:ansidarkgray"
-
-            if is_sel:
-                r_style += " bg:ansigray fg:ansiblack"
-                v_style += " bg:ansigray fg:ansiblack"
+            r_style = _sel(f"fg:{design.OK if has_reasoning else design.FAINT}", is_sel)
+            v_style = _sel(f"fg:{design.OK if has_vision else design.FAINT}", is_sel)
 
             # 1. Star + Selection prefix + Name (34 chars total)
             is_fav = m.model_id in favorites

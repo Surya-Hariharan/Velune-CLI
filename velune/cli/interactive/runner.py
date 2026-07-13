@@ -8,7 +8,10 @@ reuses a single long-lived ``Application`` across the whole run.
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+import sys
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.key_binding import merge_key_bindings
@@ -19,8 +22,33 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from velune.cli import design
 from velune.cli.interactive.keys import common_bindings
 from velune.cli.interactive.result import BACK, CANCEL
+from velune.cli.interactive.tty import is_interactive_tty
 from velune.cli.interactive.widget import Widget
+from velune.cli.interactive.widgets.status import (
+    HOLD_SECONDS,
+    TICK_SECONDS,
+    StatusWidget,
+)
 from velune.cli.interactive.widgets.text import TextInputWidget
+
+T = TypeVar("T")
+
+
+def _plain_mark(ok: bool) -> str:
+    """A ✓/✗ the *current* stdout can actually encode.
+
+    The non-TTY path writes with a bare ``print``, so it inherits whatever
+    encoding the redirected stream has — on Windows that is frequently cp1252,
+    which cannot represent U+2713 and raises ``UnicodeEncodeError`` mid-command.
+    Fall back to ASCII rather than crash a piped run over a decorative glyph.
+    """
+    glyph = design.ICON_SUCCESS if ok else design.ICON_ERROR
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        glyph.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return "[ok]" if ok else "[!!]"
+    return glyph
 
 
 def _footer_window(widget: Widget | TextInputWidget) -> Window:
@@ -90,3 +118,104 @@ async def run_standalone(
     )
     await app.run_async()
     return result.get("value", CANCEL)
+
+
+async def run_with_status(
+    coro: Awaitable[T],
+    *,
+    pending: str,
+    ok: str | Callable[[T], str],
+    fail: str | Callable[[T], str],
+    is_ok: Callable[[T], bool] | None = None,
+    input: Any | None = None,
+    output: Any | None = None,
+) -> T:
+    """Await *coro* behind a spinner, then show a ✓/✗ frame, and return its value.
+
+    ``is_ok`` decides which frame to show. It exists because the interesting
+    cases here — ``ValidationResult`` above all — report failure as a *value*,
+    not an exception, so "did it raise?" is the wrong question. Defaults to
+    plain truthiness.
+
+    ``ok``/``fail`` may be strings, or callables taking the result (so the
+    message can name what came back: "Verified — 8 models available").
+
+    If *coro* raises, the ✗ frame shows the exception and the exception is
+    re-raised: a caller must never mistake a crash for a clean "invalid key".
+
+    Outside an interactive TTY there is no Application to drive — the coroutine
+    is awaited plainly and the outcome printed as one line, so piped and CI
+    invocations behave and stay readable.
+    """
+
+    def _message(spec: str | Callable[[T], str], value: T) -> str:
+        return spec(value) if callable(spec) else spec
+
+    def _succeeded(value: T) -> bool:
+        return is_ok(value) if is_ok is not None else bool(value)
+
+    if not is_interactive_tty():
+        value = await coro
+        good = _succeeded(value)
+        text = _message(ok if good else fail, value)
+        print(f"  {_plain_mark(good)} {text}")
+        return value
+
+    widget = StatusWidget(pending=pending)
+    work = asyncio.ensure_future(coro)
+
+    app: Application = Application(
+        layout=Layout(
+            HSplit(
+                [
+                    Window(FormattedTextControl(widget.render), dont_extend_height=True),
+                    _footer_window(widget),
+                ]
+            )
+        ),
+        # Esc/Ctrl-C cancel the in-flight work rather than silently orphaning it.
+        key_bindings=common_bindings(on_cancel=work.cancel, on_back=work.cancel),
+        full_screen=False,
+        mouse_support=False,
+        input=input,
+        output=output,
+    )
+
+    async def _spin() -> None:
+        """Advance the spinner until the work settles."""
+        while not work.done():
+            widget.advance()
+            app.invalidate()
+            await asyncio.sleep(TICK_SECONDS)
+
+    async def _drive() -> None:
+        spinner = asyncio.ensure_future(_spin())
+        try:
+            try:
+                value = await work
+            except asyncio.CancelledError:
+                widget.settle(ok=False, message="Cancelled.")
+                raise
+            except Exception as exc:  # noqa: BLE001 - surfaced in the frame, then re-raised
+                widget.settle(ok=False, message=str(exc))
+                raise
+            else:
+                good = _succeeded(value)
+                widget.settle(ok=good, message=_message(ok if good else fail, value))
+        finally:
+            spinner.cancel()
+            app.invalidate()
+            # Hold the terminal frame long enough to be read, then close.
+            await asyncio.sleep(HOLD_SECONDS)
+            if app.is_running:
+                app.exit()
+
+    driver = asyncio.ensure_future(_drive())
+    try:
+        await app.run_async()
+    finally:
+        # The driver owns the outcome; awaiting it here propagates a failure or
+        # a cancellation to our caller instead of leaving a detached task.
+        await asyncio.gather(driver, return_exceptions=True)
+
+    return await work

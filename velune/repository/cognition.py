@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from velune.repository.analyzer import CodebaseAnalyzer
 from velune.repository.architecture_detector import ArchitectureDetector
@@ -17,6 +19,9 @@ from velune.repository.schemas import (
 )
 from velune.repository.technology_detector import TechnologyDetector
 from velune.repository.tracker import GitTracker
+
+if TYPE_CHECKING:
+    from velune.repository.incremental_indexer import IncrementalIndexer, IndexDelta
 
 logger = logging.getLogger("velune.repository.cognition")
 
@@ -43,6 +48,16 @@ class RepositoryCognitionService:
         """The IndexDelta from the most recent incremental index, or None."""
         return self._last_delta
 
+    def consume_delta(self) -> object | None:
+        """Return the pending delta and clear it, so it is announced only once.
+
+        Exists because callers genuinely need this and the property had no
+        setter — which is why ``cognition/orchestrator.py`` used to reach across
+        packages and poke ``_last_delta`` directly.
+        """
+        delta, self._last_delta = self._last_delta, None
+        return delta
+
     # ------------------------------------------------------------------
     # Lifecycle protocol (called by LifecycleCoordinator)
     # ------------------------------------------------------------------
@@ -50,14 +65,14 @@ class RepositoryCognitionService:
     async def initialize(self) -> None:
         """Lifecycle hook — intentionally inert.
 
-        Repository cognition is *never* triggered automatically at startup. It
-        is an explicit, user-driven workflow (the ``/cognition`` command). This
-        keeps launch instant and avoids scanning unrelated directories when
-        Velune is started outside a project. The methods below
-        (:meth:`quick_summary`, :meth:`preview`, :meth:`run_incremental`,
-        :meth:`index`) are the manual entry points the REPL calls on demand.
+        Indexing is not kicked off from here, so that constructing the service
+        (which happens on every launch, including outside a project) costs
+        nothing. The *triggers* live elsewhere and are real: the REPL submits a
+        first index on entry via ``auto_detect_on_entry``, and
+        ``RepositoryIntelligenceEngine`` polls for changes thereafter. The
+        methods below are the on-demand entry points behind ``/index``.
         """
-        logger.debug("RepositoryCognitionService.initialize: no-op (cognition is manual).")
+        logger.debug("RepositoryCognitionService.initialize: no-op (indexing starts on demand).")
         return
 
     async def probe_for_changes(self) -> bool:
@@ -71,6 +86,15 @@ class RepositoryCognitionService:
         from velune.repository.scanner import unsafe_index_root_reason
 
         if unsafe_index_root_reason(self.workspace_root):
+            return False
+
+        # An index already running is *progress*, not an obstacle. This used to
+        # cancel the in-flight task and start over — and since apply_delta only
+        # persists at the very end, and the orchestrator probes on every prompt,
+        # a repo that took longer to index than the user's typing interval would
+        # be cancelled and restarted forever, never finishing. Let it run.
+        if self._bg_index_task and not self._bg_index_task.done():
+            logger.debug("probe_for_changes: an index is already running — leaving it alone.")
             return False
 
         inc = IncrementalIndexer(self.workspace_root, self._state_path)
@@ -88,13 +112,6 @@ class RepositoryCognitionService:
             delta.total,
         )
         self._last_delta = delta
-        # Re-use the background task slot so there is at most one running at a time.
-        if self._bg_index_task and not self._bg_index_task.done():
-            self._bg_index_task.cancel()
-            try:
-                await self._bg_index_task
-            except (asyncio.CancelledError, Exception):
-                pass
         self._bg_index_task = asyncio.create_task(self._background_apply(inc, delta, delta.total))
         return True
 
@@ -195,8 +212,14 @@ class RepositoryCognitionService:
             self._bg_index_task.cancel()
             try:
                 await self._bg_index_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
+                # Expected — we are the one who cancelled it. Kept separate from
+                # the handler below: catching (CancelledError, Exception) as one
+                # bucket also swallowed a cancellation aimed at *shutdown itself*,
+                # which silently broke cooperative shutdown of the caller.
                 pass
+            except Exception as exc:
+                logger.debug("Background index task failed during shutdown: %s", exc)
 
     # ------------------------------------------------------------------
     # Primary indexing API
@@ -216,18 +239,33 @@ class RepositoryCognitionService:
 
         On a cache miss, the full ``RepositoryIndexer`` pipeline runs (incremental
         at the file level via SHA256 comparison) and the ``IndexState`` is updated.
+
+        **This is synchronous and slow** — a full tree walk, a SHA-256 of every
+        file, tree-sitter parsing, and several git subprocesses. Async callers
+        must go through :meth:`run_deep` / :meth:`run_incremental`, or wrap it in
+        ``asyncio.to_thread``; calling it directly from a coroutine freezes the
+        REPL for as long as the walk takes.
         """
         from velune.repository.incremental_indexer import IncrementalIndexer
 
+        # Refuse to walk an unbounded tree. probe_for_changes() and the CLI
+        # handler both check this, but index() is reachable directly (the
+        # orchestrator and the MCP server call it), and in $HOME or C:\ that
+        # means recursively hashing the entire drive.
+        reason = self.unsafe_reason()
+        if reason:
+            logger.warning("Refusing to index — workspace is %s.", reason)
+            return RepositorySnapshot(root_path=str(self.root_path))
+
         inc = IncrementalIndexer(self.root_path, self._state_path)
 
-        if not force and inc._get_git_sha() == self._stored_commit_sha():
-            clean = inc._working_tree_is_clean()
+        if not force and inc.git_sha() == self._stored_commit_sha():
+            clean = inc.working_tree_is_clean()
             if clean:
                 cached = self.get_snapshot()
                 if cached:
                     logger.debug("Fast path: reusing cached snapshot (git SHA matches).")
-                    return self._run_pipeline(cached, update_state=False)
+                    return self._run_pipeline(cached)
 
         # Slow path: file-level incremental index
         snapshot = self.indexer.index(force=force)
@@ -235,7 +273,7 @@ class RepositoryCognitionService:
         # Persist updated IndexState so the next session benefits from the fast path
         self._persist_index_state(inc, snapshot)
 
-        return self._run_pipeline(snapshot, update_state=False)
+        return self._run_pipeline(snapshot)
 
     # ------------------------------------------------------------------
     # Read-only snapshot accessor (no indexing)
@@ -300,9 +338,7 @@ class RepositoryCognitionService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _run_pipeline(
-        self, snapshot: RepositorySnapshot, *, update_state: bool = False
-    ) -> RepositorySnapshot:
+    def _run_pipeline(self, snapshot: RepositorySnapshot) -> RepositorySnapshot:
         """Run grapher, git metrics, architecture analysis, and API mapping on *snapshot*."""
         # Reset grapher for this run (it is stateful and must be rebuilt each call)
         self.grapher = RepositoryGrapher(self.root_path)
@@ -354,14 +390,21 @@ class RepositoryCognitionService:
                     pass
         frameworks = self.analyzer.detect_framework_footprint(code_files)
 
-        # API connection map — frontend ↔ backend ↔ database chain
+        # API connection map — frontend ↔ backend ↔ database chain.
+        #
+        # `snapshot.api_map` must be a declared field on RepositorySnapshot; when
+        # it wasn't, this assignment raised on every run and the broad handler
+        # below reduced a dead feature to a debug line nobody read. The build is
+        # still best-effort (a parse failure in one repo shouldn't fail the whole
+        # index), but a programming error here — a missing field, a bad
+        # signature — is not "non-fatal", so those propagate.
         api_map_data: dict = {}
         try:
             from velune.repository.api_mapper import APIMapper, render_api_map
 
             api_mapper = APIMapper(self.root_path)
             api_map = api_mapper.build_map(file_paths)
-            snapshot.api_map = api_map  # type: ignore[attr-defined]
+            snapshot.api_map = api_map
             api_map_data = {
                 "route_count": len(api_map.routes),
                 "frontend_call_count": len(api_map.frontend_calls),
@@ -377,8 +420,8 @@ class RepositoryCognitionService:
                     len(api_map.db_queries),
                     len(api_map.connections),
                 )
-        except Exception as exc:
-            logger.debug("API mapping failed (non-fatal): %s", exc)
+        except (OSError, UnicodeDecodeError, re.error) as exc:
+            logger.warning("API mapping failed (non-fatal): %s", exc)
 
         # Technology + Architecture detection
         tech_detector = TechnologyDetector(self.root_path)
@@ -469,26 +512,40 @@ class RepositoryCognitionService:
         state = IndexState.load(self._state_path)
         return state.last_commit_sha if state else None
 
-    def _persist_index_state(self, inc: object, snapshot: RepositorySnapshot) -> None:
+    def _persist_index_state(self, inc: IncrementalIndexer, snapshot: RepositorySnapshot) -> None:
         """Update IndexState on disk after a full index run."""
         import time
 
         from velune.repository.index_state import IndexedFile, IndexState
 
         try:
-            git_sha = inc._get_git_sha()  # type: ignore[attr-defined]
+            git_sha = inc.git_sha()
             state = IndexState.load(self._state_path) or IndexState.empty(str(self.root_path))
             now = time.time()
-            state.file_index = {
-                f.path: IndexedFile(
+
+            file_index: dict[str, IndexedFile] = {}
+            for f in snapshot.files:
+                # Record the mtime/size alongside the hash, so the next delta
+                # computation can skip this file with a stat() instead of
+                # re-reading and re-hashing it. Missing them here would leave
+                # every fully-indexed file without a fast signal.
+                try:
+                    st = (self.root_path / f.path).stat()
+                    mtime, size = st.st_mtime, st.st_size
+                except OSError:
+                    mtime, size = 0.0, 0
+
+                file_index[f.path] = IndexedFile(
                     path=f.path,
                     content_hash=f.sha256,
                     language=f.language.value,
                     symbol_count=len(f.symbols),
                     indexed_at=now,
+                    mtime=mtime,
+                    size=size,
                 )
-                for f in snapshot.files
-            }
+
+            state.file_index = file_index
             state.touch(git_sha)
             state.workspace_root = str(self.root_path)
             state.save(self._state_path)
@@ -497,34 +554,26 @@ class RepositoryCognitionService:
 
     async def _background_apply(
         self,
-        inc: object,
-        delta: object,
+        inc: IncrementalIndexer,
+        delta: IndexDelta,
         n: int,
     ) -> None:
-        """Apply a delta in the background with a Rich progress bar on stderr."""
+        """Apply a delta in the background. Reports through logs and the job registry.
+
+        This used to build its own ``Console(stderr=True)`` and drive a
+        ``transient=True`` Rich progress bar on it. That console bypassed the
+        REPL's ``_ConsoleSink`` — whose entire job is to strip non-SGR CSI
+        sequences — and ``transient`` means Rich emits cursor-up and erase-line
+        escapes directly into the terminal. Fired from ``auto_detect_on_entry``
+        on the default REPL-entry path, it wrote those escapes straight over the
+        fullscreen prompt_toolkit UI.
+
+        A background task the user never asked for has no business drawing on the
+        screen. Progress is available via ``/index status`` and ``/dashboard``,
+        which read the job registry.
+        """
         try:
-            from rich.console import Console
-            from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
-
-            _console = Console(stderr=True)
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[dim]{task.description}[/dim]"),
-                BarColumn(bar_width=30),
-                TextColumn("[dim]{task.completed}/{task.total}[/dim]"),
-                console=_console,
-                transient=True,
-            ) as _prog:
-                _task = _prog.add_task("Indexing...", total=n)
-
-                def _cb(processed: int, total: int, rel_path: str) -> None:
-                    short = rel_path.rsplit("/", 1)[-1]
-                    _prog.update(_task, completed=processed, description=f"Indexing {short}")
-
-                inc.progress_callback = _cb  # type: ignore[attr-defined]
-                await inc.apply_delta(delta)  # type: ignore[attr-defined]
-
-            _console.print(f"[dim green]Repository index updated ({n} file(s))[/dim green]")
+            await inc.apply_delta(delta)
             logger.info("Background incremental index complete: %d file(s) processed.", n)
 
             # Write a minimal retrieval index so BM25 is non-empty even on cold start.
@@ -549,7 +598,7 @@ class RepositoryCognitionService:
                                         "path": rel_path,
                                         "language": entry.language,
                                         "symbols": [],
-                                        "size_bytes": 0,
+                                        "size_bytes": entry.size,
                                     },
                                 }
                             )
@@ -559,10 +608,6 @@ class RepositoryCognitionService:
                         logger.info("Cold-start retrieval index written: %d documents", len(docs))
                 except Exception as exc:
                     logger.debug("Could not write cold-start retrieval index: %s", exc)
-
-            # Keep last_delta so the next orchestrator run can surface it in context,
-            # then clear it so subsequent runs don't re-announce the same changes.
-            # (The orchestrator reads last_delta before calling index(), so the order is safe.)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

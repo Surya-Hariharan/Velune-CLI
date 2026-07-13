@@ -24,7 +24,11 @@ from velune.cli.interactive.widget import Widget
 @dataclass(slots=True)
 class Option:
     """One selectable row. ``meta`` is dim trailing detail; ``badge`` is a
-    short status label (e.g. "already configured") rendered in success color.
+    short status label (e.g. "already configured").
+
+    A badge defaults to success color, which is right for the "you already have
+    this" case it was built for — but a badge can also carry bad news ("invalid",
+    "offline"), so ``badge_style`` overrides the color when the state isn't good.
     """
 
     id: str
@@ -32,6 +36,7 @@ class Option:
     meta: str = ""
     group: str | None = None
     badge: str | None = None
+    badge_style: str | None = None
     disabled: bool = False
 
 
@@ -140,7 +145,7 @@ class SelectWidget(Widget):
             if opt.meta:
                 lines.append((f"fg:{design.MUTED}", f"  {opt.meta}"))
             if opt.badge:
-                lines.append((f"fg:{design.OK}", f"  {opt.badge}"))
+                lines.append((f"fg:{opt.badge_style or design.OK}", f"  {opt.badge}"))
             lines.append(("", "\n"))
 
         return lines

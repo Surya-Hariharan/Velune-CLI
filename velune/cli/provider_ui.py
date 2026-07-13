@@ -1,36 +1,51 @@
-"""Interactive Provider Management UI for the Velune REPL.
+"""Interactive provider management for the Velune REPL — the /providers and
+/login commands.
 
-Implements the /providers command: a searchable palette for adding, managing,
-testing, and discovering models from cloud AI providers — all inside the REPL
-without requiring separate CLI commands.
+Every screen here is built from the shared widget kit in
+``velune.cli.interactive`` (``single_select`` / ``text_input`` / ``confirm`` /
+``run_with_status``), so provider setup looks and behaves exactly like the
+onboarding wizard. It previously hand-rolled its own ``prompt_toolkit``
+``Application`` menu and a bare ``PromptSession(is_password=True)``, which is
+why key entry had no chrome, no spinner, and no verified state.
 
-Architecture:
-- ProviderPalette is the entry point, constructed with the REPL's console and
-  service container.
-- All interactive menus use prompt_toolkit Application (same pattern as
-  VeluneREPL._show_model_picker), so they interoperate cleanly with the REPL's
-  own prompt session.
-- Validation, keystore, and discovery reuse existing modules; no duplication.
+Provider metadata comes from ``velune.providers.catalog`` — the single source of
+truth — not from a private table.
+
+Credential state comes from ``keystore.verification_state()``, so a rejected or
+never-checked key is shown as such. The old ``has_key()`` check reported a
+revoked key as "configured".
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
 from velune.cli import design
+from velune.cli.interactive import (
+    BACK,
+    CANCEL,
+    Option,
+    confirm,
+    run_with_status,
+    single_select,
+    text_input,
+)
+from velune.providers import catalog
 from velune.providers.discovery.scanner import ModelDiscoveryScanner
 from velune.providers.keystore import (
+    KeyState,
     delete_key,
     get_key,
-    has_key,
     is_ollama_live,
+    mark_verified,
     save_key,
+    verification_state,
 )
 from velune.providers.validation import (
+    ValidationResult,
     ValidationStatus,
-    validate_provider_sync,
+    validate_provider,
 )
 
 if TYPE_CHECKING:
@@ -38,179 +53,97 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("velune.cli.provider_ui")
 
-# ---------------------------------------------------------------------------
-# Provider catalogue
-# ---------------------------------------------------------------------------
-
-CLOUD_PROVIDERS: dict[str, dict] = {
-    "anthropic": {
-        "label": "Anthropic",
-        "description": "Creator of Claude — leading AI safety research and models.",
-        "env": "ANTHROPIC_API_KEY",
-        "url": "https://console.anthropic.com",
-    },
-    "openai": {
-        "label": "OpenAI",
-        "description": "GPT-4, o1, and more — the most widely integrated AI platform.",
-        "env": "OPENAI_API_KEY",
-        "url": "https://platform.openai.com/api-keys",
-    },
-    "google": {
-        "label": "Google Gemini",
-        "description": "Gemini Pro, Flash, Ultra — Google's multimodal AI family.",
-        "env": "GOOGLE_API_KEY",
-        "url": "https://aistudio.google.com/app/apikey",
-    },
-    "groq": {
-        "label": "Groq",
-        "description": "Ultra-fast LPU inference — open models at blazing speed.",
-        "env": "GROQ_API_KEY",
-        "url": "https://console.groq.com/keys",
-    },
-    "openrouter": {
-        "label": "OpenRouter",
-        "description": "Unified access to 100+ models from all major providers.",
-        "env": "OPENROUTER_API_KEY",
-        "url": "https://openrouter.ai/keys",
-    },
-    "nvidia": {
-        "label": "NVIDIA NIM",
-        "description": "Optimized inference on NVIDIA hardware — enterprise AI at scale.",
-        "env": "NVIDIA_API_KEY",
-        "url": "https://build.nvidia.com/",
-    },
-    "xai": {
-        "label": "xAI (Grok)",
-        "description": "xAI's Grok models — built for real-time reasoning.",
-        "env": "XAI_API_KEY",
-        "url": "https://console.x.ai",
-    },
-    "together": {
-        "label": "Together.AI",
-        "description": "Open model ecosystem — fine-tuning, inference, and embedding.",
-        "env": "TOGETHER_API_KEY",
-        "url": "https://api.together.ai/settings/api-keys",
-    },
-    "fireworks": {
-        "label": "Fireworks.AI",
-        "description": "Production open model inference — fast, cheap, and reliable.",
-        "env": "FIREWORKS_API_KEY",
-        "url": "https://fireworks.ai/account/api-keys",
-    },
-    "deepseek": {
-        "label": "DeepSeek",
-        "description": "DeepSeek-V3, R1 and Coder — powerful reasoning and coding models.",
-        "env": "DEEPSEEK_API_KEY",
-        "url": "https://platform.deepseek.com/api_keys",
-    },
-    "cohere": {
-        "label": "Cohere",
-        "description": "Enterprise NLP — Command R+, embeddings, and reranking.",
-        "env": "COHERE_API_KEY",
-        "url": "https://dashboard.cohere.com/api-keys",
-    },
-    "huggingface": {
-        "label": "HuggingFace",
-        "description": "70,000+ models via HF Inference API and Inference Endpoints.",
-        "env": "HF_TOKEN",
-        "url": "https://huggingface.co/settings/tokens",
-    },
-    "mistral": {
-        "label": "Mistral AI",
-        "description": "European AI — Mistral Large, Codestral, and Mistral Nemo.",
-        "env": "MISTRAL_API_KEY",
-        "url": "https://console.mistral.ai/api-keys",
-    },
+# How a credential state is shown on a provider row: (badge text, color token).
+# MISSING has no badge — an empty row reads as "nothing here yet", which is
+# exactly right, and a "not configured" badge on two-thirds of the list is noise.
+_STATE_BADGE: dict[KeyState, tuple[str, str]] = {
+    KeyState.VERIFIED: (f"{design.ICON_SUCCESS} verified", design.OK),
+    KeyState.UNVERIFIED: ("unverified", design.WARN),
+    KeyState.STALE: ("stale", design.MUTED),
+    KeyState.INVALID: (f"{design.ICON_ERROR} invalid", design.DANGER),
+    KeyState.ENV: ("env", design.INFO),
+    KeyState.MISSING: ("", design.MUTED),
 }
 
-LOCAL_PROVIDERS: dict[str, dict] = {
-    "ollama": {
-        "label": "Ollama",
-        "description": "Run models locally — zero cloud dependency.",
-        "url": "https://ollama.com",
-        "local": True,
-    },
-    "lmstudio": {
-        "label": "LM Studio",
-        "description": "GUI for local model management and inference.",
-        "url": "https://lmstudio.ai",
-        "local": True,
-    },
-}
-
-ALL_PROVIDER_META: dict[str, dict] = {
-    **CLOUD_PROVIDERS,
-    **LOCAL_PROVIDERS,
+_FAILURE_HINTS: dict[ValidationStatus, str] = {
+    ValidationStatus.INVALID_KEY: (
+        "The provider rejected this key. Check it was copied in full, with no trailing spaces."
+    ),
+    ValidationStatus.EXPIRED_KEY: "This key has expired. Generate a new one in the console.",
+    ValidationStatus.REVOKED_KEY: "This key was revoked. You need to create a replacement.",
+    ValidationStatus.RATE_LIMITED: "The API is rate-limited right now. Wait a moment and retry.",
+    ValidationStatus.PERMISSION_DENIED: (
+        "The key is real but lacks permission for this operation — check its scopes."
+    ),
+    ValidationStatus.NETWORK_ERROR: (
+        "Could not reach the provider. If you're offline you can still save the key "
+        "and it will be verified later."
+    ),
+    ValidationStatus.MALFORMED_KEY: "The key format looks wrong — check you copied all of it.",
 }
 
 
-# ---------------------------------------------------------------------------
-# Status helpers
-# ---------------------------------------------------------------------------
+def _is_local(pid: str) -> bool:
+    meta = catalog.get(pid)
+    return meta is not None and not meta.requires_key
 
 
-def provider_status(pid: str) -> str:
-    """Return a short human-readable status for a provider."""
-    meta = ALL_PROVIDER_META.get(pid, {})
-    if meta.get("local"):
-        if pid == "ollama":
-            return "running" if is_ollama_live(timeout=0.5) else "offline"
-        if pid == "lmstudio":
-            try:
-                import httpx
+def _local_status(pid: str) -> str:
+    """Liveness of a local, keyless provider: 'running' or 'offline'."""
+    if pid == "ollama":
+        return "running" if is_ollama_live(timeout=0.5) else "offline"
+    if pid == "lmstudio":
+        try:
+            import httpx
 
-                r = httpx.get("http://localhost:1234/v1/models", timeout=0.5)
-                return "running" if r.status_code == 200 else "offline"
-            except Exception:
-                return "offline"
-        return "unknown"
-    return "configured" if has_key(pid) else "not configured"
+            resp = httpx.get("http://localhost:1234/v1/models", timeout=0.5)
+            return "running" if resp.status_code == 200 else "offline"
+        except Exception:
+            return "offline"
+    return "unknown"
 
 
-def status_style(status: str) -> str:
-    """Map a status string to a design colour token."""
-    return {
-        "configured": design.OK,
-        "running": design.OK,
-        "not configured": design.MUTED,
-        "offline": design.WARN,
-        "unknown": design.MUTED,
-        "invalid": design.DANGER,
-        "rate limited": design.WARN,
-        "quota exceeded": design.WARN,
-        "expired": design.WARN,
-        "permission denied": design.DANGER,
-    }.get(status, design.MUTED)
+def _row(pid: str) -> Option:
+    """One provider row, badged with its live credential or liveness state."""
+    meta = catalog.get(pid)
+    label = meta.display_name if meta else pid
+    desc = meta.description if meta else ""
+
+    if _is_local(pid):
+        status = _local_status(pid)
+        style = design.OK if status == "running" else design.MUTED
+        return Option(
+            id=pid, label=label, meta=desc, group="Local", badge=status, badge_style=style
+        )
+
+    badge, style = _STATE_BADGE[verification_state(pid)]
+    return Option(
+        id=pid,
+        label=label,
+        meta=desc,
+        group="Cloud",
+        badge=badge or None,
+        badge_style=style,
+    )
 
 
-def validation_status_label(vs: ValidationStatus) -> str:
-    """Convert a ValidationStatus to a concise human label."""
-    return {
-        ValidationStatus.OK: "Connected",
-        ValidationStatus.INVALID_KEY: "Invalid Key",
-        ValidationStatus.EXPIRED_KEY: "Expired Key",
-        ValidationStatus.REVOKED_KEY: "Revoked Key",
-        ValidationStatus.RATE_LIMITED: "Rate Limited",
-        ValidationStatus.NETWORK_ERROR: "Network Error",
-        ValidationStatus.MALFORMED_KEY: "Malformed Key",
-        ValidationStatus.PERMISSION_DENIED: "Permission Denied",
-        ValidationStatus.UNKNOWN_ERROR: "Unknown Error",
-    }.get(vs, str(vs))
+def _validate_key_shape(raw: str) -> str | None:
+    """Cheap client-side check, run as the user types.
 
-
-# ---------------------------------------------------------------------------
-# ProviderPalette
-# ---------------------------------------------------------------------------
+    Deliberately catches only what a *paste* gets wrong — an empty field, or
+    embedded whitespace/newlines from selecting too much. Whether the key is
+    actually valid is never decided here; only the provider can answer that.
+    """
+    key = raw.strip()
+    if not key:
+        return "Enter a key, or press Esc to go back."
+    if any(ch.isspace() for ch in key):
+        return "That key contains spaces or line breaks — check what you pasted."
+    return None
 
 
 class ProviderPalette:
-    """Interactive provider management system, designed to run inside the REPL.
-
-    Call ``await palette.run(args)`` from a slash command handler. All menus
-    use prompt_toolkit Application (non-blocking, non-full-screen) just like
-    VeluneREPL._show_model_picker, so they stack cleanly inside the existing
-    REPL event loop.
-    """
+    """Interactive provider management, hosted inside the running REPL."""
 
     def __init__(self, console: Console, container) -> None:
         self.console = console
@@ -221,483 +154,232 @@ class ProviderPalette:
     # ------------------------------------------------------------------
 
     async def run(self, args: str = "") -> None:
-        """Dispatch to a sub-flow or open the interactive main menu."""
         parts = args.strip().split(None, 1)
         sub = parts[0].lower() if parts else ""
-        rest = parts[1].strip() if len(parts) > 1 else ""
+        rest = parts[1].strip().lower() if len(parts) > 1 else ""
 
         if sub == "add":
-            if rest:
-                await self._add_single_provider(rest.lower())
-            else:
-                await self._flow_add_provider()
+            await (self._connect(rest) if rest else self._flow_add())
         elif sub == "manage":
-            if rest:
-                await self._provider_detail(rest.lower())
-            else:
-                await self._flow_manage_providers()
+            await (self._detail(rest) if rest else self._flow_manage())
         elif sub in ("discover", "refresh"):
-            await self._flow_discover_models()
+            await self._discover_all()
         elif sub == "test":
-            if rest:
-                await self._test_provider(rest.lower())
-            else:
-                await self._flow_test_connection()
+            await (self._test(rest) if rest else self._flow_test())
         elif sub == "status":
-            await self._show_status_all()
+            self._show_status_table()
         elif sub == "remove":
             if rest:
-                await self._remove_provider(rest.lower())
+                await self._remove(rest)
             else:
-                self.console.print(
-                    f"[{design.WARN}]Usage: /providers remove <provider-id>[/{design.WARN}]"
-                )
+                self.console.print(f"[{design.WARN}]Usage: /providers remove <id>[/{design.WARN}]")
         else:
             await self._main_menu()
 
-    # ------------------------------------------------------------------
-    # Main menu
-    # ------------------------------------------------------------------
-
     async def _main_menu(self) -> None:
-        choices = [
-            ("add", "Add Provider", "Connect a new cloud AI provider with an API key"),
-            ("manage", "Manage Providers", "View, update, or remove configured providers"),
-            ("discover", "Discover Models", "Refresh model catalogue from all connected providers"),
-            ("test", "Test Connection", "Validate credentials for configured providers"),
-            ("refresh", "Refresh Models", "Re-fetch model list from every provider"),
-            ("status", "Provider Status", "Quick status table for all providers"),
-        ]
-        selected = await self._show_menu(
-            title="Provider Management",
-            subtitle="Manage cloud AI provider connections  (type to filter)",
-            choices=choices,
-        )
-        if selected == "add":
-            await self._flow_add_provider()
-        elif selected == "manage":
-            await self._flow_manage_providers()
-        elif selected in ("discover", "refresh"):
-            await self._flow_discover_models()
-        elif selected == "test":
-            await self._flow_test_connection()
-        elif selected == "status":
-            await self._show_status_all()
-
-    # ------------------------------------------------------------------
-    # Generic searchable menu (prompt_toolkit Application)
-    # ------------------------------------------------------------------
-
-    async def _show_menu(
-        self,
-        title: str,
-        subtitle: str,
-        choices: list[tuple[str, str, str]],
-        filterable: bool = True,
-    ) -> str | None:
-        """Show a fuzzy-searchable interactive menu.
-
-        ``choices`` is a list of ``(key, label, description)`` triples.
-        Returns the chosen ``key``, or ``None`` if the user cancelled.
-        """
-        from prompt_toolkit.application import Application
-        from prompt_toolkit.formatted_text import FormattedText
-        from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.layout import Layout
-        from prompt_toolkit.layout.containers import Window
-        from prompt_toolkit.layout.controls import FormattedTextControl
-
-        from velune.cli.autocomplete import fuzzy_score
-
-        selected_idx: list[int] = [0]
-        query: list[str] = [""]
-        result: list[str | None] = [None]
-
-        def _visible() -> list[tuple[str, str, str]]:
-            if not filterable or not query[0]:
-                return choices
-            q = query[0].lower()
-            scored = [
-                (
-                    max(fuzzy_score(q, label.lower()), fuzzy_score(q, key.lower())),
-                    key,
-                    label,
-                    desc,
-                )
-                for key, label, desc in choices
-            ]
-            return [(k, lbl, d) for s, k, lbl, d in sorted(scored, key=lambda t: -t[0]) if s > 0]
-
-        def _render() -> FormattedText:
-            visible = _visible()
-            if visible:
-                selected_idx[0] = min(selected_idx[0], len(visible) - 1)
-
-            lines: list[tuple[str, str]] = [
-                (f"bold fg:{design.ACCENT}", f"\n  {title}\n"),
-                (f"fg:{design.MUTED}", f"  {subtitle}\n"),
-                (f"fg:{design.FAINT}", "  " + "─" * 44 + "\n"),
-            ]
-
-            if filterable:
-                if query[0]:
-                    lines.append((f"fg:{design.INFO}", f"  filter: {query[0]}  "))
-                    lines.append(
-                        (f"fg:{design.FAINT}", "[↑↓ navigate · Enter select · Esc cancel]\n\n")
-                    )
-                else:
-                    lines.append(
-                        (f"fg:{design.FAINT}", "  ↑↓ navigate · Enter select · Esc cancel\n\n")
-                    )
-
-            if not visible:
-                lines.append((f"fg:{design.WARN}", "  No matches.\n"))
-                return FormattedText(lines)
-
-            for i, (_key, label, desc) in enumerate(visible):
-                is_sel = i == selected_idx[0]
-                prefix = "❯ " if is_sel else "  "
-                label_style = f"bold fg:{design.ACCENT}" if is_sel else f"fg:{design.WHITE}"
-                lines.append((label_style, f"  {prefix}{label}\n"))
-                lines.append((f"fg:{design.MUTED}", f"       {desc}\n\n"))
-
-            return FormattedText(lines)
-
-        kb = KeyBindings()
-
-        @kb.add("up")
-        def _up(event) -> None:
-            n = len(_visible())
-            if n:
-                selected_idx[0] = (selected_idx[0] - 1) % n
-
-        @kb.add("down")
-        def _down(event) -> None:
-            n = len(_visible())
-            if n:
-                selected_idx[0] = (selected_idx[0] + 1) % n
-
-        @kb.add("enter")
-        def _enter(event) -> None:
-            visible = _visible()
-            if visible:
-                result[0] = visible[selected_idx[0]][0]
-            event.app.exit()
-
-        @kb.add("escape", eager=True)
-        @kb.add("c-c")
-        def _cancel(event) -> None:
-            event.app.exit()
-
-        @kb.add("backspace")
-        def _bs(event) -> None:
-            query[0] = query[0][:-1]
-            selected_idx[0] = 0
-
-        @kb.add("<any>")
-        def _type(event) -> None:
-            ch = event.data
-            if filterable and ch and ch.isprintable():
-                query[0] += ch
-                selected_idx[0] = 0
-
-        app = Application(
-            layout=Layout(Window(content=FormattedTextControl(_render, focusable=True))),
-            key_bindings=kb,
-            full_screen=False,
-            mouse_support=False,
-        )
-        await app.run_async()
-        return result[0]
-
-    # ------------------------------------------------------------------
-    # Masked API key prompt
-    # ------------------------------------------------------------------
-
-    async def _prompt_api_key(self, provider_label: str) -> str | None:
-        """Prompt for a masked API key. Returns the key or None if cancelled."""
-        from prompt_toolkit import PromptSession
-        from prompt_toolkit.formatted_text import FormattedText
-
-        session: PromptSession = PromptSession(is_password=True)
-        prompt_text = FormattedText(
+        choice = await single_select(
+            "Providers",
             [
-                (f"fg:{design.ACCENT} bold", f"  {provider_label} API key"),
-                (f"fg:{design.FAINT}", " (hidden)"),
-                ("", ": "),
-            ]
-        )
-        try:
-            raw: str = await session.prompt_async(prompt_text)
-            return raw.strip() or None
-        except (KeyboardInterrupt, EOFError):
-            return None
-
-    # ------------------------------------------------------------------
-    # Inline confirmation (yes/no)
-    # ------------------------------------------------------------------
-
-    async def _confirm(self, message: str) -> bool:
-        """Two-option confirmation menu. Returns True for yes."""
-        choice = await self._show_menu(
-            title=message,
-            subtitle="",
-            choices=[
-                ("no", "No — Cancel", "Keep the current state"),
-                ("yes", "Yes — Confirm", "Proceed with this action"),
+                Option("add", "Add Provider", "Connect a cloud provider with an API key"),
+                Option("manage", "Manage Providers", "View, update, or remove a provider"),
+                Option("test", "Test Connection", "Re-verify a configured provider"),
+                Option("discover", "Discover Models", "Re-fetch models from every provider"),
+                Option("status", "Provider Status", "Status table for every provider"),
             ],
-            filterable=False,
+            subtitle="Manage cloud AI provider connections",
         )
-        return choice == "yes"
+        if choice in (BACK, CANCEL):
+            return
+        if choice == "add":
+            await self._flow_add()
+        elif choice == "manage":
+            await self._flow_manage()
+        elif choice == "test":
+            await self._flow_test()
+        elif choice == "discover":
+            await self._discover_all()
+        elif choice == "status":
+            self._show_status_table()
 
     # ------------------------------------------------------------------
-    # Add Provider flow
+    # Add / connect
     # ------------------------------------------------------------------
 
-    async def _flow_add_provider(self) -> None:
-        """Interactive picker: choose a cloud provider then configure it."""
-        choices = [
-            (pid, meta["label"], meta["description"]) for pid, meta in CLOUD_PROVIDERS.items()
-        ]
-        pid = await self._show_menu(
-            title="Add Provider",
-            subtitle="Choose a cloud AI provider to connect  (type to filter)",
-            choices=choices,
+    async def _flow_add(self) -> None:
+        pid = await single_select(
+            "Add Provider",
+            [_row(p.id) for p in catalog.list_cloud_providers_alphabetical()],
+            subtitle="Choose a provider to connect",
+            filterable=True,
         )
-        if pid is not None:
-            await self._add_single_provider(pid)
+        if pid in (BACK, CANCEL):
+            return
+        await self._connect(str(pid))
 
-    async def _add_single_provider(self, pid: str) -> None:
-        """Guided workflow to add or update a single cloud provider."""
-        meta = CLOUD_PROVIDERS.get(pid)
-        if meta is None:
-            self.console.print(f"[{design.WARN}]Unknown provider: {pid}[/{design.WARN}]")
+    async def _connect(self, pid: str) -> None:
+        """Key entry → live verification → persist. The core flow."""
+        meta = catalog.get(pid)
+        if meta is None or not meta.requires_key:
+            self.console.print(f"[{design.WARN}]Unknown cloud provider: {pid}[/{design.WARN}]")
             return
 
-        # Step 1 — show provider context
-        self.console.print()
-        self.console.print(f"[bold {design.ACCENT}]{meta['label']}[/bold {design.ACCENT}]")
-        self.console.print(f"[{design.MUTED}]{meta['description']}[/{design.MUTED}]")
-        self.console.print(f"[{design.FAINT}]Keys at: {meta['url']}[/{design.FAINT}]")
-
-        cur_status = provider_status(pid)
-        cur_color = status_style(cur_status)
-        self.console.print(
-            f"[{design.MUTED}]Current status:[/{design.MUTED}] "
-            f"[{cur_color}]{cur_status}[/{cur_color}]"
-        )
-        self.console.print()
-
-        # Step 2 — key entry loop (retry / cancel on failure)
         while True:
-            api_key = await self._prompt_api_key(meta["label"])
-
-            if api_key is None:
-                self.console.print(f"[{design.MUTED}]Cancelled.[/{design.MUTED}]")
-                return
-
-            if not api_key:
-                action = await self._show_menu(
-                    title="No key entered",
-                    subtitle="What would you like to do?",
-                    choices=[
-                        ("retry", "Retry", "Enter the API key again"),
-                        ("cancel", "Cancel", "Return to the previous menu"),
-                    ],
-                    filterable=False,
-                )
-                if action == "retry":
-                    continue
-                return
-
-            # Step 3 — validate
-            self.console.print(
-                f"[{design.MUTED}]Validating {meta['label']} credentials...[/{design.MUTED}]"
+            entered = await text_input(
+                f"{meta.key_label or meta.display_name + ' API key'}",
+                hint=f"Get one at {meta.get_key_url}  ·  input is hidden",
+                password=True,
+                validate=_validate_key_shape,
             )
-            result = await asyncio.to_thread(validate_provider_sync, pid, api_key)
+            if entered in (BACK, CANCEL):
+                return
+
+            key = str(entered).strip()
+
+            result: ValidationResult = await run_with_status(
+                validate_provider(pid, key),
+                pending=f"Verifying with {meta.display_name}…",
+                ok=lambda r: (
+                    f"Verified — {len(r.models)} model{'s' if len(r.models) != 1 else ''} available"
+                    if r.models
+                    else "Verified — key accepted"
+                ),
+                fail=lambda r: r.human_message(),
+                is_ok=lambda r: r.ok,
+            )
 
             if result.ok:
-                # Step 4 — persist
-                await asyncio.to_thread(save_key, pid, api_key)
-                self.console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
-                self.console.print(
-                    f"[{design.OK}]API key saved securely to OS keychain.[/{design.OK}]"
-                )
-                if result.models:
-                    n = len(result.models)
-                    preview = ", ".join(result.models[:6])
-                    suffix = f" +{n - 6} more" if n > 6 else ""
-                    self.console.print(
-                        f"[{design.MUTED}]Models: {preview}{suffix}[/{design.MUTED}]"
-                    )
-                if result.account_info:
-                    self._print_account_info(result.account_info)
-
-                # Step 5 — discover models for this provider
-                self.console.print(
-                    f"[{design.MUTED}]Discovering {meta['label']} models...[/{design.MUTED}]"
-                )
-                await self._discover_for_provider(pid)
-
-                self.console.print(
-                    f"[bold {design.OK}]{meta['label']} is now connected![/bold {design.OK}]"
-                )
+                save_key(pid, key, verified=True)
+                mark_verified(pid, model_count=len(result.models))
+                self._report_saved(meta.display_name)
+                await self._discover_one(pid)
                 return
 
-            else:
-                # Validation failed — human-readable diagnosis
-                label = validation_status_label(result.status)
-                self.console.print(
-                    f"[{design.WARN}]{label}: {result.human_message()}[/{design.WARN}]"
-                )
-                self._print_failure_hint(result.status)
+            hint = _FAILURE_HINTS.get(result.status)
+            if hint:
+                self.console.print(f"[{design.FAINT}]{hint}[/{design.FAINT}]")
 
-                action = await self._show_menu(
-                    title=f"Connection failed — {label}",
-                    subtitle="How would you like to proceed?",
-                    choices=[
-                        ("retry", "Retry", "Enter a different API key"),
-                        (
-                            "save_anyway",
-                            "Save Anyway",
-                            "Store without validation (offline / network issue)",
-                        ),
-                        ("cancel", "Cancel", "Return without saving"),
-                    ],
-                    filterable=False,
-                )
-                if action == "retry":
-                    continue
-                if action == "save_anyway":
-                    await asyncio.to_thread(save_key, pid, api_key)
-                    self.console.print(
-                        f"[{design.WARN}]Key saved without validation.[/{design.WARN}]"
-                    )
-                return
-
-    # ------------------------------------------------------------------
-    # Manage Providers flow
-    # ------------------------------------------------------------------
-
-    async def _flow_manage_providers(self) -> None:
-        """List every provider with status → pick one → provider detail."""
-        while True:
-            choices: list[tuple[str, str, str]] = []
-            for pid, meta in CLOUD_PROVIDERS.items():
-                st = provider_status(pid)
-                color = status_style(st)
-                f"[{color}]{st}[/{color}]  ·  {meta['description'][:48]}"
-                # Strip Rich tags for the plain-text description shown in the menu
-                plain_desc = f"{st}  ·  {meta['description'][:48]}"
-                choices.append((pid, meta["label"], plain_desc))
-            for pid, meta in LOCAL_PROVIDERS.items():
-                st = provider_status(pid)
-                choices.append((pid, meta["label"], f"{st}  ·  {meta['description'][:48]}"))
-
-            pid = await self._show_menu(
-                title="Manage Providers",
-                subtitle="Select a provider to view details or take action  (type to filter)",
-                choices=choices,
+            action = await single_select(
+                f"{meta.display_name} — not connected",
+                [
+                    Option("retry", "Try another key", "Enter a different API key"),
+                    Option(
+                        "anyway",
+                        "Save anyway",
+                        "Store it unverified — for when you're offline",
+                    ),
+                    Option("cancel", "Cancel", "Return without saving"),
+                ],
             )
-            if pid is None:
+            if action == "retry":
+                continue
+            if action == "anyway":
+                # Explicitly NOT verified: the provider never accepted this key,
+                # and recording it as verified is exactly the lie this rework
+                # exists to remove. It will be re-checked in the background.
+                save_key(pid, key, verified=False)
+                self.console.print(
+                    f"[{design.WARN}]Saved unverified — Velune will re-check it "
+                    f"automatically.[/{design.WARN}]"
+                )
+            return
+
+    def _report_saved(self, label: str) -> None:
+        """Say where the key actually went.
+
+        The old copy claimed "saved securely to OS keychain", which was not true:
+        the key is AES-GCM-encrypted into credentials.json, and only the *master*
+        key lives in the OS keyring — falling back to a machine-derived key when
+        no keyring is available.
+        """
+        from velune.providers.keystore import credentials_file_path
+
+        self.console.print(f"[bold {design.OK}]{label} connected.[/bold {design.OK}]")
+        self.console.print(
+            f"[{design.MUTED}]Key encrypted (AES-GCM) at {credentials_file_path()}[/{design.MUTED}]"
+        )
+
+    # ------------------------------------------------------------------
+    # Manage / detail / remove
+    # ------------------------------------------------------------------
+
+    async def _flow_manage(self) -> None:
+        while True:
+            rows = [_row(p.id) for p in catalog.list_providers_alphabetical()]
+            pid = await single_select(
+                "Manage Providers",
+                rows,
+                subtitle="Select a provider to view or change",
+                filterable=True,
+            )
+            if pid in (BACK, CANCEL):
                 return
+            await self._detail(str(pid))
 
-            await self._provider_detail(pid)
-
-    async def _provider_detail(self, pid: str) -> None:
-        """Show details and an action menu for a single provider."""
-        meta = ALL_PROVIDER_META.get(pid)
+    async def _detail(self, pid: str) -> None:
+        meta = catalog.get(pid)
         if meta is None:
             self.console.print(f"[{design.WARN}]Unknown provider: {pid}[/{design.WARN}]")
             return
 
-        is_local = meta.get("local", False)
-        label = meta["label"]
+        if _is_local(pid):
+            options = [
+                Option("test", "Test Connection", "Check the local server is reachable"),
+                Option("refresh", "Refresh Models", "Re-fetch this server's model list"),
+            ]
+        elif verification_state(pid) is KeyState.MISSING:
+            options = [Option("add", "Connect", "Add an API key to enable this provider")]
+        else:
+            options = [
+                Option("test", "Test Connection", "Re-verify the stored key now"),
+                Option("update", "Replace API Key", "Enter a new key for this provider"),
+                Option("refresh", "Refresh Models", "Re-fetch the model catalogue"),
+                Option("remove", "Remove API Key", "Delete the key and disconnect"),
+            ]
 
-        # Context print
-        self.console.print()
-        self.console.print(f"[bold {design.ACCENT}]{label}[/bold {design.ACCENT}]")
-        self.console.print(f"[{design.MUTED}]{meta.get('description', '')}[/{design.MUTED}]")
-
-        st = provider_status(pid)
-        self.console.print(
-            f"[{design.MUTED}]Status:[/{design.MUTED}] [{status_style(st)}]{st}[/{status_style(st)}]"
+        action = await single_select(
+            meta.display_name,
+            options,
+            subtitle=self._detail_subtitle(pid),
         )
+        if action in (BACK, CANCEL):
+            return
+        if action in ("add", "update"):
+            await self._connect(pid)
+        elif action == "test":
+            await self._test(pid)
+        elif action == "refresh":
+            await self._discover_one(pid)
+        elif action == "remove":
+            await self._remove(pid)
 
-        # Cached model count
+    def _detail_subtitle(self, pid: str) -> str:
+        if _is_local(pid):
+            return f"local  ·  {_local_status(pid)}"
+        state = verification_state(pid)
+        badge = _STATE_BADGE[state][0] or "not configured"
         try:
             mr = self.container.get("runtime.model_registry")
-            n_models = len(mr.get_by_provider(pid))
-            if n_models:
-                self.console.print(f"[{design.MUTED}]Cached models: {n_models}[/{design.MUTED}]")
+            count = len(mr.get_by_provider(pid))
         except Exception:
-            pass
-        self.console.print()
+            count = 0
+        return f"{badge}  ·  {count} cached model(s)" if count else badge
 
-        # Build action list based on provider type / current state
-        if is_local:
-            choices: list[tuple[str, str, str]] = [
-                ("test", "Test Connection", "Verify the local server is reachable"),
-                ("refresh", "Refresh Models", "Re-fetch the model list from this server"),
-                ("back", "← Back", "Return to the provider list"),
-            ]
-        else:
-            choices = []
-            if has_key(pid):
-                choices += [
-                    ("update", "Update API Key", "Replace the stored API key"),
-                    ("remove", "Remove API Key", "Delete the key and disconnect this provider"),
-                    ("test", "Test Connection", "Validate credentials with a live API call"),
-                    ("refresh", "Refresh Models", "Re-fetch the model catalogue"),
-                ]
-            else:
-                choices += [
-                    ("add", "Connect Provider", "Add an API key to enable this provider"),
-                ]
-            choices.append(("back", "← Back", "Return to the provider list"))
+    async def _remove(self, pid: str) -> None:
+        meta = catalog.get(pid)
+        label = meta.display_name if meta else pid
 
-        action = await self._show_menu(
-            title=f"{label} — Actions",
-            subtitle="Choose an action",
-            choices=choices,
-            filterable=False,
+        ok = await confirm(
+            f"Remove the {label} API key?",
+            hint=f"This disconnects all {label} models from Velune.",
+            default=False,
         )
-
-        if action in ("add", "update"):
-            await self._add_single_provider(pid)
-        elif action == "remove":
-            await self._remove_provider(pid)
-        elif action == "test":
-            await self._test_provider(pid)
-        elif action == "refresh":
-            await self._discover_for_provider(pid)
-
-    # ------------------------------------------------------------------
-    # Remove Provider
-    # ------------------------------------------------------------------
-
-    async def _remove_provider(self, pid: str) -> None:
-        """Confirm then remove a provider's API key and evict cached models."""
-        meta = ALL_PROVIDER_META.get(pid, {"label": pid})
-        label = meta["label"]
-
-        self.console.print()
-        self.console.print(f"[bold {design.WARN}]Remove {label} API key?[/bold {design.WARN}]")
-        self.console.print(
-            f"[{design.MUTED}]This will disconnect all {label} models from Velune.[/{design.MUTED}]"
-        )
-        self.console.print()
-
-        if not await self._confirm(f"Remove {label} key?"):
-            self.console.print(f"[{design.MUTED}]Cancelled. Key is still stored.[/{design.MUTED}]")
+        if ok is not True:
+            self.console.print(f"[{design.MUTED}]Cancelled — key kept.[/{design.MUTED}]")
             return
 
-        await asyncio.to_thread(delete_key, pid)
-        self.console.print(
-            f"[{design.OK}]API key for {label} removed from OS keychain.[/{design.OK}]"
-        )
+        delete_key(pid)
+        self.console.print(f"[{design.OK}]{label} disconnected.[/{design.OK}]")
 
-        # Evict models from the registry
         evicted = 0
         try:
             mr = self.container.get("runtime.model_registry")
@@ -706,211 +388,157 @@ class ProviderPalette:
                     evicted += 1
         except Exception:
             pass
-
         if evicted:
             self.console.print(
-                f"[{design.MUTED}]Removed {evicted} cached model(s) for {label}.[/{design.MUTED}]"
-            )
-
-        # If no cloud providers remain, surface a helpful notice
-        configured_cloud = [p for p in CLOUD_PROVIDERS if has_key(p)]
-        if not configured_cloud:
-            self.console.print(
-                f"[{design.WARN}]No cloud providers are currently configured. "
-                f"Use /providers add to connect one.[/{design.WARN}]"
+                f"[{design.MUTED}]Removed {evicted} cached model(s).[/{design.MUTED}]"
             )
 
     # ------------------------------------------------------------------
-    # Test Connection flow
+    # Test
     # ------------------------------------------------------------------
 
-    async def _flow_test_connection(self) -> None:
-        """Pick a provider then test it; or test all configured ones."""
+    async def _flow_test(self) -> None:
         configured = [
-            (pid, CLOUD_PROVIDERS[pid]["label"]) for pid in CLOUD_PROVIDERS if has_key(pid)
+            p.id
+            for p in catalog.list_cloud_providers_alphabetical()
+            if verification_state(p.id) is not KeyState.MISSING
         ]
         if not configured:
             self.console.print(
-                f"[{design.WARN}]No cloud providers configured. "
-                f"Run /providers add to get started.[/{design.WARN}]"
+                f"[{design.WARN}]No providers configured yet. "
+                f"Run [bold]/login[/bold] to connect one.[/{design.WARN}]"
             )
             return
 
-        choices: list[tuple[str, str, str]] = [
-            ("__all__", "Test All", "Validate every configured provider in sequence"),
-        ]
-        choices += [(pid, label, f"Test {label} credentials") for pid, label in configured]
+        options = [Option("__all__", "Test all", "Re-verify every configured provider")]
+        options += [_row(pid) for pid in configured]
 
-        selected = await self._show_menu(
-            title="Test Connection",
-            subtitle="Select a provider to test  (type to filter)",
-            choices=choices,
-        )
-        if selected is None:
+        pid = await single_select("Test Connection", options, filterable=True)
+        if pid in (BACK, CANCEL):
             return
 
-        if selected == "__all__":
-            for pid, _ in configured:
-                await self._test_provider(pid)
+        if pid == "__all__":
+            for one in configured:
+                await self._test(one)
         else:
-            await self._test_provider(selected)
+            await self._test(str(pid))
 
-    async def _test_provider(self, pid: str) -> None:
-        """Live validation round-trip for a single provider."""
-        meta = ALL_PROVIDER_META.get(pid, {"label": pid, "local": False})
-        label = meta["label"]
-        is_local = meta.get("local", False)
+    async def _test(self, pid: str) -> None:
+        """Live round-trip against a provider, persisting the verdict."""
+        meta = catalog.get(pid)
+        if meta is None:
+            self.console.print(f"[{design.WARN}]Unknown provider: {pid}[/{design.WARN}]")
+            return
+        label = meta.display_name
 
-        key = "" if is_local else (get_key(pid) or "")
-        if not is_local and not key:
+        if meta.requires_key and not get_key(pid):
             self.console.print(f"[{design.WARN}]{label} — no API key configured.[/{design.WARN}]")
             return
 
-        self.console.print(f"[{design.MUTED}]Testing {label}...[/{design.MUTED}]")
-        result = await asyncio.to_thread(validate_provider_sync, pid, key)
+        if meta.requires_key:
+            # Route through the verifier so the stored state is updated by the
+            # same rules the background sweep uses — in particular, a network
+            # error must not mark the key invalid.
+            from velune.providers.verifier import reverify
 
-        if result.ok:
-            n = len(result.models) if result.models else 0
-            self.console.print(f"[{design.OK}]{label} — Connected ({n} model(s))[/{design.OK}]")
+            work = reverify(pid)
         else:
-            lbl = validation_status_label(result.status)
-            self.console.print(
-                f"[{design.WARN}]{label} — {lbl}: {result.human_message()}[/{design.WARN}]"
-            )
-            self._print_failure_hint(result.status)
+            work = validate_provider(pid, "")
+
+        await run_with_status(
+            work,
+            pending=f"Testing {label}…",
+            ok=lambda r: (
+                f"{label} — connected ({len(r.models)} model(s))"
+                if r.models
+                else f"{label} — connected"
+            ),
+            fail=lambda r: f"{label} — {r.human_message()}",
+            is_ok=lambda r: r.ok,
+        )
 
     # ------------------------------------------------------------------
     # Model discovery
     # ------------------------------------------------------------------
 
-    async def _flow_discover_models(self) -> None:
-        """Trigger full discovery across all connected providers."""
-        self.console.print(
-            f"[{design.MUTED}]Scanning all connected providers for models...[/{design.MUTED}]"
+    async def _discover_all(self) -> None:
+        async def _scan():
+            return await ModelDiscoveryScanner().scan_all()
+
+        models = await run_with_status(
+            _scan(),
+            pending="Scanning connected providers for models…",
+            ok=lambda ms: f"Registered {len(ms)} model(s)",
+            fail="No models discovered",
+            is_ok=lambda ms: bool(ms),
         )
-        try:
-            scanner = ModelDiscoveryScanner()
-            models = await scanner.scan_all()
-        except Exception as exc:
-            self.console.print(f"[{design.WARN}]Discovery failed: {exc}[/{design.WARN}]")
+        self._register(models)
+
+    async def _discover_one(self, pid: str) -> None:
+        meta = catalog.get(pid)
+        label = meta.display_name if meta else pid
+
+        async def _scan():
+            try:
+                return await ModelDiscoveryScanner().scan_provider(pid)
+            except Exception as exc:
+                _log.debug("Discovery error for %s: %s", pid, exc)
+                return []
+
+        models = await run_with_status(
+            _scan(),
+            pending=f"Discovering {label} models…",
+            ok=lambda ms: f"{len(ms)} {label} model(s) available",
+            # Not an error: several providers legitimately expose no list endpoint.
+            fail=f"No model list from {label} — this is normal for some providers",
+            is_ok=lambda ms: bool(ms),
+        )
+        self._register(models)
+
+    def _register(self, models) -> None:
+        if not models:
             return
-
-        registered = self._register_models(models)
-        self.console.print(
-            f"[{design.OK}]Discovered and registered {registered} model(s).[/{design.OK}]"
-        )
-
-    async def _discover_for_provider(self, pid: str) -> None:
-        """Trigger model discovery for a single provider after key setup."""
-        meta = ALL_PROVIDER_META.get(pid, {"label": pid})
-        label = meta["label"]
-        try:
-            scanner = ModelDiscoveryScanner()
-            models = await scanner.scan_provider(pid)
-        except Exception as exc:
-            _log.debug("Discovery error for %s: %s", pid, exc)
-            models = []
-
-        if models:
-            registered = self._register_models(models)
-            self.console.print(
-                f"[{design.MUTED}]Registered {registered} {label} model(s).[/{design.MUTED}]"
-            )
-        else:
-            self.console.print(
-                f"[{design.MUTED}]No models discovered for {label} (this is normal for some providers).[/{design.MUTED}]"
-            )
-
-    def _register_models(self, models) -> int:
-        """Push discovered models into the model registry. Returns count registered."""
         try:
             mr = self.container.get("runtime.model_registry")
             for m in models:
                 mr.register(m)
-            return len(models)
-        except Exception:
-            return len(models)
+        except Exception as exc:
+            _log.debug("Could not register discovered models: %s", exc)
 
     # ------------------------------------------------------------------
-    # Status overview
+    # Status table
     # ------------------------------------------------------------------
 
-    async def _show_status_all(self) -> None:
-        """Print a Rich table showing status for every provider."""
+    def _show_status_table(self) -> None:
         from rich.table import Table
 
-        table = Table(
-            title=f"[bold {design.ACCENT}]Provider Status[/bold {design.ACCENT}]",
-            border_style=design.FAINT,
-            padding=(0, 1),
-        )
-        table.add_column("Provider", style=design.INFO, min_width=16)
+        table = Table(border_style=design.FAINT, padding=(0, 1))
+        table.add_column("Provider", style=design.WHITE, min_width=14)
         table.add_column("Type", style=design.MUTED, width=6)
-        table.add_column("Status", min_width=18)
+        table.add_column("Status", min_width=12)
         table.add_column("Env Var", style=design.FAINT)
 
-        for pid, meta in sorted(CLOUD_PROVIDERS.items(), key=lambda kv: kv[1]["label"]):
-            st = provider_status(pid)
-            color = status_style(st)
+        for meta in catalog.list_providers_alphabetical():
+            if meta.requires_key:
+                state = verification_state(meta.id)
+                text, color = _STATE_BADGE[state]
+                text = text or "not configured"
+                kind = "cloud"
+            else:
+                status = _local_status(meta.id)
+                text = status
+                color = design.OK if status == "running" else design.MUTED
+                kind = "local"
+
             table.add_row(
-                meta["label"],
-                "cloud",
-                f"[{color}]{st}[/{color}]",
-                meta.get("env") or "—",
+                meta.display_name,
+                kind,
+                f"[{color}]{text}[/{color}]",
+                meta.env_var or "—",
             )
-        for pid, meta in sorted(LOCAL_PROVIDERS.items(), key=lambda kv: kv[1]["label"]):
-            st = provider_status(pid)
-            color = status_style(st)
-            table.add_row(meta["label"], "local", f"[{color}]{st}[/{color}]", "—")
 
         self.console.print(table)
         self.console.print(
-            f"\n[{design.MUTED}]Use [bold]/providers add[/bold] to connect a provider, "
-            f"[bold]/providers manage[/bold] to update or remove one.[/{design.MUTED}]"
+            f"[{design.MUTED}]Stale keys are re-checked automatically. "
+            f"[bold]/login[/bold] to connect a provider.[/{design.MUTED}]"
         )
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _print_account_info(self, info: dict) -> None:
-        parts: list[str] = []
-        if "username" in info:
-            parts.append(f"user: {info['username']}")
-        if "organization" in info:
-            parts.append(f"org: {info['organization']}")
-        if "model_count" in info:
-            parts.append(f"{info['model_count']} models")
-        if "total_models" in info:
-            parts.append(f"{info['total_models']} total models")
-        if parts:
-            self.console.print(f"[{design.MUTED}]Account: {', '.join(parts)}[/{design.MUTED}]")
-
-    def _print_failure_hint(self, status: ValidationStatus) -> None:
-        hints: dict[ValidationStatus, str] = {
-            ValidationStatus.INVALID_KEY: (
-                "The key was rejected by the provider. "
-                "Double-check it was copied in full with no trailing spaces."
-            ),
-            ValidationStatus.EXPIRED_KEY: (
-                "This key has expired. Generate a new one at the provider's console."
-            ),
-            ValidationStatus.REVOKED_KEY: (
-                "This key has been revoked. You need to create a replacement."
-            ),
-            ValidationStatus.RATE_LIMITED: (
-                "The API is temporarily rate-limited. Wait a moment and retry."
-            ),
-            ValidationStatus.PERMISSION_DENIED: (
-                "Your account or key does not have permission for this operation."
-            ),
-            ValidationStatus.NETWORK_ERROR: (
-                "Could not reach the provider. Check your internet connection."
-            ),
-            ValidationStatus.MALFORMED_KEY: (
-                "The key format looks wrong — check you copied the full key."
-            ),
-        }
-        hint = hints.get(status)
-        if hint:
-            self.console.print(f"[{design.FAINT}]Hint: {hint}[/{design.FAINT}]")

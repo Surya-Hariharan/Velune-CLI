@@ -21,7 +21,7 @@ async def cmd_memory(repl: VeluneREPL, args: str) -> None:
     if sub == "clear":
         from velune.cli.handlers.confirm import confirm_destructive
 
-        if not confirm_destructive(repl, "  Clear working memory? This cannot be undone."):
+        if not await confirm_destructive(repl, "Clear working memory? This cannot be undone."):
             repl.console.print("[dim]Cancelled.[/dim]")
             return
         working.clear()

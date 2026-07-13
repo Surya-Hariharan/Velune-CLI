@@ -18,10 +18,33 @@ async def _noop(args: str) -> None:
 
 def _commands():
     return [
-        SlashCommand(name="help", aliases=[], description="d", usage="/help", handler=_noop, category="General"),
-        SlashCommand(name="memory", aliases=["mem"], description="d", usage="/memory", handler=_noop, category="Memory"),
-        SlashCommand(name="backup", aliases=[], description="d", usage="/backup", handler=_noop, category="Session"),
-        SlashCommand(name="mcp", aliases=[], description="d", usage="/mcp", handler=_noop, category="Tools"),
+        SlashCommand(
+            name="help",
+            aliases=[],
+            description="d",
+            usage="/help",
+            handler=_noop,
+            category="General",
+        ),
+        SlashCommand(
+            name="memory",
+            aliases=["mem"],
+            description="d",
+            usage="/memory",
+            handler=_noop,
+            category="Memory",
+        ),
+        SlashCommand(
+            name="backup",
+            aliases=[],
+            description="d",
+            usage="/backup",
+            handler=_noop,
+            category="Session",
+        ),
+        SlashCommand(
+            name="mcp", aliases=[], description="d", usage="/mcp", handler=_noop, category="Tools"
+        ),
     ]
 
 
@@ -57,7 +80,10 @@ def test_active_search_ignores_recency_grouping():
 
 def test_palette_shares_the_completer_recency_source():
     completer = SlashCompleter(
-        commands=[CommandEntry(name="mcp", description="d"), CommandEntry(name="backup", description="d")],
+        commands=[
+            CommandEntry(name="mcp", description="d"),
+            CommandEntry(name="backup", description="d"),
+        ],
         show_command_completions=False,
     )
     completer.record_use("mcp")

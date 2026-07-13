@@ -18,10 +18,33 @@ async def _noop(args: str) -> None:
 
 def _commands():
     return [
-        SlashCommand(name="help", aliases=[], description="d", usage="/help", handler=_noop, category="General"),
-        SlashCommand(name="memory", aliases=["mem"], description="d", usage="/memory", handler=_noop, category="Memory"),
-        SlashCommand(name="backup", aliases=[], description="d", usage="/backup", handler=_noop, category="Session"),
-        SlashCommand(name="mcp", aliases=[], description="d", usage="/mcp", handler=_noop, category="Tools"),
+        SlashCommand(
+            name="help",
+            aliases=[],
+            description="d",
+            usage="/help",
+            handler=_noop,
+            category="General",
+        ),
+        SlashCommand(
+            name="memory",
+            aliases=["mem"],
+            description="d",
+            usage="/memory",
+            handler=_noop,
+            category="Memory",
+        ),
+        SlashCommand(
+            name="backup",
+            aliases=[],
+            description="d",
+            usage="/backup",
+            handler=_noop,
+            category="Session",
+        ),
+        SlashCommand(
+            name="mcp", aliases=[], description="d", usage="/mcp", handler=_noop, category="Tools"
+        ),
     ]
 
 

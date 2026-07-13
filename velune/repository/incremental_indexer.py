@@ -188,24 +188,19 @@ class IncrementalIndexer:
         _total = len(_to_process)
         for _idx, rel_path in enumerate(_to_process):
             full_path = self.workspace_root / rel_path
-            if not full_path.exists():
-                continue
             try:
-                content = full_path.read_text(encoding="utf-8", errors="ignore")
-                sha = self._hash_file(full_path)
-                symbols, language = await asyncio.to_thread(self._parse_file, full_path, content)
-                state.update_file(
-                    IndexedFile(
-                        path=rel_path,
-                        content_hash=sha,
-                        language=language,
-                        symbol_count=len(symbols),
-                        indexed_at=now,
-                    )
-                )
-                logger.debug("Indexed: %s (%d symbols)", rel_path, len(symbols))
+                # One hop to a worker thread for the whole file: stat + read +
+                # SHA-256 + parse. Previously only the parse was off-loaded, so
+                # the read and the full hash of every changed file ran on the
+                # event loop and stalled the REPL in proportion to file size.
+                entry = await asyncio.to_thread(self._index_one, rel_path, full_path, now)
+            except FileNotFoundError:
+                continue
             except Exception as exc:
                 logger.debug("Skipped %s during apply_delta: %s", rel_path, exc)
+            else:
+                state.update_file(entry)
+                logger.debug("Indexed: %s (%d symbols)", rel_path, entry.symbol_count)
             finally:
                 if self.progress_callback is not None:
                     self.progress_callback(_idx + 1, _total, rel_path)
@@ -220,6 +215,37 @@ class IncrementalIndexer:
     # ------------------------------------------------------------------
     # Synchronous helpers (run in thread pool)
     # ------------------------------------------------------------------
+
+    def _index_one(self, rel_path: str, full_path: Path, now: float) -> IndexedFile:
+        """Stat, read, hash and parse one file. Runs entirely off the event loop.
+
+        Raises ``FileNotFoundError`` if the file vanished between delta
+        computation and here — a normal race when the user is editing.
+        """
+        stat = full_path.stat()  # raises FileNotFoundError if it's gone
+        content = full_path.read_text(encoding="utf-8", errors="ignore")
+        sha = self._hash_file(full_path)
+        symbols, language = self._parse_file(full_path, content)
+        return IndexedFile(
+            path=rel_path,
+            content_hash=sha,
+            language=language,
+            symbol_count=len(symbols),
+            indexed_at=now,
+            mtime=stat.st_mtime,
+            size=stat.st_size,
+        )
+
+    # Public aliases. RepositoryCognitionService needs both of these, and was
+    # reaching into the private names from another module to get them — every
+    # call site carrying a `# type: ignore[attr-defined]` to silence the fallout.
+    def git_sha(self) -> str | None:
+        """The current git HEAD SHA, or None outside a git repo."""
+        return self._get_git_sha()
+
+    def working_tree_is_clean(self) -> bool:
+        """True when the tree has no modifications and no untracked files."""
+        return self._working_tree_is_clean()
 
     def _get_git_sha(self) -> str | None:
         """Return the current git HEAD SHA, or None if git is unavailable."""
@@ -238,10 +264,18 @@ class IncrementalIndexer:
         return None
 
     def _working_tree_is_clean(self) -> bool:
-        """Return True when there are no staged or unstaged modifications."""
+        """Return True when the tree has no modifications *and* no new files.
+
+        Uses ``git status --porcelain``, not ``git diff HEAD``. ``git diff`` does
+        not report untracked files, so with it a brand-new file that had never
+        been ``git add``ed made the tree look clean — the caller took the fast
+        path, returned an empty delta without touching the disk, and the new file
+        stayed invisible to the index until HEAD moved or some *tracked* file
+        happened to change. New code was simply never indexed.
+        """
         try:
             result = subprocess.run(
-                ["git", "diff", "HEAD", "--name-only"],
+                ["git", "status", "--porcelain", "--untracked-files=normal"],
                 capture_output=True,
                 text=True,
                 cwd=str(self.workspace_root),
@@ -279,12 +313,26 @@ class IncrementalIndexer:
         to_update: list[str] = []
 
         for rel_path, abs_path in current.items():
+            stored_entry = stored.get(rel_path)
+
+            # Cheap check first. A stat() is orders of magnitude cheaper than
+            # reading and SHA-256ing the file, and this path runs on every
+            # change-detection tick (every 3s while the tree is dirty, which is
+            # to say: throughout normal development). Hashing the whole repo each
+            # time was pure waste — the hash is only needed to catch a file whose
+            # size and mtime are unchanged but whose bytes are not.
+            if stored_entry is not None:
+                try:
+                    if stored_entry.unchanged_on_disk(abs_path.stat()):
+                        continue
+                except OSError:
+                    continue
+
             try:
                 sha = self._hash_file(abs_path)
             except Exception:
                 continue
 
-            stored_entry = stored.get(rel_path)
             if stored_entry is None:
                 to_add.append(rel_path)
             elif stored_entry.content_hash != sha:

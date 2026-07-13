@@ -42,7 +42,7 @@ async def test_confirm_permission_blocks_handler_when_declined(monkeypatch):
         )
     )
     monkeypatch.setattr(
-        "velune.cli.handlers.confirm.confirm_destructive", lambda *a, **k: False
+        "velune.cli.handlers.confirm.confirm_destructive", AsyncMock(return_value=False)
     )
 
     await repl._handle_slash_command("/dangerous")
@@ -72,7 +72,7 @@ async def test_confirm_permission_runs_handler_when_accepted(monkeypatch):
         )
     )
     monkeypatch.setattr(
-        "velune.cli.handlers.confirm.confirm_destructive", lambda *a, **k: True
+        "velune.cli.handlers.confirm.confirm_destructive", AsyncMock(return_value=True)
     )
 
     await repl._handle_slash_command("/dangerous")
@@ -98,10 +98,20 @@ async def test_command_without_confirm_permission_runs_unconditionally():
     handler.assert_awaited_once()
 
 
-def test_confirm_destructive_honors_auto_accept():
+async def test_confirm_destructive_honors_auto_accept():
     repl = MagicMock()
     repl.container.get.return_value = True  # runtime.auto_accept
-    assert confirm_destructive(repl, "  Sure?") is True
+    assert await confirm_destructive(repl, "Sure?") is True
+
+
+async def test_confirm_destructive_refuses_without_a_tty(monkeypatch):
+    """No TTY means nobody is there to answer — a destructive action must not
+    proceed on the strength of a default."""
+    monkeypatch.setattr("velune.cli.handlers.confirm.is_interactive_tty", lambda: False)
+    repl = MagicMock()
+    repl.container.get.return_value = False  # auto_accept off
+
+    assert await confirm_destructive(repl, "Delete everything?", default=True) is False
 
 
 async def test_memory_clear_does_nothing_without_confirmation(monkeypatch):
@@ -112,7 +122,7 @@ async def test_memory_clear_does_nothing_without_confirmation(monkeypatch):
         "runtime.episodic_memory": MagicMock(),
     }.get(key)
     monkeypatch.setattr(
-        "velune.cli.handlers.confirm.confirm_destructive", lambda *a, **k: False
+        "velune.cli.handlers.confirm.confirm_destructive", AsyncMock(return_value=False)
     )
 
     await cmd_memory(repl, "clear")
@@ -129,7 +139,7 @@ async def test_memory_clear_wipes_working_memory_once_confirmed(monkeypatch):
         "runtime.episodic_memory": MagicMock(),
     }.get(key)
     monkeypatch.setattr(
-        "velune.cli.handlers.confirm.confirm_destructive", lambda *a, **k: True
+        "velune.cli.handlers.confirm.confirm_destructive", AsyncMock(return_value=True)
     )
 
     await cmd_memory(repl, "clear")

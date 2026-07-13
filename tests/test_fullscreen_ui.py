@@ -180,13 +180,7 @@ async def _stream_markdown_text(ui: FullscreenREPLUI, text: str) -> None:
 
 def test_streamed_response_renders_markdown_and_code_highlighting():
     ui = _make_ui()
-    md_text = (
-        "Recursion calls **itself**.\n\n"
-        "```python\n"
-        "def f(n):\n"
-        "    return f(n - 1)\n"
-        "```\n"
-    )
+    md_text = "Recursion calls **itself**.\n\n```python\ndef f(n):\n    return f(n - 1)\n```\n"
     asyncio.run(_stream_markdown_text(ui, md_text))
 
     rendered_lines = [line for line in ui._lines if line.fragments]

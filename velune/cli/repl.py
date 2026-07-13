@@ -24,6 +24,7 @@ _log = logging.getLogger("velune.cli.repl")
 from velune._compat import uncancel_task
 from velune.cli.slash_commands import SlashCommandRegistry
 from velune.core.runtime import RuntimeContext
+from velune.core.task_registry import track
 from velune.core.types.model import ModelDescriptor
 
 if TYPE_CHECKING:
@@ -246,6 +247,25 @@ class VeluneREPL:
             home_provider=self._home_state,
         )
 
+    async def _reverify_stale_keys(self) -> None:
+        """Re-check any stored API key that has aged past its TTL.
+
+        Fire-and-forget on REPL entry. It must never block the prompt and never
+        print: a key that turns out to be rejected is surfaced in the status bar
+        (``invalid_keys``) rather than written into the transcript, since the
+        user did not ask for this and may be mid-thought. Any failure here is
+        silent by design — an offline user is not told their keys are broken
+        (``verifier`` leaves inconclusive verdicts as STALE).
+        """
+        try:
+            from velune.providers.keystore import list_invalid_providers
+            from velune.providers.verifier import reverify_stale
+
+            await reverify_stale()
+            self._status_state.invalid_keys = tuple(list_invalid_providers())
+        except Exception as exc:
+            _log.debug("Background key re-verification failed (non-fatal): %s", exc)
+
     def _refresh_status_state(self) -> None:
         workspace_path = self.container.get("runtime.workspace")
         folder_name = Path(workspace_path).name if workspace_path else "velune"
@@ -456,7 +476,9 @@ class VeluneREPL:
 
         from velune.cli.handlers.cognition import auto_detect_on_entry
 
-        asyncio.create_task(auto_detect_on_entry(self), name="velune.auto_index")
+        track(asyncio.create_task(auto_detect_on_entry(self), name="velune.auto_index"))
+
+        track(asyncio.create_task(self._reverify_stale_keys(), name="velune.reverify_keys"))
 
         self._interrupts.install()
         try:
@@ -652,7 +674,7 @@ class VeluneREPL:
         if "confirm" in cmd.permissions:
             from velune.cli.handlers.confirm import confirm_destructive
 
-            if not confirm_destructive(self, f"  Run /{cmd.name}?", default=False):
+            if not await confirm_destructive(self, f"Run /{cmd.name}?", default=False):
                 self.console.print("[dim]Cancelled.[/dim]")
                 return
 
@@ -839,9 +861,7 @@ class VeluneREPL:
                 text = cleaned_text
                 mention_context = build_mention_context(mentioned_files)
                 if mention_context:
-                    self._conversation.append(
-                        {"role": "system", "content": mention_context}
-                    )
+                    self._conversation.append({"role": "system", "content": mention_context})
 
             _hook_pre = await self._hook_dispatcher.dispatch_user_prompt(
                 user_prompt=text,
@@ -850,9 +870,7 @@ class VeluneREPL:
             if _hook_pre.transformed_prompt:
                 text = _hook_pre.transformed_prompt
             if _hook_pre.system_message:
-                self._conversation.append(
-                    {"role": "system", "content": _hook_pre.system_message}
-                )
+                self._conversation.append({"role": "system", "content": _hook_pre.system_message})
             if _hook_pre.blocked:
                 if _hook_pre.block_reason:
                     self.console.print(
@@ -1278,6 +1296,11 @@ class VeluneREPL:
         from velune.cli.handlers.providers import cmd_providers
 
         await cmd_providers(self, args)
+
+    async def _cmd_login(self, args: str) -> None:
+        from velune.cli.handlers.providers import cmd_login
+
+        await cmd_login(self, args)
 
     # Backwards-compat aliases used by the old private API in tests/tools
     async def _restore_active_model(self) -> None:
