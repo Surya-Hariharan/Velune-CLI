@@ -78,52 +78,6 @@ def debug_timer(operation_name: str, **context: Any) -> Iterator[DebugTimer]:
         yield timer
 
 
-class TokenCounter:
-    """Tracks and logs token usage per context section."""
-
-    def __init__(self) -> None:
-        """Initialize counter."""
-        self.sections: dict[str, int] = {}
-        self.total: int = 0
-
-    def add_section(self, section_name: str, token_count: int) -> None:
-        """Record tokens for a section.
-
-        Args:
-            section_name: Name of context section (e.g., "repository_files", "memory")
-            token_count: Approximate token count for this section
-        """
-        self.sections[section_name] = token_count
-        self.total += token_count
-
-        logger.debug(
-            "[TOKEN COUNT] Section added",
-            section=section_name,
-            tokens=token_count,
-            total_so_far=self.total,
-        )
-
-    def log_summary(self) -> None:
-        """Log a summary of token usage."""
-        logger.debug("[TOKEN SUMMARY]")
-        for section, count in sorted(self.sections.items(), key=lambda x: -x[1]):
-            percentage = (count / self.total * 100) if self.total > 0 else 0
-            logger.debug(
-                f"  {section}: {count:,} tokens ({percentage:.1f}%)",
-                section=section,
-                tokens=count,
-                percentage=percentage,
-            )
-        logger.debug(f"  TOTAL: {self.total:,} tokens", total=self.total)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return as dictionary for structured logging."""
-        return {
-            "sections": self.sections,
-            "total_tokens": self.total,
-        }
-
-
 class RoutingDecision:
     """Tracks routing decision with scores."""
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from velune.execution.path_guard import PathGuard
 from velune.tools.base.tool import BaseTool
@@ -24,12 +25,52 @@ class SemanticCodeSearch(BaseTool):
         directory: str = ".",
         limit: int = 10,
     ) -> list[dict]:
-        """Search code semantically."""
+        """Search code semantically via the hybrid retriever (lexical + vector + graph).
+
+        Falls back to a plain grep — this tool's original behavior — when no
+        retriever is registered in the container (e.g. running outside a
+        bootstrapped Velune session) or the retrieval call itself errors, so
+        this tool degrades rather than fails when retrieval isn't available.
+        """
+        try:
+            from velune.kernel.registry import get_container
+
+            container = get_container()
+            if container.has("runtime.retrieval"):
+                retriever = container.get("runtime.retrieval")
+                if retriever is not None:
+                    return await self._semantic_search(retriever, query, limit)
+        except Exception:
+            pass
+
+        return await self._grep_fallback(query, directory, limit)
+
+    async def _semantic_search(self, retriever: Any, query: str, limit: int) -> list[dict]:
+        from velune.cognition.intent import IntentClassifier
+        from velune.retrieval.planner import RetrievalPlanner
+
+        intent, confidence = IntentClassifier().classify_with_confidence(query)
+        planner = RetrievalPlanner()
+        result = await planner.plan_and_retrieve(retriever, intent, confidence, query)
+
+        results: list[dict] = []
+        for hit in result.hits[:limit]:
+            meta = hit.document.metadata or {}
+            results.append(
+                {
+                    "path": meta.get("path") or meta.get("file_path") or hit.document.id,
+                    "content": hit.document.content,
+                    "score": hit.score,
+                    "source": str(hit.source),
+                }
+            )
+        return results
+
+    async def _grep_fallback(self, query: str, directory: str, limit: int) -> list[dict]:
         from velune.tools.filesystem.search import GrepFiles
 
         grep = GrepFiles(workspace=self.workspace)
         results = await grep.execute(pattern=query, directory=directory)
-
         return results[:limit]
 
     def get_schema(self) -> dict:

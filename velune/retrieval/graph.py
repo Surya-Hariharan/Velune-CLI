@@ -102,6 +102,21 @@ class GraphRetriever:
                         content += f"\nDocstring: {s.docstring}"
 
                 if content:
+                    # Stamp a recency signal the reranker already knows how to use
+                    # (CrossEncoderReranker._calculate_recency_score reads
+                    # metadata["timestamp"]) — recently-edited files/symbols rank
+                    # higher without adding a new signal path, just populating a
+                    # field the reranker already consumes.
+                    file_path_for_mtime = metadata.get("path") or metadata.get("file_path")
+                    if file_path_for_mtime:
+                        try:
+                            mtime = (
+                                (repo_service.workspace_root / file_path_for_mtime).stat().st_mtime
+                            )
+                            metadata["timestamp"] = mtime
+                        except OSError:
+                            pass
+
                     doc = RetrievalDocument(
                         id=f"graph-{n}",
                         content=content,

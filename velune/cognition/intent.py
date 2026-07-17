@@ -24,6 +24,12 @@ class IntentType(StrEnum):
     REVIEW = "review"
     QUESTION = "question"
     COMMAND = "command"
+    SEARCH = "search"
+    TEST_GENERATION = "test_generation"
+    SECURITY = "security"
+    ARCHITECTURE = "architecture"
+    DOCUMENTATION = "documentation"
+    DEPENDENCY_ANALYSIS = "dependency_analysis"
 
 
 # ── Keyword signal tables ─────────────────────────────────────────────────────
@@ -141,6 +147,103 @@ _REVIEW_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+_SEARCH_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "find",
+        "search",
+        "where is",
+        "where are",
+        "locate",
+        "look for",
+        "which file",
+        "which files",
+        "grep",
+        "search for",
+    }
+)
+
+_TEST_GENERATION_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "write a test",
+        "write tests",
+        "add a test",
+        "add tests",
+        "unit test",
+        "unit tests",
+        "test case",
+        "test coverage",
+        "generate tests",
+        "generate a test",
+        "pytest",
+        "test this function",
+    }
+)
+
+_SECURITY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "security",
+        "vulnerability",
+        "vulnerable",
+        "exploit",
+        "injection",
+        "sanitize",
+        "sanitise",
+        "cve",
+        "insecure",
+        "credentials",
+        "secrets",
+        "authentication bypass",
+        "xss",
+        "sql injection",
+    }
+)
+
+_ARCHITECTURE_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "architecture",
+        "design pattern",
+        "how is this structured",
+        "how is this organized",
+        "system design",
+        "high level",
+        "high-level",
+        "overall structure",
+        "module boundaries",
+        "layering",
+        "component diagram",
+    }
+)
+
+_DOCUMENTATION_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "document",
+        "documentation",
+        "docstring",
+        "write docs",
+        "add docs",
+        "readme",
+        "api docs",
+        "comment this",
+        "add comments",
+    }
+)
+
+_DEPENDENCY_ANALYSIS_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "dependency",
+        "dependencies",
+        "what depends on",
+        "what imports",
+        "who imports",
+        "who uses",
+        "impact of changing",
+        "blast radius",
+        "breaking change",
+        "circular import",
+        "circular dependency",
+    }
+)
+
 # Regex: error stack trace signature
 _TRACEBACK_RE = re.compile(
     r"(Traceback \(most recent|File \".+\", line \d+|Error:|Exception:|error:|exception:)",
@@ -178,8 +281,21 @@ class IntentClassifier:
         if _TRACEBACK_RE.search(text):
             return IntentType.DEBUG, 0.95
 
-        # Count keyword hits per category
+        # Count keyword hits per category. On a tied score, max() below keeps
+        # whichever key was inserted first — so the more specific, multi-word
+        # phrase categories are listed before the older single-generic-word
+        # ones (EXPLAIN's "what", GENERATE's "add"/"write") they'd otherwise
+        # lose ties to (e.g. "write a test" hitting both GENERATE's "write"
+        # and TEST_GENERATION's "write a test" at equal score).
         scores: dict[IntentType, float] = {
+            IntentType.SEARCH: self._score(lower, _SEARCH_KEYWORDS, exact_prefix=True),
+            IntentType.TEST_GENERATION: self._score(lower, _TEST_GENERATION_KEYWORDS),
+            IntentType.SECURITY: self._score(lower, _SECURITY_KEYWORDS, word_boundary=False),
+            IntentType.ARCHITECTURE: self._score(lower, _ARCHITECTURE_KEYWORDS),
+            IntentType.DOCUMENTATION: self._score(
+                lower, _DOCUMENTATION_KEYWORDS, word_boundary=False
+            ),
+            IntentType.DEPENDENCY_ANALYSIS: self._score(lower, _DEPENDENCY_ANALYSIS_KEYWORDS),
             IntentType.COMMAND: self._score(lower, _COMMAND_SIGNALS, exact_prefix=True),
             # Debug signals like "error" appear inside compound words (KeyError, ValueError)
             # so use substring matching rather than word boundaries.

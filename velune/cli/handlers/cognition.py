@@ -238,6 +238,40 @@ async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool, silent: bo
         )
 
 
+def _print_pipeline_cache_status(repl: VeluneREPL) -> None:
+    """Show whether the last prompt hit the incremental pipeline cache.
+
+    Reads counters set by ``RepositoryCognitionService.get_snapshot_fresh``
+    (cache hit/miss) and the persisted pipeline cache's own freshness metadata
+    — no recompute here, this is purely a status read.
+    """
+    service = _get_cognition_service(repl)
+    if service is None:
+        return
+
+    hits = getattr(service, "pipeline_cache_hits", 0)
+    misses = getattr(service, "pipeline_cache_misses", 0)
+    if hits + misses == 0:
+        return
+
+    cache = None
+    try:
+        cache = service._load_pipeline_cache()
+    except Exception:
+        pass
+
+    freshness = "no cache yet"
+    if cache is not None:
+        age = max(0.0, time.time() - cache.get("computed_at", 0.0))
+        freshness = f"{age:.0f}s old" + (" (stale)" if age > 30 else "")
+
+    recomputed = getattr(service, "files_recomputed_last_run", 0)
+    repl.console.print(
+        f"[dim]Pipeline cache: {hits} hit(s), {misses} miss(es) · {freshness}"
+        f" · {recomputed} file(s) recomputed on last background refresh[/dim]"
+    )
+
+
 def _cognition_status(repl: VeluneREPL) -> None:
     from rich.table import Table
 
@@ -246,6 +280,8 @@ def _cognition_status(repl: VeluneREPL) -> None:
     if repl._job_registry is None:
         repl.console.print("[dim]No job registry available.[/dim]")
         return
+    _print_pipeline_cache_status(repl)
+
     jobs = [j for j in repl._job_registry.all_jobs() if j.name.startswith("cognition")]
     if not jobs:
         repl.console.print("[dim]No index jobs yet. Run [bold]/index standard[/bold].[/dim]")

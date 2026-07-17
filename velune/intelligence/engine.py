@@ -50,6 +50,7 @@ from velune.intelligence.events import (
     make_git_state_changed,
     make_index_updated,
     make_knowledge_graph_patched,
+    make_pipeline_refreshed,
     make_profile_refreshed,
 )
 from velune.intelligence.graph_patcher import KnowledgeGraphPatcher
@@ -70,7 +71,7 @@ _DOWNSTREAM_QUEUE_MAXSIZE = 32
 
 @dataclass
 class _DownstreamTask:
-    task_type: str  # "graph_patch" | "profile_refresh"
+    task_type: str  # "graph_patch" | "profile_refresh" | "pipeline_refresh"
     delta: IndexDelta | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -105,6 +106,7 @@ class RepositoryIntelligenceEngine:
         bus: CognitiveBus,
         *,
         retrieval: Any | None = None,
+        job_registry: Any | None = None,
         change_poll_interval: float = _DEFAULT_CHANGE_POLL,
         git_poll_interval: float = _DEFAULT_GIT_POLL,
     ) -> None:
@@ -116,6 +118,10 @@ class RepositoryIntelligenceEngine:
         # files removed since the last index (see _handle_graph_patch). None
         # is a normal, fully-supported state — vector cleanup is then just skipped.
         self._retrieval = retrieval
+        # Optional: JobRegistry, so pipeline-refresh background work shows up in
+        # /index status and /dashboard instead of being invisible. None just
+        # skips registration — this engine must never depend on it to function.
+        self._job_registry = job_registry
         self._change_poll = change_poll_interval
         self._git_poll = git_poll_interval
 
@@ -232,6 +238,7 @@ class RepositoryIntelligenceEngine:
                 # Queue downstream work (non-blocking — drop if full)
                 self._enqueue_downstream(_DownstreamTask(task_type="graph_patch", delta=delta))
                 self._enqueue_downstream(_DownstreamTask(task_type="profile_refresh"))
+                self._enqueue_downstream(_DownstreamTask(task_type="pipeline_refresh", delta=delta))
 
                 # Cool down to avoid burst re-indexing
                 await asyncio.sleep(_COOLDOWN_AFTER_CHANGE)
@@ -296,6 +303,8 @@ class RepositoryIntelligenceEngine:
                 await self._handle_graph_patch(task.delta)
             elif task.task_type == "profile_refresh":
                 await self._handle_profile_refresh()
+            elif task.task_type == "pipeline_refresh" and task.delta is not None:
+                await self._handle_pipeline_refresh(task.delta)
         except Exception as exc:
             logger.debug("Downstream task '%s' failed (non-fatal): %s", task.task_type, exc)
 
@@ -323,6 +332,52 @@ class RepositoryIntelligenceEngine:
                 )
             except Exception as exc:
                 logger.debug("Vector cleanup for removed files failed (non-fatal): %s", exc)
+
+    async def _handle_pipeline_refresh(self, delta: IndexDelta) -> None:
+        """Incrementally refresh the cognition pipeline cache (import graph, API
+        map, architecture/tech summary) for *delta*, off the interactive path.
+
+        This is what makes the interactive turn's ``get_snapshot_fresh()`` fast:
+        by the time the next prompt lands, the cache this writes is already
+        current (bounded by this loop's poll + cooldown cadence).
+        """
+        job_id: str | None = None
+        if self._job_registry is not None:
+            try:
+                from velune.core.task_registry import JobRecord, JobStatus
+
+                job_id = self._job_registry.new_id()
+                self._job_registry.register(
+                    JobRecord(
+                        job_id=job_id, name="cognition:pipeline_refresh", status=JobStatus.RUNNING
+                    )
+                )
+            except Exception as exc:
+                logger.debug("JobRegistry registration failed (non-fatal): %s", exc)
+                job_id = None
+
+        try:
+            stats = await self._cognition.refresh_pipeline_cache(delta)
+            await self._emit(
+                make_pipeline_refreshed(
+                    files_recomputed=stats.get("files_recomputed", 0),
+                    edge_count=stats.get("edge_count", 0),
+                    route_count=stats.get("route_count", 0),
+                )
+            )
+            if job_id is not None:
+                self._job_registry.update(
+                    job_id,
+                    status=JobStatus.COMPLETED,
+                    completed_at=time.monotonic(),
+                    result_preview=f"{stats.get('files_recomputed', 0)} file(s) recomputed",
+                )
+        except Exception as exc:
+            logger.debug("Pipeline refresh failed (non-fatal): %s", exc)
+            if job_id is not None:
+                self._job_registry.update(
+                    job_id, status=JobStatus.FAILED, completed_at=time.monotonic(), error=str(exc)
+                )
 
     async def _handle_profile_refresh(self) -> None:
         """Refresh repository metadata and emit profile_refreshed."""

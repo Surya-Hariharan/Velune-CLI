@@ -1,7 +1,6 @@
-"""@mention file resolution and @@symbol search for LLM context injection.
+"""@mention file resolution for LLM context injection.
 
 @filepath  — resolves to file content (existing behaviour).
-@@term     — fuzzy-searches the symbol registry and injects matching symbols.
 """
 
 from __future__ import annotations
@@ -9,20 +8,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from velune.repository.symbol_registry import SymbolRegistry
 
 # Matches @path/to/file.py or @filename.py
 # Negative lookbehind prevents email addresses (user@host.com) from matching.
 _MENTION_RE = re.compile(r"(?<![a-zA-Z0-9])@([\w./\\-]+\.\w+)")
-
-# Matches @@term (symbol search) — must come BEFORE @file matching so
-# double-@ tokens are consumed first.
-_SYMBOL_MENTION_RE = re.compile(r"@@([\w]+)")
-
-MAX_SYMBOL_MENTIONS = 5
 
 MAX_MENTION_CHARS = 8000
 MAX_MENTIONS = 5
@@ -171,36 +160,3 @@ def build_mention_context(mentioned: list[MentionedFile]) -> str:
             f"[MENTIONED FILE: {rel}]\n```\n{m.content}\n```\n[END MENTIONED FILE: {rel}]"
         )
     return "\n\n".join(blocks)
-
-
-async def parse_symbol_mentions(
-    text: str,
-    registry: SymbolRegistry,
-) -> tuple[str, str, list[str]]:
-    """Parse @@term tokens and resolve them via the symbol registry.
-
-    Returns:
-        (cleaned_text, symbol_context_block, unresolved_terms)
-        cleaned_text has @@tokens removed for resolved terms.
-    """
-    from velune.analysis.symbol_search import SymbolSearcher
-
-    terms = _SYMBOL_MENTION_RE.findall(text)
-    if not terms:
-        return text, "", []
-
-    searcher = SymbolSearcher()
-    context_parts: list[str] = []
-    unresolved: list[str] = []
-    cleaned = text
-
-    for term in terms[:MAX_SYMBOL_MENTIONS]:
-        symbols = await searcher.search(term, registry)
-        if symbols:
-            block = searcher.format_as_context(symbols)
-            context_parts.append(block)
-            cleaned = cleaned.replace(f"@@{term}", term, 1)
-        else:
-            unresolved.append(term)
-
-    return cleaned.strip(), "\n\n".join(context_parts), unresolved

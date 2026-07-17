@@ -73,8 +73,16 @@ class BM25Retriever:
         tokens = self._tokenize(query)
         scores = self.bm25.get_scores(tokens)
 
-        # Pair scores with documents and index ranks
-        hits: list[RetrievalHit] = []
+        # Candidate selection is by token *overlap*, not by a positive BM25
+        # score. BM25Okapi's IDF — ln((N - df + 0.5) / (df + 0.5)) — is exactly
+        # 0 when a term appears in half the corpus, and ≤ 0 for every term in
+        # 1–2-document corpora, so a `score > 0` filter silently discards
+        # verbatim matches in small workspaces (the common "first try in a
+        # scratch repo" case) and lexical retrieval returns nothing at all.
+        # Ranking still uses the BM25 score first (healthy corpora are
+        # unaffected), with overlap as the tiebreak for the degenerate case.
+        query_tokens = set(tokens)
+        scored: list[tuple[float, int, RetrievalHit]] = []
         for i, score in enumerate(scores):
             doc = self.documents[i]
 
@@ -82,18 +90,28 @@ class BM25Retriever:
             if namespace and doc.namespace != namespace:
                 continue
 
-            if score > 0.0:  # Only capture positive keyword matches
-                hits.append(
+            overlap = len(query_tokens.intersection(self.corpus[i]))
+            if overlap == 0:
+                continue
+            scored.append(
+                (
+                    float(score),
+                    overlap,
                     RetrievalHit(
-                        document=doc, score=float(score), source=RetrievalSource.LEXICAL, rank=0
-                    )
+                        document=doc,
+                        # RetrievalHit scores must be non-negative; degenerate
+                        # (zero/negative-IDF) matches carry 0.0 and rely on
+                        # hybrid-fusion normalization downstream.
+                        score=max(0.0, float(score)),
+                        source=RetrievalSource.LEXICAL,
+                        rank=0,
+                    ),
                 )
+            )
 
-        # Sort and return top candidates
-        hits.sort(key=lambda x: x.score, reverse=True)
-
-        # Trim list and apply proper sequential ranks
-        final_hits = hits[:top_k]
+        # Sort by BM25 score, then overlap; trim and apply sequential ranks.
+        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+        final_hits = [h for _, _, h in scored[:top_k]]
         for idx, h in enumerate(final_hits):
             h.rank = idx + 1
 

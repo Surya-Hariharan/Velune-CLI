@@ -169,5 +169,18 @@ class StreamRenderer:
             result.interrupted = True
         except KeyboardInterrupt:
             result.interrupted = True
+        finally:
+            # Always tear down the fullscreen assistant region — cancels the
+            # "Thinking…" animation task and clears the stream marker — even
+            # when generation is interrupted before the first token. Without
+            # this, an early cancel leaves the animation cycling and
+            # ``_stream_start`` set, corrupting the next turn's transcript.
+            # ``finish_assistant`` is idempotent, so the normal path (which
+            # already called it) is unaffected.
+            if self._fullscreen_ui is not None:
+                try:
+                    self._fullscreen_ui.finish_assistant()
+                except Exception:  # never let cleanup mask the real result
+                    pass
 
         return result

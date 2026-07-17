@@ -275,11 +275,14 @@ class CouncilOrchestrator:
                 # when nothing has changed.
                 await repository_cognition.probe_for_changes()
 
-                # index() is synchronous and heavy (tree walk + SHA-256 of every
-                # file + tree-sitter parse + git subprocesses). Calling it
-                # directly here froze the REPL on *every prompt* for as long as
-                # the walk took. Off-load it.
-                snapshot = await asyncio.to_thread(repository_cognition.index, False)
+                # get_snapshot_fresh() reads the pipeline cache (grapher edges,
+                # API map, architecture/tech summary, git metrics) instead of
+                # rebuilding it — that rebuild is what used to run on *every
+                # prompt* regardless of whether anything changed. The cache is
+                # kept current by RepositoryIntelligenceEngine's background
+                # worker; this only falls back to the full synchronous index()
+                # pipeline on true cold start (no cache yet).
+                snapshot = await repository_cognition.get_snapshot_fresh()
                 if snapshot:
                     from velune.repository.context_builder import WorkspaceContextBuilder
 

@@ -414,7 +414,11 @@ class FullscreenREPLUI:
                 self._replace_stream_lines(self._stream_text, "class:conversation.thinking")
                 self.invalidate()
 
-        self._thinking_task = asyncio.create_task(_thinking_anim())
+        from velune.core.task_registry import track
+
+        self._thinking_task = track(
+            asyncio.create_task(_thinking_anim(), name="velune.fullscreen_thinking")
+        )
 
     def update_assistant(self, text: str, *, final: bool = False) -> None:
         if self._thinking_task and not self._thinking_task.done():

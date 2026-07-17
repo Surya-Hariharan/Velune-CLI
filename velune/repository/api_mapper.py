@@ -98,6 +98,75 @@ class APIConnectionMap:
     def is_empty(self) -> bool:
         return not self.routes and not self.frontend_calls and not self.db_queries
 
+    def to_dict(self) -> dict:
+        """Serialize for the pipeline cache (``connections`` is re-derived on load, not stored)."""
+        return {
+            "routes": [r.__dict__ for r in self.routes],
+            "frontend_calls": [c.__dict__ for c in self.frontend_calls],
+            "db_queries": [q.__dict__ for q in self.db_queries],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> APIConnectionMap:
+        """Deserialize routes/calls/queries and re-derive ``connections``."""
+        amap = cls(
+            routes=[RouteEndpoint(**r) for r in data.get("routes", [])],
+            frontend_calls=[FrontendCall(**c) for c in data.get("frontend_calls", [])],
+            db_queries=[DBQuery(**q) for q in data.get("db_queries", [])],
+        )
+        amap.connections = resolve_connections(amap)
+        return amap
+
+
+def resolve_connections(amap: APIConnectionMap) -> list[RouteConnection]:
+    """Match frontend calls to backend routes, attach relevant DB queries.
+
+    Module-level (not a method) so :meth:`APIConnectionMap.from_dict` can
+    re-derive ``connections`` after deserializing a cached map without
+    needing an ``APIMapper`` instance.
+    """
+    connections: list[RouteConnection] = []
+
+    for route in amap.routes:
+        conn = RouteConnection(route=route)
+
+        # Match frontend callers
+        for call in amap.frontend_calls:
+            if _url_matches_route(call.url, route.path):
+                # Filter by method where possible
+                if (
+                    route.method in ("*", call.method)
+                    or call.method == "GET"
+                    and route.method == "GET"
+                ):
+                    conn.frontend_callers.append(call)
+
+        # Attach DB queries from the same file as the route
+        for q in amap.db_queries:
+            if q.file == route.file:
+                # Only include queries within ~50 lines of the handler declaration
+                if abs(q.line - route.line) <= 80:
+                    conn.db_queries.append(q)
+
+        connections.append(conn)
+
+    # Also emit orphan frontend calls (no matched route) as bare connections with no route
+    matched_calls = {id(c) for conn in connections for c in conn.frontend_callers}
+    for call in amap.frontend_calls:
+        if id(call) not in matched_calls:
+            # Synthetic route placeholder for unmatched calls
+            synthetic = RouteEndpoint(
+                method=call.method,
+                path=call.url,
+                file="(unknown)",
+                line=0,
+                handler="",
+                framework="unknown",
+            )
+            connections.append(RouteConnection(route=synthetic, frontend_callers=[call]))
+
+    return connections
+
 
 # ---------------------------------------------------------------------------
 # Regex patterns
@@ -271,30 +340,77 @@ class APIMapper:
         amap = APIConnectionMap()
 
         for rel_path in file_paths:
-            abs_path = self.root_path / rel_path
-            try:
-                content, lines = self._read_file(abs_path)
-            except Exception:
-                continue
-            if content is None:
-                continue
+            routes, calls, queries = self.scan_file(rel_path)
+            amap.routes.extend(routes)
+            amap.db_queries.extend(queries)
+            amap.frontend_calls.extend(calls)
 
-            ext = Path(rel_path).suffix.lower()
-            norm = rel_path.replace("\\", "/")
+        amap.connections = self._resolve_connections(amap)
+        return amap
 
-            # Backend route extraction
-            if ext in self._BACKEND_EXTS:
-                routes = self._extract_routes(norm, content, lines)
-                amap.routes.extend(routes)
+    def scan_file(
+        self, rel_path: str
+    ) -> tuple[list[RouteEndpoint], list[FrontendCall], list[DBQuery]]:
+        """Extract routes, frontend calls, and DB queries from a single file.
 
-                queries = self._extract_db_queries(norm, content, lines)
-                amap.db_queries.extend(queries)
+        Split out of :meth:`build_map` so callers with a file-level delta
+        (added/updated files only) can re-scan just those files instead of
+        the whole workspace — see :meth:`build_map_incremental`.
+        """
+        abs_path = self.root_path / rel_path
+        try:
+            content, lines = self._read_file(abs_path)
+        except Exception:
+            return [], [], []
+        if content is None:
+            return [], [], []
 
-            # Frontend API call extraction
-            if ext in self._FRONTEND_EXTS:
-                calls = self._extract_frontend_calls(norm, content, lines)
-                amap.frontend_calls.extend(calls)
+        ext = Path(rel_path).suffix.lower()
+        norm = rel_path.replace("\\", "/")
 
+        routes: list[RouteEndpoint] = []
+        queries: list[DBQuery] = []
+        calls: list[FrontendCall] = []
+
+        if ext in self._BACKEND_EXTS:
+            routes = self._extract_routes(norm, content, lines)
+            queries = self._extract_db_queries(norm, content, lines)
+
+        if ext in self._FRONTEND_EXTS:
+            calls = self._extract_frontend_calls(norm, content, lines)
+
+        return routes, calls, queries
+
+    def build_map_incremental(
+        self,
+        previous: APIConnectionMap | None,
+        changed_files: list[str],
+        removed_files: list[str],
+    ) -> APIConnectionMap:
+        """Reuse *previous*'s entries for untouched files; re-scan only the delta.
+
+        ``connections`` still gets re-derived over the merged (kept + rescanned)
+        lists — that step is pure in-memory matching (no I/O), so it's cheap
+        even though it isn't itself scoped to the delta.
+
+        Falls back to a full :meth:`build_map` over ``changed_files`` when
+        there is no previous map to diff against (cold start).
+        """
+        if previous is None:
+            return self.build_map(changed_files)
+
+        stale = set(changed_files) | set(removed_files)
+        routes = [r for r in previous.routes if r.file not in stale]
+        frontend_calls = [c for c in previous.frontend_calls if c.file not in stale]
+        db_queries = [q for q in previous.db_queries if q.file not in stale]
+
+        for rel_path in changed_files:
+            new_routes, new_calls, new_queries = self.scan_file(rel_path)
+            routes.extend(new_routes)
+            frontend_calls.extend(new_calls)
+            db_queries.extend(new_queries)
+
+        amap = APIConnectionMap(routes=routes, frontend_calls=frontend_calls, db_queries=db_queries)
         amap.connections = self._resolve_connections(amap)
         return amap
 
@@ -681,47 +797,7 @@ class APIMapper:
 
     def _resolve_connections(self, amap: APIConnectionMap) -> list[RouteConnection]:
         """Match frontend calls to backend routes, attach relevant DB queries."""
-        connections: list[RouteConnection] = []
-
-        for route in amap.routes:
-            conn = RouteConnection(route=route)
-
-            # Match frontend callers
-            for call in amap.frontend_calls:
-                if _url_matches_route(call.url, route.path):
-                    # Filter by method where possible
-                    if (
-                        route.method in ("*", call.method)
-                        or call.method == "GET"
-                        and route.method == "GET"
-                    ):
-                        conn.frontend_callers.append(call)
-
-            # Attach DB queries from the same file as the route
-            for q in amap.db_queries:
-                if q.file == route.file:
-                    # Only include queries within ~50 lines of the handler declaration
-                    if abs(q.line - route.line) <= 80:
-                        conn.db_queries.append(q)
-
-            connections.append(conn)
-
-        # Also emit orphan frontend calls (no matched route) as bare connections with no route
-        matched_calls = {id(c) for conn in connections for c in conn.frontend_callers}
-        for call in amap.frontend_calls:
-            if id(call) not in matched_calls:
-                # Synthetic route placeholder for unmatched calls
-                synthetic = RouteEndpoint(
-                    method=call.method,
-                    path=call.url,
-                    file="(unknown)",
-                    line=0,
-                    handler="",
-                    framework="unknown",
-                )
-                connections.append(RouteConnection(route=synthetic, frontend_callers=[call]))
-
-        return connections
+        return resolve_connections(amap)
 
     # ------------------------------------------------------------------
     # Helpers

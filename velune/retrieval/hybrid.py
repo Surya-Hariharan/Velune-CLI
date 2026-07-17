@@ -13,6 +13,25 @@ from velune.retrieval.schemas import RetrievalHit, RetrievalQuery, RetrievalResu
 from velune.retrieval.vector import VectorRetriever
 
 
+def _normalize_scores(hits: list[RetrievalHit]) -> list[RetrievalHit]:
+    """Min-max normalize *hits*' scores to [0,1] in place, within this result set only.
+
+    Leaves scores untouched when there's no spread to map onto (empty list,
+    or every hit scored identically — including the single-hit case) since
+    min-max normalization is undefined there.
+    """
+    if not hits:
+        return hits
+    scores = [h.score for h in hits]
+    lo, hi = min(scores), max(scores)
+    spread = hi - lo
+    if spread <= 0:
+        return hits
+    for h in hits:
+        h.score = (h.score - lo) / spread
+    return hits
+
+
 class HybridRetriever:
     """Orchestrates fusion retrieval, combining Lexical, Vector, and Graph traversals.
 
@@ -134,6 +153,19 @@ class HybridRetriever:
 
         # 4. Fusion and Deduplication
         t_fuse = time.perf_counter()
+
+        # Normalize each source's scores to [0,1] *within its own result set*
+        # before fusion. Without this, BM25's unbounded scores (can run into
+        # the tens for a strong match) dominate the weighted sum regardless of
+        # lexical_weight, while cosine similarity (~[0,1]) and the graph
+        # retriever's heuristic (~0.9) are left comparatively tiny — the
+        # configured weights stopped meaning what they said. Min-max per
+        # source, not a global min-max, since the three score distributions
+        # have nothing to do with each other.
+        lexical_hits = _normalize_scores(lexical_hits)
+        vector_hits = _normalize_scores(vector_hits)
+        graph_hits = _normalize_scores(graph_hits)
+
         merged_hits_map: dict[str, RetrievalHit] = {}
 
         # Helper to blend weights into score
@@ -162,7 +194,7 @@ class HybridRetriever:
 
         # 5. Rerank final combined candidates
         t_rerank = time.perf_counter()
-        reranked_hits = self.reranker.rerank(all_hits, query.text)
+        reranked_hits = self.reranker.rerank(all_hits, query.text, intent=query.intent)
         diagnostics["rerank"]["in"] = len(all_hits)
         diagnostics["rerank"]["ms"] = (time.perf_counter() - t_rerank) * 1000.0
 

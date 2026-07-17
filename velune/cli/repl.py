@@ -236,6 +236,15 @@ class VeluneREPL:
         model_switcher.add_bindings(kb)
 
         def _interrupt(event):
+            # A generation or tool turn is running: a single Ctrl+C aborts it.
+            # In the fullscreen app SIGINT never fires (raw mode), so this key
+            # binding is the only path that can cancel foreground work.
+            if self._interrupts.has_foreground:
+                self._interrupts.cancel_foreground()
+                self._interrupts.reset_exit_window()
+                event.app.invalidate()
+                return False
+            # Idle: keep the "press Ctrl+C again to exit" double-press contract.
             if self._interrupts.note_interrupt():
                 return True
             event.app.invalidate()
@@ -970,7 +979,9 @@ class VeluneREPL:
         )
 
         turn_workspace = str(self.container.get("runtime.workspace") or "")
-        self._record_turn_async(role="user", content=text, model_id=model.model_id, workspace_root=turn_workspace)
+        self._record_turn_async(
+            role="user", content=text, model_id=model.model_id, workspace_root=turn_workspace
+        )
 
         # Native tool loop first (models that support function calling can act
         # on the workspace); returns None when unsupported/disabled, in which

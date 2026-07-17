@@ -41,10 +41,23 @@ _REPO_SNAPSHOT_BIASED_TOKENS = 4000
 
 # Intents whose turn benefits most from deep retrieval, so they use the
 # session mode's full retrieval_depth rather than a half-depth default.
-_DEEP_RETRIEVAL_INTENTS = frozenset(
-    {IntentType.EXPLAIN, IntentType.QUESTION, IntentType.DEBUG}
-)
+_DEEP_RETRIEVAL_INTENTS = frozenset({IntentType.EXPLAIN, IntentType.QUESTION, IntentType.DEBUG})
 _REPO_HEAVY_INTENTS = frozenset({IntentType.REFACTOR, IntentType.REVIEW})
+
+# How much of the retrieval/working-memory split ContextBudget gives to
+# retrieval, per intent — mirrors the existing repo_snapshot_budget/depth
+# bias above rather than introducing a new mechanism. Intents needing more
+# retrieved material get a larger share; DEBUG (needs conversational
+# continuity — "what did we just try?") gets less. Unlisted intents keep
+# ContextBudget's original fixed 0.55 default.
+_RETRIEVAL_BUDGET_BIAS: dict[IntentType, float] = {
+    IntentType.SEARCH: 0.7,
+    IntentType.DEPENDENCY_ANALYSIS: 0.7,
+    IntentType.ARCHITECTURE: 0.65,
+    IntentType.REFACTOR: 0.6,
+    IntentType.REVIEW: 0.6,
+    IntentType.DEBUG: 0.45,
+}
 
 
 async def build_turn_context(
@@ -60,9 +73,14 @@ async def build_turn_context(
     mode_config = repl._mode_manager.config
     workspace = Path(repl.container.get("runtime.workspace") or ".")
 
-    budget = ContextBudget.for_chat(repl._mode_manager.current, model.context_length)
+    retrieval_bias = _RETRIEVAL_BUDGET_BIAS.get(intent, 0.55)
+    budget = ContextBudget.for_chat(
+        repl._mode_manager.current, model.context_length, retrieval_bias=retrieval_bias
+    )
     repo_snapshot_budget = (
-        _REPO_SNAPSHOT_BIASED_TOKENS if intent in _REPO_HEAVY_INTENTS else _REPO_SNAPSHOT_BASE_TOKENS
+        _REPO_SNAPSHOT_BIASED_TOKENS
+        if intent in _REPO_HEAVY_INTENTS
+        else _REPO_SNAPSHOT_BASE_TOKENS
     )
 
     base_depth = max(1, mode_config.retrieval_depth)
@@ -71,7 +89,9 @@ async def build_turn_context(
     chunks: list[ContextChunk] = []
 
     # ── SYSTEM_PROMPT (always present, never trimmed) ────────────────────
-    system_text = f"Velune session — mode: {repl._mode_manager.current.value}, model: {model.model_id}."
+    system_text = (
+        f"Velune session — mode: {repl._mode_manager.current.value}, model: {model.model_id}."
+    )
     chunks.append(
         ContextChunk(
             section=ContextSection.SYSTEM_PROMPT,
@@ -83,8 +103,8 @@ async def build_turn_context(
         )
     )
 
-    # ── RETRIEVED_CONTEXT: hybrid file/code retrieval (untouched subsystem) ─
-    chunks.extend(await _retrieve_hybrid(repl, text, depth))
+    # ── RETRIEVED_CONTEXT: hybrid file/code retrieval, planned by intent ────
+    chunks.extend(await _retrieve_hybrid(repl, text, depth, intent, confidence))
 
     # ── RETRIEVED_CONTEXT: three-brain fan-out (semantic/episodic/kg) ────
     chunks.extend(await _retrieve_three_brain(repl, text, workspace, depth))
@@ -95,19 +115,25 @@ async def build_turn_context(
         chunks.append(continuity_chunk)
 
     # ── REPOSITORY_SNAPSHOT / ARCHITECTURAL_DRIFT ────────────────────────
-    chunks.extend(_repository_snapshot_chunks(repl, repo_snapshot_budget))
+    chunks.extend(await _repository_snapshot_chunks(repl, repo_snapshot_budget))
 
     # ── WORKING_MEMORY: prior conversation turns ─────────────────────────
     conversation = repl._conversation
     if mode_config.context_compression and conversation:
         from velune.context.extractive import compress_conversation
 
-        conversation = compress_conversation(conversation, max_tokens=mode_config.max_context_tokens)
+        conversation = compress_conversation(
+            conversation, max_tokens=mode_config.max_context_tokens
+        )
         repl._conversation = conversation
 
     # The just-appended current turn becomes its own CURRENT_PROMPT chunk
     # below — excluding it here avoids sending the same text twice.
-    history = conversation[:-1] if conversation and conversation[-1].get("role") == "user" else conversation
+    history = (
+        conversation[:-1]
+        if conversation and conversation[-1].get("role") == "user"
+        else conversation
+    )
     for msg in history:
         content = msg.get("content", "")
         if not content:
@@ -137,6 +163,7 @@ async def build_turn_context(
     )
 
     assembled_context, report = ContextAssembler().assemble(chunks, budget, model)
+    _record_retrieval_feedback(repl, text, intent, confidence, chunks, report)
 
     messages: list[dict] = []
     if assembled_context:
@@ -146,8 +173,44 @@ async def build_turn_context(
     return messages, report, intent, confidence
 
 
-async def _retrieve_hybrid(repl: VeluneREPL, text: str, top_k: int) -> list[ContextChunk]:
-    """Query the untouched HybridRetriever (code/file retrieval) for context."""
+def _record_retrieval_feedback(
+    repl: VeluneREPL,
+    text: str,
+    intent: IntentType,
+    confidence: float,
+    chunks: list[ContextChunk],
+    report: ContextAssemblyReport,
+) -> None:
+    """Best-effort: record this turn's retrieval outcome. Never blocks or fails the turn."""
+    try:
+        recorder = (
+            repl.container.get("runtime.retrieval_feedback")
+            if repl.container.has("runtime.retrieval_feedback")
+            else None
+        )
+        if recorder is None:
+            return
+        from velune.retrieval.feedback import hit_counts_by_source
+
+        retrieved_sources = [
+            c.source for c in chunks if c.section == ContextSection.RETRIEVED_CONTEXT
+        ]
+        recorder.record(
+            query_text=text,
+            intent=intent.value,
+            confidence=confidence,
+            hit_counts_by_source=hit_counts_by_source(retrieved_sources),
+            report=report,
+        )
+    except Exception as exc:
+        _log.debug("Retrieval feedback recording failed (non-fatal): %s", exc)
+
+
+async def _retrieve_hybrid(
+    repl: VeluneREPL, text: str, top_k: int, intent: IntentType, confidence: float
+) -> list[ContextChunk]:
+    """Query HybridRetriever, planning the fusion strategy from *intent* rather
+    than always using the same fixed weights regardless of what's being asked."""
     try:
         retrieval = repl.container.get("runtime.retrieval")
     except Exception:
@@ -155,10 +218,25 @@ async def _retrieve_hybrid(repl: VeluneREPL, text: str, top_k: int) -> list[Cont
     if not retrieval:
         return []
     try:
-        from velune.retrieval.schemas import RetrievalQuery
+        planner = (
+            repl.container.get("runtime.retrieval_planner")
+            if repl.container.has("runtime.retrieval_planner")
+            else None
+        )
+        if planner is None:
+            from velune.retrieval.planner import RetrievalPlanner
 
-        query = RetrievalQuery(text=text, top_k=top_k)
-        result = await asyncio.wait_for(retrieval.retrieve(query), timeout=_RETRIEVAL_TIMEOUT_S)
+            planner = RetrievalPlanner()
+
+        result = await asyncio.wait_for(
+            planner.plan_and_retrieve(retrieval, intent, confidence, text, namespace=None),
+            timeout=_RETRIEVAL_TIMEOUT_S,
+        )
+        # top_k from the planner's intent-tuned strategy takes priority; still
+        # respect the caller's depth as an upper bound so mode_config.retrieval_depth
+        # (OPTIMUS/NORMAL/GODLY) continues to cap retrieval breadth as before.
+        if result.hits and top_k:
+            result.hits = result.hits[:top_k]
     except Exception as exc:
         _log.debug("Hybrid retrieval failed (non-fatal): %s", exc)
         return []
@@ -287,12 +365,19 @@ async def _lineage_chunk(repl: VeluneREPL, text: str) -> ContextChunk | None:
     )
 
 
-def _repository_snapshot_chunks(repl: VeluneREPL, max_snapshot_tokens: int) -> list[ContextChunk]:
-    """Cheap, cached Repository Brain participation — no per-turn reindexing.
+async def _repository_snapshot_chunks(
+    repl: VeluneREPL, max_snapshot_tokens: int
+) -> list[ContextChunk]:
+    """Cheap Repository Brain participation — reads the incremental pipeline cache.
 
-    Uses ``RepositoryCognitionService.get_snapshot()`` (on-disk cache, same
-    pattern as ``GraphRetriever``) rather than ``.index()``, which is heavy
-    and reserved for the explicit ``/index`` command and council runs.
+    Uses ``RepositoryCognitionService.get_snapshot_fresh()``, which merges the
+    dependency edges + API connection map that the background
+    ``RepositoryIntelligenceEngine`` maintains incrementally onto the file/symbol
+    snapshot. The plain ``get_snapshot()`` returns ``edges=[]`` and no
+    ``api_map``, so those context sections rendered empty on every chat turn —
+    the incremental cognition was computed but never surfaced. This does no
+    per-turn reindexing: it's a cache read + merge, with a one-time full
+    ``index()`` only on true cold start (then seeded for the fast path).
     """
     try:
         repo_service = repl.container.get("runtime.repository_cognition")
@@ -302,7 +387,11 @@ def _repository_snapshot_chunks(repl: VeluneREPL, max_snapshot_tokens: int) -> l
         return []
 
     try:
-        snapshot = repo_service.get_snapshot()
+        fresh = getattr(repo_service, "get_snapshot_fresh", None)
+        if fresh is not None:
+            snapshot = await fresh()
+        else:  # defensive: mocks/older services without the fast path
+            snapshot = repo_service.get_snapshot()
     except Exception as exc:
         _log.debug("Repository snapshot read failed (non-fatal): %s", exc)
         return []

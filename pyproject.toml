@@ -56,7 +56,8 @@ dependencies = [
     "openai>=1.10.0",
     "anthropic>=0.18.0",
     "httpx>=0.26.0",
-    "mcp>=1.0.0",
+    # mcp <1.28.1: CVE-2026-59950 — floor at the patched release.
+    "mcp>=1.28.1",
 
     # Memory metadata store (stdlib-backed; vector store is the [rag] extra)
     "aiosqlite>=0.19.0",

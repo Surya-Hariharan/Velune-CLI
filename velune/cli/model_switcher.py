@@ -22,7 +22,7 @@ from prompt_toolkit.application.current import get_app
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import ConditionalContainer, Float, Window
+from prompt_toolkit.layout.containers import ConditionalContainer, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Frame
@@ -77,7 +77,12 @@ class ModelSwitcher:
 
     @staticmethod
     def _same(a: Any, b: Any) -> bool:
-        return a is not None and b is not None and a.model_id == b.model_id and a.provider_id == b.provider_id
+        return (
+            a is not None
+            and b is not None
+            and a.model_id == b.model_id
+            and a.provider_id == b.provider_id
+        )
 
     # -- interaction ------------------------------------------------------
 

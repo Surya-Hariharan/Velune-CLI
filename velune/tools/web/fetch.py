@@ -21,25 +21,44 @@ class WebFetch(BaseTool):
         url: str,
         timeout: int = 10,
     ) -> str:
-        """Fetch content from URL."""
+        """Fetch content from URL.
+
+        Redirects are followed manually rather than by httpx so that every hop
+        is re-validated: capping the redirect *count* does not restrict the
+        *destination*, so a permitted public host could otherwise 302 the
+        request to an internal service (e.g. the cloud metadata endpoint).
+        """
+        from urllib.parse import urljoin
+
         import httpx
 
-        is_valid, error = validate_url(url)
-        if not is_valid:
-            raise ValueError(f"URL validation failed: {error}")
+        max_redirects = 3
+        current = url
 
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=True,
-            max_redirects=3,  # Prevent redirect chains to internal services
-        ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            # Limit response size to prevent memory exhaustion
-            content = response.text
-            if len(content) > 500_000:  # 500KB limit
-                content = content[:500_000] + "\n... [TRUNCATED: response exceeded 500KB]"
-            return content
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            for _ in range(max_redirects + 1):
+                is_valid, error = validate_url(current)
+                if not is_valid:
+                    raise ValueError(f"URL validation failed: {error}")
+
+                response = await client.get(current)
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        break
+                    # Resolve relative redirects, then loop to re-validate the
+                    # destination before the next request is issued.
+                    current = urljoin(current, location)
+                    continue
+
+                response.raise_for_status()
+                # Limit response size to prevent memory exhaustion
+                content = response.text
+                if len(content) > 500_000:  # 500KB limit
+                    content = content[:500_000] + "\n... [TRUNCATED: response exceeded 500KB]"
+                return content
+
+        raise ValueError(f"URL validation failed: too many redirects (>{max_redirects})")
 
     def get_schema(self) -> dict:
         return {

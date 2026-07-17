@@ -73,18 +73,32 @@ class InterruptController:
 
     def _on_sigint(self, signum, frame) -> None:  # noqa: ANN001 — signal API
         self.note_interrupt()
-        task = self._foreground_task
-        if task is not None and not task.done():
-            self._user_cancelled = True
-            loop = self._loop
-            if loop is not None and loop.is_running():
-                loop.call_soon_threadsafe(task.cancel)
-            else:
-                task.cancel()
+        if self.cancel_foreground():
             return
         # No foreground work — preserve default semantics so the REPL's
         # own KeyboardInterrupt handling (and Typer's) still applies.
         raise KeyboardInterrupt
+
+    def cancel_foreground(self) -> bool:
+        """Cancel the active foreground task, if any. Returns True when one was cancelled.
+
+        This is the cancellation half of :meth:`_on_sigint`, exposed so the
+        fullscreen REPL's Ctrl+C key binding can reach it directly. In
+        ``full_screen`` mode prompt_toolkit holds the terminal in raw mode for
+        the whole session, so Ctrl+C arrives as a key event and SIGINT never
+        fires — meaning :meth:`_on_sigint` is unreachable and a single Ctrl+C
+        could not otherwise abort a running generation.
+        """
+        task = self._foreground_task
+        if task is None or task.done():
+            return False
+        self._user_cancelled = True
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(task.cancel)
+        else:
+            task.cancel()
+        return True
 
     # ── Double-press exit window ─────────────────────────────────────────
 
@@ -123,12 +137,15 @@ class InterruptController:
                     raise  # real shutdown — propagate
                 uncancel_task(asyncio.current_task())
         """
+        prev = self._foreground_task
         self._foreground_task = asyncio.current_task()
         self._user_cancelled = False
         try:
             yield self
         finally:
-            self._foreground_task = None
+            # Restore the previous task rather than clearing unconditionally,
+            # so a nested ``foreground()`` does not blank out an outer one.
+            self._foreground_task = prev
 
     def consume_user_cancelled(self) -> bool:
         """Return True if the last cancellation came from Ctrl+C, then reset."""

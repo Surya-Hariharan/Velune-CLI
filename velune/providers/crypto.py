@@ -2,9 +2,11 @@
 
 This module provides AES-GCM encryption for the credentials.json file.
 It attempts to use the OS keyring (Credential Manager / Keychain) to store
-a randomly generated 256-bit master key. If the keyring is unavailable,
-it gracefully falls back to a deterministic machine-specific key to ensure
-credentials remain encrypted at rest.
+a randomly generated 256-bit master key. If the keyring is unavailable, it
+prefers a key derived from the ``VELUNE_MASTER_PASSPHRASE`` environment
+variable (PBKDF2-HMAC-SHA256) — suitable for headless servers, Docker, and
+CI — and only as a last resort falls back to a weak machine-derived key so
+credentials are never written in the clear.
 """
 
 from __future__ import annotations
@@ -29,6 +31,21 @@ _PBKDF2_ITERATIONS = 390_000
 _SALT_LEN = 16
 _NONCE_LEN = 12
 
+#: Optional env var holding a user secret used to derive the master key when no
+#: OS keyring is available (headless servers, Docker, CI). Vastly stronger than
+#: the machine-derived fallback and portable across machines.
+_ENV_PASSPHRASE = "VELUNE_MASTER_PASSPHRASE"
+
+#: Versioned static salt for the passphrase-derived *master* key. Static (not
+#: random) so the same passphrase yields the same key across runs without
+#: persisting a salt beside the ciphertext — this keeps the on-disk
+#: ``nonce + ciphertext`` format unchanged. PBKDF2 at the iteration count above
+#: over a real user secret is still far stronger than the machine key.
+_MASTER_PASSPHRASE_SALT = b"velune_master_passphrase_salt_v1"
+
+#: Guard so the "weak at-rest protection" warning is emitted at most once.
+_warned_no_protection = False
+
 
 class DecryptionError(Exception):
     """Raised when passphrase-based decryption fails (wrong passphrase or corrupt data)."""
@@ -45,45 +62,113 @@ def _get_machine_id() -> str:
 
 
 def _get_fallback_key() -> bytes:
-    """Derive a stable 256-bit fallback key from machine properties."""
+    """Derive a stable 256-bit machine key — last-resort fallback only.
+
+    Weak by design (the machine id is not secret); used only when neither an OS
+    keyring nor a ``VELUNE_MASTER_PASSPHRASE`` is available, purely so
+    credentials are not written in the clear. Retained unchanged so stores
+    previously encrypted under this key remain decryptable.
+    """
     machine_id = _get_machine_id().encode("utf-8")
     salt = b"velune_fallback_salt_v1"
 
-    # We use a simple hash since this is a fallback for when the OS keyring
-    # is entirely broken. It prevents plaintext credentials on disk but relies
-    # on machine properties for stability.
     hasher = hashlib.sha256()
     hasher.update(machine_id)
     hasher.update(salt)
     return hasher.digest()
 
 
-def get_or_create_master_key() -> bytes:
-    """Retrieve the master key from the OS keyring, or create/store a new one.
+def _passphrase_master_key() -> bytes | None:
+    """Master key derived from ``VELUNE_MASTER_PASSPHRASE``, or None if unset."""
+    passphrase = os.environ.get(_ENV_PASSPHRASE)
+    if not passphrase:
+        return None
+    return _derive_key_from_passphrase(passphrase, _MASTER_PASSPHRASE_SALT)
 
-    If the keyring is unavailable, falls back to a machine-specific key.
+
+def _keyring_read_key() -> bytes | None:
+    """Read the stored master key from the OS keyring without creating one.
+
+    Returns None when no backend is available *or* the read fails transiently —
+    the caller must not treat that as 'switch keys', which is why decryption
+    tries every candidate key rather than a single one.
     """
     try:
         import keyring
-
-        key_b64 = keyring.get_password(_SERVICE, _USERNAME)
-        if key_b64:
-            return base64.b64decode(key_b64.encode("ascii"))
-    except Exception as e:
-        logger.debug("Failed to read master key from keyring: %s", e)
-        return _get_fallback_key()
-
-    # Need to generate and save a new key
+    except Exception:
+        return None
     try:
-        new_key = AESGCM.generate_key(bit_length=256)
-        key_b64 = base64.b64encode(new_key).decode("ascii")
+        key_b64 = keyring.get_password(_SERVICE, _USERNAME)
+    except Exception as e:
+        logger.debug("Keyring read failed (transient or unavailable): %s", e)
+        return None
+    if key_b64:
+        return base64.b64decode(key_b64.encode("ascii"))
+    return None
+
+
+def _keyring_create_key() -> bytes | None:
+    """Generate and store a new random master key in the keyring; None if it can't."""
+    try:
         import keyring
 
-        keyring.set_password(_SERVICE, _USERNAME, key_b64)
+        new_key = AESGCM.generate_key(bit_length=256)
+        keyring.set_password(_SERVICE, _USERNAME, base64.b64encode(new_key).decode("ascii"))
         return new_key
     except Exception as e:
-        logger.debug("Failed to save master key to keyring: %s", e)
-        return _get_fallback_key()
+        logger.debug("Keyring write failed: %s", e)
+        return None
+
+
+def get_or_create_master_key() -> bytes:
+    """Return the master key, preferring the strongest source available.
+
+    Order: existing keyring key → newly created keyring key → passphrase-derived
+    key (``VELUNE_MASTER_PASSPHRASE``) → machine fallback. The keyring path is
+    unchanged from before; the passphrase step replaces silently trusting the
+    weak machine key on keyring-less hosts, and a one-time warning is emitted
+    when only the machine fallback remains.
+    """
+    key = _keyring_read_key()
+    if key is not None:
+        return key
+    key = _keyring_create_key()
+    if key is not None:
+        return key
+
+    pk = _passphrase_master_key()
+    if pk is not None:
+        return pk
+
+    global _warned_no_protection
+    if not _warned_no_protection:
+        logger.warning(
+            "OS keyring unavailable and %s not set — credentials are encrypted "
+            "with a machine-derived key that offers only weak at-rest protection. "
+            "Set %s to a strong secret for real encryption on this host.",
+            _ENV_PASSPHRASE,
+            _ENV_PASSPHRASE,
+        )
+        _warned_no_protection = True
+    return _get_fallback_key()
+
+
+def _candidate_master_keys() -> list[bytes]:
+    """All keys to try when decrypting, most-likely first, de-duplicated.
+
+    Ordering keyring → passphrase → machine fallback lets a store survive a
+    transient keyring failure or a host that gained a passphrase after a
+    machine-key-encrypted write, instead of failing closed.
+    """
+    keys: list[bytes] = []
+    for candidate in (
+        get_or_create_master_key(),  # primary source (keyring → passphrase → fallback)
+        _passphrase_master_key(),  # store written before a keyring became available
+        _get_fallback_key(),  # legacy machine-key store predating a passphrase
+    ):
+        if candidate is not None and candidate not in keys:
+            keys.append(candidate)
+    return keys
 
 
 def encrypt_credentials(plaintext: str) -> bytes:
@@ -101,24 +186,29 @@ def decrypt_credentials(data: bytes) -> str:
     if len(data) < 12:
         raise ValueError("Encrypted data is too short to contain a nonce.")
 
-    key = get_or_create_master_key()
-    aesgcm = AESGCM(key)
     nonce = data[:12]
     ciphertext = data[12:]
 
-    try:
-        plaintext_bytes = aesgcm.decrypt(nonce, ciphertext, None)
-    except InvalidTag as exc:
-        # AES-GCM raises InvalidTag with an empty message, which surfaces
-        # downstream as a blank "Failed to load credentials" log. Translate it
-        # into an actionable error: this happens when the master key changed
-        # (new machine, reset OS keyring) or the file is corrupt.
-        raise DecryptionError(
-            "Stored credentials could not be decrypted — the encryption key "
-            "changed (new machine or reset OS keyring) or the file is corrupt. "
-            "Re-add your keys with `velune setup`."
-        ) from exc
-    return plaintext_bytes.decode("utf-8")
+    # Try every candidate key rather than a single one so a store written under
+    # the machine fallback still opens after a passphrase is configured (and
+    # vice versa), and a transient keyring hiccup does not brick decryption.
+    last_exc: InvalidTag | None = None
+    for key in _candidate_master_keys():
+        try:
+            return AESGCM(key).decrypt(nonce, ciphertext, None).decode("utf-8")
+        except InvalidTag as exc:
+            last_exc = exc
+            continue
+
+    # AES-GCM raises InvalidTag with an empty message, which surfaces downstream
+    # as a blank "Failed to load credentials" log. Translate it into an
+    # actionable error: the key genuinely changed (new machine, reset OS
+    # keyring, changed passphrase) or the file is corrupt.
+    raise DecryptionError(
+        "Stored credentials could not be decrypted — the encryption key changed "
+        "(new machine, reset OS keyring, or changed VELUNE_MASTER_PASSPHRASE) or "
+        "the file is corrupt. Re-add your keys with `velune setup`."
+    ) from last_exc
 
 
 def _derive_key_from_passphrase(passphrase: str, salt: bytes) -> bytes:

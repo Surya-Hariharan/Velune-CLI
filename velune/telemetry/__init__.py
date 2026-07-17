@@ -10,7 +10,6 @@ from velune.telemetry.debug import (
     DebugTimer,
     PipelineMetrics,
     RoutingDecision,
-    TokenCounter,
     debug_timer,
     log_debug_info,
 )
@@ -49,7 +48,6 @@ __all__ = [
     "UsageSummary",
     "DebugTimer",
     "debug_timer",
-    "TokenCounter",
     "RoutingDecision",
     "PipelineMetrics",
     "log_debug_info",

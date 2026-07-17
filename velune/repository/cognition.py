@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger("velune.repository.cognition")
 
 _STATE_FILENAME = "index_state.json"
+_PIPELINE_CACHE_FILENAME = "pipeline_cache.json"
+# Volatility reflects committed history, not local edits — recomputing it on
+# every incremental refresh is pure waste. Cache it for a few minutes.
+_VOLATILITY_TTL_SECONDS = 600.0
+# Above this age, get_snapshot_fresh() still returns the cache (never blocks
+# the turn on recompute) but flags it stale in cognition_freshness so /index
+# status and the context builder can surface it.
+_FRESHNESS_STALE_AFTER_SECONDS = 30.0
 
 
 class RepositoryCognitionService:
@@ -42,6 +51,17 @@ class RepositoryCognitionService:
         # Tracks the most recent file-level change set so the orchestrator can
         # surface "what changed since last run" in the prompt without re-indexing.
         self._last_delta: object | None = None  # IndexDelta | None
+
+        # Pipeline cache: the persisted, delta-aware output of the grapher /
+        # API mapper / architecture+tech detectors / git metrics (everything
+        # _run_pipeline computes). Populated on cold start and kept current by
+        # RepositoryIntelligenceEngine's background downstream worker calling
+        # refresh_pipeline_cache() — see get_snapshot_fresh().
+        self._pipeline_cache_path = self.root_path / ".velune" / _PIPELINE_CACHE_FILENAME
+        self._volatility_cache: tuple[float, dict[str, int]] | None = None  # (cached_at, data)
+        self.pipeline_cache_hits = 0
+        self.pipeline_cache_misses = 0
+        self.files_recomputed_last_run = 0
 
     @property
     def last_delta(self) -> object | None:
@@ -335,6 +355,304 @@ class RepositoryCognitionService:
         return self.grapher.traverse(node_id, depth)
 
     # ------------------------------------------------------------------
+    # Fast, cache-first snapshot for the interactive turn path
+    # ------------------------------------------------------------------
+
+    async def get_snapshot_fresh(self) -> RepositorySnapshot | None:
+        """Return a snapshot without rebuilding the pipeline, unless this is cold start.
+
+        This is what the per-turn orchestrator call should use instead of
+        :meth:`index`. It reads the persisted pipeline cache (grapher edges,
+        API map, architecture/tech summary, git metrics) — maintained
+        incrementally by ``RepositoryIntelligenceEngine``'s background worker
+        via :meth:`refresh_pipeline_cache` — and merges it onto the file/symbol
+        snapshot. No grapher/API-mapper/architecture/tech work runs here.
+
+        Falls back to the synchronous full :meth:`index` pipeline only when no
+        pipeline cache exists yet (true cold start, e.g. first prompt in a repo
+        that has never been indexed) — a one-time cost, seeded into the cache
+        so every subsequent call hits the fast path.
+
+        The returned snapshot may be a few seconds stale relative to disk (the
+        background engine converges on its own poll cadence) — bounded
+        staleness is the intended trade for never blocking a prompt on a full
+        rescan. Staleness is surfaced via ``summary["cognition_freshness"]``.
+        """
+        file_snapshot = self.get_snapshot()
+        cache = await asyncio.to_thread(self._load_pipeline_cache)
+
+        if file_snapshot is None or cache is None:
+            self.pipeline_cache_misses += 1
+            snapshot = await asyncio.to_thread(self.index, False)
+            if snapshot is not None:
+                await asyncio.to_thread(self._seed_pipeline_cache_from_snapshot, snapshot)
+            return snapshot
+
+        self.pipeline_cache_hits += 1
+        self._merge_cache_onto_snapshot(file_snapshot, cache)
+        return file_snapshot
+
+    def _merge_cache_onto_snapshot(self, snapshot: RepositorySnapshot, cache: dict) -> None:
+        """Apply a persisted pipeline cache's derived fields onto *snapshot* in place."""
+        from velune.repository.api_mapper import APIConnectionMap
+
+        try:
+            snapshot.edges = [RepositoryEdge(**e) for e in cache.get("edges", [])]
+        except Exception as exc:
+            logger.debug("Pipeline cache had malformed edges (ignored): %s", exc)
+
+        summary = cache.get("summary")
+        if isinstance(summary, dict):
+            snapshot.summary.update(summary)
+
+        api_map_dict = cache.get("api_map")
+        if api_map_dict:
+            try:
+                snapshot.api_map = APIConnectionMap.from_dict(api_map_dict)
+            except Exception as exc:
+                logger.debug("Pipeline cache had malformed api_map (ignored): %s", exc)
+
+        computed_at = cache.get("computed_at", 0.0)
+        age = max(0.0, time.time() - computed_at)
+        snapshot.summary["cognition_freshness"] = {
+            "computed_at": computed_at,
+            "age_seconds": round(age, 1),
+            "source_commit_sha": cache.get("source_commit_sha"),
+            "stale": age > _FRESHNESS_STALE_AFTER_SECONDS,
+            "cache_hit": True,
+        }
+
+    def _load_pipeline_cache(self) -> dict | None:
+        try:
+            if not self._pipeline_cache_path.exists():
+                return None
+            with open(self._pipeline_cache_path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.debug("Could not load pipeline cache: %s", exc)
+            return None
+
+    def _save_pipeline_cache(self, cache: dict) -> None:
+        try:
+            self._pipeline_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._pipeline_cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+        except Exception as exc:
+            logger.debug("Could not persist pipeline cache: %s", exc)
+
+    def _seed_pipeline_cache_from_snapshot(self, snapshot: RepositorySnapshot) -> None:
+        """Seed the pipeline cache from a snapshot the full :meth:`index` pipeline just built.
+
+        Called once, on cold start, so every call after the first hits
+        :meth:`get_snapshot_fresh`'s fast path instead of re-running :meth:`index`
+        forever.
+        """
+        from velune.repository.incremental_indexer import IncrementalIndexer
+
+        try:
+            sha = IncrementalIndexer(self.root_path, self._state_path).git_sha()
+        except Exception:
+            sha = None
+
+        cache = {
+            "computed_at": time.time(),
+            "source_commit_sha": sha,
+            "edges": [e.model_dump() for e in snapshot.edges],
+            "api_map": snapshot.api_map.to_dict()
+            if snapshot.api_map is not None and hasattr(snapshot.api_map, "to_dict")
+            else None,
+            "summary": {
+                k: v
+                for k, v in snapshot.summary.items()
+                if k in ("git", "architecture", "metrics", "api_map")
+            },
+        }
+        self._save_pipeline_cache(cache)
+
+    # ------------------------------------------------------------------
+    # Incremental pipeline refresh — runs off the interactive path, driven by
+    # RepositoryIntelligenceEngine's background downstream worker.
+    # ------------------------------------------------------------------
+
+    async def refresh_pipeline_cache(self, delta: IndexDelta) -> dict:
+        """Incrementally update the persisted pipeline cache for *delta*.
+
+        Recomputes only the analyzers whose cost actually scales with the
+        files in *delta* (grapher edges, API map); everything else is either
+        cheap regardless of repo size (architecture/tech detection — audited,
+        no full-file-content I/O) or TTL-cached (git volatility). Returns a
+        small stats dict for the caller to log/emit as an event.
+        """
+        return await asyncio.to_thread(self._refresh_pipeline_cache_sync, delta)
+
+    def _refresh_pipeline_cache_sync(self, delta: IndexDelta) -> dict:
+        from velune.repository.api_mapper import APIConnectionMap, APIMapper, render_api_map
+        from velune.repository.incremental_indexer import IncrementalIndexer
+
+        snapshot = self.get_snapshot()
+        if snapshot is None:
+            return {"files_recomputed": 0, "edge_count": 0, "route_count": 0}
+
+        prev_cache = self._load_pipeline_cache()
+        if prev_cache is None:
+            # No baseline yet — this background refresh got here before any
+            # cold-start full index ran, so self.grapher is still empty.
+            # Patching it now would cache a graph containing only the delta's
+            # files. Do the one-time full build instead (same work a cold-start
+            # index() call would do); every refresh after this one can patch.
+            snapshot = self._run_pipeline(snapshot)
+            self._seed_pipeline_cache_from_snapshot(snapshot)
+            return {
+                "files_recomputed": len(snapshot.files),
+                "edge_count": len(snapshot.edges),
+                "route_count": len(snapshot.api_map.routes) if snapshot.api_map else 0,
+            }
+
+        changed = list(dict.fromkeys(list(delta.to_add) + list(delta.to_update)))
+        removed = list(delta.to_remove)
+        self.files_recomputed_last_run = len(changed) + len(removed)
+
+        file_by_path = {f.path: f for f in snapshot.files}
+        all_paths = [f.path for f in snapshot.files]
+
+        # --- Grapher: patch in place instead of rebuilding from scratch ---
+        for path in removed + changed:
+            self.grapher.remove_file(path)
+        for path in changed:
+            f = file_by_path.get(path)
+            if f is None:
+                continue
+            self.grapher.add_file(f.path, f.language.value, f.size_bytes)
+            for sym in f.symbols:
+                self.grapher.add_symbol(sym)
+        self.grapher.resolve_import_dependencies(
+            all_paths, snapshot.symbols, source_scope=set(changed)
+        )
+
+        edges = [
+            RepositoryEdge(
+                source=src,
+                target=tgt,
+                edge_type=data.get("edge_type", "depends"),
+                weight=data.get("weight", 1.0),
+            )
+            for src, tgt, _key, data in self.grapher.graph.edges(keys=True, data=True)
+        ]
+
+        # --- API map: incremental rescan, scoped to changed/removed files ---
+        prev_api_map = None
+        if prev_cache.get("api_map"):
+            try:
+                prev_api_map = APIConnectionMap.from_dict(prev_cache["api_map"])
+            except Exception as exc:
+                logger.debug("Could not reuse previous api_map (full rescan): %s", exc)
+        api_mapper = APIMapper(self.root_path)
+        api_map = api_mapper.build_map_incremental(prev_api_map, changed, removed)
+        api_map_data = {
+            "route_count": len(api_map.routes),
+            "frontend_call_count": len(api_map.frontend_calls),
+            "db_query_count": len(api_map.db_queries),
+            "connection_count": len(api_map.connections),
+            "api_map_text": render_api_map(api_map, max_tokens=1500),
+        }
+
+        # --- Framework footprints: union, content read scoped to changed files ---
+        code_files: dict[str, str] = {}
+        for path in changed:
+            f = file_by_path.get(path)
+            if f is not None and f.size_bytes < 100_000:
+                try:
+                    code_files[path] = (self.root_path / path).read_text(
+                        encoding="utf-8", errors="ignore"
+                    )
+                except Exception:
+                    pass
+        new_frameworks = (
+            set(self.analyzer.detect_framework_footprint(code_files)) if code_files else set()
+        )
+        prev_frameworks = set(
+            prev_cache.get("summary", {}).get("architecture", {}).get("frameworks_detected", [])
+        )
+        frameworks = sorted(prev_frameworks | new_frameworks)
+
+        # --- Cheap regardless of repo size — always re-run in full ---
+        layers = self.analyzer.classify_architecture_layers(all_paths)
+        analyzer_edges = [(e.source, e.target) for e in edges]
+        violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
+        tech_stack = TechnologyDetector(self.root_path).detect()
+        arch_report = ArchitectureDetector(self.root_path, snapshot.files, tech_stack).detect()
+
+        # --- Git metrics: volatility TTL-cached, rest stays live but cheap ---
+        branch = self.tracker.get_active_branch()
+        changes = self.tracker.get_uncommitted_changes()
+        recent_commits = self.tracker.get_recent_commits(limit=5)
+        git_sha = recent_commits[0]["hash"] if recent_commits else None
+        if git_sha is None:
+            try:
+                git_sha = IncrementalIndexer(self.root_path, self._state_path).git_sha()
+            except Exception:
+                git_sha = None
+
+        all_volatility = self._get_volatility_cached()
+        file_volatility: dict[str, int] = {}
+        for f in snapshot.files:
+            file_volatility[f.path] = all_volatility.get(f.path, 0) or all_volatility.get(
+                f.path.replace("/", "\\"), 0
+            )
+
+        summary = {
+            "git": {
+                "active_branch": branch,
+                "uncommitted_changes_count": len(changes),
+                "uncommitted_changes": changes[:10],
+                "recent_commits": recent_commits,
+            },
+            "architecture": {
+                "layers": {k: len(v) for k, v in layers.items()},
+                "layer_membership": dict(layers.items()),
+                "violations_count": len(violations),
+                "violations": violations[:5],
+                "frameworks_detected": frameworks,
+                "project_types": list(self.analyzer.detected_project_types),
+                "tech_stack": tech_stack.to_dict(),
+                "arch_report": arch_report.to_dict(),
+            },
+            "metrics": {
+                "high_volatility_files": sorted(
+                    file_volatility.items(), key=lambda x: x[1], reverse=True
+                )[:5],
+            },
+            "api_map": api_map_data,
+        }
+
+        cache = {
+            "computed_at": time.time(),
+            "source_commit_sha": git_sha,
+            "edges": [e.model_dump() for e in edges],
+            "api_map": api_map.to_dict(),
+            "summary": summary,
+        }
+        self._save_pipeline_cache(cache)
+
+        return {
+            "files_recomputed": self.files_recomputed_last_run,
+            "edge_count": len(edges),
+            "route_count": len(api_map.routes),
+        }
+
+    def _get_volatility_cached(self) -> dict[str, int]:
+        """TTL-cached ``GitTracker.get_all_file_volatility`` — it reflects commit
+        history, not local edits, so recomputing it on every refresh is waste."""
+        now = time.time()
+        if self._volatility_cache is not None:
+            cached_at, data = self._volatility_cache
+            if now - cached_at < _VOLATILITY_TTL_SECONDS:
+                return data
+        data = self.tracker.get_all_file_volatility(days=90)
+        self._volatility_cache = (now, data)
+        return data
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -367,7 +685,7 @@ class RepositoryCognitionService:
         branch = self.tracker.get_active_branch()
         changes = self.tracker.get_uncommitted_changes()
         recent_commits = self.tracker.get_recent_commits(limit=5)
-        all_volatility = self.tracker.get_all_file_volatility(days=90)
+        all_volatility = self._get_volatility_cached()
         file_volatility: dict[str, int] = {}
         for f in snapshot.files:
             file_volatility[f.path] = all_volatility.get(f.path, 0) or all_volatility.get(

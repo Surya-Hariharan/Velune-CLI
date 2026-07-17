@@ -203,7 +203,10 @@ async def _prompt_approval(
             default="n",
             console=repl.console,
         )
-    except (EOFError, KeyboardInterrupt, Exception) as exc:
+    except KeyboardInterrupt:
+        # A real interrupt must abort the turn, not read as a silent denial.
+        raise
+    except (EOFError, Exception) as exc:
         _log.debug("Approval prompt unavailable (%s); denying %s", exc, name)
         return False
     if answer == "a":

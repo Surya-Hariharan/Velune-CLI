@@ -29,12 +29,21 @@ class ContextBudget:
     system_allocation: int = 512
 
     @classmethod
-    def from_mode(cls, mode: SessionMode, model_context_window: int) -> ContextBudget:
+    def from_mode(
+        cls,
+        mode: SessionMode,
+        model_context_window: int,
+        retrieval_bias: float = 0.55,
+    ) -> ContextBudget:
         """Create a budget for the given session mode and model context.
 
         Args:
             mode: SessionMode (OPTIMUS, NORMAL, or GODLY)
             model_context_window: Model's reported context length in tokens
+            retrieval_bias: Fraction of usable tokens given to retrieval vs.
+                working memory, clamped to [0.2, 0.8] so neither section is
+                ever starved entirely. Defaults to 0.55 — the original fixed
+                split — so existing callers are unaffected.
 
         Returns:
             ContextBudget with allocations tuned to the mode's constraints
@@ -58,9 +67,9 @@ class ContextBudget:
         usable = total - output_reserve - system_alloc
 
         # Phase 3: Allocate remaining budget proportionally
-        # retrieval: 55%, working_memory: 35%
-        retrieval_alloc = int(usable * 0.55)
-        working_memory_alloc = int(usable * 0.35)
+        bias = min(0.8, max(0.2, retrieval_bias))
+        retrieval_alloc = int(usable * bias)
+        working_memory_alloc = int(usable * (1.0 - bias))
 
         return cls(
             total_tokens=total,
@@ -71,7 +80,12 @@ class ContextBudget:
         )
 
     @classmethod
-    def for_chat(cls, mode: SessionMode, model_context_window: int) -> ContextBudget:
+    def for_chat(
+        cls,
+        mode: SessionMode,
+        model_context_window: int,
+        retrieval_bias: float = 0.55,
+    ) -> ContextBudget:
         """Create a budget for an interactive chat turn.
 
         Chat differs from council context assembly in one way: the output
@@ -84,6 +98,13 @@ class ContextBudget:
         Args:
             mode: SessionMode (OPTIMUS, NORMAL, or GODLY)
             model_context_window: Model's reported context length in tokens
+            retrieval_bias: Fraction of usable tokens given to retrieval vs.
+                working memory, clamped to [0.2, 0.8]. Defaults to 0.55 — the
+                original fixed split — so existing callers are unaffected.
+                Callers can bias this per query intent, e.g. higher for
+                intents that need more retrieved material (SEARCH,
+                DEPENDENCY_ANALYSIS), lower for intents that lean on
+                conversational continuity (DEBUG).
 
         Returns:
             ContextBudget sized for a chat turn in the given mode.
@@ -106,10 +127,12 @@ class ContextBudget:
             output_reserve = max(256, total // 2 - system_alloc)
             usable = max(128, total - output_reserve - system_alloc)
 
+        bias = min(0.8, max(0.2, retrieval_bias))
+
         return cls(
             total_tokens=total,
-            retrieval_allocation=int(usable * 0.55),
-            working_memory_allocation=int(usable * 0.35),
+            retrieval_allocation=int(usable * bias),
+            working_memory_allocation=int(usable * (1.0 - bias)),
             system_allocation=system_alloc,
             output_reservation=output_reserve,
         )

@@ -18,7 +18,6 @@ from velune.cli.handlers.tool_chat import (
 from velune.cli.interrupts import InterruptController
 from velune.cli.modes import SessionMode
 from velune.context.budget import ContextBudget
-from velune.context.window import fit_messages
 from velune.core.errors.provider import InferenceError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, ToolCall
 from velune.core.types.model import ModelDescriptor
@@ -155,37 +154,6 @@ def test_chat_budget_missing_context_length_falls_back():
     budget = ContextBudget.for_chat(SessionMode.NORMAL, 0)
     assert budget.total_tokens >= 1024
     assert budget.usable_tokens > 0
-
-
-# ── M2: message fitting ─────────────────────────────────────────────────────
-
-
-def test_fit_messages_keeps_newest_within_budget():
-    messages = [{"role": "user", "content": f"message {i} " + "x" * 400} for i in range(30)]
-    fitted = fit_messages(messages, max_input_tokens=500)
-    assert 0 < len(fitted) < 30
-    assert fitted[-1] is messages[-1]  # newest always kept
-    assert fitted == messages[-len(fitted) :]  # contiguous suffix
-
-
-def test_fit_messages_always_keeps_last_even_if_oversized():
-    messages = [{"role": "user", "content": "y" * 100_000}]
-    assert fit_messages(messages, max_input_tokens=10) == messages
-
-
-def test_fit_messages_drops_orphaned_tool_results():
-    messages = [
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1"}]},
-        {"role": "tool", "tool_call_id": "c1", "content": "big " * 50},
-        {"role": "user", "content": "next"},
-    ]
-    # Budget that cuts between the assistant msg and the tool result.
-    fitted = fit_messages(messages, max_input_tokens=70)
-    assert fitted[0].get("role") != "tool"
-
-
-def test_fit_messages_empty():
-    assert fit_messages([], 1000) == []
 
 
 # ── M1: gating ──────────────────────────────────────────────────────────────

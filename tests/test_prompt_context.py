@@ -16,12 +16,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from velune.cli.handlers.prompt_context import (
+    _repository_snapshot_chunks,
     _retrieve_hybrid,
     _retrieve_three_brain,
-    _repository_snapshot_chunks,
     build_turn_context,
 )
 from velune.cli.modes import ModeConfig, ModeManager, SessionMode
+from velune.cognition.intent import IntentType
 from velune.context.sections import ContextSection
 from velune.memory.three_brain import ThreeBrainResult
 from velune.retrieval.schemas import (
@@ -54,9 +55,13 @@ def _mode_config(**overrides) -> ModeConfig:
 def _make_repl(container_map: dict, conversation: list | None = None, mode_config=None):
     repl = MagicMock()
     repl.container.get.side_effect = lambda key: container_map.get(key)
-    repl._conversation = conversation if conversation is not None else [
-        {"role": "user", "content": "hello there"},
-    ]
+    repl._conversation = (
+        conversation
+        if conversation is not None
+        else [
+            {"role": "user", "content": "hello there"},
+        ]
+    )
     repl._episodic_session_id = "ses-test"
     mode_manager = MagicMock(spec=ModeManager)
     mode_manager.current = SessionMode.NORMAL
@@ -87,16 +92,45 @@ async def test_retrieve_hybrid_calls_retrieve_with_a_real_query():
     )
     repl = _make_repl({"runtime.retrieval": retrieval})
 
-    chunks = await _retrieve_hybrid(repl, "how does auth work", top_k=3)
+    chunks = await _retrieve_hybrid(
+        repl, "how does auth work", top_k=3, intent=IntentType.QUESTION, confidence=0.8
+    )
 
     retrieval.retrieve.assert_awaited_once()
     (call_query,), _ = retrieval.retrieve.call_args
     assert isinstance(call_query, RetrievalQuery)
     assert call_query.text == "how does auth work"
-    assert call_query.top_k == 3
+    # top_k on the query itself comes from the planner's intent strategy, not
+    # the caller's depth — the caller's top_k caps the *final* chunk count
+    # (checked below) so the reranker still sees the planner's full candidate
+    # pool before truncation.
+    assert call_query.intent == IntentType.QUESTION.value
     assert len(chunks) == 1
     assert chunks[0].section == ContextSection.RETRIEVED_CONTEXT
     assert "def a(): pass" in chunks[0].content
+
+
+async def test_retrieve_hybrid_caps_chunks_at_callers_top_k():
+    retrieval = MagicMock()
+    hits = [
+        RetrievalHit(
+            document=RetrievalDocument(id=f"{i}.py", content=f"content {i}"),
+            score=0.9,
+            source=RetrievalSource.VECTOR,
+            rank=i,
+        )
+        for i in range(5)
+    ]
+    retrieval.retrieve = AsyncMock(
+        return_value=RetrievalResult(query=RetrievalQuery(text="x"), hits=hits)
+    )
+    repl = _make_repl({"runtime.retrieval": retrieval})
+
+    chunks = await _retrieve_hybrid(
+        repl, "find the sandbox validator", top_k=2, intent=IntentType.SEARCH, confidence=0.9
+    )
+
+    assert len(chunks) == 2
 
 
 async def test_retrieve_hybrid_returns_empty_on_no_hits():
@@ -105,19 +139,34 @@ async def test_retrieve_hybrid_returns_empty_on_no_hits():
         return_value=RetrievalResult(query=RetrievalQuery(text="x"), hits=[])
     )
     repl = _make_repl({"runtime.retrieval": retrieval})
-    assert await _retrieve_hybrid(repl, "nothing relevant", top_k=3) == []
+    assert (
+        await _retrieve_hybrid(
+            repl, "nothing relevant", top_k=3, intent=IntentType.QUESTION, confidence=0.5
+        )
+        == []
+    )
 
 
 async def test_retrieve_hybrid_degrades_silently_when_retrieval_missing():
     repl = _make_repl({"runtime.retrieval": None})
-    assert await _retrieve_hybrid(repl, "anything", top_k=3) == []
+    assert (
+        await _retrieve_hybrid(
+            repl, "anything", top_k=3, intent=IntentType.QUESTION, confidence=0.5
+        )
+        == []
+    )
 
 
 async def test_retrieve_hybrid_swallows_retriever_errors():
     retrieval = MagicMock()
     retrieval.retrieve = AsyncMock(side_effect=RuntimeError("boom"))
     repl = _make_repl({"runtime.retrieval": retrieval})
-    assert await _retrieve_hybrid(repl, "anything", top_k=3) == []
+    assert (
+        await _retrieve_hybrid(
+            repl, "anything", top_k=3, intent=IntentType.QUESTION, confidence=0.5
+        )
+        == []
+    )
 
 
 async def test_retrieve_hybrid_clips_out_of_range_scores_to_valid_trust_score():
@@ -132,7 +181,7 @@ async def test_retrieve_hybrid_clips_out_of_range_scores_to_valid_trust_score():
         return_value=RetrievalResult(query=RetrievalQuery(text="x"), hits=[hit])
     )
     repl = _make_repl({"runtime.retrieval": retrieval})
-    chunks = await _retrieve_hybrid(repl, "q", top_k=3)
+    chunks = await _retrieve_hybrid(repl, "q", top_k=3, intent=IntentType.QUESTION, confidence=0.5)
     assert chunks[0].trust_score == 1.0
 
 
@@ -155,7 +204,9 @@ async def test_three_brain_drops_working_hits_to_avoid_double_count():
         )
     )
     repl = _make_repl({"runtime.three_brain_coordinator": coordinator})
-    chunks = await _retrieve_three_brain(repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5)
+    chunks = await _retrieve_three_brain(
+        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+    )
     assert chunks == []
 
 
@@ -170,7 +221,9 @@ async def test_three_brain_converts_semantic_episodic_and_kg_hits():
         )
     )
     repl = _make_repl({"runtime.three_brain_coordinator": coordinator})
-    chunks = await _retrieve_three_brain(repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5)
+    chunks = await _retrieve_three_brain(
+        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+    )
 
     sources = {c.source for c in chunks}
     assert sources == {"semantic_memory", "episodic_memory", "knowledge_graph"}
@@ -179,14 +232,24 @@ async def test_three_brain_converts_semantic_episodic_and_kg_hits():
 
 async def test_three_brain_degrades_silently_when_coordinator_missing():
     repl = _make_repl({"runtime.three_brain_coordinator": None})
-    assert await _retrieve_three_brain(repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5) == []
+    assert (
+        await _retrieve_three_brain(
+            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+        )
+        == []
+    )
 
 
 async def test_three_brain_swallows_query_errors():
     coordinator = MagicMock()
     coordinator.query = AsyncMock(side_effect=RuntimeError("boom"))
     repl = _make_repl({"runtime.three_brain_coordinator": coordinator})
-    assert await _retrieve_three_brain(repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5) == []
+    assert (
+        await _retrieve_three_brain(
+            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+        )
+        == []
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,23 +257,25 @@ async def test_three_brain_swallows_query_errors():
 # ---------------------------------------------------------------------------
 
 
-def test_repository_snapshot_absent_on_cold_start():
+async def test_repository_snapshot_absent_on_cold_start():
     repo_service = MagicMock()
-    repo_service.get_snapshot.return_value = None
+    repo_service.get_snapshot_fresh = AsyncMock(return_value=None)
     repl = _make_repl({"runtime.repository_cognition": repo_service})
-    assert _repository_snapshot_chunks(repl, 2500) == []
+    assert await _repository_snapshot_chunks(repl, 2500) == []
 
 
-def test_repository_snapshot_present_when_cache_exists():
+async def test_repository_snapshot_present_when_cache_exists():
     repo_service = MagicMock()
-    repo_service.get_snapshot.return_value = MagicMock(api_map=None)
+    # The fast turn path reads the incrementally-maintained pipeline cache via
+    # get_snapshot_fresh(), which carries dependency edges + api_map.
+    repo_service.get_snapshot_fresh = AsyncMock(return_value=MagicMock(api_map=None))
     repl = _make_repl({"runtime.repository_cognition": repo_service, "runtime.firewall": None})
 
     with patch(
         "velune.repository.context_builder.WorkspaceContextBuilder.build",
         return_value=("[WORKSPACE: /repo]", None),
     ):
-        chunks = _repository_snapshot_chunks(repl, 2500)
+        chunks = await _repository_snapshot_chunks(repl, 2500)
 
     assert len(chunks) == 1
     assert chunks[0].section == ContextSection.REPOSITORY_SNAPSHOT
@@ -218,25 +283,25 @@ def test_repository_snapshot_present_when_cache_exists():
     assert "[WORKSPACE: /repo]" in chunks[0].content
 
 
-def test_repository_drift_chunk_present_when_violations_exist():
+async def test_repository_drift_chunk_present_when_violations_exist():
     repo_service = MagicMock()
-    repo_service.get_snapshot.return_value = MagicMock(api_map=None)
+    repo_service.get_snapshot_fresh = AsyncMock(return_value=MagicMock(api_map=None))
     repl = _make_repl({"runtime.repository_cognition": repo_service, "runtime.firewall": None})
 
     with patch(
         "velune.repository.context_builder.WorkspaceContextBuilder.build",
         return_value=("[WORKSPACE: /repo]", "[ARCHITECTURE VIOLATIONS — 1 issue(s) detected]"),
     ):
-        chunks = _repository_snapshot_chunks(repl, 2500)
+        chunks = await _repository_snapshot_chunks(repl, 2500)
 
     sections = {c.section for c in chunks}
     assert ContextSection.REPOSITORY_SNAPSHOT in sections
     assert ContextSection.ARCHITECTURAL_DRIFT in sections
 
 
-def test_repository_snapshot_degrades_silently_when_service_missing():
+async def test_repository_snapshot_degrades_silently_when_service_missing():
     repl = _make_repl({"runtime.repository_cognition": None})
-    assert _repository_snapshot_chunks(repl, 2500) == []
+    assert await _repository_snapshot_chunks(repl, 2500) == []
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +348,7 @@ async def test_debug_intent_biases_toward_deeper_retrieval_than_generate():
 
 async def test_refactor_intent_biases_repository_snapshot_budget():
     repo_service = MagicMock()
-    repo_service.get_snapshot.return_value = MagicMock(api_map=None)
+    repo_service.get_snapshot_fresh = AsyncMock(return_value=MagicMock(api_map=None))
     repl = _make_repl(_container_map(**{"runtime.repository_cognition": repo_service}))
 
     captured_budgets: list[int] = []
@@ -322,9 +387,7 @@ async def test_compression_runs_only_when_mode_enables_it():
         mode_config=_mode_config(context_compression=True, max_context_tokens=100),
     )
 
-    with patch(
-        "velune.context.extractive.compress_conversation", return_value=[]
-    ) as compress:
+    with patch("velune.context.extractive.compress_conversation", return_value=[]) as compress:
         await build_turn_context(repl, "hi", _model())
     compress.assert_called_once()
 

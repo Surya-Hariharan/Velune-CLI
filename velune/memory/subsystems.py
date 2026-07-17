@@ -93,9 +93,11 @@ def _create_three_brain_coordinator(env: RuntimeEnvironment):
     working = env.container.get("runtime.working_memory")
     semantic = env.container.get("runtime.semantic_memory_lance")
     episodic = env.container.get("runtime.episodic_session_memory")
-    kg_query = env.container.get("runtime.knowledge_query") if env.container.has(
-        "runtime.knowledge_query"
-    ) else None
+    kg_query = (
+        env.container.get("runtime.knowledge_query")
+        if env.container.has("runtime.knowledge_query")
+        else None
+    )
     bus = env.container.get("runtime.bus") if env.container.has("runtime.bus") else None
     return ThreeBrainCoordinator(working, semantic, episodic, kg_query=kg_query, bus=bus)
 

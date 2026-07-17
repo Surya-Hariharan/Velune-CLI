@@ -105,8 +105,13 @@ async def _resume_snapshot(repl: VeluneREPL, session_id: str) -> bool:
     if loaded is None:
         return False
     meta, conversation = loaded
+    # Archive the live conversation before replacing it so in-progress turns
+    # are never silently discarded, then adopt the resumed session's id so
+    # exit writes back to that slot instead of the REPL's original random id.
+    repl._archive_current_session()
     await repl._end_episodic_session()
     repl._conversation = conversation
+    repl._session_id = session_id
     repl.session_tokens = meta.total_tokens
     await repl._start_episodic_session()
     repl.console.print(
@@ -164,6 +169,9 @@ async def _cmd_session_resume(repl: VeluneREPL, session_id: str) -> None:
         repl.console.print(f"[red]Session '{session_id}' not found or has no turns.[/red]")
         return
 
+    # Same data-loss guard as the snapshot path: preserve the live conversation
+    # before overwriting it with the episodic reconstruction.
+    repl._archive_current_session()
     repl._conversation = [{"role": t.role, "content": t.content} for t in turns]
     repl.console.print(
         f"[green]Resumed[/green] [cyan]{session_id}[/cyan] "

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from velune.cognition.intent import IntentType
 
 logger = logging.getLogger("velune.retrieval.reranker")
 
@@ -65,6 +68,26 @@ class CrossEncoderReranker:
     MIN_RECENCY_SECONDS = 300
     MAX_RECENCY_SECONDS = 2592000
 
+    # Additive trust boosts for a source when it matches the query's intent —
+    # on top of the base per-source trust table below. Small and additive
+    # (not a multiplier) so ranking stays intent-*aware* rather than
+    # intent-*dominated*: a highly relevant hit from an unboosted source can
+    # still outrank a barely-relevant hit from a boosted one.
+    # Keyed by the actual ``RetrievalSource`` labels that ``HybridRetriever``
+    # emits — ``lexical`` / ``vector`` / ``graph`` / ``memory`` — with the older
+    # specialized labels (``import_graph`` / ``call_graph`` / ``symbol``) kept so
+    # any caller still using them is unaffected.
+    INTENT_TRUST_BOOST: dict[str, dict[str, float]] = {
+        "architecture": {"graph": 0.1, "import_graph": 0.1, "call_graph": 0.1},
+        "dependency_analysis": {"graph": 0.15, "import_graph": 0.15, "call_graph": 0.1},
+        "refactor": {"graph": 0.05, "symbol": 0.1, "call_graph": 0.05},
+        "debug": {"graph": 0.1, "vector": 0.05, "symbol": 0.05, "call_graph": 0.1},
+        "security": {"graph": 0.05, "lexical": 0.05, "call_graph": 0.05},
+        "search": {"vector": 0.1, "lexical": 0.1},
+        "documentation": {"vector": 0.1},
+        "test_generation": {"vector": 0.05, "lexical": 0.05},
+    }
+
     def __init__(self) -> None:
         """Initialize reranker."""
         pass
@@ -73,15 +96,23 @@ class CrossEncoderReranker:
         self,
         chunks: list[Any],
         query: str | None = None,
+        intent: IntentType | str | None = None,
     ) -> list[Any]:
-        """Rerank chunks by combined score, tolerant of both chunk shapes."""
+        """Rerank chunks by combined score, tolerant of both chunk shapes.
+
+        *intent*, when given, nudges the trust component for sources that
+        matter most for that intent (e.g. the import graph for
+        DEPENDENCY_ANALYSIS) — see ``INTENT_TRUST_BOOST``. Unlisted intents
+        (and ``None``) behave exactly as before this parameter existed.
+        """
         start_time = time.perf_counter()
+        intent_value = getattr(intent, "value", intent)
 
         # Score into a per-call map keyed by identity so ranking never depends on
         # mutating the (possibly immutable) input objects.
         scores: dict[int, float] = {}
         for chunk in chunks:
-            score = self._calculate_combined_score(chunk)
+            score = self._calculate_combined_score(chunk, intent_value)
             scores[id(chunk)] = score
             # Write back for callers (ContextChunk) whose downstream reads it.
             try:
@@ -97,11 +128,11 @@ class CrossEncoderReranker:
 
         return deduplicated
 
-    def _calculate_combined_score(self, chunk: Any) -> float:
+    def _calculate_combined_score(self, chunk: Any, intent_value: str | None = None) -> float:
         """Calculate combined score."""
         semantic = min(1.0, max(0.0, _relevance(chunk)))
         recency = self._calculate_recency_score(chunk)
-        trust = self._calculate_trust_score(chunk)
+        trust = self._calculate_trust_score(chunk, intent_value)
 
         combined = (
             (semantic * self.SEMANTIC_WEIGHT)
@@ -133,9 +164,18 @@ class CrossEncoderReranker:
         score = 1.0 - ((age_seconds - self.MIN_RECENCY_SECONDS) / age_range)
         return min(1.0, max(0.0, score))
 
-    def _calculate_trust_score(self, chunk: Any) -> float:
-        """Calculate trust score based on source."""
+    def _calculate_trust_score(self, chunk: Any, intent_value: str | None = None) -> float:
+        """Calculate trust score based on source, nudged by query intent."""
         source_trust = {
+            # Real hybrid-retrieval source labels (RetrievalSource values). These
+            # are what actually reach the reranker; keying on the old vocabulary
+            # left every hybrid hit at the 0.5 default, making the trust term
+            # inert.
+            "graph": 0.85,  # structural dependency graph
+            "vector": 0.7,  # semantic embedding match
+            "memory": 0.7,  # working / episodic / semantic memory
+            "lexical": 0.6,  # BM25 keyword match
+            # Legacy / specialized labels retained for other callers.
             "symbol": 0.9,
             "import_graph": 0.85,
             "lineage": 0.8,
@@ -143,7 +183,10 @@ class CrossEncoderReranker:
             "episodic": 0.7,
             "semantic": 0.6,
         }
-        return source_trust.get(_source(chunk), 0.5)
+        source = _source(chunk)
+        base = source_trust.get(source, 0.5)
+        boost = self.INTENT_TRUST_BOOST.get(intent_value or "", {}).get(source, 0.0)
+        return min(1.0, base + boost)
 
     def _deduplicate_by_content(self, chunks: list[Any], scores: dict[int, float]) -> list[Any]:
         """Remove similar chunks keeping highest score."""

@@ -40,6 +40,11 @@ class RepositoryEventType(StrEnum):
     # Fired after a quick_summary/profile refresh completes.
     PROFILE_REFRESHED = "repository.profile_refreshed"
 
+    # Fired after the pipeline cache (import graph, API map, architecture/tech
+    # summary) has been incrementally refreshed for a delta, off the
+    # interactive prompt path.
+    PIPELINE_REFRESHED = "repository.pipeline_refreshed"
+
     # Lifecycle events.
     ENGINE_STARTED = "repository.engine_started"
     ENGINE_STOPPED = "repository.engine_stopped"
@@ -114,6 +119,23 @@ def make_profile_refreshed(profile: dict[str, Any]) -> Event:
         event_type=RepositoryEventType.PROFILE_REFRESHED,
         source=_SOURCE,
         data=profile,
+    )
+
+
+def make_pipeline_refreshed(
+    files_recomputed: int,
+    edge_count: int,
+    route_count: int,
+) -> Event:
+    return Event(
+        event_type=RepositoryEventType.PIPELINE_REFRESHED,
+        source=_SOURCE,
+        data={
+            "files_recomputed": files_recomputed,
+            "edge_count": edge_count,
+            "route_count": route_count,
+            "refreshed_at": time.time(),
+        },
     )
 
 

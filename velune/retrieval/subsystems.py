@@ -48,6 +48,19 @@ def _create_hybrid_retriever(env: RuntimeEnvironment):
     return retriever
 
 
+def _create_retrieval_planner(env: RuntimeEnvironment):
+    from velune.retrieval.planner import RetrievalPlanner
+
+    retrieval_config = getattr(env.config, "retrieval", None)
+    return RetrievalPlanner(config=retrieval_config)
+
+
+def _create_retrieval_feedback_recorder(env: RuntimeEnvironment):
+    from velune.retrieval.feedback import RetrievalFeedbackRecorder
+
+    return RetrievalFeedbackRecorder()
+
+
 RETRIEVAL_MODULES = [
     SubsystemModule(
         name="retrieval",
@@ -55,5 +68,23 @@ RETRIEVAL_MODULES = [
         container_key="runtime.retrieval",
         lifecycle_key="retrieval",
         dependencies=["runtime.semantic_memory"],
-    )
+    ),
+    # No lifecycle_key: a plain, stateful-but-async-free object (an
+    # intent->weights lookup table plus a small result cache) — nothing to
+    # start or stop. Kept in the container (rather than constructed fresh
+    # per call) specifically so its result cache persists across turns in a
+    # session instead of starting empty every time.
+    SubsystemModule(
+        name="retrieval_planner",
+        factory=_create_retrieval_planner,
+        container_key="runtime.retrieval_planner",
+    ),
+    # Same reasoning: a plain object accumulating a bounded in-memory
+    # history across the session — must be a shared instance, not
+    # reconstructed (and emptied) on every turn.
+    SubsystemModule(
+        name="retrieval_feedback",
+        factory=_create_retrieval_feedback_recorder,
+        container_key="runtime.retrieval_feedback",
+    ),
 ]

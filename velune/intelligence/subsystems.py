@@ -43,12 +43,21 @@ def _create_intelligence_engine(env: RuntimeEnvironment):
         env.container.get("runtime.retrieval") if env.container.has("runtime.retrieval") else None
     )
 
+    # Soft dependency: lets the engine's pipeline-refresh downstream task show
+    # up in /index status and /dashboard. Absence just skips registration.
+    job_registry = (
+        env.container.get("runtime.job_registry")
+        if env.container.has("runtime.job_registry")
+        else None
+    )
+
     return RepositoryIntelligenceEngine(
         workspace=env.workspace,
         cognition=cognition,
         knowledge_graph=knowledge_graph,
         bus=bus,
         retrieval=retrieval,
+        job_registry=job_registry,
     )
 
 

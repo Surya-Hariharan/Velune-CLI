@@ -238,3 +238,122 @@ async def test_a_modified_file_is_still_detected(git_repo):
 
     delta = await inc.compute_delta()
     assert "a.py" in delta.to_update
+
+
+# ---------------------------------------------------------------------------
+# Incremental pipeline cache (Phase 3): a no-op prompt must not re-run the
+# grapher/API-mapper/architecture pipeline, and an edit must only rescan the
+# files that actually changed.
+# ---------------------------------------------------------------------------
+
+
+async def test_get_snapshot_fresh_skips_recompute_when_nothing_changed(git_repo, monkeypatch):
+    service = RepositoryCognitionService(git_repo)
+
+    first = await service.get_snapshot_fresh()
+    assert first is not None
+    assert service.pipeline_cache_misses == 1  # cold start: no cache yet
+
+    calls: list[int] = []
+    original = RepositoryCognitionService._run_pipeline
+
+    def _spy(self, *args, **kwargs):
+        calls.append(1)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(RepositoryCognitionService, "_run_pipeline", _spy)
+
+    second = await service.get_snapshot_fresh()
+
+    assert second is not None
+    assert calls == [], "second call re-ran the pipeline despite an unchanged workspace"
+    assert service.pipeline_cache_hits == 1
+
+
+async def test_get_snapshot_fresh_cache_carries_edges_and_api_map(git_repo):
+    (git_repo / "api.py").write_text(
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "\n"
+        '@app.get("/items")\n'
+        "def list_items():\n"
+        "    return []\n"
+    )
+
+    service = RepositoryCognitionService(git_repo)
+    first = await service.get_snapshot_fresh()
+    assert first.summary["api_map"]["route_count"] == 1
+
+    second = await service.get_snapshot_fresh()
+    assert second.api_map is not None
+    assert [r.path for r in second.api_map.routes] == ["/items"]
+    assert second.summary["cognition_freshness"]["cache_hit"] is True
+
+
+async def test_refresh_pipeline_cache_scopes_api_mapper_to_changed_files(git_repo, monkeypatch):
+    """The background pipeline_refresh path must re-scan only the delta's
+    files, not the whole workspace, once a baseline pipeline cache exists."""
+    from velune.repository.api_mapper import APIMapper
+
+    service = RepositoryCognitionService(git_repo)
+    await service.get_snapshot_fresh()  # cold start: seeds the cache + grapher
+
+    (git_repo / "b.py").write_text("def b():\n    return 2\n")
+
+    state_path = git_repo / ".velune" / "index_state.json"
+    inc = IncrementalIndexer(git_repo, state_path)
+    delta = await inc.compute_delta()
+    assert "b.py" in delta.to_add
+    await inc.apply_delta(delta)
+
+    scanned: list[str] = []
+    original_scan = APIMapper.scan_file
+
+    def _spy(self, rel_path):
+        scanned.append(rel_path)
+        return original_scan(self, rel_path)
+
+    monkeypatch.setattr(APIMapper, "scan_file", _spy)
+
+    stats = await service.refresh_pipeline_cache(delta)
+
+    assert scanned == ["b.py"], f"rescanned more than the delta: {scanned}"
+    assert stats["files_recomputed"] == 1
+    assert service.files_recomputed_last_run == 1
+
+
+async def test_refresh_pipeline_cache_removes_stale_graph_nodes(git_repo):
+    service = RepositoryCognitionService(git_repo)
+    await service.get_snapshot_fresh()  # seeds grapher with a.py
+
+    assert "a.py" in service.grapher.graph
+
+    (git_repo / "a.py").unlink()
+    state_path = git_repo / ".velune" / "index_state.json"
+    inc = IncrementalIndexer(git_repo, state_path)
+    delta = await inc.compute_delta()
+    assert "a.py" in delta.to_remove
+    await inc.apply_delta(delta)
+
+    await service.refresh_pipeline_cache(delta)
+
+    assert "a.py" not in service.grapher.graph
+
+
+async def test_refresh_pipeline_cache_without_baseline_does_a_full_build(tmp_path):
+    """If the background engine's change-detection loop fires before any
+    cold-start index has ever run, refresh_pipeline_cache must fall back to a
+    full build instead of patching an empty graph."""
+    from velune.repository.incremental_indexer import IndexDelta
+
+    (tmp_path / "a.py").write_text("def a():\n    return 1\n")
+    (tmp_path / "b.py").write_text("def b():\n    return 2\n")
+
+    service = RepositoryCognitionService(tmp_path)
+    service.index(force=True)  # populate the file/symbol cache only, no pipeline cache yet
+    assert service._load_pipeline_cache() is None
+
+    stats = await service.refresh_pipeline_cache(IndexDelta(to_add=["a.py"]))
+
+    assert stats["files_recomputed"] == 2  # full build saw both files, not just the delta
+    assert service._load_pipeline_cache() is not None

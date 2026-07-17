@@ -26,6 +26,7 @@ from velune.intelligence.events import (
     make_git_state_changed,
     make_index_updated,
     make_knowledge_graph_patched,
+    make_pipeline_refreshed,
     make_profile_refreshed,
 )
 from velune.intelligence.graph_patcher import KnowledgeGraphPatcher, PatchResult
@@ -87,6 +88,9 @@ class TestRepositoryEventType:
     def test_engine_stopped_value(self):
         assert RepositoryEventType.ENGINE_STOPPED == "repository.engine_stopped"
 
+    def test_pipeline_refreshed_value(self):
+        assert RepositoryEventType.PIPELINE_REFRESHED == "repository.pipeline_refreshed"
+
 
 # ---------------------------------------------------------------------------
 # Event factory helpers
@@ -146,6 +150,14 @@ class TestEventFactories:
         evt = make_engine_stopped("/workspace")
         assert evt.event_type == RepositoryEventType.ENGINE_STOPPED
         assert evt.data["workspace"] == "/workspace"
+
+    def test_make_pipeline_refreshed_payload(self):
+        evt = make_pipeline_refreshed(files_recomputed=3, edge_count=10, route_count=2)
+        assert evt.event_type == RepositoryEventType.PIPELINE_REFRESHED
+        assert evt.data["files_recomputed"] == 3
+        assert evt.data["edge_count"] == 10
+        assert evt.data["route_count"] == 2
+        assert "refreshed_at" in evt.data
 
     def test_events_have_unique_ids(self):
         e1 = make_files_changed([], [], [])
@@ -424,6 +436,97 @@ class TestRepositoryIntelligenceEngine:
             await engine.shutdown()
 
         _run(_test())  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# pipeline_refresh downstream task — the new incremental-cognition trigger
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineRefreshDownstreamTask:
+    def _make_engine(self, tmp_path: Path, *, with_job_registry: bool = False):
+        from velune.intelligence.engine import RepositoryIntelligenceEngine
+
+        graph = _make_graph(tmp_path)
+        bus = _make_bus()
+
+        cognition = MagicMock()
+        cognition.refresh_pipeline_cache = AsyncMock(
+            return_value={"files_recomputed": 2, "edge_count": 5, "route_count": 1}
+        )
+
+        job_registry = None
+        if with_job_registry:
+            from velune.core.task_registry import JobRegistry
+
+            job_registry = JobRegistry()
+
+        engine = RepositoryIntelligenceEngine(
+            workspace=tmp_path,
+            cognition=cognition,
+            knowledge_graph=graph,
+            bus=bus,
+            job_registry=job_registry,
+            change_poll_interval=60.0,
+            git_poll_interval=60.0,
+        )
+        return engine, bus, cognition, job_registry
+
+    def test_pipeline_refresh_calls_cognition_and_emits_event(self, tmp_path: Path):
+        engine, bus, cognition, _ = self._make_engine(tmp_path)
+        delta = IndexDelta(to_add=["a.py"], to_update=["b.py"], to_remove=[])
+
+        _run(engine._handle_pipeline_refresh(delta))
+
+        cognition.refresh_pipeline_cache.assert_awaited_once_with(delta)
+        evt = next(e for e in bus.emitted if e.event_type == RepositoryEventType.PIPELINE_REFRESHED)
+        assert evt.data["files_recomputed"] == 2
+        assert evt.data["edge_count"] == 5
+        assert evt.data["route_count"] == 1
+
+    def test_pipeline_refresh_registers_a_job(self, tmp_path: Path):
+        from velune.core.task_registry import JobStatus
+
+        engine, _, _, job_registry = self._make_engine(tmp_path, with_job_registry=True)
+        delta = IndexDelta(to_add=["a.py"], to_update=[], to_remove=[])
+
+        _run(engine._handle_pipeline_refresh(delta))
+
+        jobs = [j for j in job_registry.all_jobs() if j.name == "cognition:pipeline_refresh"]
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.COMPLETED
+
+    def test_pipeline_refresh_job_marked_failed_on_error(self, tmp_path: Path):
+        from velune.core.task_registry import JobStatus
+
+        engine, _, cognition, job_registry = self._make_engine(tmp_path, with_job_registry=True)
+        cognition.refresh_pipeline_cache = AsyncMock(side_effect=RuntimeError("boom"))
+        delta = IndexDelta(to_add=["a.py"], to_update=[], to_remove=[])
+
+        _run(engine._handle_pipeline_refresh(delta))  # must not raise
+
+        jobs = [j for j in job_registry.all_jobs() if j.name == "cognition:pipeline_refresh"]
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.FAILED
+
+    def test_pipeline_refresh_dispatched_from_downstream_worker(self, tmp_path: Path):
+        from velune.intelligence.engine import _DownstreamTask
+
+        engine, bus, cognition, _ = self._make_engine(tmp_path)
+        delta = IndexDelta(to_add=["a.py"], to_update=[], to_remove=[])
+
+        _run(engine._run_downstream_task(_DownstreamTask(task_type="pipeline_refresh", delta=delta)))
+
+        cognition.refresh_pipeline_cache.assert_awaited_once()
+
+    def test_missing_job_registry_does_not_break_refresh(self, tmp_path: Path):
+        """job_registry=None (the default) must not crash the handler."""
+        engine, bus, cognition, _ = self._make_engine(tmp_path)  # no job registry
+        delta = IndexDelta(to_add=["a.py"], to_update=[], to_remove=[])
+
+        _run(engine._handle_pipeline_refresh(delta))  # must not raise
+
+        assert any(e.event_type == RepositoryEventType.PIPELINE_REFRESHED for e in bus.emitted)
 
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,26 @@ class RepositoryGrapher:
         # Draw containing relationship
         self.graph.add_edge(file_rel, sym_id, edge_type="contains", weight=1.0)
 
+    def remove_file(self, file_path: str) -> None:
+        """Remove a file node, its contained symbol nodes, and all incident edges.
+
+        Used to patch a persistent graph in place for ``delta.to_remove`` files
+        instead of rebuilding the whole graph from scratch.
+        """
+        rel_path = self._to_rel_path(file_path)
+        if rel_path not in self.graph:
+            return
+
+        contained_symbols = [
+            target
+            for _, target, data in self.graph.out_edges(rel_path, data=True)
+            if data.get("edge_type") == "contains"
+        ]
+        self.graph.remove_node(rel_path)
+        for sym_id in contained_symbols:
+            if sym_id in self.graph:
+                self.graph.remove_node(sym_id)
+
     def add_edge(self, edge: RepositoryEdge) -> None:
         """Adds a relationship edge between files or symbols."""
         source_rel = self._to_rel_path(edge.source)
@@ -54,9 +74,39 @@ class RepositoryGrapher:
         self.graph.add_edge(source_rel, target_rel, edge_type=edge.edge_type, weight=edge.weight)
 
     def resolve_import_dependencies(
-        self, files: list[str], symbols: list[RepositorySymbol]
+        self,
+        files: list[str],
+        symbols: list[RepositorySymbol],
+        source_scope: set[str] | None = None,
     ) -> None:
-        """Resolves module imports to concrete files and draws file-to-file import edges."""
+        """Resolves module imports to concrete files and draws file-to-file import edges.
+
+        *files* is always the full file list — the stem/module lookup maps need
+        every file to resolve targets correctly, and building them is pure
+        string manipulation (no I/O), so passing the full list every call is
+        cheap regardless of repo size.
+
+        *source_scope*, when given, restricts which files' own import symbols
+        get processed — pass ``delta.to_add + delta.to_update`` here to add
+        edges only for files that actually changed, leaving edges from
+        unchanged files (already in the persistent graph) untouched.
+
+        Drops each scoped file's existing outgoing ``imports`` edges first, so
+        re-running this on an updated file replaces its stale import edges
+        rather than accumulating duplicates alongside the new ones.
+        """
+        if source_scope is not None:
+            for src in source_scope:
+                rel_src = self._to_rel_path(src)
+                if rel_src not in self.graph:
+                    continue
+                stale = [
+                    (rel_src, tgt, key)
+                    for _, tgt, key, data in self.graph.out_edges(rel_src, keys=True, data=True)
+                    if data.get("edge_type") == "imports"
+                ]
+                self.graph.remove_edges_from(stale)
+
         _code_exts = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs"}
 
         # Build two lookup maps:
@@ -87,6 +137,9 @@ class RepositoryGrapher:
                 continue
 
             source_file = self._to_rel_path(sym.file_path)
+            if source_scope is not None and source_file not in source_scope:
+                continue
+
             import_name = sym.name
 
             matched_file: str | None = None

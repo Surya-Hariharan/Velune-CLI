@@ -49,6 +49,11 @@ class RetrievalQuery(BaseModel):
     vector_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     lexical_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     graph_weight: float = Field(default=0.2, ge=0.0, le=1.0)
+    # Set by RetrievalPlanner.plan() so the reranker can apply an
+    # intent-conditioned trust boost (see CrossEncoderReranker). Optional and
+    # unused by default — direct RetrievalQuery construction (e.g. `velune
+    # retrieval trace`) behaves exactly as before this field existed.
+    intent: str | None = None
 
 
 class RetrievalResult(BaseModel):

@@ -395,5 +395,3 @@ Provide a compact summary:"""
             Estimated token count
         """
         return max(1, len(text) // 4)
-
-
