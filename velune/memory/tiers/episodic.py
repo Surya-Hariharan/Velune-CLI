@@ -310,7 +310,7 @@ class EpisodicMemory:
     the ``lifecycle_key``).  Then:
 
     * ``start_session()`` at REPL startup
-    * ``record_turn()`` (or event-driven via ``subscribe_to_bus()``) per exchange
+    * ``record_turn()`` per exchange
     * ``end_session()`` on graceful shutdown
     """
 
@@ -539,36 +539,6 @@ class EpisodicMemory:
                 )
         except Exception as exc:
             logger.error("Failed to set session summary: %s", exc)
-
-    # ── Event bus wiring ─────────────────────────────────────────────────────
-
-    async def subscribe_to_bus(self, bus: Any) -> None:
-        """Subscribe an async handler to *ConversationTurn* events on *bus*.
-
-        The handler calls :meth:`record_turn` for each event, so REPL turn
-        recording is non-blocking: the REPL emits and forgets; SQLite writes
-        happen asynchronously in the background.
-        """
-
-        async def _on_turn_event(event: Any) -> None:
-            data = event.data
-            session_id = data.get("session_id")
-            role = data.get("role")
-            content = data.get("content")
-            if session_id and role and content:
-                try:
-                    await self.record_turn(
-                        session_id=session_id,
-                        role=role,
-                        content=content,
-                        model=data.get("model_used"),
-                        tokens=data.get("tokens_used"),
-                    )
-                except Exception as exc:
-                    logger.warning("Bus turn-handler failed: %s", exc)
-
-        await bus.subscribe("ConversationTurn", _on_turn_event)
-        logger.debug("EpisodicMemory subscribed to ConversationTurn events")
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────

@@ -14,7 +14,6 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.document import Document
-from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.history import History
 from prompt_toolkit.key_binding import KeyBindings
@@ -23,7 +22,6 @@ from prompt_toolkit.layout.containers import Float, HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.layout.processors import BeforeInput, ConditionalProcessor
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
 from rich.console import Console
@@ -112,7 +110,7 @@ class _ConsoleSink:
             self._pending = ""
 
 
-def _build_floats(command_palette: Any | None) -> list[Float]:
+def _build_floats(command_palette: Any | None, model_switcher: Any | None = None) -> list[Float]:
     """The CompletionsMenu float (model-id/@@symbol completion), plus the
     command palette's float when one is supplied.
 
@@ -138,6 +136,20 @@ def _build_floats(command_palette: Any | None) -> list[Float]:
                 z_index=20,
             )
         )
+    if model_switcher is not None:
+        # Upper-right, compact — distinct from the palette's full-width box
+        # so the two never visually compete (they're triggered differently:
+        # typing "/" vs. Alt+Up/Down).
+        floats.append(
+            Float(
+                content=model_switcher.container(),
+                right=2,
+                top=1,
+                height=14,
+                allow_cover_cursor=True,
+                z_index=20,
+            )
+        )
     return floats
 
 
@@ -156,6 +168,7 @@ class FullscreenREPLUI:
         on_interrupt: Any,
         on_status_render: Any | None = None,
         command_palette: Any | None = None,
+        model_switcher: Any | None = None,
         home_provider: Any | None = None,
         input: Any | None = None,
         output: Any | None = None,
@@ -243,7 +256,6 @@ class FullscreenREPLUI:
                 "separator": f"bg:{design.BACKGROUND} {design.BACKGROUND}",  # Hide separators for minimal look
                 "prompt": f"bg:{design.BACKGROUND} {design.WHITE}",
                 "prompt.prefix": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                "prompt.placeholder": f"bg:{design.BACKGROUND} {design.SECONDARY}",
                 "prompt.border": f"bg:{design.BACKGROUND} {design.FAINT}",
                 "prompt.hint": f"bg:{design.BACKGROUND} {design.FAINT} italic",
             }
@@ -297,24 +309,7 @@ class FullscreenREPLUI:
                         always_hide_cursor=True,
                     ),
                     Window(
-                        BufferControl(
-                            buffer=self.buffer,
-                            input_processors=[
-                                ConditionalProcessor(
-                                    BeforeInput(
-                                        FormattedText(
-                                            [
-                                                (
-                                                    "class:prompt.placeholder",
-                                                    "Type your request... ",
-                                                )
-                                            ]
-                                        )
-                                    ),
-                                    Condition(lambda: not self.buffer.text),
-                                )
-                            ],
-                        ),
+                        BufferControl(buffer=self.buffer),
                         height=Dimension(min=1, max=_PROMPT_MAX_LINES, preferred=1),
                         wrap_lines=True,
                         style="class:prompt",
@@ -327,7 +322,7 @@ class FullscreenREPLUI:
                     ),
                 ]
             ),
-            floats=_build_floats(command_palette),
+            floats=_build_floats(command_palette, model_switcher),
         )
 
         self._app = Application(

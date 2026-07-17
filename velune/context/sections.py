@@ -84,6 +84,18 @@ class ContextAssemblyReport:
     chunks_dropped: int = 0
     budget_exceeded: bool = False
 
+    def to_dict(self) -> dict:
+        """Convert to a JSON-serializable dict for trace/observability payloads."""
+        return {
+            "total_chunks_received": self.total_chunks_received,
+            "total_tokens_requested": self.total_tokens_requested,
+            "total_tokens_assembled": self.total_tokens_assembled,
+            "sections_present": [s.name for s in self.sections_present],
+            "sections_trimmed": {s.name: tokens for s, tokens in self.sections_trimmed.items()},
+            "chunks_dropped": self.chunks_dropped,
+            "budget_exceeded": self.budget_exceeded,
+        }
+
     def __str__(self) -> str:
         """Human-readable assembly report."""
         lines = [

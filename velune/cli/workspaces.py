@@ -46,6 +46,7 @@ _WORKSPACE_SCOPED_KEYS = frozenset(
         "runtime.embedding_pipeline",
         "runtime.semantic_memory_lance",
         "runtime.episodic_session_memory",
+        "runtime.three_brain_coordinator",
         "runtime.memory_lifecycle",
         "runtime.repository_cognition",
     }

@@ -32,6 +32,7 @@ STATUS_BAR_STYLES: dict[str, str] = {
     "bottom-toolbar.model": f"bg:{_BG} {design.MUTED}",
     "bottom-toolbar.mode": f"bg:{_BG} {design.MUTED}",
     "bottom-toolbar.ok": f"bg:{_BG} {design.MUTED}",
+    "bottom-toolbar.ctx-ok": f"bg:{_BG} {design.OK}",
     "bottom-toolbar.warn": f"bg:{_BG} {design.WARN}",
     "bottom-toolbar.danger": f"bg:{_BG} {design.DANGER}",
     "bottom-toolbar.hint": f"bg:{_BG} {design.MUTED} italic",
@@ -111,9 +112,9 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
 
     # Context usage with visual bar
     pct = state.context_pct
-    if pct < 70:
-        ctx_style = "class:bottom-toolbar.ok"
-    elif pct < 90:
+    if pct < 60:
+        ctx_style = "class:bottom-toolbar.ctx-ok"
+    elif pct < 85:
         ctx_style = "class:bottom-toolbar.warn"
     else:
         ctx_style = "class:bottom-toolbar.danger"

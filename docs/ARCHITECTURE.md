@@ -148,7 +148,7 @@ orchestrator. It owns `CouncilArbitrator`, `ArchitectureCognitionAgent`,
 `CognitiveFirewall`, `CouncilScheduler` (sequential vs. concurrent execution
 across providers), `StyleResolver`, `CouncilAgentFactory`, and
 `CognitivePerformanceAnalytics`. It is wired into the DI container as
-`runtime.council_orchestrator`; `velune/orchestration/module.py` exposes the
+`runtime.council_orchestrator`; `velune/orchestration/subsystems.py` exposes the
 same instance again as `runtime.orchestration_engine` — `velune/orchestration/`
 is an alias module, not a separate engine, despite the separate package name.
 
@@ -196,7 +196,7 @@ tier system as user-facing overrides, not a separate mechanism.
 ## 5. Memory system
 
 Five tiers, each with its own class and backing store, wired in
-`velune/memory/module.py`:
+`velune/memory/subsystems.py`:
 
 | Tier | Class | Store |
 | --- | --- | --- |

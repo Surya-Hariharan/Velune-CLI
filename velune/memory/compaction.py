@@ -158,20 +158,17 @@ class ContextCompactor:
             logger.warning("Summary failed quality check")
             return None
 
-        # Store summary in episodic memory
+        # Store summary in episodic memory. EpisodicMemory.record_turn()'s
+        # schema has no metadata column (unlike the legacy EpisodicMemoryTier),
+        # so the compaction tag/counts live only in the working-memory turn
+        # _replace_turns_with_summary() adds below, not here.
         summary_token_count = self._estimate_tokens_string(summary)
         try:
             await self.episodic_memory.record_turn(
                 session_id=session_id,
                 role="system",
                 content=summary,
-                metadata={
-                    "tag": "compaction_summary",
-                    "original_turn_count": original_turn_count,
-                    "original_token_count": original_token_count,
-                    "summary_token_count": summary_token_count,
-                    "compacted_at": time.time(),
-                },
+                tokens=summary_token_count,
             )
         except Exception as e:
             logger.warning(f"Failed to store compaction summary: {e}")
@@ -400,107 +397,3 @@ Provide a compact summary:"""
         return max(1, len(text) // 4)
 
 
-class HierarchicalSummaryGenerator:
-    """Generates hierarchical summaries at session end."""
-
-    def __init__(self, provider: Any, episodic_memory: Any) -> None:
-        """Initialize generator.
-
-        Parameters
-        ----------
-        provider:
-            LLM provider for meta-summarization
-        episodic_memory:
-            EpisodicMemory for storing session summaries
-        """
-        self.provider = provider
-        self.episodic_memory = episodic_memory
-
-    async def generate_session_summary(
-        self,
-        session_id: str,
-        compaction_summaries: list[str],
-    ) -> str | None:
-        """Generate session-level summary from compaction summaries.
-
-        Takes all compaction summaries from a session and generates
-        a single meta-summary for session-level retrieval.
-
-        Parameters
-        ----------
-        session_id:
-            Session ID
-        compaction_summaries:
-            List of compaction summaries from the session
-
-        Returns
-        -------
-        str | None:
-            Session summary text or None if generation failed
-        """
-        if not compaction_summaries:
-            return None
-
-        from velune.core.types.inference import InferenceRequest
-
-        # Combine summaries
-        combined = "\n\n".join(compaction_summaries)
-
-        prompt = f"""Generate a concise session-level summary from these conversation summaries.
-
-Focus on:
-- Overall goals and objectives
-- Major decisions and outcomes
-- Key problems identified and solved
-- Files and systems affected
-- Next steps or action items
-
-Summaries:
-{combined}
-
-Provide a brief (200-300 word) session summary:"""
-
-        try:
-            request = InferenceRequest(
-                model_id=self.provider.default_model
-                if hasattr(self.provider, "default_model")
-                else "gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=500,
-            )
-
-            response = await self.provider.infer(request)
-            return response.content if response else None
-
-        except Exception as e:
-            logger.error(f"Failed to generate session summary: {e}")
-            return None
-
-    async def store_session_summary(
-        self,
-        session_id: str,
-        summary: str,
-    ) -> bool:
-        """Store session-level summary.
-
-        Parameters
-        ----------
-        session_id:
-            Session ID
-        summary:
-            Summary text
-
-        Returns
-        -------
-        bool:
-            True if storage succeeded
-        """
-        try:
-            # Store as session summary metadata
-            # This would integrate with session management
-            logger.info(f"Session {session_id} summary stored: {len(summary)} chars")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to store session summary: {e}")
-            return False

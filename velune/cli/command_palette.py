@@ -30,7 +30,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import Frame
 
 from velune.cli import design
-from velune.cli.autocomplete import CATEGORY_ORDER, fuzzy_score
+from velune.cli.autocomplete import CATEGORY_ORDER
 from velune.cli.slash_commands import SlashCommand
 
 if TYPE_CHECKING:
@@ -121,28 +121,54 @@ class CommandPaletteModel:
         return text[1:]
 
     @staticmethod
-    def _field_score(query: str, command: SlashCommand) -> int:
+    def _contains_score(query: str, candidate: str, *, allow_substring: bool = True) -> int:
+        """Exact/prefix[/substring] match only — no letter-scatter subsequence tier.
+
+        Search terms are short curated keywords ("credentials", "background"),
+        not identifiers a user is abbreviating. Subsequence matching against
+        them finds the query's letters scattered in order almost anywhere,
+        which is coincidental noise rather than a real match. Command names
+        and aliases go further and disable the substring tier too
+        (``allow_substring=False``): a query of "c" must only surface commands
+        that *start with* "c", not ones like /doctor or /mcp that merely
+        contain a "c" somewhere in the middle.
+        """
+        query = query.lower()
+        candidate_l = candidate.lower()
+        if query == candidate_l:
+            return 1000
+        if candidate_l.startswith(query):
+            return 500 - len(candidate_l)
+        if allow_substring and query in candidate_l:
+            return 250 - candidate_l.index(query)
+        return 0
+
+    @classmethod
+    def _field_score(cls, query: str, command: SlashCommand) -> int:
         if not query:
             return 1
 
-        # Command names and aliases are intent-bearing, so they outrank a
-        # coincidental match in prose. Search terms let domain words such as
-        # "anthropic" lead to the provider-management command.
-        name_score = fuzzy_score(query, command.name) * 5
+        # Matching is scoped to intent-bearing fields only: the command name,
+        # its aliases, and its curated search terms (domain words such as
+        # "anthropic" that should lead to the provider-management command).
+        # Description/usage/category text is prose, not deliberately chosen
+        # search vocabulary — fuzzy-matching against it let a typed query like
+        # "coun" surface /godly, /run, and /model purely because those long
+        # strings happened to contain the right letters somewhere, burying the
+        # commands that actually start with "coun" among unrelated ones.
+        name_score = cls._contains_score(query, command.name, allow_substring=False) * 5
         alias_score = max(
-            (fuzzy_score(query, alias) * 5 for alias in command.aliases),
+            (
+                cls._contains_score(query, alias, allow_substring=False) * 5
+                for alias in command.aliases
+            ),
             default=0,
         )
         term_score = max(
-            (fuzzy_score(query, term) * 4 for term in command.search_terms),
+            (cls._contains_score(query, term) * 4 for term in command.search_terms),
             default=0,
         )
-        detail_score = max(
-            fuzzy_score(query, command.description),
-            fuzzy_score(query, command.usage),
-            fuzzy_score(query, command.category),
-        )
-        return max(name_score, alias_score, term_score, detail_score)
+        return max(name_score, alias_score, term_score)
 
     def _recent_names(self) -> list[str]:
         if self._recency_source is None:

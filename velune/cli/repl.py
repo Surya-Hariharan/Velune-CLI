@@ -17,7 +17,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 _log = logging.getLogger("velune.cli.repl")
 
@@ -51,6 +51,7 @@ class VeluneREPL:
         )
         self._completer = None
         self._command_palette = None
+        self._model_switcher = None
         self.session_tokens: int = 0
         self.session_cost: float = 0.0
         self._history_file = Path.home() / ".velune" / "repl_history"
@@ -186,6 +187,7 @@ class VeluneREPL:
         from velune.cli.autocomplete import CommandEntry, SlashCompleter
         from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
         from velune.cli.fullscreen import FullscreenREPLUI
+        from velune.cli.model_switcher import MODEL_SWITCHER_STYLES, ModelSwitcher
         from velune.cli.statusbar import STATUS_BAR_STYLES
         from velune.cli.validators import InlineSyntaxValidator
 
@@ -193,6 +195,7 @@ class VeluneREPL:
             "prompt.arrow": f"{design.ACCENT_SOFT} bold",
             **STATUS_BAR_STYLES,
             **PALETTE_STYLES,
+            **MODEL_SWITCHER_STYLES,
         }
 
         try:
@@ -225,8 +228,12 @@ class VeluneREPL:
         )
         self._command_palette = palette
 
+        model_switcher = ModelSwitcher(self)
+        self._model_switcher = model_switcher
+
         kb = KeyBindings()
         palette.add_bindings(kb)
+        model_switcher.add_bindings(kb)
 
         def _interrupt(event):
             if self._interrupts.note_interrupt():
@@ -244,6 +251,7 @@ class VeluneREPL:
             on_interrupt=_interrupt,
             on_status_render=self._refresh_status_state,
             command_palette=palette,
+            model_switcher=model_switcher,
             home_provider=self._home_state,
         )
 
@@ -772,46 +780,51 @@ class VeluneREPL:
         self.console.print(" · ".join(parts))
 
     async def _emit_turn_events(
-        self, user_text: str, response_text: str, model_id: str, tokens: int
+        self,
+        user_text: str,
+        response_text: str,
+        model_id: str,
+        tokens: int,
+        intent: Any | None = None,
+        intent_confidence: float | None = None,
+        context_report: Any | None = None,
     ) -> None:
         try:
             from velune.events import Event
+
+            sections_present: list[str] = []
+            data: dict[str, Any] = {
+                "user": user_text[:200],
+                "response": response_text[:200],
+                "model_id": model_id,
+                "tokens": tokens,
+            }
+            if intent is not None:
+                data["intent"] = str(intent)
+                data["intent_confidence"] = intent_confidence
+            if context_report is not None:
+                report_dict = context_report.to_dict()
+                data["context_report"] = report_dict
+                sections_present = report_dict.get("sections_present", [])
+                data["three_brain"] = {
+                    "retrieved_context_present": "RETRIEVED_CONTEXT" in sections_present,
+                    "cognitive_continuity_present": "COGNITIVE_CONTINUITY" in sections_present,
+                }
+                data["repository_brain"] = {
+                    "snapshot_present": "REPOSITORY_SNAPSHOT" in sections_present,
+                    "drift_present": "ARCHITECTURAL_DRIFT" in sections_present,
+                }
 
             bus = self.container.get("runtime.bus")
             await bus.emit(
                 Event(
                     event_type="turn.completed",
                     source="repl",
-                    data={
-                        "user": user_text[:200],
-                        "response": response_text[:200],
-                        "model_id": model_id,
-                        "tokens": tokens,
-                    },
+                    data=data,
                 )
             )
         except Exception:
             pass
-
-    async def _retrieve_semantic_context(self, text: str) -> str | None:
-        try:
-            import asyncio as _asyncio
-
-            from velune.retrieval.schemas import RetrievalQuery
-
-            retrieval = self.container.get("runtime.retrieval")
-            if not retrieval:
-                return None
-            query = RetrievalQuery(text=text, top_k=3)
-            result = await _asyncio.wait_for(retrieval.retrieve(query), timeout=2.0)
-            if not result or not result.hits:
-                return None
-            snippets = "\n\n".join(
-                hit.document.content for hit in result.hits if hit.document.content
-            )
-            return f"[Relevant past context]\n{snippets}" if snippets else None
-        except Exception:
-            return None
 
     async def _start_episodic_session(self) -> None:
         try:
@@ -819,7 +832,9 @@ class VeluneREPL:
             workspace = str(self.container.get("runtime.workspace") or "")
             model_id = self.active_model.model_id if self.active_model else "unknown"
             self._episodic_session_id = await episodic.start_session(
-                workspace=workspace, model_id=model_id
+                workspace_root=workspace,
+                model=model_id,
+                mode=self._mode_manager.current.value,
             )
         except Exception as exc:
             _log.debug("Could not start episodic session: %s", exc)
@@ -829,11 +844,46 @@ class VeluneREPL:
             return
         try:
             episodic = self.container.get("runtime.episodic_session_memory")
-            await episodic.end_session(self._episodic_session_id, self._conversation)
+            await episodic.end_session(self._episodic_session_id)
         except Exception as exc:
             _log.debug("Could not end episodic session: %s", exc)
         finally:
             self._episodic_session_id = None
+
+    def _record_turn_async(
+        self,
+        role: str,
+        content: str,
+        model_id: str,
+        workspace_root: str,
+        tokens: int | None = None,
+    ) -> None:
+        """Fire-and-forget ``MemoryLifecycleManager.record_turn()`` for one turn.
+
+        Tracked via the background task registry so a slow SQLite/embedding
+        write never blocks the prompt loop; ``record_turn`` already
+        try/excepts each tier write internally and triggers compaction.
+        """
+        try:
+            manager = self.container.get("runtime.memory_lifecycle")
+        except Exception:
+            return
+        if not manager:
+            return
+
+        track(
+            asyncio.create_task(
+                manager.record_turn(
+                    session_id=self._episodic_session_id or "unknown",
+                    role=role,
+                    content=content,
+                    model=model_id,
+                    tokens=tokens,
+                    workspace_root=workspace_root,
+                ),
+                name=f"record_turn_{role}",
+            )
+        )
 
     async def _handle_prompt(self, text: str) -> None:
         """Process a freeform (non-slash-command) user prompt."""
@@ -899,32 +949,18 @@ class VeluneREPL:
 
         mode_config = self._mode_manager.config
 
-        if mode_config.context_compression and self._conversation:
-            from velune.context.extractive import compress_conversation
-
-            self._conversation = compress_conversation(
-                self._conversation,
-                max_tokens=mode_config.max_context_tokens,
-            )
-
-        retrieved_context = await self._retrieve_semantic_context(text)
-
-        # Budget the turn from the session mode and the model's real context
-        # window (replaces the old fixed [-50:] slice and max_tokens=4096):
-        # small local models never overflow their window; large models keep
-        # far more history and get a properly sized reply reservation.
+        # Canonical context assembly: ContextAssembler (priority ordering,
+        # trust-based trimming, budget enforcement) fed by IntentClassifier,
+        # ThreeBrainCoordinator, and the cached Repository Brain snapshot —
+        # replaces the old ad-hoc compress/retrieve/fit_messages sequence.
+        from velune.cli.handlers.prompt_context import build_turn_context
         from velune.context.budget import ContextBudget
-        from velune.context.window import fit_messages
+
+        effective_messages, context_report, intent, intent_confidence = await build_turn_context(
+            self, text, model
+        )
 
         budget = ContextBudget.for_chat(self._mode_manager.current, model.context_length)
-        base_messages = fit_messages(self._conversation, budget.usable_tokens)
-        if retrieved_context:
-            effective_messages = base_messages[:-1] + [
-                {"role": "system", "content": retrieved_context},
-                base_messages[-1],
-            ]
-        else:
-            effective_messages = base_messages
 
         request = InferenceRequest(
             model_id=model.model_id,
@@ -932,6 +968,9 @@ class VeluneREPL:
             temperature=mode_config.temperature,
             max_tokens=budget.output_reservation,
         )
+
+        turn_workspace = str(self.container.get("runtime.workspace") or "")
+        self._record_turn_async(role="user", content=text, model_id=model.model_id, workspace_root=turn_workspace)
 
         # Native tool loop first (models that support function calling can act
         # on the workspace); returns None when unsupported/disabled, in which
@@ -993,11 +1032,26 @@ class VeluneREPL:
         self._autosave()
         effective_tokens = tokens_used or len(assistant_text) // 4
         self._display_usage(model, effective_tokens)
+        self._record_turn_async(
+            role="assistant",
+            content=assistant_text,
+            model_id=model.model_id,
+            workspace_root=turn_workspace,
+            tokens=effective_tokens,
+        )
         from velune.core.task_registry import track
 
         track(
             asyncio.create_task(
-                self._emit_turn_events(text, assistant_text, model.model_id, effective_tokens),
+                self._emit_turn_events(
+                    text,
+                    assistant_text,
+                    model.model_id,
+                    effective_tokens,
+                    intent=intent,
+                    intent_confidence=intent_confidence,
+                    context_report=context_report,
+                ),
                 name="emit_turn_events",
             )
         )

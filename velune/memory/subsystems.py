@@ -87,6 +87,19 @@ def _create_episodic_session_memory(env: RuntimeEnvironment):
     return EpisodicMemory(pool)
 
 
+def _create_three_brain_coordinator(env: RuntimeEnvironment):
+    from velune.memory.three_brain import ThreeBrainCoordinator
+
+    working = env.container.get("runtime.working_memory")
+    semantic = env.container.get("runtime.semantic_memory_lance")
+    episodic = env.container.get("runtime.episodic_session_memory")
+    kg_query = env.container.get("runtime.knowledge_query") if env.container.has(
+        "runtime.knowledge_query"
+    ) else None
+    bus = env.container.get("runtime.bus") if env.container.has("runtime.bus") else None
+    return ThreeBrainCoordinator(working, semantic, episodic, kg_query=kg_query, bus=bus)
+
+
 def _create_memory_lifecycle(env: RuntimeEnvironment):
     from velune.memory.lifecycle import MemoryLifecycleManager
 
@@ -96,6 +109,12 @@ def _create_memory_lifecycle(env: RuntimeEnvironment):
     semantic_memory = env.container.get("runtime.semantic_memory_lance")
     embedding_pipeline = env.container.get("runtime.embedding_pipeline")
     lineage_tier = env.container.get("runtime.lineage_memory")
+    three_brain = env.container.get("runtime.three_brain_coordinator")
+    provider_registry = (
+        env.container.get("runtime.provider_registry")
+        if env.container.has("runtime.provider_registry")
+        else None
+    )
 
     manager = MemoryLifecycleManager(
         working_tier=working_tier,
@@ -104,6 +123,8 @@ def _create_memory_lifecycle(env: RuntimeEnvironment):
         embedding_pipeline=embedding_pipeline,
         lineage_tier=lineage_tier,
         episodic_session_memory=episodic_tier,
+        three_brain=three_brain,
+        provider_registry=provider_registry,
     )
 
     # Register health hook if monitor is available
@@ -202,6 +223,18 @@ MEMORY_MODULES = [
         dependencies=["runtime.sqlite_pool"],
     ),
     SubsystemModule(
+        name="three_brain_coordinator",
+        factory=_create_three_brain_coordinator,
+        container_key="runtime.three_brain_coordinator",
+        lifecycle_key="three_brain_coordinator",
+        dependencies=[
+            "runtime.working_memory",
+            "runtime.semantic_memory_lance",
+            "runtime.episodic_session_memory",
+            "runtime.knowledge_query",
+        ],
+    ),
+    SubsystemModule(
         name="memory_lifecycle",
         factory=_create_memory_lifecycle,
         container_key="runtime.memory_lifecycle",
@@ -213,6 +246,7 @@ MEMORY_MODULES = [
             "runtime.semantic_memory_lance",
             "runtime.embedding_pipeline",
             "runtime.lineage_memory",
+            "runtime.three_brain_coordinator",
         ],
     ),
 ]

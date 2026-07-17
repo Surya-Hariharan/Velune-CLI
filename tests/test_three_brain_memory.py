@@ -173,6 +173,35 @@ class TestThreeBrainCoordinatorProperties:
 
 
 # ---------------------------------------------------------------------------
+# initialize() — Phase 1 DI wiring hook
+# ---------------------------------------------------------------------------
+
+
+class TestInitialize:
+    async def test_initialize_subscribes_to_bus_when_bus_provided(self):
+        bus = _make_bus()
+        coord = ThreeBrainCoordinator(None, None, None, bus=bus)
+        await coord.initialize()
+        bus.subscribe.assert_called_once()
+        topic, _ = bus.subscribe.call_args[0]
+        assert topic == "repository.files_changed"
+
+    async def test_initialize_is_a_noop_without_a_bus(self):
+        coord = ThreeBrainCoordinator(None, None, None)
+        await coord.initialize()  # must not raise
+        assert coord.stale_file_count == 0
+
+    async def test_initialize_wires_staleness_tracking_end_to_end(self):
+        bus = _make_bus()
+        coord = ThreeBrainCoordinator(None, None, None, bus=bus)
+        await coord.initialize()
+
+        _, handler = bus.subscribe.call_args[0]
+        await handler(_make_event(added=["new.py"], updated=[], removed=[]))
+        assert coord.stale_file_count == 1
+
+
+# ---------------------------------------------------------------------------
 # Bus subscription and staleness tracking
 # ---------------------------------------------------------------------------
 

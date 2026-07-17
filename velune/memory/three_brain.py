@@ -158,16 +158,28 @@ class ThreeBrainCoordinator:
         semantic: Any | None,
         episodic: Any | None,
         kg_query: Any | None = None,
+        bus: Any | None = None,
     ) -> None:
         self._working = working  # WorkingMemoryTier | None
         self._semantic = semantic  # SemanticMemory | None
         self._episodic = episodic  # EpisodicMemory | None
         self._kg_query = kg_query  # KnowledgeQuery | None
+        self._bus = bus  # CognitiveBus | None — used only by initialize()
         self._stale_paths: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
+
+    async def initialize(self) -> None:
+        """Subscribe to repository-change events when a bus was provided.
+
+        Matches the ``hasattr(comp, "initialize")`` convention the
+        lifecycle coordinator already uses for other DI-managed subsystems,
+        so DI wiring doesn't need an async factory just to reach this call.
+        """
+        if self._bus is not None:
+            await self.subscribe_to_repository_events(self._bus)
 
     async def query(
         self,

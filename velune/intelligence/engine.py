@@ -149,7 +149,7 @@ class RepositoryIntelligenceEngine:
 
         # Seed git state before loops start so the first diff is accurate. This
         # engine is registered as a Tier-1 lifecycle component (see
-        # velune/intelligence/module.py); LifecycleCoordinator.startup() aborts
+        # velune/intelligence/subsystems.py); LifecycleCoordinator.startup() aborts
         # the *entire* app if a registered component's initialize() raises, so
         # a transient git failure (no git binary, detached worktree, ...) here
         # must never escape.

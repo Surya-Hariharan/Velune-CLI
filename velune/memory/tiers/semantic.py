@@ -335,8 +335,6 @@ class SemanticMemory:
       semantically similar past interactions before calling the model.
     * Call ``memory.index_turn(turn, workspace_root)`` after each conversation turn
       (non-blocking).
-    * Call ``await memory.subscribe_to_bus(bus, workspace_root)`` to auto-index
-      turns via ``ConversationTurn`` events.
     """
 
     def __init__(self, store: Any, pipeline: Any) -> None:
@@ -441,35 +439,3 @@ class SemanticMemory:
         if count:
             logger.info("SemanticMemory pruned %d low-vitality entries", count)
         return count
-
-    # ── Event bus wiring ──────────────────────────────────────────────────────
-
-    async def subscribe_to_bus(self, bus: Any, workspace_root: str = "") -> None:
-        """Subscribe an async handler to ``ConversationTurn`` events on *bus*.
-
-        Each event enqueues the turn for background embedding — no blocking.
-        """
-
-        def _on_turn_sync(event: Any) -> None:
-            data = event.data
-            content = data.get("content")
-            if not content:
-                return
-            role = data.get("role", "unknown")
-            from velune.memory.embedding_pipeline import EmbedQueueItem
-
-            self._pipeline.enqueue(
-                EmbedQueueItem(
-                    record_id=f"mem-{uuid.uuid4().hex[:12]}",
-                    turn_id=data.get("turn_id", ""),
-                    session_id=data.get("session_id", ""),
-                    role=role,
-                    content=content,
-                    source_type=f"turn_{role}",
-                    workspace_root=data.get("workspace_root", workspace_root),
-                    created_at=time.time(),
-                )
-            )
-
-        await bus.subscribe("ConversationTurn", _on_turn_sync)
-        logger.debug("SemanticMemory subscribed to ConversationTurn events")

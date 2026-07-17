@@ -258,6 +258,8 @@ class MemoryLifecycleManager:
         embedding_pipeline: Any,
         lineage_tier: Any,
         episodic_session_memory: Any | None = None,
+        three_brain: Any | None = None,
+        provider_registry: Any | None = None,
     ) -> None:
         """Initialize with all memory tier implementations.
 
@@ -275,6 +277,16 @@ class MemoryLifecycleManager:
             Decision and failure store (LineageMemoryTier).
         episodic_session_memory:
             Optional session memory tier (EpisodicMemoryTier, legacy).
+        three_brain:
+            Optional pre-built ThreeBrainCoordinator. ``retrieve()`` delegates
+            its multi-tier fan-out to this instance instead of reimplementing
+            it, so there is exactly one place that coordinates working/
+            semantic/episodic queries. If omitted, one is lazily built from
+            this manager's own tiers on first use.
+        provider_registry:
+            Optional provider registry used to resolve a real inference
+            provider for compaction summarization (see
+            ``_check_and_trigger_compaction``).
         """
         self.working = working_tier
         self.episodic_memory = episodic_memory
@@ -282,12 +294,24 @@ class MemoryLifecycleManager:
         self.embedding_pipeline = embedding_pipeline
         self.lineage = lineage_tier
         self.episodic_session_memory = episodic_session_memory
+        self._three_brain_coordinator = three_brain
+        self.provider_registry = provider_registry
 
         from velune.memory.vitality import VitalityClassifier
 
         self._vitality = VitalityClassifier()
         self._session_count = 0
         self._is_active = False
+
+    def _three_brain(self) -> Any:
+        """Return the shared ThreeBrainCoordinator, building one lazily if needed."""
+        if self._three_brain_coordinator is None:
+            from velune.memory.three_brain import ThreeBrainCoordinator
+
+            self._three_brain_coordinator = ThreeBrainCoordinator(
+                self.working, self.semantic_memory, self.episodic_memory
+            )
+        return self._three_brain_coordinator
 
     async def startup(self) -> None:
         """Initialize all memory tiers."""
@@ -395,8 +419,7 @@ class MemoryLifecycleManager:
             if not hasattr(self, "_compactor"):
                 from velune.memory.compaction import ContextCompactor
 
-                # Use first available provider (or default)
-                provider = None  # Will be set when needed
+                provider = self._resolve_compaction_provider()
                 self._compactor = ContextCompactor(
                     provider=provider,
                     working_tier=self.working,
@@ -425,6 +448,28 @@ class MemoryLifecycleManager:
         except Exception as exc:
             logger.debug("Error checking compaction trigger: %s", exc)
 
+    def _resolve_compaction_provider(self) -> Any | None:
+        """Resolve a real inference provider for compaction summarization.
+
+        Prefers the local "ollama" provider (cheap, no external cost) and
+        falls back to any provider with a configured key. Returns ``None``
+        (degrading ``ContextCompactor`` to a no-op) only when the registry
+        itself is unavailable or nothing is configured.
+        """
+        if not self.provider_registry:
+            return None
+        try:
+            provider = self.provider_registry.get("ollama")
+            if provider:
+                return provider
+            for name in self.provider_registry.list_available_providers():
+                provider = self.provider_registry.get(name)
+                if provider:
+                    return provider
+        except Exception as exc:
+            logger.debug("Could not resolve a compaction provider: %s", exc)
+        return None
+
     async def _perform_compaction(self, session_id: str) -> None:
         """Perform compaction asynchronously in the background.
 
@@ -452,8 +497,10 @@ class MemoryLifecycleManager:
     ) -> RetrievedContext:
         """Multi-tier retrieval: working → episodic (LIKE) → semantic (ANN).
 
-        Merges results from all tiers, filters by vitality, ranks by
-        (relevance × trust), and fits to token budget.
+        Fans out through the shared :class:`~velune.memory.three_brain.ThreeBrainCoordinator`
+        — the single place that coordinates working/semantic/episodic
+        queries — then applies this manager's own vitality/trust shaping and
+        fits results to the token budget.
 
         Parameters
         ----------
@@ -473,36 +520,41 @@ class MemoryLifecycleManager:
         accumulated_tokens = 0
 
         try:
-            # Step 1: Working memory (current session, fastest)
-            if self.working:
-                recent = self.working.get_recent_turns(limit=10)
-                for turn in recent:
-                    result = RetrievedResult(
-                        content=turn.content,
-                        source_type="working",
-                        relevance_score=0.95,  # High confidence for current session
-                        trust_score=1.0,
-                        vitality="live",
-                        session_id=turn.session_id,
-                        age_seconds=time.time() - turn.timestamp,
-                        attribution="current session",
-                    )
-                    tokens = self._estimate_tokens(turn.content)
-                    if accumulated_tokens + tokens <= budget:
-                        context.results.append(result)
-                        accumulated_tokens += tokens
-                    else:
-                        break
+            brain_result = await self._three_brain().query(
+                query,
+                session_id=workspace_root or "default",
+                workspace_root=workspace_root,
+                working_limit=10,
+                semantic_limit=5,
+                episodic_limit=10,
+            )
         except Exception as exc:
-            logger.debug("Working memory search failed: %s", exc)
+            logger.debug("ThreeBrainCoordinator query failed: %s", exc)
+            brain_result = None
 
-        # Step 2: Episodic memory (SQLite LIKE, fast but imprecise)
-        try:
-            if self.episodic_memory and accumulated_tokens < budget:
-                episodic_results = await self.episodic_memory.search_by_content(
-                    query, workspace_root, limit=10
+        if brain_result is not None:
+            # Working memory (current session, fastest)
+            for turn in brain_result.working_hits:
+                result = RetrievedResult(
+                    content=turn.content,
+                    source_type="working",
+                    relevance_score=0.95,  # High confidence for current session
+                    trust_score=1.0,
+                    vitality="live",
+                    session_id=turn.session_id,
+                    age_seconds=time.time() - turn.timestamp,
+                    attribution="current session",
                 )
-                for turn in episodic_results:
+                tokens = self._estimate_tokens(turn.content)
+                if accumulated_tokens + tokens <= budget:
+                    context.results.append(result)
+                    accumulated_tokens += tokens
+                else:
+                    break
+
+            # Episodic memory (SQLite LIKE, fast but imprecise)
+            if accumulated_tokens < budget:
+                for turn in brain_result.episodic_hits:
                     age = time.time() - turn.created_at
                     result = RetrievedResult(
                         content=turn.content,
@@ -520,14 +572,10 @@ class MemoryLifecycleManager:
                         accumulated_tokens += tokens
                     else:
                         break
-        except Exception as exc:
-            logger.debug("Episodic search failed: %s", exc)
 
-        # Step 3: Semantic memory (LanceDB ANN, slower but precise)
-        try:
-            if self.semantic_memory and accumulated_tokens < budget and self.embedding_pipeline:
-                semantic_results = await self.semantic_memory.search(query, workspace_root, limit=5)
-                for mem in semantic_results:
+            # Semantic memory (LanceDB ANN, slower but precise)
+            if accumulated_tokens < budget:
+                for mem in brain_result.semantic_hits:
                     # Map semantic memory's vitality to our enum
                     vitality = "live"
                     trust = mem.trust_score
@@ -554,10 +602,26 @@ class MemoryLifecycleManager:
                         accumulated_tokens += tokens
                     else:
                         break
-        except Exception as exc:
-            logger.debug("Semantic search failed: %s", exc)
 
-        # Step 4: Rank by (relevance × trust) and sort
+            # Repository Brain: code-graph context, lowest-trust source
+            if brain_result.kg_context and accumulated_tokens < budget:
+                tokens = self._estimate_tokens(brain_result.kg_context)
+                if accumulated_tokens + tokens <= budget:
+                    context.results.append(
+                        RetrievedResult(
+                            content=brain_result.kg_context,
+                            source_type="kg",
+                            relevance_score=0.6,
+                            trust_score=0.6,
+                            vitality="live",
+                            session_id="",
+                            age_seconds=0.0,
+                            attribution="repository knowledge graph",
+                        )
+                    )
+                    accumulated_tokens += tokens
+
+        # Rank by (relevance × trust) and sort
         for result in context.results:
             result.relevance_score *= result.trust_score
 
