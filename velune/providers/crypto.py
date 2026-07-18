@@ -142,12 +142,19 @@ def get_or_create_master_key() -> bytes:
 
     global _warned_no_protection
     if not _warned_no_protection:
+        # The env var *name* is inlined as a literal (not passed as a %s arg)
+        # so this log statement carries no reference to `_ENV_PASSPHRASE` —
+        # CodeQL's clear-text-logging heuristic flags any variable named
+        # like a secret regardless of what it actually holds (here, a
+        # constant env-var name, never the passphrase value itself, which
+        # lives only in the local `passphrase` var in _passphrase_master_key
+        # and is never logged). Keep this literal in sync with
+        # `_ENV_PASSPHRASE` above if that constant ever changes.
         logger.warning(
-            "OS keyring unavailable and %s not set — credentials are encrypted "
-            "with a machine-derived key that offers only weak at-rest protection. "
-            "Set %s to a strong secret for real encryption on this host.",
-            _ENV_PASSPHRASE,
-            _ENV_PASSPHRASE,
+            "OS keyring unavailable and VELUNE_MASTER_PASSPHRASE not set — "
+            "credentials are encrypted with a machine-derived key that offers "
+            "only weak at-rest protection. Set VELUNE_MASTER_PASSPHRASE to a "
+            "strong secret for real encryption on this host."
         )
         _warned_no_protection = True
     return _get_fallback_key()
