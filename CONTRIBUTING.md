@@ -1,41 +1,41 @@
-# Contributing to Velune
+# Contributing to Velune CLI
 
-Thank you for helping improve Velune! This guide covers development setup, how to add new providers, agents, and commands, and the review process.
+*Development setup, how to add providers/commands/agents, and the review
+process.*
 
-> **Important:** For anything larger than a small fix, open an issue first to discuss scope before writing code.
+> **Important:** For anything larger than a small fix, open an issue first
+> to discuss scope before writing code.
 
 ---
 
-## Table of contents
+## Contents
 
 - [Development setup](#development-setup)
 - [Running tests and linting](#running-tests-and-linting)
 - [How to add a new cloud provider](#how-to-add-a-new-cloud-provider)
+- [How to add a new top-level CLI command](#how-to-add-a-new-top-level-cli-command)
 - [How to add a new slash command](#how-to-add-a-new-slash-command)
-- [How to add a new council agent](#how-to-add-a-new-council-agent)
+- [How to add a new council agent or critic](#how-to-add-a-new-council-agent-or-critic)
 - [Pull request checklist](#pull-request-checklist)
 - [Commit message format](#commit-message-format)
 - [Code style](#code-style)
 - [Reporting bugs](#reporting-bugs)
+- [Review expectations](#review-expectations)
+- [Code of conduct](#code-of-conduct)
 
 ---
 
 ## Development setup
 
-Follow these steps to set up a local development environment.
-
 ```mermaid
 flowchart LR
-    A[Clone Repo] --> B[Create Venv]
-    B --> C[Activate Venv]
-    C --> D[Install Deps]
-    D --> E[Verify Setup]
-    
-    style A fill:#4CAF50,color:white
-    style B fill:#2196F3,color:white
-    style C fill:#FF9800,color:white
-    style D fill:#E91E63,color:white
-    style E fill:#9C27B0,color:white
+    A[Clone repo] --> B[Create venv]
+    B --> C[Activate venv]
+    C --> D[Install deps]
+    D --> E[Verify setup]
+
+    classDef step fill:#0a3d62,stroke:#3c6382,stroke-width:2px,color:#fff;
+    class A,B,C,D,E step;
 ```
 
 ```bash
@@ -47,6 +47,21 @@ source .venv/bin/activate          # macOS / Linux
 .venv\Scripts\activate             # Windows
 
 pip install -e ".[dev]"
+```
+
+`[dev]` installs `ruff`, `pyright`, `pre-commit`, `pip-audit`,
+`bandit[toml]`, `build`, `twine`, `pytest`, and `pytest-asyncio` — everything
+CI runs, minus the OS-level Go/Rust toolchains (only needed if you're
+touching `ext/go` or `ext/rust`). There is no committed lockfile; dependency
+resolution is `pyproject.toml` version floors, the same way CI resolves them.
+
+Optionally, install the pre-commit hooks so lint/format run automatically on
+`git commit` (ruff --fix, ruff-format, trailing-whitespace, end-of-file-fixer,
+check-yaml, check-added-large-files, check-merge-conflict, detect-private-key,
+then pyright):
+
+```bash
+pre-commit install
 ```
 
 Verify the install:
@@ -69,68 +84,78 @@ pytest tests/ -v
 
 # Lint (must pass before merging)
 ruff check velune/
+ruff format --check velune/
 
-# Type check (informational — not a merge gate yet)
-mypy velune/ --ignore-missing-imports
+# Type check (blocking — CI runs pyright, not mypy)
+pyright velune/
 
 # Coverage
 pytest tests/ --cov=velune --cov-report=term-missing -q
 ```
 
-All `ruff` and `pytest` checks must pass before a PR will be merged.
+All of `ruff check`, `ruff format --check`, `pyright`, and `pytest` must
+pass before a PR will be merged — see the `lint` and `test` jobs in
+[docs/DEVELOPMENT.md § CI pipeline](docs/DEVELOPMENT.md#4-ci-pipeline) for
+exactly what CI runs.
 
 ---
 
 ## How to add a new cloud provider
 
-This example adds a fictional **Cohere** provider.
-Follow the same pattern for any new cloud API.
+This example adds a fictional **Nebula** provider. Follow the same pattern
+for any new cloud API — Velune CLI ships 17 real provider adapters under
+`velune/providers/adapters/` you can use as references (`together.py` and
+`fireworks.py` are good OpenAI-compatible examples; `anthropic.py` and
+`google.py` are good from-scratch examples).
 
 ### Step 1 — Create the adapter
 
-`velune/providers/adapters/cohere.py`
+`velune/providers/adapters/nebula.py`
 
-Implement the `ModelProvider` protocol. If the API is OpenAI-compatible,
-inherit from `OpenAIProvider` and override only `provider_id` and the
-base URL:
+Implement the `ModelProvider` protocol
+(`infer()`, `stream()`, `list_models()`, `health_check()` —
+`velune/providers/base.py`). If the API is OpenAI-compatible, inherit from
+`OpenAIProvider` and override only `provider_id` and the base URL:
 
 ```python
 from velune.providers.adapters.openai import OpenAIProvider
 
-class CohereProvider(OpenAIProvider):
-    provider_id = "cohere"
+class NebulaProvider(OpenAIProvider):
+    provider_id = "nebula"
 
     def __init__(self, api_key: str | None = None) -> None:
         super().__init__(
             api_key=api_key,
-            base_url="https://api.cohere.com/compatibility/v1",
+            base_url="https://api.nebula.ai/compatibility/v1",
         )
 ```
 
 If the API is not OpenAI-compatible, inherit from `ModelProvider` directly
-and implement `infer()`, `stream()`, `list_models()`, and `health_check()`.
+(see `anthropic.py` for a from-scratch reference implementation).
 
 ### Step 2 — Create the discovery module
 
-`velune/providers/discovery/cohere.py`
+`velune/providers/discovery/nebula.py`
 
 The discovery module returns a hardcoded list of `ModelDescriptor` objects
-so the model registry can surface them without a live API call:
+so the model registry can surface them without a live API call. `discover()`
+is `async`, and the key check goes through the `keystore` module (not a
+from-imported name) so it stays live and patchable in tests:
 
 ```python
-from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
-from velune.providers.keystore import has_key
+from velune.core.types.model import CapabilityLevel, ModelDescriptor
+from velune.providers import keystore
 
-COHERE_MODELS: list[ModelDescriptor] = [
+NEBULA_MODELS: list[ModelDescriptor] = [
     ModelDescriptor(
-        model_id="command-r-plus",
-        provider_id="cohere",
-        display_name="Command R+",
+        model_id="nebula-large",
+        provider_id="nebula",
+        display_name="Nebula Large",
         context_length=128000,
-        capabilities=ModelCapabilityProfile(
-            coding=CapabilityLevel.ADVANCED,
-            reasoning=CapabilityLevel.ADVANCED,
-        ),
+        capabilities={
+            "coding": CapabilityLevel.ADVANCED,
+            "reasoning": CapabilityLevel.ADVANCED,
+        },
         is_local=False,
         speed_tier="medium",
         cost_per_1k_tokens=0.003,
@@ -138,11 +163,13 @@ COHERE_MODELS: list[ModelDescriptor] = [
 ]
 
 
-class CohereDiscovery:
-    def discover(self) -> list[ModelDescriptor]:
-        if not has_key("cohere"):
+class NebulaDiscovery:
+    provider_id = "nebula"
+
+    async def discover(self) -> list[ModelDescriptor]:
+        if not keystore.has_key("nebula"):
             return []
-        return COHERE_MODELS
+        return NEBULA_MODELS
 ```
 
 ### Step 3 — Register in the provider registry
@@ -151,35 +178,43 @@ class CohereDiscovery:
 
 ```python
 self.register_factory(
-    "cohere",
+    "nebula",
     self._keyed_factory(
-        "velune.providers.adapters.cohere", "CohereProvider", "cohere"
+        "velune.providers.adapters.nebula", "NebulaProvider", "nebula"
     ),
 )
 ```
 
-### Step 4 — Add to the setup wizard
+### Step 4 — Add display metadata
 
-`velune/cli/commands/setup.py` → `PROVIDER_METADATA` dict
+`velune/providers/catalog.py` → `_PROVIDERS` tuple
+
+This is the single source of truth for provider display metadata (name,
+description, free tier, key URL) — it replaced three independently
+hand-maintained copies of the same list, so this is the only file to touch
+for display metadata:
 
 ```python
-"cohere": {
-    "label": "Cohere (cloud — Command R+, paid)",
-    "requires_key": True,
-    "free": False,
-    "key_label": "Cohere API key",
-    "get_key_url": "https://dashboard.cohere.com/api-keys",
-},
+ProviderMeta(
+    id="nebula",
+    display_name="Nebula",
+    description="Fictional example cloud provider for this walkthrough.",
+    requires_key=True,
+    free_tier=False,
+    key_label="Nebula API key",
+    get_key_url="https://dashboard.nebula.ai/api-keys",
+    env_var=PROVIDER_ENV_VARS.get("nebula"),
+),
 ```
 
 ### Step 5 — Add the environment variable fallback
 
-`velune/providers/keystore.py` → `_ENV_VARS` dict
+`velune/providers/keystore.py` → `PROVIDER_ENV_VARS` dict
 
 ```python
-_ENV_VARS: dict[str, str] = {
+PROVIDER_ENV_VARS: dict[str, str] = {
     ...
-    "cohere": "COHERE_API_KEY",
+    "nebula": "NEBULA_API_KEY",
 }
 ```
 
@@ -190,56 +225,122 @@ _ENV_VARS: dict[str, str] = {
 ```python
 PROVIDER_COSTS: dict[str, dict[str, float]] = {
     ...
-    "cohere": {
-        "command-r-plus": 0.003,
-        "command-r":      0.0005,
+    "nebula": {
+        "nebula-large": 0.003,
+        "nebula-small": 0.0005,
     },
 }
 ```
 
 ### Step 7 — Write tests
 
-`tests/test_providers.py`
+There's no single canonical `test_providers.py` — provider tests are split
+across `tests/test_provider_manager.py`, `tests/test_provider_default.py`,
+and `tests/test_providers_extended.py`. Add discovery/cost-table tests to
+whichever most closely matches what you're testing, e.g.:
 
 ```python
-def test_cohere_discovery_skips_without_key(monkeypatch):
-    monkeypatch.setenv("COHERE_API_KEY", "")
-    from velune.providers.discovery.cohere import CohereDiscovery
-    assert CohereDiscovery().discover() == []
+async def test_nebula_discovery_skips_without_key(monkeypatch):
+    monkeypatch.setenv("NEBULA_API_KEY", "")
+    from velune.providers.discovery.nebula import NebulaDiscovery
+    assert await NebulaDiscovery().discover() == []
 
-def test_cohere_discovery_returns_models(monkeypatch):
-    monkeypatch.setenv("COHERE_API_KEY", "test-key")
-    from velune.providers.discovery.cohere import CohereDiscovery
-    models = CohereDiscovery().discover()
-    assert any(m.model_id == "command-r-plus" for m in models)
+async def test_nebula_discovery_returns_models(monkeypatch):
+    monkeypatch.setenv("NEBULA_API_KEY", "test-key")
+    from velune.providers.discovery.nebula import NebulaDiscovery
+    models = await NebulaDiscovery().discover()
+    assert any(m.model_id == "nebula-large" for m in models)
 
-def test_cohere_cost_table_entry():
+def test_nebula_cost_table_entry():
     from velune.telemetry.token_tracker import PROVIDER_COSTS
-    assert "cohere" in PROVIDER_COSTS
-    assert "command-r-plus" in PROVIDER_COSTS["cohere"]
+    assert "nebula" in PROVIDER_COSTS
 ```
 
 ### Step 8 — Update the README
 
-Add `Cohere` to the Providers table in [README.md](README.md).
+Add `Nebula` to the Providers table in [README.md](README.md).
+
+---
+
+## How to add a new top-level CLI command
+
+Top-level `velune <command>` entries (as opposed to REPL `/slash` commands,
+covered next) are a **declarative spec table**, not eager Typer
+registration — this keeps `velune --version` and `velune --help` from
+importing every command module's dependency tree on every invocation.
+
+### Step 1 — Add a `CommandSpec`
+
+`velune/cli/registry.py` → `COMMAND_SPECS` tuple
+
+```python
+CommandSpec(
+    "yourcommand",
+    "command",                              # or "typer" for a sub-app group
+    "velune.cli.commands.yourcommand",      # module — imported lazily
+    "yourcommand_command",                  # attribute to import from it
+    _CORE,                                  # panel/group shown in --help
+    "One-line description of what it does.",
+    bootstrap="full",                       # "light" for read-only/diagnostic commands
+),
+```
+
+Set `bootstrap="light"` only if the command doesn't touch memory,
+retrieval, cognition, or orchestration — that skips the expensive Tier-1
+subsystem bootstrap entirely and saves roughly 2 seconds of startup. See
+[docs/DEVELOPMENT.md § The bootstrap / DI layer](docs/DEVELOPMENT.md#1-the-bootstrap--di-layer).
+
+### Step 2 — Implement the command function
+
+`velune/cli/commands/yourcommand.py`
+
+The module and function are only imported when this specific command is
+invoked, so nothing else needs to change for lazy-import correctness — just
+write a normal Typer command function matching the `attr` name from the spec.
+
+### Step 3 — Write a test
+
+`tests/test_cli.py` builds the app with `create_app(register="__all__")` and
+drives it with Typer's `CliRunner` — follow the existing `test_doctor_help`-
+style tests there to invoke `--help` on your new command and assert it
+appears, then add focused tests for its actual logic:
+
+```python
+def test_yourcommand_help(app):
+    result = runner.invoke(app, ["yourcommand", "--help"])
+    assert result.exit_code == 0
+```
 
 ---
 
 ## How to add a new slash command
 
-### Step 1 — Register in the command registry
+REPL `/slash` commands are registered by a **factory function**, not a
+method on the REPL class — this keeps the 4,000+-line `repl.py` focused on
+execution logic rather than command-table bookkeeping.
 
-`velune/cli/repl.py` → `VeluneREPL._build_registry()`
+### Step 1 — Register in the slash registry
+
+`velune/cli/slash_dispatcher.py` → `build_slash_registry()`
 
 ```python
-registry.register(SlashCommand(
-    name="yourcommand",
-    aliases=["yc"],
-    description="One-line description of what it does",
-    usage="/yourcommand [optional-arg]",
-    handler=self._cmd_yourcommand,
-))
+registry.register(
+    SlashCommand(
+        name="yourcommand",
+        aliases=["yc"],
+        description="One-line description of what it does",
+        usage="/yourcommand [optional-arg]",
+        handler=repl._cmd_yourcommand,
+        examples=("/yourcommand", "/yourcommand foo"),
+        search_terms=("keyword", "another-keyword"),
+    )
+)
 ```
+
+Then add `"yourcommand": "YourCategory"` to the `_BUILTIN_CATEGORIES` dict
+at the top of the same file — this is the single source of truth for
+`/help` grouping and completion-menu grouping, and a test asserts every
+registered built-in has an entry (no silent fallback to "General").
 
 ### Step 2 — Implement the handler
 
@@ -259,108 +360,127 @@ Handlers must be `async`. Use `self.console.print()` for all output
 model_registry = self.container.get("runtime.model_registry")
 ```
 
-### Step 3 — Add to autocomplete
+### Step 3 — Write a test
 
-`velune/cli/autocomplete.py` → `SLASH_COMMANDS` list
-
-```python
-SLASH_COMMANDS: list[tuple[str, str]] = [
-    ...
-    ("yourcommand", "One-line description of what it does"),
-]
-```
-
-### Step 4 — Write a test
-
-`tests/test_repl.py`
+There's no single `test_repl.py` — REPL handler tests live in files like
+`tests/test_repl_prompt_turn.py`. Construct the REPL with
+`VeluneREPL.__new__(VeluneREPL)` (bypassing the heavyweight `__init__`) and
+set only the attributes your handler touches:
 
 ```python
-@pytest.mark.asyncio
-async def test_cmd_yourcommand(mock_runtime):
-    repl = VeluneREPL(mock_runtime)
+from unittest.mock import MagicMock
+from velune.cli.repl import VeluneREPL
+
+def _make_repl() -> VeluneREPL:
+    repl = VeluneREPL.__new__(VeluneREPL)
+    repl.container = MagicMock()
+    repl.console = MagicMock()
+    return repl
+
+async def test_cmd_yourcommand():
+    repl = _make_repl()
     await repl._cmd_yourcommand("some-arg")
-    mock_runtime.console.print.assert_called()
+    repl.console.print.assert_called()
 ```
+
+> **Debugging note:** if your handler doesn't seem to fire, check that it's
+> actually registered in `build_slash_registry()` — an implemented-but-
+> unregistered `_cmd_*` method fails silently (it just never appears in
+> `/help` or dispatch), it doesn't raise at import time.
 
 ---
 
-## How to add a new council agent
+## How to add a new council agent or critic
 
-### Step 1 — Create the agent
+The core council pipeline (`velune/cognition/council_runner.py`) is a
+**fixed six-phase sequence** — Planner → Coder → Reviewer loop → Challenger
+→ Debate → Synthesizer — not a per-tier configurable list. Adding a wholly
+new pipeline phase is a structural change to that runner, not a drop-in
+extension point.
 
-`velune/cognition/council/your_agent.py`
+The actual extension point is **critics** — specialized reviewers
+(currently Scalability, Security, Performance, Maintainability) that are
+config-driven and independently tier-gated in
+`velune/cognition/orchestrator.py`. Follow this pattern for a new critic:
 
-Inherit from `BaseCouncilAgent` and implement the required interface.
-Use an existing agent (e.g., `reviewer.py`) as a template:
+### Step 1 — Define the critic's config
+
+`velune/cognition/council/critic_configs.py`
 
 ```python
-from velune.cognition.council.base import BaseCouncilAgent
-from velune.cognition.council.messages import CouncilMessage
+from velune.cognition.council.critic_configs import CriticConfig
+from velune.models.specializations import CouncilRole
 
-class YourAgent(BaseCouncilAgent):
-    role_id = "your_agent"
+ACCESSIBILITY_CONFIG = CriticConfig(
+    name="Accessibility",
+    council_role=CouncilRole.REVIEWER,
+    system_prompt="""You are the Accessibility Critic for the Velune CLI Reasoning Council.
+Your role is to critique UI-facing changes for a11y regressions.
 
-    @property
-    def system_prompt(self) -> str:
-        return (
-            "You are a specialized agent that ..."
-        )
-
-    async def process(self, message: CouncilMessage) -> CouncilMessage:
-        response = await self._infer(message.content)
-        return message.with_response(self.role_id, response)
+OUTPUT EXCLUSIVELY A RAW VALID JSON OBJECT WITH NO CODEBLOCK WRAPPERS OR Markdown.
+JSON Format:
+{
+  "passed": true/false,
+  "issues": ["Issue description 1"],
+  "score": 0.0 to 1.0,
+  "rationale": "..."
+}
+""",
+    output_fields={"passed": True, "issues": [], "score": 0.9, "rationale": ""},
+)
 ```
 
-### Step 2 — Register in the agent factory
+### Step 2 — Create the critic class
 
-`velune/cognition/council/factory.py`
-
-Add the agent to the `_build_agents()` method so the factory can
-instantiate it at runtime:
+`velune/cognition/council/critics.py`
 
 ```python
-from velune.cognition.council.your_agent import YourAgent
-
-def _build_agents(self, ...) -> list[BaseCouncilAgent]:
-    return [
-        ...
-        YourAgent(provider=self._provider, model_id=self._model_id),
-    ]
+class AccessibilityCritic(CriticAgent):
+    def __init__(self, model: ModelDescriptor, provider: ModelProvider) -> None:
+        super().__init__(ACCESSIBILITY_CONFIG, model, provider)
 ```
 
-### Step 3 — Choose which tiers include the agent
+> `CriticAgent` itself is fully config-driven (its docstring literally says
+> "replace all specific critic classes with this") — a dedicated subclass
+> is only for symmetry with the existing four. You can skip this step and
+> instantiate `CriticAgent(ACCESSIBILITY_CONFIG, model, provider)` directly
+> in the factory method below if you'd rather not add a one-line class.
 
-`velune/cognition/council/tiers.py`
+### Step 3 — Register a factory method
 
-The `CouncilTier` enum and `classify_task_tier()` function control
-which agents run per tier:
+`velune/cognition/council/factory.py` → `CouncilAgentFactory`
+
+Add a `create_accessibility_critic(self, run_id: str)` method following the
+shape of the existing `create_scalability_critic` / `create_security_critic`
+/ `create_performance_critic` / `create_maintainability_critic` methods.
+
+### Step 4 — Wire tier gating
+
+`velune/cognition/orchestrator.py`, near the other `agent_factory.create_*`
+calls — gate instantiation on `tier_level` the same way the existing critics
+are (e.g. `tier_level >= 2` for lightweight critics, `tier_level >= 3` for
+more expensive ones):
 
 ```python
-class CouncilTier(str, Enum):
-    INSTANT  = "instant"   # Coder only
-    MINIMAL  = "minimal"   # Planner + Coder
-    STANDARD = "standard"  # Coder + Reviewer
-    FULL     = "full"      # All agents
+accessibility_critic = (
+    self.agent_factory.create_accessibility_critic(run_id) if tier_level >= 2 else None
+)
 ```
 
-Add `YourAgent` to the agent list for the tiers where it should fire.
-Prefer `FULL` for expensive agents and `STANDARD` or higher for
-lightweight ones.
+### Step 5 — Write tests
 
-### Step 4 — Write tests
-
-`tests/test_council.py` (or create it if it does not exist):
+There's no dedicated `test_council.py` yet — `tests/test_council_view.py`
+is the closest existing file (it currently only covers the display layer,
+not agent logic), so either extend it or start a new
+`tests/test_council_agents.py`. A critic's public entry point is
+`critique(task, proposal, context)`, returning a `CriticMessage`:
 
 ```python
-@pytest.mark.asyncio
-async def test_your_agent_processes_message(mock_provider):
-    from velune.cognition.council.your_agent import YourAgent
-    from velune.cognition.council.messages import CouncilMessage
-
-    agent = YourAgent(provider=mock_provider, model_id="test-model")
-    msg = CouncilMessage(content="refactor auth module")
-    result = await agent.process(msg)
-    assert result.responses.get("your_agent") is not None
+async def test_accessibility_critic_flags_issues(mock_provider):
+    from velune.cognition.council.critics import AccessibilityCritic
+    critic = AccessibilityCritic(model=mock_model, provider=mock_provider)
+    result = await critic.critique(task="...", proposal="...", context="...")
+    assert result.parse_error is None
 ```
 
 ---
@@ -371,10 +491,11 @@ Before requesting review:
 
 - [ ] All existing tests pass: `pytest tests/ -q`
 - [ ] New code has tests — unit tests for pure logic, integration
-      tests for provider/agent wiring
-- [ ] `ruff check velune/` shows zero issues
+      tests for provider/agent/slash-command wiring
+- [ ] `ruff check velune/` and `ruff format --check velune/` show zero issues
+- [ ] `pyright velune/` shows zero new errors
 - [ ] `velune doctor` passes on a clean install (check CI)
-- [ ] `CHANGELOG.md` has an entry under `[Unreleased]`
+- [ ] [CHANGELOG.md](CHANGELOG.md) has an entry under `[Unreleased]`
 - [ ] README updated if a user-facing feature was added
 - [ ] No secrets, `.env` files, or API keys committed
 - [ ] Branch targets `main` and is rebased to latest `main`
@@ -386,7 +507,7 @@ Before requesting review:
 Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```text
-feat: add Cohere provider adapter
+feat: add Nebula provider adapter
 fix: handle Ollama connection timeout gracefully
 docs: update MCP integration guide
 test: add tests for token tracker edge cases
@@ -402,15 +523,17 @@ For breaking changes add `!` after the type: `feat!: rename /run to /exec`
 
 ## Code style
 
-- **Python 3.11+** — use `X | Y` not `Optional[X]`, `list[str]` not
-  `List[str]`
+- **Python 3.10+** — use `X | Y` not `Optional[X]`, `list[str]` not
+  `List[str]` (`requires-python = ">=3.10"`; CI's `test` job runs the full
+  matrix down to 3.10, so don't rely on 3.11+-only syntax)
 - **async/await throughout** — no blocking I/O inside `async` functions;
   use `asyncio.to_thread()` for CPU-bound work if needed
 - **All user-facing output** goes through `self.console.print()` (Rich);
   never `print()`
 - **No `shell=True`** in subprocess calls — always pass a list of args
-- **API keys** always via `velune.providers.keystore.get_key()` — never
-  `os.getenv()` directly in provider code
+  (CI's `security` job fails the build if it finds one)
+- **API keys** always via `velune.providers.keystore.get_key()` / `has_key()`
+  — never `os.getenv()` directly in provider code
 - **File writes** inside the workspace go through the diff preview
   system — never `path.write_text()` directly in council agents
 - **No comments** explaining what the code does — use clear names.
@@ -427,9 +550,12 @@ velune --version
 velune doctor
 ```
 
-Include the exact command that failed, the full error message (run with `--verbose` for stack traces), and your OS and Python version.
+Include the exact command that failed, the full error message (run with
+`--verbose` for stack traces), and your OS and Python version.
 
-> **Caution:** Do not report security vulnerabilities in public issues. Report security vulnerabilities via [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new).
+> **Caution:** Do not report security vulnerabilities in public issues.
+> Report them via
+> [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new).
 
 ---
 

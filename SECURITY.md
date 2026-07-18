@@ -1,5 +1,16 @@
 # Security Policy
 
+## Contents
+
+- [Supported versions](#supported-versions)
+- [Reporting a vulnerability](#reporting-a-vulnerability)
+- [Response timeline](#response-timeline)
+- [Vulnerability lifecycle](#vulnerability-lifecycle)
+- [Engineering safeguards](#engineering-safeguards)
+- [Credits](#credits)
+
+---
+
 ## Supported versions
 
 Security fixes are triaged on `main`. Maintainers backport critical fixes to supported
@@ -73,18 +84,21 @@ for reasonable research activity; this is not a formal safe-harbor guarantee.
 
 ## Engineering safeguards
 
-For the full attacker model, trust boundaries, and per-surface controls, see
-[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+Velune CLI is local-first by design: the central guarantee is that untrusted input (LLM
+output, repository contents, web/MCP responses) cannot escalate into arbitrary code
+execution, credential theft, or cross-project data bleed without an explicit, visible
+user action. The controls below are the per-surface implementation of that guarantee.
 
 ### Managed command execution
 
-Velune runs shell commands through `SubprocessSandbox`
+Velune CLI runs shell commands through `SubprocessSandbox`
 (`velune/execution/sandbox.py`). To be precise about what this is: it is a **managed,
-resource-limited execution environment**, **not** an OS-level security sandbox. There
-is no namespace, seccomp, Job Object, or container isolation — commands run as the
-invoking user. The controls below constrain *what* can run and bound its resources;
-they do not isolate a process that is allowed to run. See
-[docs/THREAT_MODEL.md › B1](docs/THREAT_MODEL.md) for the full residual-risk analysis.
+resource-limited execution environment**, **not** an OS-level security sandbox by
+default. There is no namespace, seccomp, Job Object, or container isolation — commands
+run as the invoking user. The controls below constrain *what* can run and bound its
+resources; they do not isolate a process that is allowed to run. True OS-level
+isolation is available as an opt-in — see
+[Optional Docker sandbox](#optional-docker-sandbox) below.
 
 - **No shell** — commands run via `subprocess.Popen(argv, shell=False)`; the argv is
   parsed with `shlex` and inline shell operators (`;`, `&&`, `|`, backticks, `$(...)`)
@@ -108,7 +122,22 @@ they do not isolate a process that is allowed to run. See
 > **Known limitation.** Allowlisted interpreters and build tools (`python`, `node`,
 > `go`, `make`, …) can execute files that exist in the workspace with your privileges.
 > Treat command execution as "code you have allowed to run," not as a hard isolation
-> boundary. True OS-level isolation is tracked as roadmap work in the threat model.
+> boundary — unless the Docker sandbox below is enabled.
+
+### Optional Docker sandbox
+
+For real OS-level isolation, `velune/execution/docker_sandbox.py` provides a
+`DockerSandbox` that runs every command inside a per-session container with the
+workspace mounted as a volume, so agent-executed code cannot affect the host beyond
+that mount. It is **opt-in, not the default**:
+
+- Requires the `[docker]` extra and a reachable Docker daemon; falls back to
+  `SubprocessSandbox` automatically if Docker is unavailable.
+- Enable for all agent execution by setting `execution.docker_sandbox = true` in
+  `velune.toml`, or start/inspect it directly with `/sandbox docker` /
+  `/sandbox status` in the REPL.
+- Each session gets its own container (`velune-<random>`), stopped and removed at
+  session end; state does not persist across sessions.
 
 ### Filesystem protection
 
@@ -144,6 +173,17 @@ validates every server URL before the client connects:
 - Optional **host allowlist** (`[mcp] allowed_hosts` in `velune.toml`): when set, only
   listed hosts may be connected to — deny-by-default for everything else.
 
+### Workspace / project trust
+
+Separately from the URL-level checks above, `velune trust add|list|forget`
+(`velune/core/trust.py`) gates whether a *directory's* project-level config is honored
+at all. A trusted directory's `.mcp.json` / `velune.toml` may be loaded — which can
+spawn local MCP server processes and override provider `base_url`s; an untrusted
+directory falls back to user-level config only. Inside the REPL, `/approve
+[safe|ask|block]` is a separate, session-scoped control over whether individual
+tool/command calls need confirmation (`ask`, the default), run unattended when known
+read-only (`safe`), or are rejected outright (`block`).
+
 ### Plugin trust model
 
 Plugin sandboxing is **not yet implemented**. Plugins load in-process with full
@@ -155,8 +195,16 @@ isolation for plugins is tracked as future work.
 
 ### Secrets protection
 
-- API keys live in the OS keyring (BYOK) with environment-variable fallback; they are
-  never cached process-wide and never written into the workspace.
+- API keys live in the OS keyring (BYOK) with per-provider environment-variable
+  fallback (e.g. `GROQ_API_KEY`); they are never cached process-wide and never written
+  into the workspace.
+- On disk, keys are AES-GCM encrypted (`velune/providers/crypto.py`) under a master
+  key sourced with a strength-first fallback: an existing OS keyring entry, else a
+  newly generated one stored in the keyring, else a key derived from
+  `VELUNE_MASTER_PASSPHRASE` (PBKDF2-HMAC-SHA256, 390k iterations — for headless
+  servers, Docker, CI), and only as a last resort a weak machine-derived key so
+  credentials are never written in the clear. That last case logs a one-time warning
+  urging you to set `VELUNE_MASTER_PASSPHRASE`.
 - **Log redaction** (`velune/core/redaction.py`): a logging filter scrubs known key
   shapes (`sk-…`, `sk-ant-…`, `xai-…`, `gsk_…`, `hf_…`, `AIza…`, OpenRouter, Fireworks,
   Replicate), `Authorization: Bearer/Token` headers, and the live values of configured
@@ -164,6 +212,20 @@ isolation for plugins is tracked as future work.
 - The `.veluneignore` template excludes `.env`, `*.pem`, `*.key`, and other credential
   files from indexing; runtime artifacts (`*.db-wal`, `*.db-shm`, `velune.local.toml`)
   are excluded from commits and indexing.
+
+### Backup and recovery secrets
+
+`velune backup` (`velune/recovery/archive.py`) never writes API keys to an archive in
+the clear:
+
+- By default, provider keys are **excluded** from the backup entirely — the exported
+  `providers.json` carries only masked (`"***"`) key fields.
+- `velune backup --with-secrets` requires a passphrase and AES-GCM encrypts the real
+  key values into a separate `providers.json.enc` payload, using a key derived solely
+  from that passphrase (`encrypt_with_passphrase`) — independent of the OS-keyring key
+  above, so the archive stays restorable on a machine with no keyring entry. The
+  passphrase itself is never stored; it must be supplied again on `velune restore` to
+  decrypt.
 
 ### Workspace / memory isolation
 
@@ -183,6 +245,15 @@ isolation for plugins is tracked as future work.
 
 No analytics, crash reports, or code snippets are transmitted to external servers.
 All indexes and logs live exclusively in local, non-synced application storage.
+
+### Dependency security
+
+- `mcp>=1.28.1` is pinned in `pyproject.toml` specifically to floor out
+  CVE-2026-59950 in earlier `mcp` releases.
+- The former `[llamacpp]` extra was **permanently removed**: `llama-cpp-python` pulls
+  in `diskcache ≤ 5.6.3`, which has an unpatched unsafe pickle-deserialization RCE
+  risk with no fixed version available. See [Optional extras](README.md#optional-extras)
+  in the README for the current extras list.
 
 ---
 

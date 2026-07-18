@@ -1,17 +1,31 @@
 # Development Guide
 
-This is the internal engineering reference: how the codebase is put
-together at the framework level, how CI validates it, and how to reason
-about changes that cross subsystem boundaries. For "how do I set up a venv
-and open a PR," see [CONTRIBUTING.md](../CONTRIBUTING.md) — that doc owns
-the step-by-step contributor workflow; this one owns the *why* behind the
-structure so those steps make sense.
+*The internal engineering reference: how the codebase is put together at the
+framework level, how CI validates it, and how to reason about changes that
+cross subsystem boundaries.*
+
+For "how do I set up a venv and open a PR," see
+[CONTRIBUTING.md](../CONTRIBUTING.md) — that doc owns the step-by-step
+contributor workflow; this one owns the *why* behind the structure so those
+steps make sense.
+
+---
+
+## Contents
+
+- [1. The bootstrap / DI layer](#1-the-bootstrap--di-layer)
+- [2. Module boundaries — what depends on what](#2-module-boundaries--what-depends-on-what)
+- [3. Testing philosophy](#3-testing-philosophy)
+- [4. CI pipeline](#4-ci-pipeline)
+- [5. Extension points — the design pattern behind all of them](#5-extension-points--the-design-pattern-behind-all-of-them)
+- [6. Debugging tips specific to this codebase](#6-debugging-tips-specific-to-this-codebase)
+- [7. Where things live, cross-referenced](#7-where-things-live-cross-referenced)
 
 ---
 
 ## 1. The bootstrap / DI layer
 
-Everything in Velune beyond the Typer command dispatch runs on top of a
+Everything in Velune CLI beyond the Typer command dispatch runs on top of a
 small dependency-injection kernel in `velune/kernel/`:
 
 - **`ServiceContainer`** (`kernel/registry.py`) — a registry of named
@@ -22,21 +36,26 @@ small dependency-injection kernel in `velune/kernel/`:
   constructing subsystems directly.
 - **`RuntimeEnvironment`** (`kernel/bootstrap.py`) — the object every
   subsystem module receives to register its services against. It carries
-  workspace path, config, and hardware profile.
+  workspace path, config, the container, and the lifecycle coordinator.
 - **`SubsystemModule`** (`kernel/bootstrap.py`) — the unit of registration.
   Each major package (`memory`, `retrieval`, `cognition`, `mcp`, `resources`,
-  `hooks`, `plugins`, …) exposes a `module.py` with factory functions
-  (`_create_*`) that `RuntimeBootstrapper` wires into the container.
-- **Bootstrap levels** — `velune/cli/registry.py:CommandSpec.bootstrap` is
-  either `"light"` (Typer/config only — used by `velune --version`,
-  `velune config show`) or `"full"` (constructs the entire Tier-1 stack:
-  memory, retrieval, cognition, orchestration). This is the mechanism behind
-  Velune's near-zero-cost startup for simple commands — see
+  `hooks`, `plugins`, …) exposes a `module.py` with factory functions that
+  `RuntimeBootstrapper` wires into the container in dependency order. Each
+  `SubsystemModule` also declares a **`tier`**: `0` runs synchronously and
+  must be cheap (it blocks the prompt appearing — `/model`, `/help`); `1`
+  runs as background warm-up after the prompt is already interactive
+  (memory tiers, vector stores, retrieval, repository cognition,
+  orchestration).
+- **CLI bootstrap levels** — independently of subsystem tiers,
+  `velune/cli/registry.py:CommandSpec.bootstrap` is either `"light"`
+  (Typer/config only — used by `velune --version`, `velune config show`) or
+  `"full"` (constructs the entire Tier-1 stack). This is the mechanism
+  behind Velune CLI's near-zero-cost startup for simple commands — see
   [ARCHITECTURE.md § Process shape](ARCHITECTURE.md#1-process-shape).
 
 **Practical implication for contributors:** if you add a new subsystem,
-give it a `module.py` with a factory function and register it in the
-relevant `MODULES` tuple, rather than instantiating it inline wherever it's
+give it a `module.py` with a factory function and register it with the
+`RuntimeBootstrapper`, rather than instantiating it inline wherever it's
 used. Code that reaches for a service should go through `get_container()` /
 `inject()`, not import and construct the class directly — otherwise you get
 a second, unwired instance (see the `BoundedCouncilOrchestrator` /
@@ -51,7 +70,7 @@ which is exactly this mistake).
 Rough dependency direction (upper layers depend on lower ones, not the
 reverse):
 
-```
+```text
 cli/            ← REPL, commands, rendering — depends on everything below
 orchestration/  ← native tool loop, alias over CouncilOrchestrator
 cognition/      ← council pipeline — depends on memory, retrieval, repository
@@ -71,6 +90,12 @@ that's backwards — it means UI-layer concerns have leaked into a subsystem
 that should be usable headlessly (e.g. from `velune mcp serve`, which has
 no REPL at all).
 
+> `intelligence/` (change detection → incremental reindex) and `knowledge/`
+> (AI-queryable knowledge graph) sit alongside `repository/` at the same
+> layer, and `recovery/` sits alongside `core/` as a cross-cutting concern
+> (backup/restore/crash-recovery touches memory, sessions, config, and
+> providers, so it depends on all of them but nothing depends on it).
+
 ---
 
 ## 3. Testing philosophy
@@ -89,10 +114,11 @@ Some conventions worth knowing before adding tests:
   in-process, use it.
 - **New subsystems should ship with both a unit test and, if they're wired
   into the REPL, at least one test that exercises them through the actual
-  slash-command dispatch path** (`VeluneREPL._handle_slash_command` or the
-  relevant handler), not just the underlying class in isolation — dispatch
-  wiring bugs (a handler that's implemented but never registered) have been
-  a recurring category of bug in this codebase.
+  slash-command dispatch path** (`VeluneREPL._handle_slash_command`, or
+  `build_slash_registry()` in `velune/cli/slash_dispatcher.py`), not just
+  the underlying class in isolation — dispatch wiring bugs (a handler
+  that's implemented but never registered) have been a recurring category
+  of bug in this codebase.
 - **Dead-code checks**: before extending a class, grep for its importers.
   This codebase has more than one instance of a "second implementation"
   (see the council agents note above) accumulating because a refactor added
@@ -103,27 +129,36 @@ Some conventions worth knowing before adding tests:
 Run the suite the same way CI does:
 
 ```bash
-pytest tests/unit -q                                    # fast path
-pytest tests/ -v                                         # full suite
-pytest tests/ --cov=velune --cov-report=term-missing -q  # coverage
-ruff check velune/                                        # lint gate (blocking)
-mypy velune/ --ignore-missing-imports                      # type check (informational only, not yet a gate)
+pytest tests/unit -q                                       # fast path
+pytest tests/ -v                                            # full suite
+pytest tests/ --cov=velune --cov-report=term-missing -q     # coverage
+ruff check velune/                                           # lint (blocking)
+ruff format --check velune/                                  # format (blocking)
+pyright velune/                                               # type check (blocking)
 ```
+
+> `pyright`, not `mypy`, is the type checker CI actually gates on (see the
+> `lint` job below). `pyproject.toml`'s `[tool.pyright]` section runs in
+> `basic` mode with most optional-access/argument-type checks turned off —
+> it catches structural mistakes, not full strict typing.
 
 ---
 
 ## 4. CI pipeline
 
-`.github/workflows/ci.yml` runs on every push/PR:
+`.github/workflows/ci.yml` runs on every push/PR to `main` or `develop`,
+gated by a final `ci-pass` aggregation job:
 
 | Job | What it does |
 | --- | --- |
-| `lint` | `ruff check` — blocking |
-| `security` | Gitleaks secret scan (incremental on PRs, full on `main`) |
-| `test` | Full `pytest` run across the matrix: Python 3.10–3.13 × Ubuntu/Windows/macOS |
-| `build` | Builds sdist + wheel, `twine check --strict`, verifies the wheel is pure-python (`py3-none-any` — no compiled extension is required for the PyPI package), reproducible via `SOURCE_DATE_EPOCH` pinned to the commit date |
-| `build-go` | Builds/tests/vets the optional Go launcher under `ext/go/` (`cmd/velune`), matrix across all three OSes |
-| `build-rust` | Builds/tests the optional Rust native helpers under `ext/rust/velune-native/` (clippy + rustfmt), matrix across all three OSes |
+| `lint` | `ruff check`, `ruff format --check`, and `pyright velune/` — all blocking |
+| `security` | `pip-audit --skip-editable` (dependency vulnerabilities), `bandit` (static analysis, medium+ severity gates the build), a gitleaks secret scan (incremental on PRs — only the commits introduced by the push; full history on a fresh branch), plus two regression guards: no `shell=True` anywhere in `velune/`, and no more than one `asyncio.run()` call outside `plugins/runner.py` (a subprocess worker where it's intentional) |
+| `test` | `pip install -e ".[all,dev]"` then `pytest`, across the matrix: Python 3.10–3.13 × Ubuntu/Windows/macOS |
+| `build` | Builds sdist + wheel via **Hatchling** (`[build-system] requires = ["hatchling"]` in `pyproject.toml`), `twine check --strict`, verifies the wheel is pure-python (`py3-none-any` — no compiled extension required for the PyPI package), reproducible via `SOURCE_DATE_EPOCH` pinned to the commit date |
+| `build-go` | Builds/tests/vets the optional Go launcher under `ext/go/cmd/velune`, Go 1.26, matrix across all three OSes |
+| `build-rust` | Builds/tests the optional Rust native helpers under `ext/rust/velune-native/` (`cargo fmt --check`, `clippy -- -D warnings`, `cargo test --lib`), Rust stable, matrix across all three OSes |
+| `install-smoke` | Downloads the `build` job's wheel, installs it into a clean environment (not the source tree), and runs `velune --version`, `velune --help`, `python -m velune --version`, `velune doctor check` — matrix across OS × Python version |
+| `ci-pass` | Aggregation gate — fails if any of the above jobs didn't succeed; this is the single required status check for branch protection |
 
 `.github/workflows/release.yml` handles the publish path (separate from CI,
 triggered on tag push — see that file directly for the exact steps rather
@@ -132,10 +167,16 @@ architecture).
 
 **Key invariant the `build` job enforces:** the PyPI wheel must stay
 pure-Python. The Go and Rust components under `ext/` are validated in CI
-but are not required for `pip install velune-cli` to work — Velune keeps
+but are not required for `pip install velune-cli` to work — Velune CLI keeps
 pure-Python fallbacks for anything the Rust helpers would otherwise
 accelerate. Don't add a hard dependency on either native component to a
 code path that's supposed to work on a bare `pip install`.
+
+> There is no committed lockfile (no `uv.lock`, `poetry.lock`, or
+> `requirements.txt`) — dependency resolution is `pyproject.toml` floors
+> only, verified across the CI matrix rather than pinned. `[project.optional-dependencies].dev`
+> is `ruff`, `pyright`, `pre-commit`, `pip-audit`, `bandit[toml]`, `build`,
+> `twine`, `pytest`, `pytest-asyncio` — installed via `pip install -e ".[dev]"`.
 
 ---
 
@@ -148,7 +189,7 @@ feature.** Concretely:
 
 - A slash command, a hook binding, and an MCP server are all "data" (TOML,
   JSON) describing *what* to run and *when*, not code executed in-process
-  by Velune's own interpreter.
+  by Velune CLI's own interpreter.
 - All four load into the same core objects the built-ins use
   (`SlashCommandRegistry`, `HookDispatcher`, `MCPServerRegistry`) — so a
   plugin-provided command gets tab-completion, palette search, and `/help`
@@ -167,23 +208,30 @@ three registries over inventing a fourth loading mechanism.
 
 - **"My change to a handler isn't taking effect"** — check
   `slash_dispatcher.py:build_slash_registry()` actually points at the
-  module/function you edited; handlers are lazily imported by string
-  reference (`module_path`, `attr_name`), so a typo there fails silently at
-  dispatch time rather than at import time.
+  module/method you edited; handlers are bound directly to `VeluneREPL`
+  methods (`handler=repl._cmd_yourcommand`) at registry-build time, so a
+  typo in the method name fails at that call, not silently — but a command
+  that's implemented on the REPL class and never registered in
+  `build_slash_registry()` fails silently (it just never appears in
+  `/help` or dispatch).
 - **"Memory/retrieval results look stale or wrong"** — remember there are
   two vector stores (Qdrant for retrieval, LanceDB for memory lifecycle).
   Confirm which one the code path you're debugging actually reads from
   before assuming a shared cause.
   See [ARCHITECTURE.md § Memory system](ARCHITECTURE.md#5-memory-system).
-- **"A council task got escalated to FULL tier and I don't know why"** —
-  check the repository's import graph fan-in for whatever file was
-  mentioned; `TierClassifier` escalates independent of keywords when a
-  mentioned file has many dependents. This is intended behavior, not a bug,
-  but it surprises people the first time they see it.
-- **"Where does X actually get constructed?"** — grep for `_create_X` in
-  the relevant `module.py`, not for `class X` — construction is centralized
-  in factory functions registered with the DI container, not scattered at
-  call sites.
+- **"A council task got escalated to a higher tier and I don't know why"**
+  — check the repository's import graph fan-in for whatever file was
+  mentioned; `TierClassifier.classify()` (`cognition/council/tiers.py`)
+  escalates independent of keywords when a mentioned file has many
+  dependents (fan-in ≥ 5 floors the tier at `FULL`, ≥ 3 at `STANDARD`, ≥ 1
+  at `MINIMAL`). This is intended behavior, not a bug, but it surprises
+  people the first time they see it.
+- **"Where does X actually get constructed?"** — grep for the factory
+  method or `_create_X` function in the relevant `module.py` /
+  `factory.py`, not for `class X` — construction is centralized in
+  factories registered with the DI container (subsystems) or on
+  `CouncilAgentFactory` (council agents/critics), not scattered at call
+  sites.
 - **Windows-specific issues** — this project treats Windows as a first-class
   platform (see the CI matrix). Command execution sandboxing, PATH
   resolution (`shutil.which` + trusted-path checks in

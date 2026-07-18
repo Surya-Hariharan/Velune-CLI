@@ -252,7 +252,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="backup",
             aliases=[],
             description="Snapshot all Velune state (sessions, config, providers, memory, trust)",
-            usage="/backup [path] [--include a,b] [--no-secrets]",
+            usage="/backup [path] [--include a,b] [--with-secrets]",
             handler=repl._cmd_backup,
             examples=("/backup", "/backup --include sessions,memory"),
             search_terms=("backup", "snapshot", "archive", "export", "save state"),

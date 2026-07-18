@@ -1,11 +1,25 @@
 # Contributor Covenant Code of Conduct
 
+## Contents
+
+- [Our pledge](#our-pledge)
+- [Our standards](#our-standards)
+- [Enforcement responsibilities](#enforcement-responsibilities)
+- [Scope](#scope)
+- [Enforcement](#enforcement)
+- [Enforcement guidelines](#enforcement-guidelines)
+- [Attribution](#attribution)
+
+---
+
 ## Our pledge
 
-We as members, contributors, and maintainers pledge to make participation in Velune and our community a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, caste, color, religion, or sexual identity and orientation.
+We as members, contributors, and maintainers pledge to make participation in Velune CLI and our community a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, caste, color, religion, or sexual identity and orientation.
 
 We pledge to act and interact in ways that contribute to an open, welcoming,
 diverse, inclusive, and healthy community.
+
+---
 
 ## Our standards
 
@@ -30,6 +44,8 @@ Examples of unacceptable behaviour:
 - Other conduct which could reasonably be considered inappropriate in a
   professional setting
 
+---
+
 ## Enforcement responsibilities
 
 Maintainers are responsible for clarifying and enforcing our standards of
@@ -42,11 +58,15 @@ commits, code, wiki edits, issues, and other contributions that are not aligned 
 this Code of Conduct, and will communicate reasons for moderation decisions when
 appropriate.
 
+---
+
 ## Scope
 
 This Code of Conduct applies within all community spaces — the repository, issue
 tracker, pull requests, discussions, and any other official project channel — and
 also when an individual is officially representing the project in public spaces.
+
+---
 
 ## Enforcement
 
@@ -58,6 +78,8 @@ promptly and fairly.
 Maintainers who do not follow or enforce the Code of Conduct in good faith may
 face temporary or permanent repercussions as determined by other project
 maintainers.
+
+---
 
 ## Enforcement guidelines
 
@@ -99,6 +121,8 @@ toward or disparagement of classes of individuals.
 
 **Consequence:** A permanent ban from any sort of public interaction within the
 community.
+
+---
 
 ## Attribution
 
