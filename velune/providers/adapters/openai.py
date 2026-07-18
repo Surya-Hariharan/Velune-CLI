@@ -62,6 +62,22 @@ class OpenAIProvider(ModelProvider):
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
 
+    def _raise_provider_error(self, exc: httpx.HTTPError, action: str) -> None:
+        """Map an httpx failure to the right typed error.
+
+        A 401/403 is a verdict about the *key* and must surface as
+        :class:`ProviderAuthenticationError` — callers (council, preflight)
+        key off that type to persist the rejection and fail fast on the next
+        run. Everything else is a generic :class:`InferenceError`. Shared by
+        the Groq/OpenRouter subclasses.
+        """
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
+            raise ProviderAuthenticationError(
+                f"{self.provider_id} rejected the API key "
+                f"(HTTP {exc.response.status_code}) during {action}."
+            ) from exc
+        raise InferenceError(f"{self.provider_id} {action} failed: {exc}") from exc
+
     async def list_models(self) -> list[ModelDescriptor]:
         """Return the current OpenAI model lineup."""
         await self.initialize()
@@ -156,7 +172,8 @@ class OpenAIProvider(ModelProvider):
                 tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
-            raise InferenceError(f"OpenAI completion failed: {e}")
+            self._raise_provider_error(e, "completion")
+            raise  # unreachable — _raise_provider_error always raises
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         """Streaming chat completions.
@@ -208,7 +225,8 @@ class OpenAIProvider(ModelProvider):
                     metadata={"tool_calls": tool_calls},
                 )
         except httpx.HTTPError as e:
-            raise InferenceError(f"OpenAI stream failed: {e}")
+            self._raise_provider_error(e, "stream")
+            raise  # unreachable — _raise_provider_error always raises
 
     async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         """Generate batch embeddings."""
@@ -224,7 +242,8 @@ class OpenAIProvider(ModelProvider):
             sorted_data = sorted(data["data"], key=lambda x: x["index"])
             return [item["embedding"] for item in sorted_data]
         except httpx.HTTPError as e:
-            raise InferenceError(f"OpenAI embedding failed: {e}")
+            self._raise_provider_error(e, "embedding")
+            raise  # unreachable — _raise_provider_error always raises
 
     async def health_check(self) -> ProviderHealth:
         """Verifies API credentials and connectivity."""

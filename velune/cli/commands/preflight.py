@@ -119,10 +119,59 @@ async def run_preflight_check(
                 "       [bold green]velune init[/bold green]"
             )
 
-    # 2. Model availability — always required.
+    # 2. Model availability — always required. A model whose provider has
+    # actively rejected its key is not reachable: filter it out here and say
+    # so, rather than letting the council burn a full retry cycle against
+    # guaranteed 401s and returning garbage.
     registry = container.get("runtime.model_registry")
     models = registry.list_all()
-    if not models:
+
+    rejected: list[str] = []
+    ollama_down = False
+    try:
+        from velune.providers.keystore import (
+            KeyState,
+            is_ollama_live,
+            list_invalid_providers,
+            verification_state,
+        )
+
+        if models:
+            provider_ids = {m.provider_id for m in models}
+            invalid = {p for p in provider_ids if verification_state(p) is KeyState.INVALID}
+            if invalid:
+                usable = [m for m in models if m.provider_id not in invalid]
+                if not usable:
+                    rejected = sorted(invalid)
+                models = usable
+        else:
+            # No models at all: if that's because every configured key was
+            # rejected, "run a model scan" is the wrong advice — name the fix.
+            rejected = sorted(list_invalid_providers())
+
+        # Ollama manifest models are deliberately listed even when the daemon
+        # is down (they exist on disk) — but they can't answer anything. If
+        # they are all that's left, block with the one-command fix instead of
+        # letting the council fail five connection attempts.
+        if models and all(m.provider_id == "ollama" for m in models) and not is_ollama_live():
+            ollama_down = True
+            models = []
+    except Exception:
+        pass  # key-state / liveness lookup must never block a run on its own
+
+    if rejected:
+        fixes = "\n".join(f"       [bold green]velune login {pid}[/bold green]" for pid in rejected)
+        issues.append(
+            f"The API key for [bold]{', '.join(rejected)}[/bold] was rejected by the provider.\n"
+            "  [bold white]Fix:[/bold white] Save a fresh key:\n" + fixes
+        )
+    if ollama_down:
+        issues.append(
+            "Ollama models are installed, but the Ollama service isn't running.\n"
+            "  [bold white]Fix:[/bold white] Start it and retry:\n"
+            "       [bold green]ollama serve[/bold green]"
+        )
+    if not models and not rejected and not ollama_down:
         issues.append(_no_models_issue())
 
     if issues:

@@ -213,7 +213,8 @@ class BaseCouncilAgent(ABC):
                 logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)
                 return f"[Agent {self.role.value} timed out — using empty response]"
             except Exception as e:
-                logger.error("deliberation failed for agent %s: %s", self.role.value, e)
+                self._note_provider_failure(self.provider.provider_id, e)
+                logger.error("deliberation failed for agent %s: %s", self.role.value, str(e)[:300])
                 # Attempt fallback providers before giving up.
                 for fb_provider, fb_model in self._fallback_providers:
                     try:
@@ -241,12 +242,32 @@ class BaseCouncilAgent(ABC):
                         )
                         return fb_response.content
                     except Exception as fb_exc:
+                        self._note_provider_failure(fb_model.provider_id, fb_exc)
                         logger.warning(
                             "Fallback provider %s also failed: %s",
                             fb_model.provider_id,
-                            fb_exc,
+                            str(fb_exc)[:300],
                         )
                 return f"Deliberation failure inside agent {self.role.value}: {e}"
+
+    @staticmethod
+    def _note_provider_failure(provider_id: str, exc: Exception) -> None:
+        """Persist a definitive key rejection so the next run fails fast at preflight.
+
+        Only :class:`ProviderAuthenticationError` qualifies — it is raised solely
+        for 401-style verdicts, which say something about the key itself. Network
+        failures and rate limits must not poison the stored key state.
+        """
+        from velune.core.errors.provider import ProviderAuthenticationError
+
+        if not isinstance(exc, ProviderAuthenticationError):
+            return
+        try:
+            from velune.providers import keystore
+
+            keystore.mark_invalid(provider_id, reason=str(exc))
+        except Exception:  # noqa: BLE001 — key-state bookkeeping must never break a run
+            pass
 
     async def typed_deliberate(
         self,

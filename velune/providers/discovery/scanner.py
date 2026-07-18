@@ -98,9 +98,14 @@ class ModelDiscoveryScanner:
         """Return True if this discoverer should be queried."""
         if discoverer.provider_id in _LOCAL_PROVIDERS:
             return True
-        from velune.providers.keystore import has_key
+        from velune.providers.keystore import KeyState, has_key, verification_state
 
-        return has_key(discoverer.provider_id)
+        if not has_key(discoverer.provider_id):
+            return False
+        # A key the provider has actively rejected cannot yield usable models —
+        # listing them anyway lets the council seat roles that 401 on every
+        # call. `velune login <provider>` re-verifies and restores discovery.
+        return verification_state(discoverer.provider_id) is not KeyState.INVALID
 
     async def _collect(self, discoverer) -> list[ModelDescriptor]:
         """Run a single discoverer, returning [] on any failure."""

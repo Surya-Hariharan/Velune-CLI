@@ -55,18 +55,29 @@ def ask_command(
 async def _ask_command_async(
     cli_context: CLIContext, prompt: str, council_tier: str | None = None
 ) -> None:
-    # 1. Access services from DI container
-    container = cli_context.container
-    lifecycle = container.get("runtime.lifecycle")
-    model_registry = container.get("runtime.model_registry")
-    model_specialization = container.get("runtime.council_orchestrator").mapper
-    repo_cognition = container.get("runtime.repository_cognition")
-    orchestrator = container.get("runtime.council_orchestrator")
+    lifecycle = cli_context.container.get("runtime.lifecycle")
 
     # 2. Boot subsystems
     if not cli_context.json_mode:
         console.print("[dim]Thinking…[/dim]")
     await lifecycle.startup()
+    try:
+        await _ask_with_runtime(cli_context, prompt, council_tier)
+    finally:
+        # Shutdown must run on every exit path — including typer.Exit and
+        # council errors — or background tasks outlive the command.
+        await lifecycle.shutdown()
+
+
+async def _ask_with_runtime(
+    cli_context: CLIContext, prompt: str, council_tier: str | None = None
+) -> None:
+    container = cli_context.container
+    model_registry = container.get("runtime.model_registry")
+    model_specialization = container.get("runtime.council_orchestrator").mapper
+    repo_cognition = container.get("runtime.repository_cognition")
+    orchestrator = container.get("runtime.council_orchestrator")
+
     await model_registry.refresh()
 
     # Onboarding preflight gate. `ask` is a one-off question, so it works in any
@@ -87,8 +98,7 @@ async def _ask_command_async(
                     {"error": "No model available. Run `velune setup` to configure a provider."}
                 )
             )
-        await lifecycle.shutdown()
-        return
+        raise typer.Exit(code=1)
 
     if not cli_context.json_mode:
         from velune.cli.display.council_view import CouncilDisplayView
@@ -138,8 +148,19 @@ async def _ask_command_async(
     arbitration = council_res["arbitration"]
     final_summary = council_res["final_summary"]
 
+    # Total failure (wall-time exhausted or every agent call failed) is an
+    # error, not an answer: one actionable message and a non-zero exit code
+    # instead of rendering a degraded report and returning success.
+    if council_res.get("is_timeout"):
+        _render_council_failure(cli_context, final_summary, arbitration.get("flags", []))
+        raise typer.Exit(code=1)
+
     if cli_context.json_mode:
         import json
+
+        def _dump(report: object) -> object:
+            dump = getattr(report, "model_dump", None)
+            return dump() if callable(dump) else report
 
         roles_dict = {role.value: model_id for role, model_id in roles.items()}
         print(
@@ -147,11 +168,12 @@ async def _ask_command_async(
                 {
                     "prompt": prompt,
                     "roles": roles_dict,
-                    "reviewer_report": council_res["reviewer_report"],
-                    "challenger_report": council_res["challenger_report"],
+                    "reviewer_report": _dump(council_res["reviewer_report"]),
+                    "challenger_report": _dump(council_res["challenger_report"]),
                     "arbitration": arbitration,
                     "final_summary": final_summary,
-                }
+                },
+                default=str,
             )
         )
     else:
@@ -186,8 +208,54 @@ async def _ask_command_async(
                 )
             )
 
-    # 7. Shutdown
-    await lifecycle.shutdown()
+
+def _render_council_failure(cli_context: CLIContext, summary: str, flags: list[str]) -> None:
+    """Render a single actionable error for a run that produced no answer."""
+    message = summary or "The council could not produce an answer."
+
+    invalid: list[str] = []
+    try:
+        from velune.providers.keystore import list_invalid_providers
+
+        invalid = list_invalid_providers()
+    except Exception:
+        pass
+
+    if cli_context.json_mode:
+        import json
+
+        print(json.dumps({"error": message, "flags": flags, "invalid_providers": invalid}))
+        return
+
+    from rich.box import ROUNDED
+    from rich.panel import Panel
+    from rich.text import Text
+
+    lines = [f"[bold red]{message}[/bold red]\n"]
+    if invalid:
+        for pid in invalid:
+            lines.append(
+                f"\nYour [bold]{pid}[/bold] API key was rejected by the provider.\n"
+                f"  [bold white]Fix:[/bold white] [bold green]velune login {pid}[/bold green]"
+            )
+    else:
+        lines.append(
+            "\nCommon causes: an invalid or expired API key, or an unreachable provider.\n"
+            "  [bold white]Check:[/bold white] [bold green]velune doctor check[/bold green]"
+            "  [dim]or[/dim]  [bold green]velune providers[/bold green]"
+        )
+
+    console.print()
+    console.print(
+        Panel(
+            Text.from_markup("".join(lines)),
+            title="[bold red]Council Failed[/bold red]",
+            border_style="red",
+            box=ROUNDED,
+            padding=(1, 2),
+        )
+    )
+    console.print()
 
 
 # Markers that indicate the workspace is (probably) a real project root, in

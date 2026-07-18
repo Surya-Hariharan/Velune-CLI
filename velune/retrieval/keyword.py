@@ -11,6 +11,34 @@ from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalS
 
 logger = logging.getLogger("velune.retrieval.keyword")
 
+_WORD_RE = re.compile(r"\w+")
+# camelCase / PascalCase / ALLCAPS hump splitter, applied per underscore-chunk.
+_HUMP_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+")
+
+_STOP_WORDS = {
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "but",
+    "if",
+    "then",
+    "else",
+    "to",
+    "of",
+    "in",
+    "for",
+    "on",
+    "with",
+    "at",
+    "by",
+    "from",
+    "is",
+    "this",
+    "that",
+}
+
 
 class BM25Retriever:
     """Retrieves context using BM25 exact keyword lexical indexing."""
@@ -118,32 +146,20 @@ class BM25Retriever:
         return final_hits
 
     def _tokenize(self, text: str) -> list[str]:
-        """Simplistic and quick alphanumeric tokenization ignoring standard case mappings."""
-        # Lowercase and split on non-alphanumeric boundaries
-        words = re.findall(r"\w+", text.lower())
+        """Alphanumeric tokenization with identifier subword expansion.
 
-        # Remove extremely common short English stop words to filter noise
-        stop_words = {
-            "a",
-            "an",
-            "the",
-            "and",
-            "or",
-            "but",
-            "if",
-            "then",
-            "else",
-            "to",
-            "of",
-            "in",
-            "for",
-            "on",
-            "with",
-            "at",
-            "by",
-            "from",
-            "is",
-            "this",
-            "that",
-        }
-        return [w for w in words if w not in stop_words and len(w) > 1]
+        Each identifier is emitted whole (lowercased) *and* split on
+        underscore/camelCase boundaries, so the natural-language query
+        "list users" reaches ``list_users`` and ``listUsers`` alike. Index
+        and query sides share this method, so the vocabularies always agree.
+        """
+        tokens: list[str] = []
+        for word in _WORD_RE.findall(text):
+            lower = word.lower()
+            if len(lower) <= 1 or lower in _STOP_WORDS:
+                continue
+            tokens.append(lower)
+            parts = [p.lower() for chunk in word.split("_") for p in _HUMP_RE.findall(chunk)]
+            if len(parts) > 1:
+                tokens.extend(p for p in parts if len(p) > 1 and p not in _STOP_WORDS)
+        return tokens

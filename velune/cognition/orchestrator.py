@@ -194,7 +194,17 @@ class CouncilOrchestrator:
             progress_callback(f"[Coder] Diverge round: {n_samples} candidate solutions...")
 
         results = await self.scheduler.run(jobs, timeout=timeout)
-        candidates = [r.value for r in results if r.ok and isinstance(r.value, str) and r.value]
+        # deliberate() converts agent exceptions into sentinel strings rather than
+        # raising, so a sample that failed still comes back r.ok — drop those too,
+        # or a provider error would win the self-consistency vote as the "answer".
+        candidates = [
+            r.value
+            for r in results
+            if r.ok
+            and isinstance(r.value, str)
+            and r.value
+            and not r.value.startswith(("Deliberation failure inside agent", "[Agent "))
+        ]
         return candidates
 
     async def stream(self, prompt: str) -> AsyncIterator[StreamProgress]:
@@ -693,7 +703,15 @@ class CouncilOrchestrator:
         except Exception as exc:
             logger.debug("Cost gate skipped due to error: %s", exc)
 
-    def _build_timeout_result(self, prompt: str, tier: str = "full") -> dict[str, Any]:
+    def _build_timeout_result(
+        self,
+        prompt: str,
+        tier: str = "full",
+        *,
+        flag: str = "TIMEOUT",
+        summary: str = "Council execution timed out. Partial analysis: (None)",
+        critical_issue: str = "Council execution timed out.",
+    ) -> dict[str, Any]:
         from velune.cognition.council.messages import ReviewerMessage
 
         return {
@@ -702,7 +720,7 @@ class CouncilOrchestrator:
             "coder_proposal": None,
             "reviewer_report": ReviewerMessage(
                 passed=False,
-                critical_issues=["Council execution timed out."],
+                critical_issues=[critical_issue],
                 confidence_rating=0.0,
             ),
             "challenger_report": None,
@@ -713,11 +731,11 @@ class CouncilOrchestrator:
             "arbitration": {
                 "overall_confidence": 0.0,
                 "requires_human_review": True,
-                "flags": ["TIMEOUT"],
+                "flags": [flag],
                 "winning_claims": [],
                 "synthesis_instructions": "",
             },
-            "final_summary": "Council execution timed out. Partial analysis: (None)",
+            "final_summary": summary,
             "is_timeout": True,
         }
 
@@ -959,7 +977,16 @@ class CouncilOrchestrator:
             )
             if not candidate_pool:
                 logger.error("Coder produced no usable candidates (all failed/timed out)")
-                return self._build_timeout_result(tier, start_time)
+                return self._build_timeout_result(
+                    prompt,
+                    tier.value,
+                    flag="ALL_AGENTS_FAILED",
+                    summary=(
+                        "The council could not produce an answer: every model call "
+                        "failed or timed out."
+                    ),
+                    critical_issue="Every Coder attempt failed or timed out.",
+                )
 
             winner_idx = medoid_index(candidate_pool) if len(candidate_pool) > 1 else 0
             coder_proposal = candidate_pool[winner_idx]

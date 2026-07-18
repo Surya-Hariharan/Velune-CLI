@@ -352,3 +352,37 @@ def test_bm25_scores_are_never_negative():
     hits = bm.retrieve("shared_term")  # df == N → IDF ≤ 0 for every doc
     assert len(hits) == 3
     assert all(h.score >= 0.0 for h in hits)
+
+
+def test_bm25_natural_language_reaches_snake_case_symbols():
+    """Identifier subword expansion: "list users" must reach list_users."""
+    bm = _bm25_with(
+        {
+            "users.py": "def list_users(db): return db.query(User).all()",
+            "orders.py": "def create_order(cart): pass",
+        }
+    )
+    assert [h.document.id for h in bm.retrieve("list users")] == ["users.py"]
+
+
+def test_bm25_natural_language_reaches_camel_case_symbols():
+    bm = _bm25_with(
+        {
+            "config.py": "class HTTPServerConfig: maxRetryCount = 3",
+            "auth.py": "class TokenValidator: pass",
+        }
+    )
+    assert [h.document.id for h in bm.retrieve("max retry count")] == ["config.py"]
+    assert [h.document.id for h in bm.retrieve("http server")] == ["config.py"]
+
+
+def test_bm25_exact_identifier_query_still_works():
+    """The whole identifier is still indexed — exact-symbol queries keep working."""
+    bm = _bm25_with(
+        {
+            "users.py": "def list_users(db): pass",
+            "misc.py": "users list here",
+        }
+    )
+    hits = bm.retrieve("list_users")
+    assert hits and hits[0].document.id == "users.py"
