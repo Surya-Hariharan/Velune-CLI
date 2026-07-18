@@ -30,6 +30,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # setuptools <83.0.0: PYSEC-2026-3447. actions/setup-python bundles
+          # its own setuptools with the interpreter, independent of anything
+          # velune pins, so it must be upgraded explicitly in this job.
+          pip install --upgrade "setuptools>=83.0.0"
           pip install -e ".[all,dev]" ruff pyright pip-audit build wheel
 
       - name: Ruff lint
@@ -46,7 +50,10 @@ jobs:
 
       - name: Security checks
         run: |
-          pip-audit
+          # --skip-editable: velune-cli itself is installed editable (-e .)
+          # and unpublished, so PyPI has no record to audit it against; that
+          # skip is expected and doesn't affect coverage of its dependencies.
+          pip-audit --skip-editable
           if grep -rn "shell=True" velune/ 2>/dev/null; then
             echo "❌ FATAL: shell=True found in codebase"
             exit 1

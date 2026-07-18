@@ -64,13 +64,22 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # setuptools <83.0.0: PYSEC-2026-3447. actions/setup-python bundles
+          # its own setuptools with the interpreter, independent of anything
+          # velune pins, so it must be upgraded explicitly in this job.
+          pip install --upgrade "setuptools>=83.0.0"
           pip install pip-audit "bandit[toml]"
           # Install the package so pip-audit sees velune's real runtime
           # dependency closure, not just pip-audit's own deps.
           pip install -e .
 
       - name: Check for pip vulnerabilities
-        run: pip-audit
+        run: |
+          # --skip-editable: velune-cli itself is installed editable (-e .)
+          # and unpublished, so PyPI has no record to audit it against; that
+          # skip is expected and doesn't affect coverage of its dependencies,
+          # which are installed normally and audited as usual.
+          pip-audit --skip-editable
 
       - name: Bandit static security scan
         # Gate on medium+ severity & confidence; full low-severity report is
