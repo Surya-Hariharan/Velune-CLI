@@ -359,15 +359,43 @@ def has_key(provider_id: str) -> bool:
     return get_key(provider_id) is not None
 
 
+# Short-lived memo for the Ollama liveness probe. The probe is a synchronous
+# socket connect, and hot callers (the REPL home surface renders it, provider
+# UIs poll it) could otherwise run it many times a second. On a machine with no
+# Ollama the connect takes the refused/timeout path — slow on Windows under
+# loopback firewall inspection — so a per-call socket would visibly stall the
+# UI thread. Memoize the verdict for a few seconds; liveness rarely flips faster.
+_OLLAMA_LIVE_TTL = 5.0
+_ollama_live_cache: tuple[bool, float] | None = None
+
+
 def is_ollama_live(timeout: float = 0.25) -> bool:
-    """Return True if a local Ollama server is reachable."""
+    """Return True if a local Ollama server is reachable.
+
+    Result is memoized for ``_OLLAMA_LIVE_TTL`` seconds so repeated callers
+    (status/home rendering, provider polling) never hammer the socket. The
+    ``timeout`` only applies on a cache miss. Callers that need a guaranteed
+    fresh reading should probe the daemon directly.
+    """
+    global _ollama_live_cache
+
+    import time as _time
+
+    now = _time.monotonic()
+    cached = _ollama_live_cache
+    if cached is not None and (now - cached[1]) < _OLLAMA_LIVE_TTL:
+        return cached[0]
+
     import socket
 
     try:
         with socket.create_connection(("127.0.0.1", 11434), timeout=timeout):
-            return True
+            live = True
     except OSError:
-        return False
+        live = False
+
+    _ollama_live_cache = (live, now)
+    return live
 
 
 def list_configured_providers(include_ollama: bool = True) -> list[str]:

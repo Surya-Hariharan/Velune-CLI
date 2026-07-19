@@ -37,24 +37,29 @@ def _full_state() -> HomeState:
     )
 
 
-# ── Header ───────────────────────────────────────────────────────────────────
+# ── Wordmark + header ────────────────────────────────────────────────────────
 
 
-def test_header_shows_brand_version_model_provider_and_workspace():
+def test_wide_terminal_shows_gradient_block_wordmark():
     text = _text(render_home(_full_state(), width=100))
-    assert "VELUNE CLI" in text
+    assert "█" in text  # block wordmark is painted at a comfortable width
+    assert "Local-first multi-model AI developer CLI" in text  # tagline
     assert "v0.9.6" in text
+
+
+def test_header_shows_model_provider_and_workspace():
+    text = _text(render_home(_full_state(), width=100))
     assert "llama-3.3-70b-versatile" in text
     assert "Groq" in text
     assert "MyApp" in text
     assert "main" in text
 
 
-def test_header_is_upper_left_not_centered():
-    # First content line starts after the small margin — no centering padding.
-    lines = _text(render_home(_full_state(), width=120)).split("\n")
-    brand_line = next(line for line in lines if "VELUNE CLI" in line)
-    assert brand_line.startswith("  VELUNE")
+def test_narrow_terminal_falls_back_to_compact_lockup():
+    # No room for the block wordmark → the literal VELUNE lockup is shown.
+    text = _text(render_home(_full_state(), width=44))
+    assert "VELUNE" in text
+    assert "█" not in text  # block banner suppressed
 
 
 def test_no_model_shows_setup_pointer_instead_of_model_line():
@@ -70,26 +75,25 @@ def test_no_model_shows_setup_pointer_instead_of_model_line():
 
 def test_summary_rows_cover_repo_memory_mcp_providers_and_local():
     text = _text(render_home(_full_state(), width=100))
-    assert "Repository" in text and "Python" in text and "412 files indexed" in text
-    assert "Memory" in text and "cognitive 76.4 MB" in text
-    assert "MCP" in text and "2/3 servers connected" in text
-    assert "Providers" in text and "Groq +1 more" in text
-    assert "Local" in text and "Ollama" in text
+    assert "Python" in text and "412 files" in text
+    assert "cognitive 76.4 MB" in text
+    assert "MCP 2/3" in text
+    assert "Groq" in text
+    assert "Ollama" in text
 
 
 def test_empty_state_degrades_to_quiet_defaults():
     text = _text(render_home(HomeState(), width=100))
-    assert "none detected" in text  # repository
-    assert "no servers configured" in text  # mcp
-    assert "/setup" in text  # providers
-    assert "Local" not in text  # row omitted when nothing local
+    assert "no model selected" in text
+    assert "no providers configured" in text
+    assert "/setup" in text
 
 
 def test_unindexed_repository_says_so():
     state = _full_state()
     state.indexed_files = None
     text = _text(render_home(state, width=100))
-    assert "not indexed yet" in text
+    assert "not indexed" in text
 
 
 def test_narrow_terminal_clips_values_instead_of_overflowing():
@@ -102,7 +106,7 @@ def test_narrow_terminal_clips_values_instead_of_overflowing():
 
 def test_hint_line_teaches_palette_and_file_mentions():
     text = _text(render_home(_full_state(), width=100))
-    assert "/ commands" in text
+    assert "commands" in text
     assert "@file" in text
 
 
@@ -126,7 +130,7 @@ def _make_ui(home_provider=None) -> FullscreenREPLUI:
 def test_empty_transcript_renders_home_state_from_provider():
     ui = _make_ui(home_provider=_full_state)
     text = _text(ui._render_conversation())
-    assert "VELUNE CLI" in text
+    assert "█" in text  # gradient wordmark
     assert "llama-3.3-70b-versatile" in text
 
 
@@ -144,13 +148,13 @@ def test_home_provider_failure_falls_back_to_default_state():
 
     ui = _make_ui(home_provider=_boom)
     text = _text(ui._render_conversation())
-    assert "VELUNE CLI" in text  # renders, does not crash
+    assert "█" in text  # renders the default wordmark, does not crash
 
 
 def test_no_provider_renders_minimal_default():
     ui = _make_ui(home_provider=None)
     text = _text(ui._render_conversation())
-    assert "VELUNE CLI" in text
+    assert "█" in text
 
 
 def test_first_submit_goes_straight_to_queue_no_animation_state():

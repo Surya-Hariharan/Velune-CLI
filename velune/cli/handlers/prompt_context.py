@@ -103,19 +103,27 @@ async def build_turn_context(
         )
     )
 
-    # ── RETRIEVED_CONTEXT: hybrid file/code retrieval, planned by intent ────
-    chunks.extend(await _retrieve_hybrid(repl, text, depth, intent, confidence))
-
-    # ── RETRIEVED_CONTEXT: three-brain fan-out (semantic/episodic/kg) ────
-    chunks.extend(await _retrieve_three_brain(repl, text, workspace, depth))
-
-    # ── COGNITIVE_CONTINUITY: lineage decisions/failures ─────────────────
-    continuity_chunk = await _lineage_chunk(repl, text)
+    # The four retrieval sources below are independent (none reads another's
+    # output and none mutates `repl`), so they run concurrently instead of
+    # serially: per-turn retrieval overhead becomes the *slowest* source rather
+    # than the *sum* of all four. Each coroutine already guards itself and
+    # returns empty on any failure, so gather never raises here. Results are
+    # spliced back in the original section order to keep chunk ordering stable.
+    #   - RETRIEVED_CONTEXT: hybrid file/code retrieval, planned by intent
+    #   - RETRIEVED_CONTEXT: three-brain fan-out (semantic/episodic/kg)
+    #   - COGNITIVE_CONTINUITY: lineage decisions/failures
+    #   - REPOSITORY_SNAPSHOT / ARCHITECTURAL_DRIFT
+    hybrid_chunks, three_brain_chunks, continuity_chunk, repo_chunks = await asyncio.gather(
+        _retrieve_hybrid(repl, text, depth, intent, confidence),
+        _retrieve_three_brain(repl, text, workspace, depth),
+        _lineage_chunk(repl, text),
+        _repository_snapshot_chunks(repl, repo_snapshot_budget),
+    )
+    chunks.extend(hybrid_chunks)
+    chunks.extend(three_brain_chunks)
     if continuity_chunk is not None:
         chunks.append(continuity_chunk)
-
-    # ── REPOSITORY_SNAPSHOT / ARCHITECTURAL_DRIFT ────────────────────────
-    chunks.extend(await _repository_snapshot_chunks(repl, repo_snapshot_budget))
+    chunks.extend(repo_chunks)
 
     # ── WORKING_MEMORY: prior conversation turns ─────────────────────────
     conversation = repl._conversation

@@ -57,6 +57,12 @@ _MAX_TRANSCRIPT_LINES = 4000
 _PROMPT_MAX_LINES = 5
 _MARKDOWN_STREAM_THROTTLE_S = 0.08
 
+# Braille spinner frames for the "thinking" indicator — advances every tick so
+# the wait feels alive, coloured with the brand accent.
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_THINKING_TICK_S = 0.1
+_THINKING_WORD_EVERY = 8  # ticks between verb changes (~0.8s)
+
 
 @dataclass
 class _Line:
@@ -252,6 +258,7 @@ class FullscreenREPLUI:
                 "conversation.assistant": f"bg:{design.BACKGROUND} {design.WHITE}",
                 "conversation.system": f"bg:{design.BACKGROUND} {design.SECONDARY}",
                 "conversation.thinking": f"bg:{design.BACKGROUND} {design.SECONDARY} italic",
+                "conversation.spinner": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
                 **HOME_STYLES,
                 "separator": f"bg:{design.BACKGROUND} {design.BACKGROUND}",  # Hide separators for minimal look
                 "prompt": f"bg:{design.BACKGROUND} {design.WHITE}",
@@ -334,7 +341,11 @@ class FullscreenREPLUI:
             mouse_support=False,
             min_redraw_interval=0.016,
             max_render_postpone_time=0.01,
-            refresh_interval=0.25,
+            # No idle polling: every state change (submit, console output,
+            # streaming, the thinking-spinner loop, interrupts) already calls
+            # invalidate() explicitly, so a periodic refresh only burned CPU and
+            # re-ran the status/home render callbacks 4x/second while idle.
+            refresh_interval=None,
             input=input,
             output=output,
         )
@@ -402,16 +413,20 @@ class FullscreenREPLUI:
         self._append_gap()
         self._lines.append(_Line("Velune", "class:conversation.user"))
         self._stream_start = len(self._lines)
+        self._thinking_idx = 0
         self._stream_text = self._thinking_words[0]
-        self._replace_stream_lines(self._stream_text, "class:conversation.thinking")
+        self._set_thinking_line(_SPINNER_FRAMES[0], self._stream_text)
         self.invalidate()
 
         async def _thinking_anim():
+            tick = 0
             while True:
-                await asyncio.sleep(0.6)
-                self._thinking_idx = (self._thinking_idx + 1) % len(self._thinking_words)
-                self._stream_text = self._thinking_words[self._thinking_idx]
-                self._replace_stream_lines(self._stream_text, "class:conversation.thinking")
+                await asyncio.sleep(_THINKING_TICK_S)
+                tick += 1
+                if tick % _THINKING_WORD_EVERY == 0:
+                    self._thinking_idx = (self._thinking_idx + 1) % len(self._thinking_words)
+                    self._stream_text = self._thinking_words[self._thinking_idx]
+                self._set_thinking_line(_SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)], self._stream_text)
                 self.invalidate()
 
         from velune.core.task_registry import track
@@ -491,12 +506,18 @@ class FullscreenREPLUI:
         self._stream_text = ""
         self.invalidate()
 
-    def _replace_stream_lines(self, text: str, style: str) -> None:
+    def _set_thinking_line(self, spinner: str, word: str) -> None:
+        """Render the thinking indicator as a single line: an accent-coloured
+        spinner glyph followed by the current verb in muted italic."""
         start = self._stream_start
         if start is None:
             return
         self._lines[start:] = []
-        self._append_wrapped(text, style)
+        frags = [
+            ("class:conversation.spinner", f"{spinner} "),
+            ("class:conversation.thinking", word),
+        ]
+        self._lines.append(_Line(f"{spinner} {word}", "class:conversation.thinking", fragments=frags))
         self._trim()
 
     def _append_gap(self) -> None:

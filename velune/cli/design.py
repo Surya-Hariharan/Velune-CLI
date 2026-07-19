@@ -21,19 +21,28 @@ from __future__ import annotations
 import os
 import sys
 
-# --- Brand palette: Monochrome + single accent ------------------------------
-# The one hue in the whole theme — used sparingly (logo, prompt prefix,
-# headings, active/selected state). Everything else is grayscale.
-ACCENT = "#8fb4c9"  # soft steel-blue (logo, primary brand, prompt prefix)
-ACCENT_SOFT = "#5f7d8f"  # dimmer accent (secondary elements, arrows)
+# --- Brand palette: vibrant indigo accent + cool gradient --------------------
+# One vivid hue drives the whole theme — the logo wordmark, prompt glyph,
+# headings, and active/selected state — set against grayscale neutrals so the
+# accent reads as energetic without turning the UI into noise.
+ACCENT = "#818cf8"  # electric indigo (wordmark, primary brand, prompt prefix)
+ACCENT_SOFT = "#5b63d6"  # dimmer indigo (secondary elements, arrows)
+
+# The brand wordmark is painted as a horizontal gradient across these three
+# stops (violet → blue → teal). `gradient_hex(t)` interpolates between them for
+# any t in [0, 1]; other surfaces can reuse it for progress fills, meters, etc.
+GRAD_START = "#a78bfa"  # violet
+GRAD_MID = "#60a5fa"  # blue
+GRAD_END = "#2dd4bf"  # teal
 
 # Reuses of the single accent — kept as separate names because other modules
-# reference them by role, not because they carry a distinct hue.
-PRIMARY_GREEN = "#5f7d8f"  # = ACCENT_SOFT (emphasis, highlights)
+# reference them by role, not because they carry a distinct hue. They point at
+# the accent tokens (not hardcoded copies) so a recolor here propagates.
+PRIMARY_GREEN = ACCENT_SOFT  # (emphasis, highlights)
 GREEN = "#7a9b82"  # = OK (accents, active states, success)
 
-HIGHLIGHT = "#8fb4c9"  # = ACCENT (modes, indicators)
-ENERGY = "#5f7d8f"  # = ACCENT_SOFT (active processes)
+HIGHLIGHT = ACCENT  # (modes, indicators)
+ENERGY = ACCENT_SOFT  # (active processes)
 
 # Info & feedback — desaturated, accent-tinted gray rather than a new hue.
 INFO = "#96a8ae"  # muted steel-gray for informational text
@@ -79,6 +88,8 @@ ICON_UNSELECTED = " "
 ICON_BULLET = "•"
 ICON_ELLIPSIS = "…"
 ICON_CURSOR = "█"
+ICON_DIAMOND = "◆"  # brand mark / compact logo lockup
+ICON_BRANCH = "⎇"  # git branch indicator
 
 # --- Spacing tokens --------------------------------------------------------
 # Rich padding tuples: (top/bottom, left/right)
@@ -104,6 +115,38 @@ def context_state(pct: float) -> str:
     if pct < CTX_DANGER_PCT:
         return "warn"
     return "danger"
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*(max(0, min(255, round(c))) for c in rgb))
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def gradient_hex(t: float) -> str:
+    """Interpolate the brand gradient (violet → blue → teal) at position *t*.
+
+    ``t`` is clamped to ``[0, 1]``. The first half blends GRAD_START→GRAD_MID,
+    the second half GRAD_MID→GRAD_END, so the midpoint lands exactly on the
+    blue stop. Used to paint the wordmark and any accent progress fills.
+    """
+    t = max(0.0, min(1.0, t))
+    if t <= 0.5:
+        start, end, local = GRAD_START, GRAD_MID, t / 0.5
+    else:
+        start, end, local = GRAD_MID, GRAD_END, (t - 0.5) / 0.5
+    r1, g1, b1 = _hex_to_rgb(start)
+    r2, g2, b2 = _hex_to_rgb(end)
+    return _rgb_to_hex(
+        (_lerp(r1, r2, local), _lerp(g1, g2, local), _lerp(b1, b2, local))
+    )
 
 
 def color_enabled() -> bool:

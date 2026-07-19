@@ -132,6 +132,17 @@ class VeluneREPL:
             self._alert_store = None
         self._prev_ctx_pct: float = 0.0
         self._fullscreen_ui = None
+        # Ollama liveness is refreshed off the UI thread by a background task
+        # (see _ollama_probe_loop); the render path only ever reads this flag,
+        # so a home-screen redraw never blocks on a socket connect.
+        self._ollama_live: bool = False
+        self._ollama_probe_task: asyncio.Task | None = None
+        # TTL-cached configured-provider snapshot for the home surface, so the
+        # render callback does no env/disk enumeration per frame.
+        self._providers_cache: tuple[list[str], float] | None = None
+        # Cheap change signature for the context-token counter, so the status
+        # render only re-tokenizes when the conversation actually changed.
+        self._ctx_signature: tuple[int, int] | None = None
 
     # ------------------------------------------------------------------
     # Workspace trust
@@ -289,7 +300,18 @@ class VeluneREPL:
 
         if self.active_model:
             self._context_tracker.max_tokens = self.active_model.context_length
-            self._context_tracker.update(self._conversation)
+            # Re-tokenizing the whole conversation is real work (tiktoken over
+            # all message text); this runs on every render, so only redo it when
+            # the conversation actually changed. A cheap length signature —
+            # message count plus the size of the last message — is enough to
+            # catch appends and in-flight streaming growth.
+            convo = self._conversation
+            last = convo[-1] if convo else None
+            last_len = len(last.get("content", "")) if isinstance(last, dict) else 0
+            signature = (len(convo), last_len)
+            if signature != self._ctx_signature:
+                self._ctx_signature = signature
+                self._context_tracker.update(convo)
 
         self._status_state.exit_hint = self._interrupts.exit_hint_active
         self._status_state.model_id = self.active_model.model_id if self.active_model else None
@@ -358,6 +380,47 @@ class VeluneREPL:
             self._branch_last_checked = now
         return self._cached_branch
 
+    def _configured_providers(self) -> list[str]:
+        """Provider IDs with a usable key, cached for 10s. Never probes a socket.
+
+        The env/disk enumeration is cheap but still ran on every home-screen
+        redraw; more importantly the ``include_ollama=True`` path used to do a
+        blocking socket connect to the Ollama port per frame. Here the disk/env
+        list is TTL-cached and Ollama is appended from ``self._ollama_live``,
+        which a background task keeps fresh off the UI thread.
+        """
+        now = time.monotonic()
+        cached = self._providers_cache
+        if cached is not None and (now - cached[1]) < 10.0:
+            base = cached[0]
+        else:
+            from velune.providers.keystore import list_configured_providers
+
+            try:
+                base = list_configured_providers(include_ollama=False)
+            except Exception:
+                base = []
+            self._providers_cache = (base, now)
+        if self._ollama_live and "ollama" not in base:
+            return ["ollama", *base]
+        return list(base)
+
+    async def _ollama_probe_loop(self) -> None:
+        """Refresh ``self._ollama_live`` off the UI thread, forever.
+
+        The liveness probe is a synchronous socket connect that must never run
+        in a render callback (it stalls typing on machines with no Ollama). This
+        low-frequency task owns it instead; the render path only reads the flag.
+        """
+        from velune.providers.keystore import is_ollama_live
+
+        while True:
+            try:
+                self._ollama_live = await asyncio.to_thread(is_ollama_live, 0.25)
+            except Exception:
+                self._ollama_live = False
+            await asyncio.sleep(5.0)
+
     # ------------------------------------------------------------------
     # Home surface (empty-transcript header + runtime summary)
     # ------------------------------------------------------------------
@@ -371,15 +434,11 @@ class VeluneREPL:
         """
         from velune import __version__
         from velune.cli.home import HomeState
-        from velune.providers.keystore import list_configured_providers
 
         workspace = self.container.get("runtime.workspace")
         workspace_path = str(Path(workspace).resolve()) if workspace else ""
 
-        try:
-            configured = tuple(list_configured_providers())
-        except Exception:
-            configured = ()
+        configured = self._configured_providers()
         local = next((p.title() for p in configured if p in ("ollama", "lmstudio")), None)
         cloud = tuple(p for p in configured if p not in ("ollama", "lmstudio"))
 
@@ -496,6 +555,10 @@ class VeluneREPL:
         track(asyncio.create_task(auto_detect_on_entry(self), name="velune.auto_index"))
 
         track(asyncio.create_task(self._reverify_stale_keys(), name="velune.reverify_keys"))
+
+        self._ollama_probe_task = track(
+            asyncio.create_task(self._ollama_probe_loop(), name="velune.ollama_probe")
+        )
 
         self._interrupts.install()
         try:
