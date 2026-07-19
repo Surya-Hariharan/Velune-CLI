@@ -1,4 +1,4 @@
-"""Provider management slash command handlers: /providers and /login."""
+"""Provider management slash command handlers: /providers and /connect."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ async def cmd_login(repl: VeluneREPL, args: str) -> None:
     """Connect a provider: pick one, paste the key, watch it verify.
 
     The shortest path to "I want to paste a key" — it lands directly on the
-    provider picker rather than a management menu. ``/login anthropic`` skips
+    provider picker rather than a management menu. ``/connect anthropic`` skips
     the picker entirely.
     """
     target = args.strip().split(None, 1)[0].lower() if args.strip() else ""

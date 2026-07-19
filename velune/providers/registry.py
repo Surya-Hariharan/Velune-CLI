@@ -281,6 +281,16 @@ class ProviderRegistry:
             self._keyed_factory("velune.providers.adapters.nvidia", "NVIDIAProvider", "nvidia"),
         )
 
+        self.register_factory(
+            "meta",
+            self._keyed_factory("velune.providers.adapters.meta", "MetaProvider", "meta"),
+        )
+
+        self.register_factory(
+            "zai",
+            self._keyed_factory("velune.providers.adapters.zai", "ZaiProvider", "zai"),
+        )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------

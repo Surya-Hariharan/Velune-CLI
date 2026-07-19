@@ -73,6 +73,8 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "mistral": "MISTRAL_API_KEY",
     "cohere": "COHERE_API_KEY",
     "nvidia": "NVIDIA_API_KEY",
+    "zai": "ZAI_API_KEY",
+    "meta": "LLAMA_API_KEY",
 }
 
 
@@ -131,13 +133,29 @@ class CredentialManager:
                 logger.error("Failed to restore backup: %s", e)
         return False
 
-    def _save_disk(self, providers: dict[str, dict[str, Any]]) -> None:
-        """Encrypt and atomically save the configuration to disk."""
+    def _save_disk(
+        self, providers: dict[str, dict[str, Any]], *, removed: set[str] | None = None
+    ) -> None:
+        """Encrypt and atomically save the configuration to disk.
+
+        *providers* is merged onto the current on-disk state (rather than
+        replacing it outright) so a concurrent save for a different provider
+        isn't clobbered by a stale in-memory read. That merge is a plain
+        ``dict.update()``, which can only add or overwrite keys — it has no
+        way to express "this provider should no longer exist," since an
+        entry that's merely absent from *providers* is indistinguishable from
+        one nobody touched. *removed* closes that gap: those ids are popped
+        from the merged result explicitly, which is what actually lets
+        :meth:`delete_provider` persist a deletion instead of the disk read
+        silently re-merging the just-deleted record back in.
+        """
         self._config_dir.mkdir(parents=True, exist_ok=True)
 
         # Read the most recent disk state to merge updates instead of overwriting
         disk_data = self._load_disk()
         disk_data.update(providers)
+        for provider_id in removed or ():
+            disk_data.pop(provider_id, None)
 
         data_wrapper = {"providers": disk_data}
         json_str = json.dumps(data_wrapper, indent=2)
@@ -233,7 +251,7 @@ class CredentialManager:
 
             if provider_id in self._cache:
                 del self._cache[provider_id]
-                self._save_disk(self._cache)
+                self._save_disk(self._cache, removed={provider_id})
 
     def get_all_providers(self) -> dict[str, dict[str, Any]]:
         """Get a copy of all loaded providers."""

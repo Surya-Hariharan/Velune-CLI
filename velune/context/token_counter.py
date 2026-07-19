@@ -14,14 +14,29 @@ from velune.models.family import ModelFamily, detect_family
 
 logger = logging.getLogger("velune.context.token_counter")
 
-# Attempt to load tiktoken for accurate OpenAI-family token counting
-try:
-    import tiktoken
+# tiktoken is deliberately NOT imported at module level. Even a bare `import
+# tiktoken` costs real time (~40ms measured), and `velune.context` (this
+# module's parent package) is imported on nearly every CLI invocation via
+# context assembly — paying that cost even for a session that only ever talks
+# to a local Ollama model, which never needs tiktoken at all. Resolved lazily
+# on first actual OpenAI/Claude-family count via `_tiktoken_module()` below.
+_tiktoken_mod: Any = None
+_tiktoken_load_attempted = False
 
-    HAS_TIKTOKEN = True
-except ImportError:
-    HAS_TIKTOKEN = False
-    logger.warning("tiktoken not available; using heuristic token estimation")
+
+def _tiktoken_module() -> Any | None:
+    global _tiktoken_mod, _tiktoken_load_attempted
+    if _tiktoken_load_attempted:
+        return _tiktoken_mod
+    _tiktoken_load_attempted = True
+    try:
+        import tiktoken as _tk
+
+        _tiktoken_mod = _tk
+    except ImportError:
+        logger.debug("tiktoken not available; using heuristic token estimation")
+        _tiktoken_mod = None
+    return _tiktoken_mod
 
 
 class TokenCounter:
@@ -82,14 +97,17 @@ class TokenCounter:
 
         Falls back to heuristic if tiktoken unavailable.
         """
-        if not HAS_TIKTOKEN:
+        tiktoken_mod = _tiktoken_module()
+        if tiktoken_mod is None:
             return TokenCounter._count_heuristic(text)
 
         try:
             # Determine appropriate encoding
             encoding_name = TokenCounter._select_encoding(model_id)
             if encoding_name not in TokenCounter._ENCODING_CACHE:
-                TokenCounter._ENCODING_CACHE[encoding_name] = tiktoken.get_encoding(encoding_name)
+                TokenCounter._ENCODING_CACHE[encoding_name] = tiktoken_mod.get_encoding(
+                    encoding_name
+                )
             encoding = TokenCounter._ENCODING_CACHE[encoding_name]
 
             # Count tokens, allowing special characters
@@ -136,14 +154,29 @@ class TokenCounter:
 
 # ── Module-level convenience function ────────────────────────────────────────
 
-try:
-    import tiktoken as _tiktoken
+# Loading the cl100k_base encoding (regex compile + merge-rank table) costs
+# ~150-200ms of CPU — real money on a weak single-thread CPU — and used to run
+# unconditionally at import time via `velune.context`'s package __init__,
+# meaning every CLI invocation paid it even for a session that only ever
+# talks to a local Ollama model and never calls tiktoken at all. Deferred to
+# first actual use instead; a sentinel (rather than checking `is None`) lets a
+# genuine load failure be cached as "unavailable" without retrying every call.
+_GLOBAL_ENCODING: Any = None
+_ENCODING_LOAD_ATTEMPTED = False
 
-    _GLOBAL_ENCODING = _tiktoken.get_encoding("cl100k_base")
-    _HAS_TIKTOKEN = True
-except Exception:
-    _GLOBAL_ENCODING = None
-    _HAS_TIKTOKEN = False
+
+def _get_global_encoding() -> Any | None:
+    global _GLOBAL_ENCODING, _ENCODING_LOAD_ATTEMPTED
+    if _ENCODING_LOAD_ATTEMPTED:
+        return _GLOBAL_ENCODING
+    _ENCODING_LOAD_ATTEMPTED = True
+    tiktoken_mod = _tiktoken_module()
+    if tiktoken_mod is not None:
+        try:
+            _GLOBAL_ENCODING = tiktoken_mod.get_encoding("cl100k_base")
+        except Exception:
+            _GLOBAL_ENCODING = None
+    return _GLOBAL_ENCODING
 
 
 def estimate_tokens(text: str) -> int:
@@ -155,9 +188,10 @@ def estimate_tokens(text: str) -> int:
     """
     if not text:
         return 0
-    if _HAS_TIKTOKEN and _GLOBAL_ENCODING is not None:
+    encoding = _get_global_encoding()
+    if encoding is not None:
         try:
-            return len(_GLOBAL_ENCODING.encode(text, disallowed_special=()))
+            return len(encoding.encode(text, disallowed_special=()))
         except Exception:
             pass
     return max(1, len(text) // 4 + (1 if len(text) % 4 > 0 else 0))

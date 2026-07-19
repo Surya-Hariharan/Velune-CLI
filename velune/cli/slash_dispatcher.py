@@ -33,20 +33,20 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "council": "AI",
     "jobs": "AI",
     "dashboard": "AI",
-    "optimus": "AI",
-    "godly": "AI",
+    "fast": "AI",
+    "max": "AI",
     "normal": "AI",
     "mode": "AI",
     # Providers
     "providers": "Providers",
-    "login": "Providers",
+    "connect": "Providers",
     # Models
     "model": "Models",
     "models": "Models",
     "pull": "Models",
     "delete": "Models",
     "bench": "Models",
-    "councilmodel": "Models",
+    "roles": "Models",
     # Projects
     "project": "Projects",
     "index": "Projects",
@@ -57,7 +57,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     # Tools
     "lint": "Tools",
     "refactor": "Tools",
-    "typify": "Tools",
+    "types": "Tools",
     "plugin": "Tools",
     "hooks": "Tools",
     # MCP
@@ -199,13 +199,22 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             ),
             search_terms=(
                 "anthropic",
+                "claude",
                 "openai",
                 "google",
                 "gemini",
+                "groq",
                 "mistral",
                 "deepseek",
                 "cohere",
                 "nvidia",
+                "nvidia nim",
+                "xai",
+                "grok",
+                "meta",
+                "llama",
+                "zai",
+                "glm",
                 "huggingface",
                 "ollama",
                 "api key",
@@ -219,16 +228,17 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     )
     registry.register(
         SlashCommand(
-            name="login",
-            aliases=["auth"],
+            name="connect",
+            aliases=["login", "auth"],
             category="Providers",
             description="Connect an AI provider — pick one, paste your API key, get it verified",
-            usage="/login [provider-id]",
+            usage="/connect [provider-id]",
             handler=repl._cmd_login,
-            examples=("/login", "/login anthropic"),
+            examples=("/connect", "/connect anthropic"),
             search_terms=(
                 "api key",
                 "sign in",
+                "login",
                 "authenticate",
                 "connect provider",
                 "add key",
@@ -410,12 +420,12 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     )
     registry.register(
         SlashCommand(
-            name="councilmodel",
-            aliases=["cm", "roles"],
+            name="roles",
+            aliases=["councilmodel", "cm"],
             description="Assign specific models to each Reasoning Council agent role",
-            usage="/councilmodel [show|reset]",
+            usage="/roles [show|reset]",
             handler=repl._cmd_councilmodel,
-            examples=("/councilmodel", "/councilmodel show", "/councilmodel reset"),
+            examples=("/roles", "/roles show", "/roles reset"),
             search_terms=("assign model", "roles", "council roles", "agent roles", "multi-agent"),
             shortcut="/cm",
         )
@@ -559,23 +569,23 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
 
     registry.register(
         SlashCommand(
-            name="optimus",
-            aliases=["fast", "opt"],
+            name="fast",
+            aliases=["optimus", "opt"],
             description="Speed mode — instant tier, compressed context, smallest model",
-            usage="/optimus",
+            usage="/fast",
             handler=repl._cmd_optimus,
-            examples=("/optimus",),
+            examples=("/fast",),
             search_terms=("fast", "quick", "speed", "instant", "lightweight", "small model"),
         )
     )
     registry.register(
         SlashCommand(
-            name="godly",
-            aliases=["full", "god"],
+            name="max",
+            aliases=["godly", "full", "god"],
             description="Max power — full council, largest model, full context",
-            usage="/godly",
+            usage="/max",
             handler=repl._cmd_godly,
-            examples=("/godly",),
+            examples=("/max",),
             search_terms=("max", "full power", "powerful", "best model", "maximum quality"),
         )
     )
@@ -813,12 +823,12 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     )
     registry.register(
         SlashCommand(
-            name="typify",
-            aliases=["types", "hints"],
+            name="types",
+            aliases=["typify", "hints"],
             description="Suggest type hints for unannotated functions in a Python file",
-            usage="/typify <file>",
+            usage="/types <file>",
             handler=repl._cmd_typify,
-            examples=("/typify src/main.py",),
+            examples=("/types src/main.py",),
             search_terms=("type hints", "annotations", "mypy", "typing", "add types"),
         )
     )

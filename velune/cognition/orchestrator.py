@@ -109,6 +109,34 @@ class CouncilOrchestrator:
             "VELUNE_LOW_RESOURCE", ""
         ).lower() in ("true", "1", "yes")
 
+        # Cap by the hardware-derived ceiling too. On weak hardware (an i3-class
+        # CPU, <=8GB RAM) HardwareDetector/derive_profile computes a
+        # LOW_RESOURCE RuntimeProfile with council_tier_ceiling="minimal", but
+        # nothing outside profiles.py ever read that field — this orchestrator
+        # built its TierClassifier from the static config default ("full")
+        # regardless, so a detected-weak machine still auto-escalated to the
+        # 6-agent FULL council. Take the more restrictive of the two ceilings;
+        # an explicit, tighter config value still wins over a beefier machine's
+        # profile, since this only ever pulls the ceiling down, never up.
+        try:
+            from velune.hardware.profiles import RuntimeProfileName
+            from velune.kernel.registry import get_container
+
+            _container = get_container()
+            _profile = (
+                _container.get("runtime.profile") if _container.has("runtime.profile") else None
+            )
+        except Exception:
+            _profile = None
+        if _profile is not None:
+            _tier_order = {"instant": 0, "minimal": 1, "standard": 2, "full": 3}
+            hw_ceiling = _profile.council_tier_ceiling
+            if _tier_order.get(hw_ceiling, 3) < _tier_order.get(max_tier, 3):
+                max_tier = hw_ceiling
+            low_resource_mode = low_resource_mode or (
+                _profile.name is RuntimeProfileName.LOW_RESOURCE
+            )
+
         self.tier_classifier = TierClassifier(
             task_registry=task_registry,
             max_council_tier=max_tier,
@@ -1054,65 +1082,94 @@ class CouncilOrchestrator:
             performance_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
             maintainability_report = CriticMessage(passed=True, issues=[], score=1.0, rationale="")
 
-            tasks = [reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context)]
-            _task_idx: dict[str, int] = {}
-            _next = 1
+            # Route the critique fan-out through the council scheduler rather
+            # than a bare asyncio.gather. Most council roles share one local
+            # backend, and "concurrent" requests to a single local Ollama/LM
+            # Studio model don't actually parallelize — they either queue
+            # internally or force multiple simultaneous KV caches into RAM,
+            # which is exactly the kind of thrash a weak/low-RAM machine can't
+            # absorb. The scheduler serializes same-backend jobs (honest about
+            # the physical truth) and only runs distinct backends concurrently.
+            from velune.cognition.council.scheduler import CouncilJob
+
+            def _critic_job(name: str, agent, run) -> CouncilJob:
+                return CouncilJob(name=name, provider_id=agent.model.provider_id, run=run)
+
+            jobs = [
+                _critic_job(
+                    "reviewer",
+                    reviewer,
+                    lambda: reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context),
+                )
+            ]
             if challenger:
-                tasks.append(
-                    challenger.challenge(task=prompt, proposal=coder_proposal, context=repo_context)
+                jobs.append(
+                    _critic_job(
+                        "challenger",
+                        challenger,
+                        lambda: challenger.challenge(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
+                    )
                 )
-                _task_idx["challenger"] = _next
-                _next += 1
             if scalability_critic:
-                tasks.append(
-                    scalability_critic.critique(
-                        task=prompt, proposal=coder_proposal, context=repo_context
+                jobs.append(
+                    _critic_job(
+                        "scalability",
+                        scalability_critic,
+                        lambda: scalability_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
                     )
                 )
-                _task_idx["scalability"] = _next
-                _next += 1
             if security_critic:
-                tasks.append(
-                    security_critic.critique(
-                        task=prompt, proposal=coder_proposal, context=repo_context
+                jobs.append(
+                    _critic_job(
+                        "security",
+                        security_critic,
+                        lambda: security_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
                     )
                 )
-                _task_idx["security"] = _next
-                _next += 1
             if performance_critic:
-                tasks.append(
-                    performance_critic.critique(
-                        task=prompt, proposal=coder_proposal, context=repo_context
+                jobs.append(
+                    _critic_job(
+                        "performance",
+                        performance_critic,
+                        lambda: performance_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
                     )
                 )
-                _task_idx["performance"] = _next
-                _next += 1
             if maintainability_critic:
-                tasks.append(
-                    maintainability_critic.critique(
-                        task=prompt, proposal=coder_proposal, context=repo_context
+                jobs.append(
+                    _critic_job(
+                        "maintainability",
+                        maintainability_critic,
+                        lambda: maintainability_critic.critique(
+                            task=prompt, proposal=coder_proposal, context=repo_context
+                        ),
                     )
                 )
-                _task_idx["maintainability"] = _next
-                _next += 1
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            job_results = {r.name: r for r in await self.scheduler.run(jobs)}
 
-            if not isinstance(results[0], Exception):
-                reviewer_report = results[0]
+            reviewer_result = job_results["reviewer"]
+            if reviewer_result.ok:
+                reviewer_report = reviewer_result.value
             else:
-                logger.error("Reviewer failed: %s", results[0])
+                logger.error("Reviewer failed: %s", reviewer_result.error)
                 reviewer_report.critical_issues = ["Reviewer unavailable"]
 
             def _pick(key: str, default):
-                i = _task_idx.get(key)
-                if i is None:
+                r = job_results.get(key)
+                if r is None:
                     return default
-                r = results[i]
-                if isinstance(r, Exception):
-                    logger.error("%s critic failed: %s", key, r)
+                if not r.ok:
+                    logger.error("%s critic failed: %s", key, r.error)
                     return default
-                return r
+                return r.value
 
             challenger_report = _pick("challenger", challenger_report)
             scalability_report = _pick("scalability", scalability_report)
@@ -1227,66 +1284,97 @@ class CouncilOrchestrator:
                             )
                             break
 
-                        re_tasks = []
+                        # Same honest-concurrency scheduling as the initial
+                        # critique fan-out above — see the comment there.
+                        from velune.cognition.council.scheduler import CouncilJob
+
+                        re_jobs: list[CouncilJob] = []
                         re_critics = []
 
                         if not reviewer_report.passed:
-                            re_tasks.append(
-                                reviewer.review(
-                                    task=prompt, proposal=refined_proposal, context=repo_context
+                            re_jobs.append(
+                                CouncilJob(
+                                    name="reviewer",
+                                    provider_id=reviewer.model.provider_id,
+                                    run=lambda: reviewer.review(
+                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                    ),
                                 )
                             )
                             re_critics.append("reviewer")
                         if tier_level == 4:
                             if not scalability_report.passed:
-                                re_tasks.append(
-                                    scalability_critic.critique(
-                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                re_jobs.append(
+                                    CouncilJob(
+                                        name="scalability",
+                                        provider_id=scalability_critic.model.provider_id,
+                                        run=lambda: scalability_critic.critique(
+                                            task=prompt,
+                                            proposal=refined_proposal,
+                                            context=repo_context,
+                                        ),
                                     )
                                 )
                                 re_critics.append("scalability")
                             if not security_report.passed:
-                                re_tasks.append(
-                                    security_critic.critique(
-                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                re_jobs.append(
+                                    CouncilJob(
+                                        name="security",
+                                        provider_id=security_critic.model.provider_id,
+                                        run=lambda: security_critic.critique(
+                                            task=prompt,
+                                            proposal=refined_proposal,
+                                            context=repo_context,
+                                        ),
                                     )
                                 )
                                 re_critics.append("security")
                             if not performance_report.passed:
-                                re_tasks.append(
-                                    performance_critic.critique(
-                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                re_jobs.append(
+                                    CouncilJob(
+                                        name="performance",
+                                        provider_id=performance_critic.model.provider_id,
+                                        run=lambda: performance_critic.critique(
+                                            task=prompt,
+                                            proposal=refined_proposal,
+                                            context=repo_context,
+                                        ),
                                     )
                                 )
                                 re_critics.append("performance")
                             if not maintainability_report.passed:
-                                re_tasks.append(
-                                    maintainability_critic.critique(
-                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                re_jobs.append(
+                                    CouncilJob(
+                                        name="maintainability",
+                                        provider_id=maintainability_critic.model.provider_id,
+                                        run=lambda: maintainability_critic.critique(
+                                            task=prompt,
+                                            proposal=refined_proposal,
+                                            context=repo_context,
+                                        ),
                                     )
                                 )
                                 re_critics.append("maintainability")
 
-                        if re_tasks:
-                            raw_re_results = await asyncio.gather(*re_tasks, return_exceptions=True)
+                        if re_jobs:
+                            re_job_results = await self.scheduler.run(re_jobs)
                             re_results = []
-                            for name, res in zip(re_critics, raw_re_results, strict=False):
-                                if isinstance(res, Exception):
-                                    if name == "reviewer":
-                                        res = ReviewerMessage(
-                                            passed=True,
-                                            confidence_rating=0.5,
-                                            critical_issues=[
-                                                "Reviewer unavailable during refinement"
-                                            ],
-                                        )
-                                    else:
-                                        res = CriticMessage(
-                                            passed=True,
-                                            issues=[f"{name} unavailable during refinement"],
-                                            score=0.9,
-                                            rationale="",
-                                        )
+                            for name, jr in zip(re_critics, re_job_results, strict=False):
+                                if jr.ok:
+                                    res = jr.value
+                                elif name == "reviewer":
+                                    res = ReviewerMessage(
+                                        passed=True,
+                                        confidence_rating=0.5,
+                                        critical_issues=["Reviewer unavailable during refinement"],
+                                    )
+                                else:
+                                    res = CriticMessage(
+                                        passed=True,
+                                        issues=[f"{name} unavailable during refinement"],
+                                        score=0.9,
+                                        rationale="",
+                                    )
                                 re_results.append(res)
 
                             for name, res in zip(re_critics, re_results, strict=False):

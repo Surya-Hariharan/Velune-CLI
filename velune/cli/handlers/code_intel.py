@@ -1,4 +1,4 @@
-"""Code intelligence slash command handlers: /lint /refactor /typify."""
+"""Code intelligence slash command handlers: /lint /refactor /types."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ async def cmd_typify(repl: VeluneREPL, args: str) -> None:
 
     target = args.strip()
     if not target:
-        repl.console.print("[yellow]Usage: /typify <file.py>[/yellow]")
+        repl.console.print("[yellow]Usage: /types <file.py>[/yellow]")
         return
 
     path = _resolve_workspace_path(repl, target)

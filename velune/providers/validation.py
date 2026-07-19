@@ -535,6 +535,76 @@ async def _validate_xai(api_key: str) -> ValidationResult:
         )
 
 
+async def _validate_meta(api_key: str) -> ValidationResult:
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.llama.com/compat/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            models = [m["id"] for m in data.get("data", [])]
+            return ValidationResult(
+                provider_id="meta",
+                status=ValidationStatus.OK,
+                message="Authenticated successfully",
+                models=models,
+                account_info={"model_count": len(models)},
+            )
+        if resp.status_code == 401:
+            return ValidationResult(
+                "meta", ValidationStatus.INVALID_KEY, "Invalid Meta Llama API key."
+            )
+        if resp.status_code == 429:
+            return ValidationResult(
+                "meta", ValidationStatus.RATE_LIMITED, "Meta Llama API key is rate-limited."
+            )
+        return ValidationResult(
+            "meta", ValidationStatus.UNKNOWN_ERROR, f"Meta Llama API returned HTTP {resp.status_code}."
+        )
+    except Exception as e:
+        return ValidationResult(
+            "meta", ValidationStatus.NETWORK_ERROR, f"Network error reaching Meta Llama API: {e}"
+        )
+
+
+async def _validate_zai(api_key: str) -> ValidationResult:
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.z.ai/api/paas/v4/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            models = [m["id"] for m in data.get("data", [])]
+            return ValidationResult(
+                provider_id="zai",
+                status=ValidationStatus.OK,
+                message="Authenticated successfully",
+                models=models,
+                account_info={"model_count": len(models)},
+            )
+        if resp.status_code == 401:
+            return ValidationResult("zai", ValidationStatus.INVALID_KEY, "Invalid Z.ai API key.")
+        if resp.status_code == 429:
+            return ValidationResult(
+                "zai", ValidationStatus.RATE_LIMITED, "Z.ai API key is rate-limited."
+            )
+        return ValidationResult(
+            "zai", ValidationStatus.UNKNOWN_ERROR, f"Z.ai returned HTTP {resp.status_code}."
+        )
+    except Exception as e:
+        return ValidationResult(
+            "zai", ValidationStatus.NETWORK_ERROR, f"Network error reaching Z.ai: {e}"
+        )
+
+
 async def _validate_huggingface(api_key: str) -> ValidationResult:
     try:
         import httpx
@@ -648,6 +718,8 @@ _VALIDATORS: dict[str, object] = {
     "cohere": _validate_cohere,
     "nvidia": _validate_nvidia,
     "xai": _validate_xai,
+    "meta": _validate_meta,
+    "zai": _validate_zai,
     "huggingface": _validate_huggingface,
     "ollama": _validate_ollama,
     "lmstudio": _validate_lmstudio,

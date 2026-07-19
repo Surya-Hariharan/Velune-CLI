@@ -159,7 +159,7 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
     if state.invalid_keys:
         parts.append(_SEP)
         names = ", ".join(state.invalid_keys)
-        parts.append(("class:bottom-toolbar.danger", f"{names} key invalid — /login"))
+        parts.append(("class:bottom-toolbar.danger", f"{names} key invalid — /connect"))
 
     # Provider health — only when there is an issue ("ok" is silent)
     if state.provider_health == "degraded":

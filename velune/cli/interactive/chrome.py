@@ -222,9 +222,11 @@ class WizardController:
         def _get_key_bindings() -> KeyBindingsBase:
             if self._widget is None:
                 return common_bindings(on_cancel=self._cancel_event.set, on_back=None)
-            common = common_bindings(on_cancel=self._cancel_event.set, on_back=self._widget.on_back)
             if isinstance(self._widget, TextInputWidget):
-                return common
+                # Same rationale as runner.run_standalone: don't let Ctrl-C
+                # cancel a field the user is pasting/copying a key into.
+                return common_bindings(on_cancel=None, on_back=self._widget.on_back)
+            common = common_bindings(on_cancel=self._cancel_event.set, on_back=self._widget.on_back)
             return merge_key_bindings([self._widget.key_bindings(), common])
 
         body = DynamicContainer(_get_container)

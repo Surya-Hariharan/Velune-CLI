@@ -420,7 +420,7 @@ def models_assign(
     # Update in-memory mapper for the current session
     mapper.overrides[council_role] = model_id
 
-    # Persist to ~/.velune/council_roles.json (same file the REPL /councilmodel uses)
+    # Persist to ~/.velune/council_roles.json (same file the REPL /roles uses)
     from pathlib import Path as _Path
 
     from velune.orchestration.role_assignments import CouncilRoleMap

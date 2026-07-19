@@ -1,5 +1,5 @@
 """Interactive provider management for the Velune REPL — the /providers and
-/login commands.
+/connect commands.
 
 Every screen here is built from the shared widget kit in
 ``velune.cli.interactive`` (``single_select`` / ``text_input`` / ``confirm`` /
@@ -406,7 +406,7 @@ class ProviderPalette:
         if not configured:
             self.console.print(
                 f"[{design.WARN}]No providers configured yet. "
-                f"Run [bold]/login[/bold] to connect one.[/{design.WARN}]"
+                f"Run [bold]/connect[/bold] to connect one.[/{design.WARN}]"
             )
             return
 
@@ -540,5 +540,5 @@ class ProviderPalette:
         self.console.print(table)
         self.console.print(
             f"[{design.MUTED}]Stale keys are re-checked automatically. "
-            f"[bold]/login[/bold] to connect a provider.[/{design.MUTED}]"
+            f"[bold]/connect[/bold] to connect a provider.[/{design.MUTED}]"
         )

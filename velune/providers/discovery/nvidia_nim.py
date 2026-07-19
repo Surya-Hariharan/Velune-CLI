@@ -24,9 +24,19 @@ _NIM_VENDOR_PREFIXES = ("nvidia/", "meta/", "mistral/", "google/", "microsoft/",
 
 
 class NVIDIANIMDiscovery:
-    """Discovers NVIDIA NIM models from cloud API and local containers."""
+    """Discovers NVIDIA NIM models from cloud API and local containers.
 
-    provider_id = "nvidia_nim"
+    ``provider_id`` is ``"nvidia"`` — the same id the key is stored/validated
+    under (``velune provider add nvidia``) — so ``ModelDiscoveryScanner``'s
+    ``has_key()`` gate and ``scan_provider("nvidia")`` both actually match this
+    discoverer. It was previously ``"nvidia_nim"``, an id nothing ever saves a
+    key under, which silently made cloud NIM discovery a dead code path: the
+    scanner's ``_should_run()`` always found no key and skipped it entirely.
+    Per-model ``ModelDescriptor.provider_id`` values stay ``"nvidia_nim"`` /
+    ``"nvidia_nim_local"`` (see ``_build_descriptor``) — unrelated to this.
+    """
+
+    provider_id = "nvidia"
 
     async def discover(self) -> list[ModelDescriptor]:
         from velune.providers.keystore import get_key

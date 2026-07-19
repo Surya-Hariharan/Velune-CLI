@@ -87,6 +87,8 @@ class ProviderHealthMonitor:
             "mistral",
             "cohere",
             "nvidia",
+            "meta",
+            "zai",
         ]
 
         while self._running:

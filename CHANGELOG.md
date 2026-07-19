@@ -8,6 +8,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **Renamed five slash commands whose names didn't say what they do.**
+  `/login` → `/connect` (it pastes an API key into a provider, not a
+  username/password sign-in), `/councilmodel` → `/roles`, `/optimus` →
+  `/fast`, `/godly` → `/max` (now matching `/mode fast|max|normal`'s own
+  vocabulary instead of a mismatched pair of nicknames), `/typify` →
+  `/types`. Every old name keeps working as an alias — nothing breaks,
+  tab-completion and `/help` just lead with the clearer name now.
+
 ## [0.9.6] - 2026-07-18
 
 ### Added

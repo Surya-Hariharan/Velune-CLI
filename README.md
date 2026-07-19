@@ -181,7 +181,7 @@ flowchart TD
 - **Responsive prompt** with intelligent context indicators (only displays when relevant)
 - **Restrained, single-accent color palette** — clarity over decoration
 - **Tab-completion** for every `/` command and for model IDs
-- **Session modes** for balancing speed vs. quality (`/optimus` · `/normal` · `/godly`)
+- **Session modes** for balancing speed vs. quality (`/fast` · `/normal` · `/max`)
 - **Live dashboard** (`/dashboard`) — background jobs, proactive alerts, provider health in one view
 
 The status bar shows `⚙ N bg` for active background jobs and `⚠ N` for
@@ -213,7 +213,7 @@ render as panels above the input line.
 
 > Keys are stored in your OS keyring, encrypted at rest — never in plain
 > text files, never in git. `velune setup` and the REPL's `/providers` /
-> `/login` walk you through it either way.
+> `/connect` walk you through it either way.
 
 ---
 
@@ -306,13 +306,13 @@ velune recover [id] [--all] [--discard <id>]       # Recover an unsaved session 
 <table>
 <tr><th>Category</th><th>Commands</th></tr>
 <tr><td><strong>Session</strong></td><td><code>/help</code> · <code>/exit</code> · <code>/clear</code> · <code>/new</code></td></tr>
-<tr><td><strong>AI</strong></td><td><code>/run &lt;task&gt;</code> · <code>/council &lt;task&gt;</code> · <code>/jobs</code> · <code>/dashboard</code> · <code>/optimus</code> · <code>/godly</code> · <code>/normal</code> · <code>/mode</code></td></tr>
+<tr><td><strong>AI</strong></td><td><code>/run &lt;task&gt;</code> · <code>/council &lt;task&gt;</code> · <code>/jobs</code> · <code>/dashboard</code> · <code>/fast</code> · <code>/max</code> · <code>/normal</code> · <code>/mode</code></td></tr>
 <tr><td><strong>Projects</strong></td><td><code>/project [open|close|status|list|add]</code> · <code>/index [quick|standard|deep|status|rebuild]</code> <em>(alias <code>/cognition</code>)</em></td></tr>
-<tr><td><strong>Providers</strong></td><td><code>/providers [add|test|discover|status]</code> · <code>/login [provider-id]</code></td></tr>
-<tr><td><strong>Models</strong></td><td><code>/model [discover|connect|use|status|locate]</code> · <code>/models</code> · <code>/pull</code> · <code>/delete</code> · <code>/councilmodel</code> · <code>/bench</code></td></tr>
+<tr><td><strong>Providers</strong></td><td><code>/providers [add|test|discover|status]</code> · <code>/connect [provider-id]</code></td></tr>
+<tr><td><strong>Models</strong></td><td><code>/model [discover|connect|use|status|locate]</code> · <code>/models</code> · <code>/pull</code> · <code>/delete</code> · <code>/roles</code> · <code>/bench</code></td></tr>
 <tr><td><strong>Memory</strong></td><td><code>/memory [clear|stats]</code> · <code>/context</code> · <code>/graph</code></td></tr>
 <tr><td><strong>Git</strong></td><td><code>/diff</code> · <code>/undo</code> · <code>/hunk</code> · <code>/push</code> · <code>/pr</code> · <code>/issue</code> · <code>/sandbox</code></td></tr>
-<tr><td><strong>Tools</strong></td><td><code>/lint</code> · <code>/refactor</code> · <code>/typify</code> · <code>/plugin</code> · <code>/hooks</code></td></tr>
+<tr><td><strong>Tools</strong></td><td><code>/lint</code> · <code>/refactor</code> · <code>/types</code> · <code>/plugin</code> · <code>/hooks</code></td></tr>
 <tr><td><strong>MCP</strong></td><td><code>/mcp [servers|tools|resources|connect|disconnect]</code></td></tr>
 <tr><td><strong>Resources</strong></td><td><code>/resource [list|discover|connect|status]</code> — Docker, PostgreSQL, MySQL, Supabase</td></tr>
 <tr><td><strong>Settings</strong></td><td><code>/settings</code> · <code>/config</code> · <code>/approve [safe|ask|block]</code></td></tr>
@@ -395,8 +395,8 @@ intent without you explaining it again.
 | Mode | Command | Council tier | Model | Context cap |
 | :--- | :--- | :---: | :--- | :--- |
 | **Normal** | `/normal` | Auto | Current | 16k tokens |
-| **Optimus** | `/optimus` | Instant | Smallest | 4k tokens |
-| **Godly** | `/godly` | Full | Largest | 128k tokens |
+| **Fast** | `/fast` | Instant | Smallest | 4k tokens |
+| **Max** | `/max` | Full | Largest | 128k tokens |
 
 > Switch modes at any time mid-session — the prompt badge updates immediately.
 

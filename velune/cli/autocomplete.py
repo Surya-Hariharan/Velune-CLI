@@ -64,7 +64,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("models", "List all available models"),
     ("pull", "Download an Ollama model interactively"),
     ("delete", "Delete a locally installed Ollama model"),
-    ("councilmodel", "Assign specific models to council agent roles"),
+    ("roles", "Assign specific models to council agent roles"),
     ("run", "Execute a task through the Reasoning Council"),
     ("council", "Force full council tier on a task"),
     ("jobs", "List background jobs or cancel one"),
@@ -74,8 +74,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("context", "Show context window usage"),
     ("graph", "Render a hierarchical tree of knowledge graph entities"),
     ("mode", "Show or switch the session mode: fast | max | normal"),
-    ("optimus", "Speed mode — instant tier, smallest model"),
-    ("godly", "Max power — full council, largest model"),
+    ("fast", "Speed mode — instant tier, smallest model"),
+    ("max", "Max power — full council, largest model"),
     ("normal", "Return to balanced normal mode"),
     ("diff", "Show uncommitted file changes from the last council run"),
     ("undo", "Revert the last Velune-generated git commit"),
@@ -91,7 +91,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("sandbox", "Show current sandbox type and status"),
     ("lint", "Lint a Python file"),
     ("refactor", "Detect code smells in a Python file"),
-    ("typify", "Suggest type hints for a Python file"),
+    ("types", "Suggest type hints for a Python file"),
 ]
 
 # Commands whose first argument is a model id.

@@ -61,31 +61,46 @@ _FAMILIES = [
 class LocalModelResolver:
     """Discovers and resolves local GGUF model files across well-known directories."""
 
-    SCAN_PATHS: list[Path] = [
-        Path.home() / "models",
-        Path.home() / "Downloads",
-        Path.home() / ".cache" / "huggingface" / "hub",
-        Path.home() / ".ollama" / "models",
-        Path.home() / "LM Studio" / "models",
-        Path.home() / ".lmstudio" / "models",
-        Path("/usr/share/ollama/models"),
-        Path("C:/Users") / os.getenv("USERNAME", "") / "AppData" / "Local" / "LM Studio" / "models",
-        Path.home() / "Library" / "Application Support" / "LM Studio" / "models",
-    ]
+    @staticmethod
+    def _scan_paths() -> list[Path]:
+        """Well-known GGUF locations, resolved fresh from the current environment.
+
+        Every user's machine lays these out differently — a different username,
+        a Windows profile that lives on D:\\ instead of C:\\, a home directory on
+        a second drive — so nothing here is hardcoded. Each path is derived from
+        an environment variable or ``Path.home()`` at call time, which resolves
+        correctly regardless of which drive/mount the profile actually lives on.
+        """
+        home = Path.home()
+        paths: list[Path] = [
+            home / "models",
+            home / "Downloads",
+            home / ".cache" / "huggingface" / "hub",
+            home / ".ollama" / "models",
+            home / "LM Studio" / "models",
+            home / ".lmstudio" / "models",
+        ]
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            paths.append(Path(local_appdata) / "LM Studio" / "models")
+        else:
+            paths.append(Path("/usr/share/ollama/models"))
+            paths.append(home / "Library" / "Application Support" / "LM Studio" / "models")
+        return paths
 
     # ------------------------------------------------------------------ #
     # Public API                                                           #
     # ------------------------------------------------------------------ #
 
     def scan_gguf_files(self) -> list[Path]:
-        """Recursively scan SCAN_PATHS for *.gguf files.
+        """Recursively scan well-known GGUF locations for *.gguf files.
 
         Skips non-existent directories, caps per-root traversal at
         _MAX_FILES_PER_ROOT items, and limits descent to _MAX_DEPTH levels.
         Returns a deduplicated, sorted list.
         """
         seen: set[Path] = set()
-        for root in self.SCAN_PATHS:
+        for root in self._scan_paths():
             if not root.exists() or not root.is_dir():
                 continue
             counter = [0]
@@ -110,7 +125,7 @@ class LocalModelResolver:
             return p if (p.exists() and p.suffix.lower() == ".gguf") else None
 
         # 2. Relative to scan paths
-        for root in self.SCAN_PATHS:
+        for root in self._scan_paths():
             if not root.exists():
                 continue
             candidate = root / model_id

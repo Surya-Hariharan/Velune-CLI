@@ -69,7 +69,7 @@ Velune CLI's hardware-tier detection suggest one at startup.
 **Rule of thumb:** local models are fine for `INSTANT`/`STANDARD`-tier work
 (explaining code, small edits); reserve your biggest/most expensive model
 for `FULL`-tier tasks (security review, cross-cutting refactors) via
-`/godly` or `/council`, so you're not paying full-council cost for a
+`/max` or `/council`, so you're not paying full-council cost for a
 one-line question.
 
 ---
@@ -96,9 +96,9 @@ Override the classifier directly when you know better:
 
 - `/council <task>` — force full council regardless of what the classifier
   would pick.
-- `/optimus` — pin everything to instant tier / smallest model / 4k context
+- `/fast` — pin everything to instant tier / smallest model / 4k context
   for a whole session (good for a burst of quick Q&A).
-- `/godly` — pin full council / largest model / 128k context for a whole
+- `/max` — pin full council / largest model / 128k context for a whole
   session (good before a big refactor pass).
 - `/normal` — back to auto-classification (16k context, adapts further to
   your hardware profile).

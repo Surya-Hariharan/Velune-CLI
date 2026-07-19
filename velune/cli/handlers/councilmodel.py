@@ -1,4 +1,4 @@
-"""Council model assignment slash command handlers: /councilmodel."""
+"""Council model assignment slash command handlers: /roles."""
 
 from __future__ import annotations
 
@@ -88,4 +88,4 @@ async def cmd_councilmodel_show(repl: VeluneREPL) -> None:
         )
     repl.console.print(table)
     if not repl._role_map.assignments:
-        repl.console.print("[dim]No custom assignments. Use /councilmodel to assign.[/dim]")
+        repl.console.print("[dim]No custom assignments. Use /roles to assign.[/dim]")

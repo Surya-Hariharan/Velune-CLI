@@ -99,7 +99,10 @@ async def run_standalone(
 
     if is_text:
         body = widget.container
-        kb = common_bindings(on_cancel=_cancel, on_back=_back)
+        # No Ctrl-C-cancel binding here: this field is exactly where a user
+        # pastes/copies a value (an API key above all), and eagerly treating
+        # Ctrl-C as "abandon the flow" fights that. Esc still backs out.
+        kb = common_bindings(on_cancel=None, on_back=_back)
     else:
         body = Window(FormattedTextControl(widget.render, focusable=True))
         kb = merge_key_bindings(

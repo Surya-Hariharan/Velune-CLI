@@ -98,6 +98,10 @@ PROVIDER_COSTS: dict[str, dict[str, dict[str, float]]] = {
         "accounts/fireworks/models/mixtral-8x22b-instruct": {"input": 1.20, "output": 1.20},
     },
     "openrouter": {},  # Dynamic — populated from model metadata at runtime
+    "meta": {},  # Preview pricing not yet finalized publicly — treat as unknown, not free
+    "zai": {
+        "glm-4.5-air": {"input": 0.0, "output": 0.0},  # free tier
+    },
     "ollama": {},  # Local — always free
     "lmstudio": {},  # Local — always free
     "huggingface": {},  # Inference API — complex pricing, treat as $0 for tracking

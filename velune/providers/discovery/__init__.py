@@ -26,6 +26,8 @@ _LAZY: dict[str, str] = {
     "GoogleDiscovery": "google",
     "GroqDiscovery": "groq",
     "OpenRouterDiscovery": "openrouter",
+    "MetaDiscovery": "meta",
+    "ZaiDiscovery": "zai",
     "GPUDetector": "gpu",
     "CapabilityClassifier": "classifier",
     "CapabilityBenchmark": "benchmarks",

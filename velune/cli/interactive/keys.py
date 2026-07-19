@@ -24,19 +24,27 @@ from prompt_toolkit.key_binding import KeyBindings
 
 def common_bindings(
     *,
-    on_cancel: Callable[[], None],
+    on_cancel: Callable[[], None] | None,
     on_back: Callable[[], None] | None = None,
 ) -> KeyBindings:
     """Return a KeyBindings with only Ctrl-C (cancel) and optionally Esc (back).
 
     Pass ``on_back=None`` for screens that have nothing to go back to (e.g.
     the first screen of a standalone widget with no wizard history).
+
+    Pass ``on_cancel=None`` for free-text fields that hold something a user
+    pastes in and might want to copy back out (API keys above all) — those
+    screens leave Ctrl-C unbound so the terminal's own copy-on-select/Ctrl-C
+    handling reaches the user instead of this app eagerly swallowing it as
+    "abandon the flow". Esc remains the way to back out.
     """
     kb = KeyBindings()
 
-    @kb.add("c-c", eager=True)
-    def _cancel(event) -> None:
-        on_cancel()
+    if on_cancel is not None:
+
+        @kb.add("c-c", eager=True)
+        def _cancel(event) -> None:
+            on_cancel()
 
     if on_back is not None:
 

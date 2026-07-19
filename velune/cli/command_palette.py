@@ -153,7 +153,7 @@ class CommandPaletteModel:
         # "anthropic" that should lead to the provider-management command).
         # Description/usage/category text is prose, not deliberately chosen
         # search vocabulary — fuzzy-matching against it let a typed query like
-        # "coun" surface /godly, /run, and /model purely because those long
+        # "coun" surface /max, /run, and /model purely because those long
         # strings happened to contain the right letters somewhere, burying the
         # commands that actually start with "coun" among unrelated ones.
         name_score = cls._contains_score(query, command.name, allow_substring=False) * 5

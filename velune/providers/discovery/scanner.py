@@ -29,6 +29,11 @@ _LOCAL_PROVIDERS: frozenset[str] = frozenset(
         "localai",
         "docker",
         "nvidia_nim_local",
+        # "nvidia" (NVIDIANIMDiscovery) is a hybrid: a local NIM container needs
+        # no key at all, and the cloud half self-gates on get_key("nvidia")
+        # internally. Always running it (like docker/ollama) is what lets a
+        # local-only NIM container get discovered with no NVIDIA key configured.
+        "nvidia",
     }
 )
 
@@ -61,6 +66,7 @@ class ModelDiscoveryScanner:
         from velune.providers.discovery.groq import GroqDiscovery
         from velune.providers.discovery.huggingface import HuggingFaceDiscovery
         from velune.providers.discovery.lmstudio import LMStudioDiscovery
+        from velune.providers.discovery.meta import MetaDiscovery
         from velune.providers.discovery.nvidia_nim import NVIDIANIMDiscovery
         from velune.providers.discovery.ollama import OllamaDiscovery
         from velune.providers.discovery.openai import OpenAIDiscovery
@@ -68,6 +74,7 @@ class ModelDiscoveryScanner:
         from velune.providers.discovery.openrouter import OpenRouterDiscovery
         from velune.providers.discovery.together import TogetherDiscovery
         from velune.providers.discovery.xai import XAIDiscovery
+        from velune.providers.discovery.zai import ZaiDiscovery
 
         return [
             OllamaDiscovery(),
@@ -85,6 +92,8 @@ class ModelDiscoveryScanner:
             OpenRouterDiscovery(),
             TogetherDiscovery(),
             FireworksDiscovery(),
+            MetaDiscovery(),
+            ZaiDiscovery(),
         ]
 
     @property
@@ -104,7 +113,7 @@ class ModelDiscoveryScanner:
             return False
         # A key the provider has actively rejected cannot yield usable models —
         # listing them anyway lets the council seat roles that 401 on every
-        # call. `velune login <provider>` re-verifies and restores discovery.
+        # call. `/connect <provider>` in the REPL re-verifies and restores discovery.
         return verification_state(discoverer.provider_id) is not KeyState.INVALID
 
     async def _collect(self, discoverer) -> list[ModelDescriptor]:

@@ -9,7 +9,7 @@ four layers of that contract:
 * a definitive 401 rejection is persisted to the keystore so the *next* run
   fails fast at preflight,
 * preflight treats models behind a rejected key as unreachable and names the
-  fix (`velune login <provider>`),
+  fix (`velune provider add <provider>`),
 * the ask command maps a no-answer council result to a clean error + exit 1.
 """
 
@@ -224,7 +224,7 @@ def test_render_council_failure_names_rejected_provider(monkeypatch):
     monkeypatch.setattr(ask_mod, "console", Console(file=buffer, width=100))
     ctx = SimpleNamespace(json_mode=False)
     ask_mod._render_council_failure(ctx, "No answer.", ["ALL_AGENTS_FAILED"])
-    assert "velune login groq" in buffer.getvalue()
+    assert "velune provider add groq" in buffer.getvalue()
 
 
 async def test_ask_exits_nonzero_on_council_failure(monkeypatch, tmp_path):

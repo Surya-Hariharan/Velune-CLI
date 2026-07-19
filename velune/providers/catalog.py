@@ -120,6 +120,16 @@ _PROVIDERS: tuple[ProviderMeta, ...] = (
         env_var=None,
     ),
     ProviderMeta(
+        id="meta",
+        display_name="Meta",
+        description="Meta's official Llama API — Llama 4 and 3.3 models from the source.",
+        requires_key=True,
+        free_tier=True,
+        key_label="Llama API key",
+        get_key_url="https://llama.developer.meta.com",
+        env_var=PROVIDER_ENV_VARS.get("meta"),
+    ),
+    ProviderMeta(
         id="mistral",
         display_name="Mistral AI",
         description="European AI — Mistral Large, Codestral, and Mistral Nemo.",
@@ -188,6 +198,16 @@ _PROVIDERS: tuple[ProviderMeta, ...] = (
         key_label="xAI API key",
         get_key_url="https://console.x.ai",
         env_var=PROVIDER_ENV_VARS.get("xai"),
+    ),
+    ProviderMeta(
+        id="zai",
+        display_name="Z.ai",
+        description="Z.ai (Zhipu) — the GLM model family, including GLM-4.6.",
+        requires_key=True,
+        free_tier=True,
+        key_label="Z.ai API key",
+        get_key_url="https://z.ai/manage-apikey/apikey-list",
+        env_var=PROVIDER_ENV_VARS.get("zai"),
     ),
 )
 

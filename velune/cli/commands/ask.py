@@ -236,7 +236,7 @@ def _render_council_failure(cli_context: CLIContext, summary: str, flags: list[s
         for pid in invalid:
             lines.append(
                 f"\nYour [bold]{pid}[/bold] API key was rejected by the provider.\n"
-                f"  [bold white]Fix:[/bold white] [bold green]velune login {pid}[/bold green]"
+                f"  [bold white]Fix:[/bold white] [bold green]velune provider add {pid}[/bold green]"
             )
     else:
         lines.append(

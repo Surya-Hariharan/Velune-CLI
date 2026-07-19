@@ -303,7 +303,7 @@ class MemoryLifecycleManager:
                     provider=provider,
                     working_tier=self.working,
                     episodic_memory=self.episodic_memory,
-                    max_context_tokens=100000,
+                    max_context_tokens=self._compaction_token_budget(),
                 )
 
             # Check if compaction should trigger
@@ -326,6 +326,28 @@ class MemoryLifecycleManager:
                 )
         except Exception as exc:
             logger.debug("Error checking compaction trigger: %s", exc)
+
+    def _compaction_token_budget(self) -> int:
+        """Working-memory token budget the compactor sizes its 75% trigger off.
+
+        Previously hardcoded to 100000 regardless of hardware — on a
+        LOW_RESOURCE machine (RuntimeProfile.max_context_tokens=4096) that made
+        the utilization-based trigger nearly unreachable (75% of 100k is
+        75,000 tokens of raw turn text held in RAM), so compaction only ever
+        fired via the turn-count fallback (>30 turns), letting far more raw
+        conversation text accumulate in memory than the profile intends.
+        Falls back to the old 100000 default when no profile is registered
+        (standalone/test construction, or bootstrap not yet complete).
+        """
+        try:
+            from velune.kernel.registry import get_container
+
+            container = get_container()
+            if container.has("runtime.profile"):
+                return container.get("runtime.profile").max_context_tokens
+        except Exception:
+            pass
+        return 100000
 
     def _resolve_compaction_provider(self) -> Any | None:
         """Resolve a real inference provider for compaction summarization.

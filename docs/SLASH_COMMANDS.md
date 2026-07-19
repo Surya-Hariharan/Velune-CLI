@@ -53,8 +53,8 @@ it runs.
 | `council` | `c` | `/council <task description>` | Force full council tier regardless of task complexity |
 | `jobs` | `job` | `/jobs [cancel <id>]` | List background jobs or cancel one |
 | `dashboard` | `dash`, `status` | `/dashboard` | Live system dashboard: session, state, jobs, alerts, health |
-| `optimus` | `fast`, `opt` | `/optimus` | Speed mode — instant tier, compressed context, smallest model |
-| `godly` | `full`, `god` | `/godly` | Max power — full council, largest model, full context |
+| `fast` | `optimus`, `opt` | `/fast` | Speed mode — instant tier, compressed context, smallest model |
+| `max` | `godly`, `full`, `god` | `/max` | Max power — full council, largest model, full context |
 | `normal` | `reset`, `n` | `/normal` | Return to balanced normal mode |
 | `mode` | *(none)* | `/mode [fast|max|normal|status]` | Show or switch the session mode |
 
@@ -62,10 +62,12 @@ it runs.
 > `STANDARD`, or `FULL` council depth based on the task and how many files
 > in the repo depend on whatever you mention. `/council` skips
 > classification and always runs the full
-> Planner → Coder → Reviewer → Challenger → Synthesizer pipeline. `/optimus`,
-> `/godly`, and `/normal` are user-facing presets over that same
+> Planner → Coder → Reviewer → Challenger → Synthesizer pipeline. `/fast`,
+> `/max`, and `/normal` are user-facing presets over that same
 > `CouncilTier` system — they pin the tier and context budget so you don't
-> have to think about it mid-task.
+> have to think about it mid-task. Their names match `/mode`'s own
+> vocabulary (`/mode fast`, `/mode max`, `/mode normal`); `optimus`/`godly`
+> still work as aliases.
 
 ---
 
@@ -76,11 +78,13 @@ Connecting and managing cloud/local AI providers.
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `providers` | `provider`, `prov` | `/providers [add\|manage\|test\|discover\|refresh\|remove\|status] [provider-id]` | Add, manage, test, and discover models from cloud AI providers |
-| `login` | `auth` | `/login [provider-id]` | Connect an AI provider — pick one, paste your API key, get it verified |
+| `connect` | `login`, `auth` | `/connect [provider-id]` | Connect an AI provider — pick one, paste your API key, get it verified |
 
-> Keys are stored in your OS keyring, encrypted at rest. `/login` is the
+> Keys are stored in your OS keyring, encrypted at rest. `/connect` is the
 > fast path for a single provider; `/providers` is the full management
-> surface (test, discover models, refresh catalog, remove).
+> surface (test, discover models, refresh catalog, remove). `/login` still
+> works as an alias, but `/connect` is the name that actually describes
+> what it does — this isn't a username/password sign-in.
 
 ---
 
@@ -96,7 +100,7 @@ council assignment.
 | `pull` | `download`, `get` | `/pull [model-id]` | Download an Ollama model interactively |
 | `delete` | `remove`, `rm` | `/delete <model-id>` | Delete a locally installed Ollama model |
 | `bench` | `b` | `/bench [run]` | View or run empirical model capability benchmarks |
-| `councilmodel` | `cm`, `roles` | `/councilmodel [show\|reset]` | Assign specific models to each Reasoning Council agent role |
+| `roles` | `councilmodel`, `cm` | `/roles [show\|reset]` | Assign specific models to each Reasoning Council agent role |
 
 ---
 
@@ -145,7 +149,7 @@ Code intelligence and the plugin system.
 | --- | --- | --- | --- |
 | `lint` | `check` | `/lint [file]` | Lint a Python file or the last @mentioned .py files |
 | `refactor` | `smell`, `smells` | `/refactor <file>` | Detect code smells in a Python file |
-| `typify` | `types`, `hints` | `/typify <file>` | Suggest type hints for unannotated functions in a Python file |
+| `types` | `typify`, `hints` | `/types <file>` | Suggest type hints for unannotated functions in a Python file |
 | `plugin` | `plugins`, `pl` | `/plugin [list\|enable <name>\|disable <name>\|reload [name]\|show <name>]` | List, enable, disable, or reload declarative TOML/Markdown plugins |
 | `hooks` | *(none)* | `/hooks` | List active lifecycle hooks and their config |
 
@@ -246,38 +250,38 @@ Session lifecycle, diagnostics, and disaster recovery.
 
 | Alias | Command | Alias | Command |
 | --- | --- | --- | --- |
-| `?` | `/help` | `job` | `/jobs` |
-| `approval` | `/approve` | `ls` | `/models` |
-| `auth` | `/login` | `m` | `/model` |
-| `b` | `/bench` | `mem` | `/memory` |
-| `c` | `/council` | `mr` | `/pr` |
-| `cfg` | `/config` | `n` | `/normal` |
-| `check` | `/lint` | `opt` | `/optimus` |
+| `?` | `/help` | `ls` | `/models` |
+| `approval` | `/approve` | `m` | `/model` |
+| `auth` | `/connect` | `mem` | `/memory` |
+| `b` | `/bench` | `mr` | `/pr` |
+| `c` | `/council` | `n` | `/normal` |
+| `cfg` | `/config` | `opt` | `/fast` |
+| `check` | `/lint` | `optimus` | `/fast` |
 | `cls` | `/clear` | `pl` | `/plugin` |
-| `cm` | `/councilmodel` | `plugins` | `/plugin` |
+| `cm` | `/roles` | `plugins` | `/plugin` |
 | `cog` | `/index` | `proj` | `/project` |
 | `cognition` | `/index` | `prov` | `/providers` |
-| `ctx` | `/context` | `provider` | `/providers` |
-| `d` | `/diff` | `pull-request` | `/pr` |
-| `dash` | `/dashboard` | `q` | `/exit` |
-| `diag` | `/doctor` | `quit` | `/exit` |
-| `download` | `/pull` | `r` | `/run` |
-| `fast` | `/optimus` | `remove` | `/delete` |
+| `councilmodel` | `/roles` | `provider` | `/providers` |
+| `ctx` | `/context` | `pull-request` | `/pr` |
+| `d` | `/diff` | `q` | `/exit` |
+| `dash` | `/dashboard` | `quit` | `/exit` |
+| `diag` | `/doctor` | `r` | `/run` |
+| `download` | `/pull` | `remove` | `/delete` |
 | `fresh` | `/new` | `reset` | `/normal` |
-| `full` | `/godly` | `res` | `/resource` |
+| `full` | `/max` | `res` | `/resource` |
 | `g` | `/graph` | `resources` | `/resource` |
 | `get` | `/pull` | `rm` | `/delete` |
-| `gh-issue` | `/issue` | `roles` | `/councilmodel` |
-| `gl-issue` | `/issue` | `s` | `/session` |
-| `god` | `/godly` | `sb` | `/sandbox` |
-| `gp` | `/push` | `setup` | `/settings` |
-| `h` | `/help` | `smell` | `/refactor` |
-| `hints` | `/typify` | `smells` | `/refactor` |
-| `hist` | `/history` | `status` | `/dashboard` |
-| `hunks` | `/hunk` | `types` | `/typify` |
-| | | `u` | `/undo` |
-| | | `usage` | `/stats` |
-| | | `workspace` | `/project` |
+| `gh-issue` | `/issue` | `s` | `/session` |
+| `gl-issue` | `/issue` | `sb` | `/sandbox` |
+| `god` | `/max` | `setup` | `/settings` |
+| `godly` | `/max` | `smell` | `/refactor` |
+| `gp` | `/push` | `smells` | `/refactor` |
+| `h` | `/help` | `status` | `/dashboard` |
+| `hints` | `/types` | `typify` | `/types` |
+| `hist` | `/history` | `u` | `/undo` |
+| `hunks` | `/hunk` | `usage` | `/stats` |
+| `job` | `/jobs` | `workspace` | `/project` |
+| `login` | `/connect` | | |
 
 </details>
 

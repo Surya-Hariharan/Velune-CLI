@@ -160,7 +160,9 @@ async def run_preflight_check(
         pass  # key-state / liveness lookup must never block a run on its own
 
     if rejected:
-        fixes = "\n".join(f"       [bold green]velune login {pid}[/bold green]" for pid in rejected)
+        fixes = "\n".join(
+            f"       [bold green]velune provider add {pid}[/bold green]" for pid in rejected
+        )
         issues.append(
             f"The API key for [bold]{', '.join(rejected)}[/bold] was rejected by the provider.\n"
             "  [bold white]Fix:[/bold white] Save a fresh key:\n" + fixes

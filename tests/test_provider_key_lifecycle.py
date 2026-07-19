@@ -124,6 +124,50 @@ def test_legacy_imported_status_is_unverified():
 
 
 # ---------------------------------------------------------------------------
+# delete_provider — a deletion must actually persist, not just vanish from
+# the in-memory cache for the lifetime of one process.
+#
+# _save_disk() merges its argument onto a *fresh* read of the on-disk state
+# (so a concurrent save for a different provider isn't clobbered by a stale
+# in-memory snapshot) via plain dict.update(). update() can only add/overwrite
+# keys — a provider merely absent from the merge argument is indistinguishable
+# from one nobody touched, so the fresh disk read silently re-introduced the
+# very record delete_provider() had just removed from the cache. Confirmed
+# live: `velune provider add nvidia <bad-key>` (accepted — NVIDIA's /v1/models
+# doesn't reject it), then deleting it and reloading fresh from disk showed it
+# right back, with the exact original timestamp, proving nothing was ever
+# written for the deletion.
+# ---------------------------------------------------------------------------
+
+
+def test_delete_provider_persists_across_a_fresh_disk_read():
+    ks.save_key("openai", "sk-to-be-deleted", verified=True)
+    ks.delete_key("openai")
+
+    # Force a real disk re-read — the bug only manifested here, since the
+    # in-memory cache correctly dropped the key; the file did not.
+    ks._manager._cache = None
+    assert "openai" not in ks._manager._load_disk()
+    assert ks.verification_state("openai") is KeyState.MISSING
+
+
+def test_delete_provider_does_not_resurrect_via_a_later_save_of_another_key():
+    """The merge-with-fresh-disk-read behavior must still protect concurrent
+    saves for *other* providers — only the deleted id should be gone."""
+    ks.save_key("openai", "sk-openai", verified=True)
+    ks.save_key("anthropic", "sk-anthropic", verified=True)
+
+    ks.delete_key("openai")
+    ks.save_key("groq", "sk-groq", verified=True)  # an unrelated concurrent-ish save
+
+    ks._manager._cache = None
+    on_disk = ks._manager._load_disk()
+    assert "openai" not in on_disk
+    assert on_disk["anthropic"]["key"] == "sk-anthropic"
+    assert on_disk["groq"]["key"] == "sk-groq"
+
+
+# ---------------------------------------------------------------------------
 # verifier — the rule that keeps offline users out of trouble
 # ---------------------------------------------------------------------------
 

@@ -122,6 +122,18 @@ _PROVIDER_META: dict[str, dict] = {
         "local": False,
         "url": "https://huggingface.co/settings/tokens",
     },
+    "meta": {
+        "label": "Meta (Llama API)",
+        "env": "LLAMA_API_KEY",
+        "local": False,
+        "url": "https://llama.developer.meta.com",
+    },
+    "zai": {
+        "label": "Z.ai",
+        "env": "ZAI_API_KEY",
+        "local": False,
+        "url": "https://z.ai/manage-apikey/apikey-list",
+    },
     "ollama": {"label": "Ollama (local)", "env": None, "local": True, "url": "https://ollama.com"},
     "lmstudio": {
         "label": "LM Studio (local)",

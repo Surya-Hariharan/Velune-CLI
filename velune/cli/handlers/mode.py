@@ -1,6 +1,6 @@
-"""Mode switch slash command handlers: /optimus /godly /normal /mode.
+"""Mode switch slash command handlers: /fast /max /normal /mode.
 
-Deduplicates /optimus and /godly which shared identical structure —
+Deduplicates /fast and /max which shared identical structure —
 now both delegate to a single _set_session_mode helper.
 """
 
@@ -16,7 +16,7 @@ _log = logging.getLogger("velune.cli.handlers.mode")
 
 
 async def _set_session_mode(repl: VeluneREPL, mode_enum, label: str, color: str) -> None:
-    """Shared body for /optimus, /godly, /normal — avoids copy-paste."""
+    """Shared body for /fast, /max, /normal — avoids copy-paste."""
     from velune.cli.model_selector import ModeAwareModelSelector
 
     config = repl._mode_manager.set_mode(mode_enum)
