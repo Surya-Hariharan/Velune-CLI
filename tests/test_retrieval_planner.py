@@ -13,7 +13,12 @@ from unittest.mock import AsyncMock
 
 from velune.cognition.intent import IntentType
 from velune.retrieval.planner import RetrievalPlanner
-from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalResult, RetrievalSource
+from velune.retrieval.schemas import (
+    RetrievalDocument,
+    RetrievalHit,
+    RetrievalResult,
+    RetrievalSource,
+)
 
 
 class TestPlan:

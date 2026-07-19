@@ -1,38 +1,71 @@
-"""Filesystem write tools — all writes pass through DiffPreview for user
-approval before touching disk."""
+"""Filesystem write tools.
+
+With ``confirm=True`` (the default, legacy behavior) every write renders a
+diff preview to a Rich console and blocks on user approval. The interactive
+REPL builds these tools with ``confirm=False``: approval happens once in the
+tool loop's approver (which shows the diff), so the tool itself must neither
+print nor prompt — its default ``Console()`` would write to raw stdout and
+its ``Prompt.ask`` would collide with the fullscreen prompt_toolkit app.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-
-from rich.console import Console
+from typing import TYPE_CHECKING
 
 from velune.execution.path_guard import resolve_in_workspace
 from velune.tools.base.tool import BaseTool, ToolPermission
 
+if TYPE_CHECKING:
+    from rich.console import Console
 
-class WriteFile(BaseTool):
-    """Write content to a file, showing a diff preview first."""
+
+class _WriteToolBase(BaseTool):
+    """Shared constructor/console plumbing for the filesystem write tools."""
 
     def __init__(
         self,
         workspace: Path | None = None,
         console: Console | None = None,
+        confirm: bool = True,
     ) -> None:
         self.workspace = workspace or Path.cwd()
-        self.console = console or Console()
+        self.confirm = confirm
+        self._console = console
 
-    def get_name(self) -> str:
-        return "write_file"
+    @property
+    def console(self) -> Console:
+        # Built lazily so the confirm=False path never constructs a detached
+        # stdout console at all.
+        if self._console is None:
+            from rich.console import Console
+
+            self._console = Console()
+        return self._console
 
     def get_required_permissions(self) -> set[ToolPermission]:
         return {ToolPermission.FILESYSTEM_WRITE}
+
+
+class WriteFile(_WriteToolBase):
+    """Write content to a file, showing a diff preview first."""
+
+    def get_name(self) -> str:
+        return "write_file"
 
     def get_description(self) -> str:
         return "Write content to a file (shows diff preview before writing)"
 
     async def execute(self, file_path: str, content: str) -> str:
         path = resolve_in_workspace(file_path, self.workspace, label="WriteFile")
+        if not self.confirm:
+            from velune.execution.diff_preview import compute_file_diff, diff_stats
+
+            added, removed = diff_stats(compute_file_diff(path, content))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            total = len(content.splitlines())
+            return f"Wrote {total} lines to {path} (+{added} -{removed})"
         return await self._write_file_with_preview(path, content)
 
     async def _write_file_with_preview(
@@ -70,28 +103,22 @@ class WriteFile(BaseTool):
         }
 
 
-class CreateFile(BaseTool):
+class CreateFile(_WriteToolBase):
     """Create an empty file, showing a diff preview first."""
-
-    def __init__(
-        self,
-        workspace: Path | None = None,
-        console: Console | None = None,
-    ) -> None:
-        self.workspace = workspace or Path.cwd()
-        self.console = console or Console()
 
     def get_name(self) -> str:
         return "create_file"
-
-    def get_required_permissions(self) -> set[ToolPermission]:
-        return {ToolPermission.FILESYSTEM_WRITE}
 
     def get_description(self) -> str:
         return "Create an empty file (shows preview before creating)"
 
     async def execute(self, file_path: str) -> str:
         path = resolve_in_workspace(file_path, self.workspace, label="CreateFile")
+
+        if not self.confirm:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+            return f"Created {file_path}"
 
         from velune.execution.diff_preview import DiffDecision, DiffPreview
 
@@ -119,22 +146,11 @@ class CreateFile(BaseTool):
         }
 
 
-class DeleteFile(BaseTool):
+class DeleteFile(_WriteToolBase):
     """Delete a file, showing a deletion preview first."""
-
-    def __init__(
-        self,
-        workspace: Path | None = None,
-        console: Console | None = None,
-    ) -> None:
-        self.workspace = workspace or Path.cwd()
-        self.console = console or Console()
 
     def get_name(self) -> str:
         return "delete_file"
-
-    def get_required_permissions(self) -> set[ToolPermission]:
-        return {ToolPermission.FILESYSTEM_WRITE}
 
     def get_description(self) -> str:
         return "Delete a file (shows preview before deleting)"
@@ -143,6 +159,11 @@ class DeleteFile(BaseTool):
         path = resolve_in_workspace(file_path, self.workspace, label="DeleteFile")
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
+
+        if not self.confirm:
+            removed = len(path.read_text(errors="replace").splitlines())
+            path.unlink()
+            return f"Deleted {file_path} ({removed} lines)"
 
         from velune.execution.diff_preview import DiffDecision, DiffPreview
 

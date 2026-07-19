@@ -13,7 +13,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 from velune.retrieval.hybrid import HybridRetriever, _normalize_scores
-from velune.retrieval.schemas import RetrievalDocument, RetrievalHit, RetrievalQuery, RetrievalSource
+from velune.retrieval.schemas import (
+    RetrievalDocument,
+    RetrievalHit,
+    RetrievalQuery,
+    RetrievalSource,
+)
 
 
 def _hit(score: float, source: RetrievalSource, doc_id: str = "d") -> RetrievalHit:

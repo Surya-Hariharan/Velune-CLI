@@ -49,6 +49,38 @@ class FileDiff:
     is_deletion: bool
 
 
+def compute_file_diff(path: Path, proposed: str) -> FileDiff:
+    """Build a FileDiff against the current on-disk state (no console needed)."""
+    is_new = not path.exists()
+    original = "" if is_new else path.read_text(errors="replace")
+    return FileDiff(
+        path=path,
+        original=original,
+        proposed=proposed,
+        is_new_file=is_new,
+        is_deletion=(proposed == ""),
+    )
+
+
+def diff_stats(diff: FileDiff) -> tuple[int, int]:
+    """(added, removed) line counts for a FileDiff."""
+    if diff.is_new_file:
+        return (len(diff.proposed.splitlines()), 0)
+    if diff.is_deletion:
+        return (0, len(diff.original.splitlines()))
+    added = removed = 0
+    for line in difflib.unified_diff(
+        diff.original.splitlines(), diff.proposed.splitlines(), lineterm=""
+    ):
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return (added, removed)
+
+
 # ---------------------------------------------------------------------------
 # DiffPreview
 # ---------------------------------------------------------------------------
@@ -63,15 +95,7 @@ class DiffPreview:
     # ------------------------------------------------------------------
 
     def compute_diff(self, path: Path, proposed: str) -> FileDiff:
-        is_new = not path.exists()
-        original = "" if is_new else path.read_text(errors="replace")
-        return FileDiff(
-            path=path,
-            original=original,
-            proposed=proposed,
-            is_new_file=is_new,
-            is_deletion=(proposed == ""),
-        )
+        return compute_file_diff(path, proposed)
 
     def render_diff(self, diff: FileDiff) -> None:
         from rich.panel import Panel

@@ -21,15 +21,123 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
     from velune.core.types.inference import InferenceRequest
     from velune.core.types.model import ModelDescriptor
+    from velune.execution.diff_preview import FileDiff
     from velune.orchestration.tool_loop import ToolLoopResult
 
 _log = logging.getLogger("velune.cli.handlers.tool_chat")
+
+# Human-readable verbs for tool cards: `● Write(velune/x.py)` instead of
+# `● write_file {"file_path": ...}`. Unknown (e.g. MCP) tools show raw names.
+_TOOL_VERBS: dict[str, str] = {
+    "read_file": "Read",
+    "read_directory": "List",
+    "write_file": "Write",
+    "create_file": "Create",
+    "delete_file": "Delete",
+    "grep_files": "Search",
+    "find_files": "Find",
+    "semantic_code_search": "Search",
+    "symbol_search": "Search",
+    "go_to_definition": "Navigate",
+    "find_references": "References",
+    "execute_command": "Run",
+    "web_fetch": "Fetch",
+    "terminal_history": "History",
+    "git_status": "Git status",
+    "git_diff": "Git diff",
+    "git_log": "Git log",
+    "git_blame": "Git blame",
+    "git_branch": "Git branch",
+    "git_commit": "Git commit",
+    "git_checkout": "Git checkout",
+    "git_push": "Git push",
+}
+
+_FILE_MUTATORS = {"write_file", "create_file", "delete_file"}
+_SEARCH_TOOLS = {
+    "grep_files",
+    "find_files",
+    "semantic_code_search",
+    "symbol_search",
+    "find_references",
+}
+
+_RESULT_STYLE = "class:conversation.tool.result"
+
+
+def _relativize(target: str, workspace: Path | None) -> str:
+    if workspace is None:
+        return target
+    try:
+        return str(Path(target).resolve().relative_to(Path(workspace).resolve()))
+    except Exception:
+        return target
+
+
+def _describe_call(
+    name: str, arguments: Any, workspace: Path | None
+) -> tuple[str, str]:
+    """(verb, primary argument) for a tool card title."""
+    verb = _TOOL_VERBS.get(name, name)
+    args = arguments if isinstance(arguments, dict) else {}
+    target = ""
+    for key in ("file_path", "path", "directory"):
+        value = args.get(key)
+        if isinstance(value, str) and value:
+            target = _relativize(value, workspace)
+            break
+    if not target:
+        for key in ("command", "pattern", "query", "url", "symbol"):
+            value = args.get(key)
+            if isinstance(value, str) and value:
+                target = value
+                break
+    target = " ".join(target.split())
+    if len(target) > 80:
+        target = target[:79] + "…"
+    return verb, target
+
+
+def _summarize_result(
+    name: str, data: dict[str, Any], diff: FileDiff | None, target: str
+) -> list[tuple[str, str]]:
+    """Fragments for the `⎿` result row under a resolved tool card."""
+    result = str(data.get("result") or "")
+    first = result.splitlines()[0].strip() if result.strip() else ""
+    if data.get("error"):
+        return [("class:conversation.tool.err", (first or "failed")[:160])]
+    if name in _FILE_MUTATORS and diff is not None:
+        from velune.execution.diff_preview import diff_stats
+
+        added, removed = diff_stats(diff)
+        label = target or str(diff.path)
+        if diff.is_new_file:
+            return [(_RESULT_STYLE, f"Created {label} with {added} lines")]
+        if diff.is_deletion:
+            return [(_RESULT_STYLE, f"Deleted {label}")]
+        return [
+            (
+                _RESULT_STYLE,
+                f"Updated {label} with {added} additions and {removed} removals",
+            )
+        ]
+    if name == "read_file":
+        if len(result) >= 2000:  # event payload truncates; count would lie
+            return [(_RESULT_STYLE, f"Read {target}".strip())]
+        return [(_RESULT_STYLE, f"Read {len(result.splitlines())} lines")]
+    if name in _SEARCH_TOOLS:
+        matches = len([ln for ln in result.splitlines() if ln.strip()])
+        return [(_RESULT_STYLE, f"Found {matches} matches" if matches else "No matches")]
+    if first:
+        return [(_RESULT_STYLE, first[:160])]
+    return [(_RESULT_STYLE, "Done")]
 
 
 def tool_loop_available(repl: VeluneREPL, model: ModelDescriptor, provider: Any) -> bool:
@@ -184,17 +292,40 @@ async def _prompt_approval(
     from rich.prompt import Prompt
 
     ui.pause_status()
-    args_preview = json.dumps(arguments, default=str, ensure_ascii=False)
-    if len(args_preview) > 400:
-        args_preview = args_preview[:400] + "…"
-    repl.console.print(
-        Panel(
-            f"[bold]{name}[/bold]\n[dim]{args_preview}[/dim]",
-            title="[yellow]Tool approval required[/yellow]",
-            border_style="yellow",
-            padding=(0, 2),
+    diff = ui.compute_mutation_diff(name, arguments) if name in _FILE_MUTATORS else None
+    if diff is not None:
+        # File mutations get the actual diff, not raw JSON.
+        from velune.execution.diff_preview import diff_stats
+
+        added, removed = diff_stats(diff)
+        verb, target = _describe_call(name, arguments, ui._workspace)
+        repl.console.print(
+            Panel(
+                f"[bold]{verb}[/bold] {target or diff.path}  [dim](+{added} -{removed})[/dim]",
+                title="[yellow]Tool approval required[/yellow]",
+                border_style="yellow",
+                padding=(0, 2),
+            )
         )
-    )
+        if ui._fullscreen_ui is not None:
+            ui._fullscreen_ui.append_fragment_lines(ui._diff_fragments(diff))
+        else:
+            from velune.execution.diff_preview import DiffPreview
+
+            DiffPreview(repl.console).render_diff(diff)
+        ui._diff_shown.add((name, str(diff.path)))
+    else:
+        args_preview = json.dumps(arguments, default=str, ensure_ascii=False)
+        if len(args_preview) > 400:
+            args_preview = args_preview[:400] + "…"
+        repl.console.print(
+            Panel(
+                f"[bold]{name}[/bold]\n[dim]{args_preview}[/dim]",
+                title="[yellow]Tool approval required[/yellow]",
+                border_style="yellow",
+                padding=(0, 2),
+            )
+        )
     try:
         answer = await asyncio.to_thread(
             Prompt.ask,
@@ -208,11 +339,18 @@ async def _prompt_approval(
         raise
     except (EOFError, Exception) as exc:
         _log.debug("Approval prompt unavailable (%s); denying %s", exc, name)
+        if diff is not None:
+            ui._diff_shown.discard((name, str(diff.path)))
         return False
     if answer == "a":
         repl._tool_session_grants.add(name)
         return True
-    return answer == "y"
+    approved = answer == "y"
+    if not approved and diff is not None:
+        # Denied: the call never starts, so the shown-marker would otherwise
+        # leak onto the next (approved) write to the same file.
+        ui._diff_shown.discard((name, str(diff.path)))
+    return approved
 
 
 # ── Live activity rendering ─────────────────────────────────────────────────
@@ -246,15 +384,35 @@ class _ToolActivityUI:
         self._last_live_update = 0.0
         self.any_tool_ran = False
         self.last_turn_streamed = False
+        # Tool-card state, keyed by the provider's tool-call id.
+        self._cards: dict[str, Any] = {}
+        self._targets: dict[str, str] = {}
+        self._pending_diffs: dict[str, FileDiff] = {}
+        # (tool name, resolved path) pairs whose diff already rendered at
+        # approval time — consumed (one-shot) at tool_end to avoid a repeat.
+        self._diff_shown: set[tuple[str, str]] = set()
+        try:
+            ws = repl.container.get("runtime.workspace")
+            self._workspace: Path | None = Path(ws) if ws else None
+        except Exception:
+            self._workspace = None
 
     # Runner events are synchronous callbacks on the loop task.
     def on_event(self, event: str, data: dict[str, Any]) -> None:
         if event == "turn":
             self.last_turn_streamed = False
-            label = "Thinking…" if data.get("turn", 1) == 1 else "Continuing…"
+            first = data.get("turn", 1) == 1
             if self._fullscreen_ui is not None:
-                self._fullscreen_ui.begin_assistant(label)
+                # Turn 1 opens the response block (◆ Velune + cycling verbs);
+                # later turns just resume the spinner under the tool cards.
+                if first:
+                    self._fullscreen_ui.begin_assistant()
+                else:
+                    self._fullscreen_ui.begin_assistant(
+                        "Continuing…", cycle=False, show_label=False
+                    )
             else:
+                label = "Thinking…" if first else "Continuing…"
                 self._start_status(f"[dim]{label}[/dim]")
         elif event == "content_delta":
             self._render_delta(data.get("text", ""))
@@ -262,16 +420,121 @@ class _ToolActivityUI:
             self._finish_live()
             self.pause_status()
         elif event == "tool_start":
-            self.any_tool_ran = True
-            args = str(data.get("arguments", ""))
-            if len(args) > 120:
-                args = args[:120] + "…"
-            self._console.print(
-                f"  [cyan]●[/cyan] [bold]{data.get('name')}[/bold] [dim]{args}[/dim]"
-            )
+            self._on_tool_start(data)
         elif event == "tool_end":
-            mark = "[red]✗[/red]" if data.get("error") else "[green]✓[/green]"
-            self._console.print(f"    {mark} [dim]{data.get('duration_ms', 0):.0f} ms[/dim]")
+            self._on_tool_end(data)
+        elif event == "tool_denied":
+            self._on_tool_denied(data)
+
+    # ── Tool cards ───────────────────────────────────────────────────
+
+    def _on_tool_start(self, data: dict[str, Any]) -> None:
+        self.any_tool_ran = True
+        name = str(data.get("name") or "")
+        call_id = str(data.get("id") or "")
+        arguments = data.get("arguments")
+        verb, target = _describe_call(name, arguments, self._workspace)
+        self._targets[call_id] = target
+        if name in _FILE_MUTATORS:
+            diff = self.compute_mutation_diff(name, arguments)
+            if diff is not None:
+                self._pending_diffs[call_id] = diff
+        if self._fullscreen_ui is not None:
+            self._cards[call_id] = self._fullscreen_ui.add_tool_card(verb, target)
+        else:
+            shown = f"[dim]({target})[/dim]" if target else ""
+            self._console.print(f"  [cyan]●[/cyan] [bold]{verb}[/bold]{shown}")
+
+    def _on_tool_end(self, data: dict[str, Any]) -> None:
+        name = str(data.get("name") or "")
+        call_id = str(data.get("id") or "")
+        error = bool(data.get("error"))
+        diff = self._pending_diffs.pop(call_id, None)
+        target = self._targets.pop(call_id, "")
+        summary = _summarize_result(name, data, diff, target)
+        shown_key = (name, str(diff.path)) if diff is not None else None
+        already_shown = shown_key in self._diff_shown if shown_key else False
+        if shown_key and already_shown:
+            self._diff_shown.discard(shown_key)  # one-shot: next call re-renders
+        show_diff = diff is not None and not error and not already_shown
+
+        if self._fullscreen_ui is not None:
+            card = self._cards.pop(call_id, None)
+            if card is None and self._cards:
+                # Defensive: resolve the oldest unresolved card if ids drift.
+                oldest = next(iter(self._cards))
+                card = self._cards.pop(oldest)
+            if card is not None:
+                card.resolve(summary, error=error)
+            else:
+                self._fullscreen_ui.append_fragment_lines(
+                    [[(_RESULT_STYLE, "  ⎿ "), *summary]]
+                )
+            if show_diff:
+                self._fullscreen_ui.append_fragment_lines(
+                    self._diff_fragments(diff)
+                )
+        else:
+            mark = "[red]✗[/red]" if error else "[green]✓[/green]"
+            plain = "".join(text for _style, text in summary)
+            self._console.print(
+                f"    {mark} [dim]{plain} · {data.get('duration_ms', 0):.0f} ms[/dim]"
+            )
+            if show_diff:
+                from velune.execution.diff_preview import DiffPreview
+
+                DiffPreview(self._console).render_diff(diff)
+
+    def _on_tool_denied(self, data: dict[str, Any]) -> None:
+        name = str(data.get("name") or "")
+        call_id = str(data.get("id") or "")
+        self._pending_diffs.pop(call_id, None)
+        self._targets.pop(call_id, None)
+        verb = _TOOL_VERBS.get(name, name)
+        if self._fullscreen_ui is not None:
+            self._fullscreen_ui.append_fragment_lines(
+                [
+                    [
+                        ("class:conversation.tool.warn", "✗ "),
+                        ("class:conversation.tool.name", verb),
+                        (_RESULT_STYLE, " — denied"),
+                    ]
+                ]
+            )
+        else:
+            self._console.print(f"  [yellow]✗ {verb} denied[/yellow]")
+
+    def compute_mutation_diff(self, name: str, arguments: Any) -> FileDiff | None:
+        """FileDiff for a file-mutation call, from pre-write disk state.
+
+        Must run before the tool touches disk (tool_start / approval time).
+        Any failure returns None — the card simply renders without a diff.
+        """
+        try:
+            args = arguments if isinstance(arguments, dict) else {}
+            file_path = args.get("file_path")
+            if not isinstance(file_path, str) or not file_path:
+                return None
+            from velune.execution.diff_preview import compute_file_diff
+            from velune.execution.path_guard import resolve_in_workspace
+
+            workspace = self._workspace or Path.cwd()
+            path = resolve_in_workspace(file_path, workspace, label=name)
+            proposed = args.get("content", "") if name == "write_file" else ""
+            if not isinstance(proposed, str):
+                return None
+            return compute_file_diff(path, proposed)
+        except Exception:
+            return None
+
+    def _diff_fragments(self, diff: FileDiff) -> list[list[tuple[str, str]]]:
+        from velune.cli.rendering.diff_fragments import render_diff_fragments
+
+        try:
+            width = max(40, int(self._fullscreen_ui._width()))
+        except Exception:
+            width = 100
+        return render_diff_fragments(diff, width)
 
     def note(self, markup: str) -> None:
         self.pause_status()
@@ -358,3 +621,15 @@ class _ToolActivityUI:
     def close(self) -> None:
         self._finish_live()
         self.pause_status()
+        # Interrupt/teardown: any card still spinning resolves as interrupted
+        # so the next turn starts from a settled transcript.
+        for card in list(self._cards.values()):
+            try:
+                card.cancel("Interrupted")
+            except Exception:
+                pass
+        self._cards.clear()
+        self._pending_diffs.clear()
+        self._targets.clear()
+        if self._fullscreen_ui is not None:
+            self._fullscreen_ui.cancel_live_cards()

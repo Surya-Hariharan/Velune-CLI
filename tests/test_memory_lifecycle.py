@@ -20,13 +20,13 @@ from velune.memory.three_brain import ThreeBrainResult
 
 
 def _manager(**overrides) -> MemoryLifecycleManager:
-    defaults = dict(
-        working_tier=MagicMock(),
-        episodic_memory=MagicMock(),
-        semantic_memory=MagicMock(),
-        embedding_pipeline=MagicMock(),
-        lineage_tier=MagicMock(),
-    )
+    defaults = {
+        "working_tier": MagicMock(),
+        "episodic_memory": MagicMock(),
+        "semantic_memory": MagicMock(),
+        "embedding_pipeline": MagicMock(),
+        "lineage_tier": MagicMock(),
+    }
     defaults.update(overrides)
     return MemoryLifecycleManager(**defaults)
 

@@ -116,6 +116,80 @@ class _ConsoleSink:
             self._pending = ""
 
 
+class ToolCardHandle:
+    """Live handle to one tool-activity line in the transcript.
+
+    Holds its `_Line` by object reference — never by index — so `_trim()`
+    dropping leading lines can't misdirect an update: a trimmed-away card
+    simply stops rendering, and further ticks/resolves are harmless no-ops.
+    """
+
+    def __init__(self, ui: FullscreenREPLUI, line: _Line, verb: str, target: str) -> None:
+        self._ui = ui
+        self._line = line
+        self._verb = verb
+        self._target = target
+        self._started = time.perf_counter()
+        self._task: asyncio.Task | None = None
+        self._done = False
+
+    def _title_fragments(
+        self, bullet: str, bullet_style: str, elapsed_s: float | None = None
+    ) -> list[tuple[str, str]]:
+        frags = [
+            (bullet_style, f"{bullet} "),
+            ("class:conversation.tool.name", self._verb),
+        ]
+        if self._target:
+            frags.append(("class:conversation.tool.arg", f"({self._target})"))
+        # Elapsed time only earns a slot once the tool stops feeling instant.
+        if elapsed_s is not None and elapsed_s >= 2.0:
+            frags.append(("class:conversation.tool.elapsed", f" · {elapsed_s:.1f}s"))
+        return frags
+
+    def _set_line(self, frags: list[tuple[str, str]]) -> None:
+        self._line.fragments = frags
+        self._line.text = "".join(t for _s, t in frags)
+
+    def tick(self, frame: str, elapsed_s: float) -> None:
+        if self._done:
+            return
+        self._set_line(self._title_fragments(frame, "class:conversation.tool.spinner", elapsed_s))
+
+    def resolve(
+        self,
+        summary: list[tuple[str, str]] | None = None,
+        *,
+        error: bool = False,
+        bullet_style: str | None = None,
+    ) -> None:
+        if self._done:
+            return
+        self._done = True
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+        style = bullet_style or (
+            "class:conversation.tool.err" if error else "class:conversation.tool.ok"
+        )
+        self._set_line(self._title_fragments("●", style))
+        if summary:
+            self._ui.append_fragment_lines(
+                [[("class:conversation.tool.result", "  ⎿ "), *summary]]
+            )
+        try:
+            self._ui._live_cards.remove(self)
+        except ValueError:
+            pass
+        self._ui.invalidate()
+
+    def cancel(self, note: str = "Interrupted") -> None:
+        self.resolve(
+            [("class:conversation.tool.warn", note)],
+            bullet_style="class:conversation.tool.warn",
+        )
+
+
 def _build_floats(command_palette: Any | None, model_switcher: Any | None = None) -> list[Float]:
     """The CompletionsMenu float (model-id/@@symbol completion), plus the
     command palette's float when one is supplied.
@@ -191,6 +265,8 @@ class FullscreenREPLUI:
         self._last_stream_render: float = 0.0
         self._running = False
         self._app: Application[None] | None = None
+        self._busy = False
+        self._live_cards: list[ToolCardHandle] = []
         self._thinking_task: asyncio.Task | None = None
         self._thinking_idx: int = 0
         self._thinking_words = [
@@ -255,10 +331,28 @@ class FullscreenREPLUI:
                 "conversation": f"bg:{design.BACKGROUND} {design.WHITE}",
                 "conversation.dim": f"bg:{design.BACKGROUND} {design.SECONDARY}",
                 "conversation.user": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.user.marker": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.user.text": f"bg:{design.BACKGROUND} {design.WHITE}",
                 "conversation.assistant": f"bg:{design.BACKGROUND} {design.WHITE}",
+                "conversation.assistant.diamond": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.assistant.label": f"bg:{design.BACKGROUND} {design.GRAD_MID} bold",
                 "conversation.system": f"bg:{design.BACKGROUND} {design.SECONDARY}",
                 "conversation.thinking": f"bg:{design.BACKGROUND} {design.SECONDARY} italic",
                 "conversation.spinner": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                # Tool-activity cards (agentic loop): ● Verb(target) · 1.2s
+                "conversation.tool.spinner": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.tool.name": f"bg:{design.BACKGROUND} {design.WHITE} bold",
+                "conversation.tool.arg": f"bg:{design.BACKGROUND} {design.SECONDARY}",
+                "conversation.tool.elapsed": f"bg:{design.BACKGROUND} {design.FAINT}",
+                "conversation.tool.ok": f"bg:{design.BACKGROUND} {design.OK} bold",
+                "conversation.tool.err": f"bg:{design.BACKGROUND} {design.DANGER} bold",
+                "conversation.tool.warn": f"bg:{design.BACKGROUND} {design.WARN} bold",
+                "conversation.tool.result": f"bg:{design.BACKGROUND} {design.MUTED}",
+                # Inline diff blocks nested under tool cards
+                "diff.add": f"bg:{design.BACKGROUND} {design.OK}",
+                "diff.del": f"bg:{design.BACKGROUND} {design.DANGER}",
+                "diff.hunk": f"bg:{design.BACKGROUND} {design.ACCENT_SOFT}",
+                "diff.meta": f"bg:{design.BACKGROUND} {design.FAINT}",
                 **HOME_STYLES,
                 "separator": f"bg:{design.BACKGROUND} {design.BACKGROUND}",  # Hide separators for minimal look
                 "prompt": f"bg:{design.BACKGROUND} {design.WHITE}",
@@ -386,8 +480,22 @@ class FullscreenREPLUI:
 
     def append_user(self, text: str) -> None:
         self._append_gap()
-        self._lines.append(_Line("You", "class:conversation.user"))
-        self._append_wrapped(text, "class:conversation")
+        # The user's turn echoes in the same voice as the prompt box: the
+        # first line carries the ❯ glyph, continuations align under it.
+        lines = (text or "").splitlines() or [""]
+        first = lines[0].rstrip()
+        self._lines.append(
+            _Line(
+                f"❯ {first}",
+                "class:conversation",
+                fragments=[
+                    ("class:conversation.user.marker", "❯ "),
+                    ("class:conversation.user.text", first),
+                ],
+            )
+        )
+        for raw in lines[1:]:
+            self._lines.append(_Line(f"  {raw.rstrip()}", "class:conversation.user.text"))
         self._trim()
 
     def append_console_line(self, line: str) -> None:
@@ -409,13 +517,38 @@ class FullscreenREPLUI:
         self._trim()
         self.invalidate()
 
-    def begin_assistant(self, text: str = "Thinking...") -> None:
+    def begin_assistant(
+        self,
+        text: str = "",
+        *,
+        cycle: bool = True,
+        show_label: bool = True,
+    ) -> None:
+        """Open an assistant block: label line + animated thinking spinner.
+
+        ``text`` seeds the spinner verb (empty → the shuffled verb pool);
+        ``cycle=False`` pins the verb (only the spinner glyph animates) — used
+        for the between-tool-batches "Continuing…" state; ``show_label=False``
+        skips the ``◆ Velune`` header so continuation turns of one response
+        don't repeat it.
+        """
         self._append_gap()
-        self._lines.append(_Line("Velune", "class:conversation.user"))
+        if show_label:
+            self._lines.append(
+                _Line(
+                    "◆ Velune",
+                    "class:conversation.assistant.label",
+                    fragments=[
+                        ("class:conversation.assistant.diamond", "◆ "),
+                        ("class:conversation.assistant.label", "Velune"),
+                    ],
+                )
+            )
         self._stream_start = len(self._lines)
         self._thinking_idx = 0
-        self._stream_text = self._thinking_words[0]
+        self._stream_text = text or self._thinking_words[0]
         self._set_thinking_line(_SPINNER_FRAMES[0], self._stream_text)
+        self.set_busy_hint(True)
         self.invalidate()
 
         async def _thinking_anim():
@@ -423,7 +556,7 @@ class FullscreenREPLUI:
             while True:
                 await asyncio.sleep(_THINKING_TICK_S)
                 tick += 1
-                if tick % _THINKING_WORD_EVERY == 0:
+                if cycle and tick % _THINKING_WORD_EVERY == 0:
                     self._thinking_idx = (self._thinking_idx + 1) % len(self._thinking_words)
                     self._stream_text = self._thinking_words[self._thinking_idx]
                 self._set_thinking_line(_SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)], self._stream_text)
@@ -441,7 +574,7 @@ class FullscreenREPLUI:
             self._thinking_task = None
 
         if self._stream_start is None:
-            self.begin_assistant("")
+            self.begin_assistant()
             if self._thinking_task:
                 self._thinking_task.cancel()
                 self._thinking_task = None
@@ -467,7 +600,68 @@ class FullscreenREPLUI:
             self._render_stream_markdown(final=True)
         self._stream_start = None
         self._stream_text = ""
+        self.set_busy_hint(False)
         self.invalidate()
+
+    def set_busy_hint(self, active: bool) -> None:
+        """Swap the prompt's bottom-border hint while a turn is in flight."""
+        if self._busy != active:
+            self._busy = active
+            self.invalidate()
+
+    # ── Tool-activity cards ──────────────────────────────────────────
+
+    def add_tool_card(self, verb: str, target: str) -> ToolCardHandle:
+        """Append a live `● Verb(target)` card with its own spinner task.
+
+        The loop's event order guarantees the assistant stream is closed
+        before any tool starts (`turn_end` precedes `tool_start`), but guard
+        anyway: a live thinking line wipes everything after `_stream_start`
+        on every tick (`_set_thinking_line` slices `_lines[start:]`), which
+        would silently delete the card.
+        """
+        if self._stream_start is not None:
+            self.finish_assistant()
+        self.set_busy_hint(True)  # the turn is still in flight while tools run
+        self._append_gap()
+        line = _Line("", "class:conversation")
+        self._lines.append(line)
+        handle = ToolCardHandle(self, line, verb, target)
+        handle.tick(_SPINNER_FRAMES[0], 0.0)
+        self._live_cards.append(handle)
+        self._trim()
+        self.invalidate()
+
+        async def _spin() -> None:
+            tick = 0
+            while True:
+                await asyncio.sleep(_THINKING_TICK_S)
+                tick += 1
+                handle.tick(
+                    _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)],
+                    time.perf_counter() - handle._started,
+                )
+                self.invalidate()
+
+        from velune.core.task_registry import track
+
+        handle._task = track(
+            asyncio.create_task(_spin(), name="velune.fullscreen_toolcard")
+        )
+        return handle
+
+    def append_fragment_lines(self, lines: list[list[tuple[str, str]]]) -> None:
+        """Append pre-built prompt_toolkit fragment lines (result rows, diffs)."""
+        for frags in lines:
+            plain = "".join(t for _s, t in frags)
+            self._lines.append(_Line(plain, "class:conversation.system", fragments=frags))
+        self._trim()
+        self.invalidate()
+
+    def cancel_live_cards(self, note: str = "Interrupted") -> None:
+        """Resolve any still-running cards (interrupt/teardown safety net)."""
+        for handle in list(self._live_cards):
+            handle.cancel(note)
 
     def _render_stream_markdown(self, *, final: bool) -> None:
         """Render the in-flight streamed response as real markdown + syntax-
@@ -546,7 +740,11 @@ class FullscreenREPLUI:
 
     def _render_prompt_bottom_border(self) -> AnyFormattedText:
         width = self._width()
-        hint = "Enter send  ·  Shift+Enter newline  ·  / commands  ·  @@ files"
+        hint = (
+            "Ctrl+C interrupt"
+            if self._busy
+            else "Enter send  ·  Shift+Enter newline  ·  / commands  ·  @@ files"
+        )
         fill = width - 5 - len(hint)
         if fill >= 1:
             return FormattedText(

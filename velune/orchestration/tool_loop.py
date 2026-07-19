@@ -354,7 +354,7 @@ class ToolLoopRunner:
             logger.warning("Approver raised for %s; denying call: %s", call.name, exc)
             approved = False
         if not approved:
-            self._emit("tool_denied", {"name": call.name})
+            self._emit("tool_denied", {"id": call.id, "name": call.name})
             return ToolInvocation(
                 call=call,
                 result=f"Error: the user denied permission to run '{call.name}'.",
@@ -363,7 +363,10 @@ class ToolLoopRunner:
                 source=kind,
             )
 
-        self._emit("tool_start", {"name": call.name, "arguments": call.arguments})
+        self._emit(
+            "tool_start",
+            {"id": call.id, "name": call.name, "arguments": call.arguments},
+        )
         try:
             if kind == "local":
                 result = await self._run_local(target, call, permissions)
@@ -388,7 +391,13 @@ class ToolLoopRunner:
         duration = (time.perf_counter() - start) * 1000.0
         self._emit(
             "tool_end",
-            {"name": call.name, "error": error, "duration_ms": duration},
+            {
+                "id": call.id,
+                "name": call.name,
+                "error": error,
+                "duration_ms": duration,
+                "result": text[:2000],
+            },
         )
         return ToolInvocation(
             call=call, result=text, error=error, duration_ms=duration, source=kind

@@ -24,14 +24,6 @@ from velune.knowledge.schemas import (
     KnowledgeNode,
     NodeType,
 )
-from velune.repository.schemas import (
-    RepositoryEdge,
-    RepositoryFile,
-    RepositoryLanguage,
-    RepositorySnapshot,
-    RepositorySymbol,
-    RepositorySymbolKind,
-)
 
 # ---------------------------------------------------------------------------
 # Fixtures

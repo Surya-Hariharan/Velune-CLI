@@ -26,7 +26,6 @@ from velune.cli.repl import VeluneREPL
 from velune.cli.statusbar import StatusBarState
 from velune.context.utilization import ContextUtilizationTracker
 
-
 # ── is_ollama_live() memoization ─────────────────────────────────────────────
 
 

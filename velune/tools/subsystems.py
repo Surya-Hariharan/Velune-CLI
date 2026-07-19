@@ -41,9 +41,12 @@ def _create_tool_registry(env: RuntimeEnvironment):
     default_tools = [
         ReadFile(workspace=ws),
         ReadDirectory(workspace=ws),
-        WriteFile(workspace=ws),
-        CreateFile(workspace=ws),
-        DeleteFile(workspace=ws),
+        # confirm=False: the REPL tool loop's approver owns preview/approval;
+        # the tools' own console preview would render to detached raw stdout
+        # and its blocking prompt would collide with the fullscreen app.
+        WriteFile(workspace=ws, confirm=False),
+        CreateFile(workspace=ws, confirm=False),
+        DeleteFile(workspace=ws, confirm=False),
         GrepFiles(workspace=ws),
         FindFiles(workspace=ws),
         GitLog(workspace=ws),

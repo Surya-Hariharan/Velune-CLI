@@ -14,8 +14,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from velune.cli.repl import VeluneREPL
 from velune.cli.modes import SessionMode
+from velune.cli.repl import VeluneREPL
 from velune.context.sections import ContextAssemblyReport, ContextSection
 
 
