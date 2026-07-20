@@ -73,7 +73,7 @@ def print_header(console: Console, title: str, subtitle: str | None = None) -> N
 
 
 @contextmanager
-def loading_status(console: Console, message: str) -> typing.Iterator[None]:
+def loading_status(console: Console, message: str) -> typing.Generator[None, None, None]:
     """A minimalist loading spinner context manager.
 
     Args:

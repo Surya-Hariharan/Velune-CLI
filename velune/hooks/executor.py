@@ -51,7 +51,7 @@ async def run_hook(
         logger.warning("Unsupported hook type '%s' — only 'command' is supported", defn.type)
         return HookResult()
 
-    timeout = min(int(defn.timeout), MAX_TIMEOUT_SECONDS)
+    timeout = min(defn.timeout, MAX_TIMEOUT_SECONDS)
     stdin_data = json.dumps(payload).encode("utf-8")
 
     # Build subprocess environment

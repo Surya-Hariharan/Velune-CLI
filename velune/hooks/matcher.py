@@ -43,7 +43,7 @@ def _extract_primary_arg(tool_name: str, tool_input: dict[str, Any]) -> str:
         if isinstance(value, str):
             return value
     # Fallback: concatenate all string values
-    return " ".join(str(v) for v in tool_input.values() if isinstance(v, str))
+    return " ".join(v for v in tool_input.values() if isinstance(v, str))
 
 
 def _tool_matches(condition_tool: str, actual_tool: str) -> bool:
