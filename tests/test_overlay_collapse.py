@@ -21,6 +21,7 @@ import io
 import pytest
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.output.vt100 import Vt100_Output
 
@@ -38,7 +39,7 @@ _SETTLE = 0.25
 
 
 class _Harness:
-    def __init__(self) -> None:
+    def __init__(self, inp) -> None:
         output = Vt100_Output(io.StringIO(), lambda: Size(rows=45, columns=160))
         self.flow = InlineFlow()
         self.palette = CommandPalette([], suppressed=self.flow.is_active)
@@ -56,6 +57,7 @@ class _Harness:
             command_palette=self.palette,
             inline_flow=self.flow,
             output=output,
+            input=inp,
         )
         # Post-first-turn state: the transcript is already in real scrollback,
         # so the live frame is at its minimum and any growth is visible.
@@ -73,15 +75,16 @@ class _Harness:
 
 def _run(body):
     async def _main():
-        h = _Harness()
-        h.ui._running = True
-        task = asyncio.ensure_future(h.app.run_async())
-        await asyncio.sleep(_SETTLE)
-        try:
-            return await body(h)
-        finally:
-            h.app.exit()
-            await task
+        with create_pipe_input() as inp:
+            h = _Harness(inp)
+            h.ui._running = True
+            task = asyncio.ensure_future(h.app.run_async())
+            await asyncio.sleep(_SETTLE)
+            try:
+                return await body(h)
+            finally:
+                h.app.exit()
+                await task
 
     return asyncio.run(_main())
 
@@ -167,6 +170,7 @@ def test_the_command_palette_gives_its_rows_back_too():
 @pytest.mark.timeout(30)
 def test_collapse_is_inert_when_the_app_is_not_running():
     """Unit tests construct this class without ever calling run()."""
-    h = _Harness()
-    assert h.ui._running is False
-    h.ui.collapse()  # must not raise
+    with create_pipe_input() as inp:
+        h = _Harness(inp)
+        assert h.ui._running is False
+        h.ui.collapse()  # must not raise
