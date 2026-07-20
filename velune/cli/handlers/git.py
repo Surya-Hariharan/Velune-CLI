@@ -42,9 +42,10 @@ async def cmd_diff(repl: VeluneREPL, args: str) -> None:
         encoding="utf-8",
         errors="replace",
     )
-    stat_text = stat.stdout.strip()
-    diff_content = full.stdout[:8000] if full.stdout else ""
-    if len(full.stdout or "") > 8000:
+    stat_text = str(stat.stdout).strip()
+    full_stdout = str(full.stdout) if full.stdout else ""
+    diff_content = full_stdout[:8000]
+    if len(full_stdout) > 8000:
         diff_content += "\n... [diff truncated]"
 
     body = (
