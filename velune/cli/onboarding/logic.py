@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -204,7 +205,7 @@ def detect_repo_marker(workspace: Path) -> tuple[str, str] | None:
 # ── Health checks ────────────────────────────────────────────────────────────
 
 
-def build_health_checks() -> list[tuple[str, object]]:
+def build_health_checks() -> list[tuple[str, Callable[[], dict]]]:
     """Ordered list of ``(display_name, check_fn)`` pairs. ``check_fn()``
     returns a ``{"status": ..., "message": ...}`` dict (see ``commands/doctor.py``).
     """
@@ -216,7 +217,7 @@ def build_health_checks() -> list[tuple[str, object]]:
         _check_velune_dir,
     )
 
-    checks: list[tuple[str, object]] = [
+    checks: list[tuple[str, Callable[[], dict]]] = [
         ("Python version", _check_python_version),
         (".velune directory", _check_velune_dir),
         ("SQLite", _check_sqlite),
