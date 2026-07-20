@@ -105,14 +105,23 @@ def session_delete(
     ctx: typer.Context,
     session_id: str = typer.Argument(..., help="Session ID to delete"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    any_workspace: bool = typer.Option(
+        False, "--any-workspace", help="Allow acting on a session from a different workspace"
+    ),
 ) -> None:
     """Delete a saved session."""
     from velune.cli.sessions import SessionStore
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
 
     store = SessionStore()
     meta = store.load_meta(session_id)
     if meta is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
+        raise typer.Exit(1)
+    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Delete"):
         raise typer.Exit(1)
 
     if not yes:
@@ -129,6 +138,31 @@ def _resolve_session_id(store, cli_context: CLIContext, session_id: str | None) 
     workspace = str(cli_context.workspace.resolve())
     recent = store.list(workspace=workspace, limit=1, include_archived=True)
     return recent[0].id if recent else None
+
+
+def _check_same_workspace(
+    store, cli_context: CLIContext, meta, *, any_workspace: bool, verb: str
+) -> bool:
+    """Refuse to act on another workspace's session unless explicitly asked.
+
+    A session id from `velune session list --all` (or copy-pasted from
+    another project) would otherwise let a delete/show/archive/export target
+    a session that isn't this project's without any warning — since ids are
+    just short hex strings, that's an easy accidental cross-workspace action.
+    Prints an actionable error and returns False when blocked.
+    """
+    if any_workspace:
+        return True
+    from velune.cli.sessions import SessionStore
+
+    if SessionStore._same_workspace(meta.workspace, str(cli_context.workspace.resolve())):
+        return True
+    console.print(
+        f"[{design.DANGER}]Session '{meta.id}' belongs to a different workspace[/] "
+        f"([{design.MUTED}]{meta.project_name}[/]).\n"
+        f"[{design.MUTED}]{verb} it anyway with:[/] [bold]--any-workspace[/bold]"
+    )
+    return False
 
 
 @session_cmd.command("resume")
@@ -167,6 +201,9 @@ def session_show(
     ctx: typer.Context,
     session_id: str = typer.Argument(..., help="Session ID to inspect"),
     turns: int = typer.Option(6, "--turns", "-n", help="How many recent turns to preview"),
+    any_workspace: bool = typer.Option(
+        False, "--any-workspace", help="Allow acting on a session from a different workspace"
+    ),
 ) -> None:
     """Show a session's metadata and a preview of its most recent turns."""
     from velune.cli.sessions import SessionStore
@@ -181,6 +218,8 @@ def session_show(
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
         raise typer.Exit(1)
     meta, conversation = loaded
+    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Show"):
+        raise typer.Exit(1)
 
     if cli_context.json_mode:
         import json
@@ -236,6 +275,9 @@ def session_show(
 def session_archive(
     ctx: typer.Context,
     session_id: str = typer.Argument(..., help="Session ID to archive"),
+    any_workspace: bool = typer.Option(
+        False, "--any-workspace", help="Allow acting on a session from a different workspace"
+    ),
 ) -> None:
     """Archive a session — hide it from the default list without deleting it.
 
@@ -244,10 +286,16 @@ def session_archive(
     """
     from velune.cli.sessions import SessionStore
 
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
     store = SessionStore()
     meta = store.load_meta(session_id)
     if meta is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
+        raise typer.Exit(1)
+    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Archive"):
         raise typer.Exit(1)
     if meta.archived:
         console.print(f"[{design.MUTED}]Session '{session_id}' is already archived.[/]")
@@ -263,14 +311,23 @@ def session_archive(
 def session_unarchive(
     ctx: typer.Context,
     session_id: str = typer.Argument(..., help="Session ID to restore from the archive"),
+    any_workspace: bool = typer.Option(
+        False, "--any-workspace", help="Allow acting on a session from a different workspace"
+    ),
 ) -> None:
     """Restore an archived session back into the active list."""
     from velune.cli.sessions import SessionStore
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
 
     store = SessionStore()
     meta = store.load_meta(session_id)
     if meta is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
+        raise typer.Exit(1)
+    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Unarchive"):
         raise typer.Exit(1)
     if not meta.archived:
         console.print(f"[{design.MUTED}]Session '{session_id}' is not archived.[/]")
@@ -288,11 +345,25 @@ def session_export(
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Output file path (default: stdout)"
     ),
+    any_workspace: bool = typer.Option(
+        False, "--any-workspace", help="Allow acting on a session from a different workspace"
+    ),
 ) -> None:
     """Export a session as Markdown."""
     from velune.cli.sessions import SessionStore
 
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
     store = SessionStore()
+    meta = store.load_meta(session_id)
+    if meta is None:
+        console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
+        raise typer.Exit(1)
+    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Export"):
+        raise typer.Exit(1)
+
     md = store.export_markdown(session_id)
     if md is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")

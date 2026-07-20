@@ -155,9 +155,11 @@ class VeluneREPL:
         if trust.is_trusted(workspace):
             return True
 
-        has_project_config = (workspace / ".mcp.json").exists() or (
-            workspace / "velune.toml"
-        ).exists()
+        has_project_config = (
+            (workspace / ".mcp.json").exists()
+            or (workspace / "velune.toml").exists()
+            or (workspace / ".velune" / "hooks.json").exists()
+        )
         if not has_project_config:
             return False
 
@@ -165,8 +167,8 @@ class VeluneREPL:
 
         self.console.print(
             f"[yellow]This workspace ({workspace}) is not trusted.[/yellow]\n"
-            "[dim]It contains project-level MCP / provider config that can run "
-            "local commands and redirect API traffic.[/dim]"
+            "[dim]It contains project-level hook / MCP / provider config that can "
+            "run local commands and redirect API traffic.[/dim]"
         )
         try:
             decision = Confirm.ask("  Trust this directory?", default=False)
@@ -522,6 +524,12 @@ class VeluneREPL:
         restore_active_model(self)
         await self._start_episodic_session()
 
+        # Workspace trust must be resolved BEFORE any hook dispatch: project-level
+        # hooks execute arbitrary shell commands, so the gate has to close ahead of
+        # the first thing that could run them, not after it.
+        trusted = self._ensure_workspace_trust()
+        self._hook_dispatcher.set_trusted(trusted)
+
         model_id = self.active_model.model_id if self.active_model else ""
         _hook_start = await self._hook_dispatcher.dispatch_session_start(
             session_id=self._episodic_session_id or self._hook_dispatcher.session_id,
@@ -530,8 +538,15 @@ class VeluneREPL:
         if _hook_start.system_message:
             _log.debug("Session start hook message: %s", _hook_start.system_message)
 
+        # Plugins must load BEFORE connect_all: plugin manifests register their own
+        # MCP servers into the registry, and the hot-reload watcher computes its
+        # "added" delta from config files only — so a plugin server registered after
+        # the connect pass would never connect for the life of the session.
+        from velune.cli.handlers.plugins import load_and_register_plugins
+
+        await load_and_register_plugins(self)
+
         try:
-            trusted = self._ensure_workspace_trust()
             self._mcp_registry.load_config(trusted=trusted)
             self._mcp_registry.load_env()
             if self._mcp_registry._entries:
@@ -545,10 +560,6 @@ class VeluneREPL:
             )
         except Exception as exc:
             _log.debug("MCP auto-connect error (non-fatal): %s", exc)
-
-        from velune.cli.handlers.plugins import load_and_register_plugins
-
-        await load_and_register_plugins(self)
 
         from velune.cli.handlers.cognition import auto_detect_on_entry
 
@@ -686,6 +697,19 @@ class VeluneREPL:
             _log.debug("Resource disconnect error (non-fatal): %s", exc)
 
         self.console.print("[dim]Stopping background tasks...[/dim]")
+
+        # Two independent task universes exist: BackgroundTaskRegistry.submit()
+        # and the module-level track(). Only the former was being cancelled here,
+        # so tracked tasks — record_turn writes, the Ollama probe loop, turn event
+        # emission — kept running into lifecycle shutdown and wrote to a SQLite
+        # pool that had already been closed. Drain both.
+        from velune.core.task_registry import cancel_tracked
+
+        try:
+            await cancel_tracked(timeout=5.0)
+        except Exception as exc:
+            _log.warning("Tracked task cancellation failed: %s", exc)
+
         try:
             task_registry = self.container.get("runtime.task_registry")
             await task_registry.cancel_all(timeout=5.0)
@@ -834,11 +858,18 @@ class VeluneREPL:
         except Exception:
             return None
 
-    def _display_usage(self, model: ModelDescriptor, tokens: int) -> None:
+    def _display_usage(
+        self,
+        model: ModelDescriptor,
+        tokens: int,
+        *,
+        completion_tokens: int | None = None,
+    ) -> None:
         self.session_tokens += tokens
         cost_per_token = (model.cost_per_1k_tokens or 0.0) / 1000
         query_cost = tokens * cost_per_token
         self.session_cost += query_cost
+        self._record_usage_telemetry(model, tokens, completion_tokens)
 
         parts = [f"[dim]{tokens:,} tokens"]
         if query_cost > 0:
@@ -850,6 +881,55 @@ class VeluneREPL:
             parts.append("[/dim]")
 
         self.console.print(" · ".join(parts))
+
+    def _record_usage_telemetry(
+        self,
+        model: ModelDescriptor,
+        tokens: int,
+        completion_tokens: int | None,
+    ) -> None:
+        """Feed the per-turn token counts into the telemetry stores.
+
+        Both stores existed with working schemas and readers — ``/usage`` and
+        ``/doctor`` — but nothing ever called their record functions, so both
+        reported 0 tokens and $0.00 for the life of the product.
+
+        Providers report a total rather than a split, so the completion side is
+        estimated from the response text and the prompt side is the remainder.
+        Best-effort throughout: telemetry must never break a turn.
+        """
+        if tokens <= 0:
+            return
+
+        completion = max(0, min(completion_tokens if completion_tokens is not None else 0, tokens))
+        prompt = max(0, tokens - completion)
+
+        try:
+            from velune.telemetry.token_tracker import TokenUsage, current_session
+
+            current_session.add(
+                TokenUsage.from_response(
+                    provider_id=model.provider_id,
+                    model_id=model.model_id,
+                    prompt_tokens=prompt,
+                    completion_tokens=completion,
+                )
+            )
+        except Exception as exc:
+            _log.debug("Token tracker update failed (non-fatal): %s", exc)
+
+        try:
+            from velune.telemetry.usage_tracker import record_usage
+
+            record_usage(
+                session_id=self._episodic_session_id or self._session_id,
+                provider_id=model.provider_id,
+                model_id=model.model_id,
+                input_tokens=prompt,
+                output_tokens=completion,
+            )
+        except Exception as exc:
+            _log.debug("Usage tracker update failed (non-fatal): %s", exc)
 
     async def _emit_turn_events(
         self,
@@ -1056,11 +1136,38 @@ class VeluneREPL:
             if loop_result.stop_reason == "interrupted":
                 self.console.print()
                 self._print_interrupted_frame()
-                if self._conversation and self._conversation[-1].get("role") == "user":
+                # Tools that already ran changed the workspace. Keep the user
+                # turn and the record of those side effects; only a turn that
+                # did nothing at all is safe to erase.
+                if loop_result.invocations:
+                    from velune.orchestration.tool_loop import format_tool_activity
+
+                    activity = format_tool_activity(loop_result.invocations)
+                    if activity:
+                        self._conversation.append(
+                            {
+                                "role": "tool",
+                                "content": activity + "\n[turn interrupted by user]",
+                            }
+                        )
+                    self._autosave(force=True)
+                elif self._conversation and self._conversation[-1].get("role") == "user":
                     self._conversation.pop()
                 return
             assistant_text = loop_result.content
             tokens_used = loop_result.tokens_used
+
+            # Persist what the tools actually did. Previously only the final
+            # assistant text survived the turn, so on the next prompt the model
+            # had no record that it had read a file or run a command — and read
+            # the same files again, every turn.
+            if loop_result.invocations:
+                from velune.orchestration.tool_loop import format_tool_activity
+
+                activity = format_tool_activity(loop_result.invocations)
+                if activity:
+                    self._conversation.append({"role": "tool", "content": activity})
+
             if loop_result.stop_reason == "max_turns" and not assistant_text.strip():
                 assistant_text = (
                     "[Velune] The tool loop reached its turn limit before the model "
@@ -1105,7 +1212,9 @@ class VeluneREPL:
         self._conversation.append({"role": "assistant", "content": assistant_text})
         self._autosave()
         effective_tokens = tokens_used or len(assistant_text) // 4
-        self._display_usage(model, effective_tokens)
+        self._display_usage(
+            model, effective_tokens, completion_tokens=len(assistant_text) // 4
+        )
         self._record_turn_async(
             role="assistant",
             content=assistant_text,
@@ -1207,7 +1316,8 @@ class VeluneREPL:
     def _notify_orphaned_autosaves(self) -> None:
         """On startup, hint that an unsaved/crashed session can be recovered."""
         try:
-            orphans = self._session_store.list_orphaned_autosaves()
+            workspace = self.container.get("runtime.workspace")
+            orphans = self._session_store.list_orphaned_autosaves(workspace=workspace)
         except Exception:
             return
         if not orphans:

@@ -2,8 +2,11 @@
 
 Every ``validate_provider()`` call makes a live round-trip to the provider's
 API so that invalid, expired, revoked, or rate-limited keys are caught before
-being persisted to the OS keyring.  No regex, no prefix heuristics — the only
-source of truth is the provider's own response.
+being persisted to the encrypted credential store (``providers/keystore.py``,
+``providers/crypto.py``). The store's own AES-256-GCM master key — not the
+provider keys directly — is what the OS keyring (Windows Credential Manager /
+macOS Keychain / Linux Secret Service) protects.  No regex, no prefix
+heuristics — the only source of truth is the provider's own response.
 """
 
 from __future__ import annotations
@@ -46,6 +49,20 @@ class ValidationResult:
                 f"{self.provider_id} — authenticated ({n} model{'s' if n != 1 else ''} available)"
             )
         return self.message
+
+
+def _redact_key(text: str, api_key: str) -> str:
+    """Strip *api_key* out of *text* before it can be shown or persisted.
+
+    Validation messages do not stay in memory: ``keystore.mark_invalid`` writes
+    them to ``credentials.json`` under ``last_error`` and provider status output
+    echoes them back. Any message built from an exception is therefore treated
+    as untrusted, since HTTP client libraries routinely include the request URL
+    (and anything in it) in their error text.
+    """
+    if not api_key or len(api_key) < 8:
+        return text
+    return text.replace(api_key, "***redacted***")
 
 
 # ---------------------------------------------------------------------------
@@ -155,9 +172,13 @@ async def _validate_google(api_key: str) -> ValidationResult:
     try:
         import httpx
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        # The key goes in a header, never the query string. httpx embeds the
+        # request URL in its exception messages, and those messages are
+        # persisted to credentials.json via mark_invalid(reason=...) — a key in
+        # the URL would be written to disk and echoed by provider status output.
+        url = "https://generativelanguage.googleapis.com/v1beta/models"
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, headers={"x-goog-api-key": api_key})
         if resp.status_code == 200:
             data = resp.json()
             models = [m.get("name", "").split("/")[-1] for m in data.get("models", [])]
@@ -196,7 +217,9 @@ async def _validate_google(api_key: str) -> ValidationResult:
         )
     except Exception as e:
         return ValidationResult(
-            "google", ValidationStatus.NETWORK_ERROR, f"Network error reaching Google: {e}"
+            "google",
+            ValidationStatus.NETWORK_ERROR,
+            _redact_key(f"Network error reaching Google: {e}", api_key),
         )
 
 
@@ -571,40 +594,6 @@ async def _validate_meta(api_key: str) -> ValidationResult:
         )
 
 
-async def _validate_zai(api_key: str) -> ValidationResult:
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.z.ai/api/paas/v4/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="zai",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult("zai", ValidationStatus.INVALID_KEY, "Invalid Z.ai API key.")
-        if resp.status_code == 429:
-            return ValidationResult(
-                "zai", ValidationStatus.RATE_LIMITED, "Z.ai API key is rate-limited."
-            )
-        return ValidationResult(
-            "zai", ValidationStatus.UNKNOWN_ERROR, f"Z.ai returned HTTP {resp.status_code}."
-        )
-    except Exception as e:
-        return ValidationResult(
-            "zai", ValidationStatus.NETWORK_ERROR, f"Network error reaching Z.ai: {e}"
-        )
-
-
 async def _validate_huggingface(api_key: str) -> ValidationResult:
     try:
         import httpx
@@ -719,7 +708,6 @@ _VALIDATORS: dict[str, object] = {
     "nvidia": _validate_nvidia,
     "xai": _validate_xai,
     "meta": _validate_meta,
-    "zai": _validate_zai,
     "huggingface": _validate_huggingface,
     "ollama": _validate_ollama,
     "lmstudio": _validate_lmstudio,

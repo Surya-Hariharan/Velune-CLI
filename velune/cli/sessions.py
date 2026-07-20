@@ -285,15 +285,24 @@ class SessionStore:
         except Exception as exc:  # pragma: no cover - best effort
             _log.debug("Could not clear autosave %s: %s", session_id, exc)
 
-    def list_orphaned_autosaves(self) -> list[SessionMeta]:
-        """Crash-guard sidecars left by sessions that did not exit cleanly."""
+    def list_orphaned_autosaves(self, workspace: str | None = None) -> list[SessionMeta]:
+        """Crash-guard sidecars left by sessions that did not exit cleanly.
+
+        Filtered to *workspace* by default so a crash in one project never
+        surfaces as a recoverable session while sitting in another project's
+        directory; pass ``None`` explicitly to see orphans from every
+        workspace (e.g. for a global ``velune recover --all-workspaces``).
+        """
         if not self.autosave_dir.exists():
             return []
         metas: list[SessionMeta] = []
         for f in self.autosave_dir.glob("*.json"):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
-                metas.append(self._meta_from(data))
+                meta = self._meta_from(data)
+                if workspace is not None and not self._same_workspace(meta.workspace, workspace):
+                    continue
+                metas.append(meta)
             except Exception:
                 continue
         metas.sort(key=lambda m: m.updated_at, reverse=True)

@@ -169,14 +169,19 @@ async def cmd_restore(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_recover(repl: VeluneREPL, args: str) -> None:
-    """/recover [id] [--all]"""
+    """/recover [id] [--all] [--all-workspaces]"""
     console = repl.console
     store = repl._session_store
     tokens = _split_args(args)
     recover_all = "--all" in tokens or "-a" in tokens
+    all_workspaces = "--all-workspaces" in tokens
     positional = [t for t in tokens if not t.startswith("-")]
 
-    orphans = store.list_orphaned_autosaves()
+    # Scoped to this workspace by default — a crash in another project
+    # shouldn't surface as something to recover here. `--all-workspaces`
+    # opts back into the old global view.
+    workspace = None if all_workspaces else repl.container.get("runtime.workspace")
+    orphans = store.list_orphaned_autosaves(workspace=workspace)
 
     if recover_all:
         if not orphans:
@@ -215,6 +220,11 @@ async def cmd_recover(repl: VeluneREPL, args: str) -> None:
     for m in orphans:
         table.add_row(m.id, m.title, m.updated_at[:16].replace("T", " "), str(m.turn_count))
     console.print(table)
+    if workspace:
+        console.print(
+            f"[{design.MUTED}]Showing this workspace only — "
+            f"[/][bold]/recover --all-workspaces[/bold][{design.MUTED}] for every project.[/]"
+        )
     console.print(
         f"[{design.MUTED}]Recover one: [/]/recover <id>   [{design.MUTED}]all: [/]/recover --all"
     )

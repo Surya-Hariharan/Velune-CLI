@@ -19,18 +19,35 @@ console = Console()
 
 
 def recover_cmd(
+    ctx: typer.Context,
     session_id: str = typer.Argument(
         "", help="Autosave ID to recover (omit to list orphaned sessions)"
     ),
     all_: bool = typer.Option(False, "--all", "-a", help="Recover every orphaned session"),
+    all_workspaces: bool = typer.Option(
+        False,
+        "--all-workspaces",
+        help="Include orphaned sessions from every workspace, not just this one",
+    ),
     discard: str = typer.Option(
         "", "--discard", help="Discard an orphaned autosave by ID without recovering"
     ),
 ) -> None:
-    """Recover an unsaved session left behind by a crash or hard exit."""
+    """Recover an unsaved session left behind by a crash or hard exit.
+
+    Scoped to the current workspace by default — a crash in another project
+    won't show up here unless `--all-workspaces` is passed.
+    """
+    from velune.cli.context import CLIContext
     from velune.cli.sessions import SessionStore
 
     store = SessionStore()
+    cli_context = ctx.obj
+    workspace = (
+        None
+        if all_workspaces or not isinstance(cli_context, CLIContext)
+        else str(cli_context.workspace.resolve())
+    )
 
     if discard:
         if store.discard_autosave(discard):
@@ -42,7 +59,7 @@ def recover_cmd(
             raise typer.Exit(1)
         return
 
-    orphans = store.list_orphaned_autosaves()
+    orphans = store.list_orphaned_autosaves(workspace=workspace)
 
     if all_:
         if not orphans:
@@ -93,6 +110,11 @@ def recover_cmd(
 
     console.print(table)
     console.print()
+    if workspace:
+        console.print(
+            f"[{design.MUTED}]Showing this workspace only — "
+            f"[/][bold]velune recover --all-workspaces[/bold][{design.MUTED}] for every project.[/]"
+        )
     console.print(
         f"[{design.MUTED}]Recover one:[/] [bold]velune recover <id>[/bold]   "
         f"[{design.MUTED}]all:[/] [bold]velune recover --all[/bold]"

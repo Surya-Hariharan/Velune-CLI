@@ -23,6 +23,13 @@ _WRITE_PRAGMAS = (
     "PRAGMA journal_mode=WAL",
     "PRAGMA synchronous=NORMAL",
     "PRAGMA cache_size=-64000",  # 64 MB page cache
+    "PRAGMA foreign_keys=ON",
+    # SQLite defaults to failing immediately (SQLITE_BUSY) on lock
+    # contention. The single-writer lock already serializes writes within
+    # one process, but a second `velune` process touching the same
+    # workspace DB (or a reader caught mid-checkpoint) can still collide
+    # briefly; retry for up to 5s instead of surfacing that as an error.
+    "PRAGMA busy_timeout=5000",
 )
 
 
@@ -125,6 +132,8 @@ class SQLiteConnectionPool:
         conn = await aiosqlite.connect(str(self._db_path))
         conn.row_factory = sqlite3.Row
         await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA foreign_keys=ON")
+        await conn.execute("PRAGMA busy_timeout=5000")
         try:
             yield conn
         finally:
