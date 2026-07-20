@@ -127,8 +127,7 @@ class ExecutionExecutor:
                     spec = CommandSpec.from_string(cmd, cwd=self.workspace_path, timeout=timeout)
                 except SandboxError as e:
                     logger.error("Rejected unsafe command from step %s: %s", step.id, e)
-                    if self.sandbox:
-                        self.sandbox.emit_rejection(cmd, str(e))
+                    self.sandbox.emit_rejection(cmd, str(e))
                     step.status = TaskStatus.FAILED
                     break
 

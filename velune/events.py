@@ -9,7 +9,7 @@ import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -183,7 +183,7 @@ class CognitiveBus:
     async def _run_async_handler(self, handler: EventHandler, event: Event) -> None:
         """Helper to run a coroutine handler with clean error capture."""
         try:
-            await handler(event)
+            await cast(Awaitable[Any], handler(event))
         except Exception as e:
             logger.error("Error running asynchronous event handler: %s", e)
 

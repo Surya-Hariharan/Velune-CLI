@@ -196,7 +196,7 @@ class HardwareDetector:
         # Describe the *actual* accelerator rather than assuming one based on the
         # tier — a 16 GB laptop with a real dGPU must not be told it has none.
         has_dgpu = bool(vram_gb) and not is_apple
-        nominal = int(round(_nominal_ram_gb(ram_gb)))
+        nominal = round(_nominal_ram_gb(ram_gb))
 
         if tier == HardwareTier.CRITICAL:
             warnings.append(f"Only {nominal} GB RAM detected — cannot run any local LLM")
