@@ -296,6 +296,45 @@ def __getattr__(name: str) -> typer.Typer:
     global _app_singleton
     if name == "app":
         if _app_singleton is None:
-            _app_singleton = create_app()
+            import os
+            import sys
+
+            from velune.cli.registry import _SPECS_BY_NAME
+
+            # Shell completion needs to see all commands to complete them
+            if "_VELUNE_COMPLETE" in os.environ:
+                _app_singleton = create_app(register="__all__")
+                return _app_singleton
+
+            args = sys.argv[1:]
+
+            # If no args or just flags (e.g., `velune`, `velune --version`, `velune --help`)
+            if not args or all(a.startswith("-") for a in args):
+                if "--help" in args or "-h" in args:
+                    from velune.cli.registry import render_root_help
+
+                    render_root_help()
+                    sys.exit(0)
+                # `velune --version` or REPL `velune` need no subcommands
+                _app_singleton = create_app(register=None)
+                return _app_singleton
+
+            # Find the invoked command name (first non-flag argument)
+            invoked_cmd = None
+            for arg in args:
+                if not arg.startswith("-"):
+                    invoked_cmd = arg
+                    break
+
+            if invoked_cmd in _SPECS_BY_NAME:
+                # Eagerly initialize core UI for responsiveness
+                from velune.cli import context, design  # noqa: F401
+
+                _app_singleton = create_app(register=invoked_cmd)
+            else:
+                # Unknown command (plugin, typo, etc) -> fallback to __all__
+                # so Typer can render "No such command" and "Did you mean...?"
+                _app_singleton = create_app(register="__all__")
+
         return _app_singleton
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

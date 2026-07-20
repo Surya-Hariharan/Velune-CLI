@@ -11,8 +11,7 @@ from velune.cli.context import CLIContext
 from velune.core.event_loop import submit
 from velune.core.runtime import build_runtime
 from velune.kernel.config import ConfigLoader
-from velune.mcp.client import VeluneMCPClient
-from velune.mcp.server import VeluneMCPServer
+
 
 console = Console()
 mcp_cmd = typer.Typer(help="Connect to or expose an MCP server.")
@@ -34,6 +33,8 @@ def mcp_connect(
         allowed_hosts = list(loader.load().mcp.allowed_hosts)
     except Exception:
         allowed_hosts = []
+
+    from velune.mcp.client import VeluneMCPClient
 
     client = VeluneMCPClient(server_url, name, allowed_hosts=allowed_hosts or None)
 
@@ -65,6 +66,8 @@ def mcp_serve_subcmd(ctx: typer.Context) -> None:
 
     container = build_runtime(workspace, config_path=config_path).container
     tool_registry = container.get("runtime.tool_registry")
+    from velune.mcp.server import VeluneMCPServer
+
     server = VeluneMCPServer(tool_registry)
 
     import logging
@@ -82,6 +85,8 @@ def mcp_serve(ctx: typer.Context) -> None:
 
     container = build_runtime(workspace, config_path=config_path).container
     tool_registry = container.get("runtime.tool_registry")
+    from velune.mcp.server import VeluneMCPServer
+
     server = VeluneMCPServer(tool_registry)
 
     import logging
