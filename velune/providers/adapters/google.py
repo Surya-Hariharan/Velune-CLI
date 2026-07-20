@@ -154,7 +154,15 @@ class GoogleProvider(ModelProvider):
                 "Google API key not found — set GOOGLE_API_KEY or run: velune config set-key google"
             )
         if not self.client:
-            self.client = httpx.AsyncClient(base_url=_BASE_URL, timeout=300.0)
+            # Authenticate via header, not a ?key= query param. httpx includes the
+            # request URL in its exception text, and those exceptions are wrapped
+            # into InferenceError messages that get logged and surfaced — a key in
+            # the URL leaks everywhere an error does.
+            self.client = httpx.AsyncClient(
+                base_url=_BASE_URL,
+                timeout=300.0,
+                headers={"x-goog-api-key": self._api_key or ""},
+            )
 
     async def list_models(self) -> list[ModelDescriptor]:
         return list(_MODELS)
@@ -167,7 +175,7 @@ class GoogleProvider(ModelProvider):
 
         try:
             url = f"/models/{request.model_id}:generateContent"
-            resp = await self.client.post(url, json=payload, params={"key": self._api_key})
+            resp = await self.client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             latency = (time.perf_counter() - start) * 1000.0
@@ -192,7 +200,7 @@ class GoogleProvider(ModelProvider):
 
         try:
             url = f"/models/{request.model_id}:streamGenerateContent"
-            params = {"key": self._api_key, "alt": "sse"}
+            params = {"alt": "sse"}
             async with self.client.stream("POST", url, json=payload, params=params) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
@@ -220,7 +228,7 @@ class GoogleProvider(ModelProvider):
         try:
             await self.initialize()
             assert self.client is not None
-            resp = await self.client.get("/models", params={"key": self._api_key})
+            resp = await self.client.get("/models")
             return ProviderHealth.HEALTHY if resp.status_code == 200 else ProviderHealth.DEGRADED
         except Exception:
             return ProviderHealth.UNAVAILABLE

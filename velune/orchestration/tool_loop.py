@@ -89,6 +89,54 @@ class ToolLoopResult:
     messages: list[dict[str, Any]] = field(default_factory=list)
 
 
+_MAX_RESULT_CHARS = 400
+_MAX_TRANSCRIPT_CHARS = 4000
+
+
+def format_tool_activity(
+    invocations: list[ToolInvocation],
+    *,
+    max_result_chars: int = _MAX_RESULT_CHARS,
+    max_total_chars: int = _MAX_TRANSCRIPT_CHARS,
+) -> str:
+    """Render executed tool calls as a compact record for conversation history.
+
+    The REPL's ``_conversation`` is a list of plain text entries that get folded
+    into WORKING_MEMORY — it is not an OpenAI message array, so the loop's native
+    ``messages`` (with ``tool_calls`` and ``role="tool"``) cannot be spliced in
+    directly: their ``content`` is None and the assembler drops empty content.
+
+    Without this, every record of what the agent did was discarded at the turn
+    boundary, so the next turn re-read the same files and re-ran the same
+    commands. Results are truncated because the point is continuity, not a
+    verbatim replay.
+    """
+    if not invocations:
+        return ""
+
+    lines: list[str] = ["[Tool activity from the previous turn]"]
+    for inv in invocations:
+        args = inv.call.arguments or {}
+        rendered_args = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:4])
+        if len(args) > 4:
+            rendered_args += ", …"
+
+        result = (inv.result or "").strip()
+        if len(result) > max_result_chars:
+            result = result[:max_result_chars] + f"… [{len(inv.result)} chars total]"
+        result = result.replace("\n", "\n    ")
+
+        marker = "FAILED" if inv.error else "ok"
+        lines.append(f"- {inv.call.name}({rendered_args}) -> {marker}")
+        if result:
+            lines.append(f"    {result}")
+
+    text = "\n".join(lines)
+    if len(text) > max_total_chars:
+        text = text[:max_total_chars] + "\n… [tool activity truncated]"
+    return text
+
+
 async def approve_readonly_only(
     name: str, arguments: dict[str, Any], permissions: set[ToolPermission]
 ) -> bool:
@@ -144,6 +192,16 @@ class ToolLoopRunner:
         self._on_event = on_event
         # exposed (sanitized) name → ("local", BaseTool) | ("mcp", qualified_name)
         self._route: dict[str, tuple[str, Any]] = {}
+        self._executed_invocations: list[ToolInvocation] = []
+
+    @property
+    def executed_invocations(self) -> list[ToolInvocation]:
+        """Tool calls executed by the most recent ``run``, including a partial one.
+
+        Lets an interrupted turn report the work that actually happened rather
+        than reporting nothing.
+        """
+        return list(self._executed_invocations)
 
     # ── Tool definition assembly ─────────────────────────────────────────
 
@@ -217,6 +275,10 @@ class ToolLoopRunner:
             self.build_tool_definitions()
 
         invocations: list[ToolInvocation] = []
+        # Exposed so a caller whose run is cancelled mid-loop can still recover
+        # the calls that already executed. Their side effects are on disk; a
+        # transcript that omits them would be a lie about what happened.
+        self._executed_invocations = invocations
         tokens_used = 0
 
         for turn in range(1, self._max_turns + 1):

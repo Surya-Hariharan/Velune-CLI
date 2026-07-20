@@ -136,20 +136,37 @@ def _approval_repl_ui():
     return repl, ui
 
 
+# The prompt now runs through the shared prompt_toolkit widget rather than a
+# blocking rich.prompt read on a stdin the fullscreen app already owns, so these
+# patch single_select instead of asyncio.to_thread. The guarantees are unchanged:
+# a real Ctrl+C aborts the turn, and anything else denies.
+
+
 async def test_approval_prompt_propagates_keyboard_interrupt():
     from velune.cli.handlers.tool_chat import _prompt_approval
 
     repl, ui = _approval_repl_ui()
-    with patch("asyncio.to_thread", side_effect=KeyboardInterrupt):
-        with pytest.raises(KeyboardInterrupt):
-            await _prompt_approval(repl, ui, "execute_command", {"command": "rm -rf /"})
+    with patch("velune.cli.interactive.is_interactive_tty", return_value=True):
+        with patch("velune.cli.interactive.single_select", side_effect=KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
+                await _prompt_approval(repl, ui, "execute_command", {"command": "rm -rf /"})
 
 
-async def test_approval_prompt_denies_on_eof():
+async def test_approval_prompt_denies_on_widget_failure():
     from velune.cli.handlers.tool_chat import _prompt_approval
 
     repl, ui = _approval_repl_ui()
-    with patch("asyncio.to_thread", side_effect=EOFError):
+    with patch("velune.cli.interactive.is_interactive_tty", return_value=True):
+        with patch("velune.cli.interactive.single_select", side_effect=EOFError):
+            assert await _prompt_approval(repl, ui, "write_file", {"path": "x"}) is False
+
+
+async def test_approval_prompt_denies_without_a_tty():
+    """Piped input or CI: nobody is there to approve a mutating call."""
+    from velune.cli.handlers.tool_chat import _prompt_approval
+
+    repl, ui = _approval_repl_ui()
+    with patch("velune.cli.interactive.is_interactive_tty", return_value=False):
         assert await _prompt_approval(repl, ui, "write_file", {"path": "x"}) is False
 
 

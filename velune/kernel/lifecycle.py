@@ -105,6 +105,7 @@ class LifecycleCoordinator:
         # Snapshot: the background warm-up may register further subsystems while
         # this coroutine awaits an initialize(); a later startup() call picks
         # those up. Iterating a snapshot avoids "dict changed size" errors.
+        failed: list[str] = []
         for name, comp in list(self._components.items()):
             if self._states.get(name) != ComponentStatus.UNINITIALIZED:
                 continue
@@ -116,12 +117,36 @@ class LifecycleCoordinator:
                 self._states[name] = ComponentStatus.HEALTHY
                 logger.info("Subsystem '%s' initialized successfully.", name)
             except Exception as e:
+                # Record and continue rather than re-raising. Components are
+                # initialized in a single ordered pass, so aborting here left
+                # every *later* subsystem permanently UNINITIALIZED — and both
+                # call sites swallow the exception, so the session carried on
+                # silently half-warm with no way to tell it apart from cold.
+                # One broken subsystem should cost that subsystem, not the rest.
                 self._states[name] = ComponentStatus.FAILED
-                logger.critical("Subsystem '%s' failed to initialize: %s", name, e)
-                raise e
+                failed.append(name)
+                logger.error("Subsystem '%s' failed to initialize: %s", name, e, exc_info=True)
+
+        if failed:
+            logger.warning(
+                "Continuing with %d degraded subsystem(s): %s",
+                len(failed),
+                ", ".join(failed),
+            )
 
     async def shutdown(self) -> None:
         """Shut down all registered subsystems gracefully in reverse order."""
+        # Fire-and-forget tasks must stop before any component closes: several of
+        # them write to the SQLite pool and embedding pipeline torn down below.
+        # The REPL also does this, but run() can raise before reaching its
+        # shutdown path, so this is the backstop that always executes.
+        try:
+            from velune.core.task_registry import cancel_tracked
+
+            await cancel_tracked(timeout=10.0)
+        except Exception as e:
+            logger.error("Failed to cancel tracked tasks during shutdown: %s", e)
+
         if self.container and self.container.has("runtime.task_registry"):
             try:
                 task_registry = self.container.get("runtime.task_registry")

@@ -69,10 +69,28 @@ class HookDispatcher:
         self,
         workspace: Path | None = None,
         session_id: str | None = None,
+        trusted: bool = False,
     ) -> None:
         self.workspace = workspace
         self.session_id = session_id or str(uuid.uuid4())[:8]
+        self._trusted = trusted
         self._bindings: list[HookBinding] | None = None  # lazy-loaded
+
+    @property
+    def trusted(self) -> bool:
+        """Whether project-level hooks are permitted for this workspace."""
+        return self._trusted
+
+    def set_trusted(self, trusted: bool) -> None:
+        """Record the workspace trust decision and drop any cached bindings.
+
+        Must be called before the first dispatch: bindings are loaded lazily and
+        cached, so a trust decision that arrives after loading would not take
+        effect without the invalidation below.
+        """
+        if trusted != self._trusted:
+            self._trusted = trusted
+            self.invalidate_cache()
 
     # ------------------------------------------------------------------
     # Cache management
@@ -80,7 +98,7 @@ class HookDispatcher:
 
     def _ensure_loaded(self) -> list[HookBinding]:
         if self._bindings is None:
-            self._bindings = load_hooks(self.workspace)
+            self._bindings = load_hooks(self.workspace, trusted=self._trusted)
             logger.debug(
                 "Loaded %d hook binding(s) for workspace %s",
                 len(self._bindings),

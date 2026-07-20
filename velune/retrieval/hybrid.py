@@ -1,6 +1,8 @@
+import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("velune.retrieval.hybrid")
@@ -9,8 +11,36 @@ logger = logging.getLogger("velune.retrieval.hybrid")
 from velune.retrieval.graph import GraphRetriever
 from velune.retrieval.keyword import BM25Retriever
 from velune.retrieval.reranker import CrossEncoderReranker
-from velune.retrieval.schemas import RetrievalHit, RetrievalQuery, RetrievalResult
+from velune.retrieval.schemas import (
+    RetrievalDocument,
+    RetrievalHit,
+    RetrievalQuery,
+    RetrievalResult,
+)
 from velune.retrieval.vector import VectorRetriever
+
+
+def load_lexical_documents(path: Path) -> list[RetrievalDocument]:
+    """Read the persisted BM25 corpus written by ``cognition._save_retrieval_index``.
+
+    Shared by the initial Tier-1 hydration and by
+    ``HybridRetriever.refresh_lexical_index`` so both agree on the document
+    shape rather than parsing the same file two different ways.
+    """
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8") as fh:
+        raw_docs = json.load(fh)
+    return [
+        RetrievalDocument(
+            id=d["id"],
+            content=d["content"],
+            metadata=d.get("metadata", {}),
+            namespace="workspace",
+        )
+        for d in raw_docs
+        if d.get("id") and d.get("content")
+    ]
 
 
 def _normalize_scores(hits: list[RetrievalHit]) -> list[RetrievalHit]:
@@ -50,6 +80,52 @@ class HybridRetriever:
         self.lexical_retriever = BM25Retriever()
         self.graph_retriever = GraphRetriever()
         self.reranker = CrossEncoderReranker()
+        # Path to the persisted BM25 corpus, plus the mtime we last loaded. The
+        # corpus was previously hydrated exactly once at Tier-1 warm-up, so
+        # after the first re-index lexical retrieval kept serving boot-time
+        # state for the rest of the session. See ``refresh_lexical_index``.
+        self._lexical_index_path: Path | None = None
+        self._lexical_index_mtime: float | None = None
+
+    def bind_lexical_index(self, path: Path, *, loaded: bool = True) -> None:
+        """Track *path* as the on-disk source for the BM25 corpus."""
+        self._lexical_index_path = path
+        if loaded:
+            try:
+                self._lexical_index_mtime = path.stat().st_mtime
+            except OSError:
+                self._lexical_index_mtime = None
+
+    def refresh_lexical_index(self) -> bool:
+        """Re-hydrate BM25 from disk if the index file changed. Returns True if reloaded.
+
+        A stat() per call is cheap next to the retrieval it precedes, and it
+        keeps the reload self-contained here rather than requiring the
+        repository indexer to reach across into the retrieval subsystem.
+        """
+        path = self._lexical_index_path
+        if path is None:
+            return False
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return False
+        if self._lexical_index_mtime is not None and mtime <= self._lexical_index_mtime:
+            return False
+
+        try:
+            docs = load_lexical_documents(path)
+        except Exception as exc:
+            logger.debug("Could not reload BM25 index from %s: %s", path, exc)
+            return False
+
+        self._lexical_index_mtime = mtime
+        if not docs:
+            return False
+        self.lexical_retriever = BM25Retriever()
+        self.lexical_retriever.add_documents_batch(docs)
+        logger.info("BM25 index reloaded: %d documents from %s", len(docs), path)
+        return True
 
     def add_documents(self, docs: list[Any]) -> None:
         """Adds and indexes documents in both vector and lexical subsystems.
@@ -77,6 +153,10 @@ class HybridRetriever:
         ``result.metadata["diagnostics"]`` so callers — notably
         ``velune retrieval trace`` — can prove what the pipeline actually did.
         """
+        # Pick up a re-indexed corpus before querying it, so lexical retrieval
+        # reflects the workspace as it is now rather than as it was at boot.
+        self.refresh_lexical_index()
+
         lexical_hits: list[RetrievalHit] = []
         vector_hits: list[RetrievalHit] = []
         graph_hits: list[RetrievalHit] = []

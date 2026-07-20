@@ -74,7 +74,6 @@ class ModelDiscoveryScanner:
         from velune.providers.discovery.openrouter import OpenRouterDiscovery
         from velune.providers.discovery.together import TogetherDiscovery
         from velune.providers.discovery.xai import XAIDiscovery
-        from velune.providers.discovery.zai import ZaiDiscovery
 
         return [
             OllamaDiscovery(),
@@ -93,7 +92,6 @@ class ModelDiscoveryScanner:
             TogetherDiscovery(),
             FireworksDiscovery(),
             MetaDiscovery(),
-            ZaiDiscovery(),
         ]
 
     @property

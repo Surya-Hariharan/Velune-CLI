@@ -1,7 +1,7 @@
-"""Meta and Z.ai provider onboarding, plus the NVIDIA NIM discovery-gating fix.
+"""Meta provider onboarding, plus the NVIDIA NIM discovery-gating fix.
 
-Covers the full "add a cloud provider" contract for the two newest providers
-(Meta's first-party Llama API, Z.ai's GLM family) end to end: catalog entry,
+Covers the full "add a cloud provider" contract for the newest provider
+(Meta's first-party Llama API) end to end: catalog entry,
 env var, validator registration, registry factory, discoverer gating, and the
 adapter's static model list. Also pins down the NVIDIA NIM regression where
 the discoverer's ``provider_id`` ("nvidia_nim") never matched the id a key is
@@ -37,7 +37,7 @@ def isolated_store(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("provider_id", ["meta", "zai"])
+@pytest.mark.parametrize("provider_id", ["meta"])
 def test_provider_is_in_catalog(provider_id):
     meta = catalog.get(provider_id)
     assert meta is not None
@@ -46,7 +46,7 @@ def test_provider_is_in_catalog(provider_id):
     assert meta.get_key_url.startswith("https://")
 
 
-@pytest.mark.parametrize("provider_id", ["meta", "zai"])
+@pytest.mark.parametrize("provider_id", ["meta"])
 def test_provider_has_env_var(provider_id):
     assert provider_id in ks.PROVIDER_ENV_VARS
     env_var = ks.PROVIDER_ENV_VARS[provider_id]
@@ -55,12 +55,12 @@ def test_provider_has_env_var(provider_id):
     assert catalog.get(provider_id).env_var == env_var
 
 
-@pytest.mark.parametrize("provider_id", ["meta", "zai"])
+@pytest.mark.parametrize("provider_id", ["meta"])
 def test_provider_has_validator(provider_id):
     assert provider_id in _VALIDATORS
 
 
-@pytest.mark.parametrize("provider_id", ["meta", "zai"])
+@pytest.mark.parametrize("provider_id", ["meta"])
 def test_provider_has_registry_factory(provider_id):
     from velune.providers.registry import ProviderRegistry
 
@@ -70,7 +70,7 @@ def test_provider_has_registry_factory(provider_id):
     assert provider.provider_id == provider_id
 
 
-@pytest.mark.parametrize("provider_id", ["meta", "zai"])
+@pytest.mark.parametrize("provider_id", ["meta"])
 def test_env_var_is_honoured_by_get_key(provider_id, monkeypatch):
     env_var = ks.PROVIDER_ENV_VARS[provider_id]
     monkeypatch.setenv(env_var, "test-key-from-env")
@@ -89,16 +89,6 @@ def test_meta_models_are_well_formed():
     assert len(META_MODELS) >= 1
     for model in META_MODELS:
         assert model.provider_id == "meta"
-        assert model.context_length > 0
-        assert model.model_id
-
-
-def test_zai_models_are_well_formed():
-    from velune.providers.adapters.zai import ZAI_MODELS
-
-    assert len(ZAI_MODELS) >= 1
-    for model in ZAI_MODELS:
-        assert model.provider_id == "zai"
         assert model.context_length > 0
         assert model.model_id
 
@@ -126,36 +116,11 @@ async def test_meta_discovery_returns_models_with_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_zai_discovery_returns_empty_without_key():
-    from velune.providers.discovery.zai import ZaiDiscovery
-
-    assert await ZaiDiscovery().discover() == []
-
-
-@pytest.mark.asyncio
-async def test_zai_discovery_returns_models_with_key(monkeypatch):
-    from velune.providers.discovery.zai import ZaiDiscovery
-
-    monkeypatch.setenv("ZAI_API_KEY", "test-key")
-    models = await ZaiDiscovery().discover()
-    assert len(models) >= 1
-    assert all(m.provider_id == "zai" for m in models)
-
-
-@pytest.mark.asyncio
 async def test_scan_provider_meta_matches_by_catalog_id(monkeypatch):
     """scan_provider(id) must match the same id `provider add` stores keys under."""
     monkeypatch.setenv("LLAMA_API_KEY", "test-key")
     scanner = ModelDiscoveryScanner()
     models = await scanner.scan_provider("meta")
-    assert len(models) >= 1
-
-
-@pytest.mark.asyncio
-async def test_scan_provider_zai_matches_by_catalog_id(monkeypatch):
-    monkeypatch.setenv("ZAI_API_KEY", "test-key")
-    scanner = ModelDiscoveryScanner()
-    models = await scanner.scan_provider("zai")
     assert len(models) >= 1
 
 

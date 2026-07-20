@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,15 @@ if TYPE_CHECKING:
 _log = logging.getLogger("velune.cli.handlers.prompt_context")
 
 _RETRIEVAL_TIMEOUT_S = 2.0
+# Larger than the retrieval budget: a warm snapshot is a cache read, but a cold
+# one falls through to a full index. This bounds that worst case rather than
+# letting it hold the turn open indefinitely.
+_REPO_SNAPSHOT_TIMEOUT_S = 5.0
+
+# Tier-1 subsystems the turn path degrades without. Waited on briefly so a
+# prompt typed during warm-up gets real context instead of silent emptiness.
+_WARM_GATED_KEYS = ("runtime.retrieval", "runtime.three_brain_coordinator")
+_WARMUP_WAIT_S = 3.0
 _REPO_SNAPSHOT_BASE_TOKENS = 2500
 _REPO_SNAPSHOT_BIASED_TOKENS = 4000
 
@@ -72,6 +82,8 @@ async def build_turn_context(
     intent, confidence = IntentClassifier().classify_with_confidence(text)
     mode_config = repl._mode_manager.config
     workspace = Path(repl.container.get("runtime.workspace") or ".")
+
+    await _await_memory_subsystems(repl)
 
     retrieval_bias = _RETRIEVAL_BUDGET_BIAS.get(intent, 0.55)
     budget = ContextBudget.for_chat(
@@ -179,6 +191,48 @@ async def build_turn_context(
     messages.append({"role": "user", "content": text})
 
     return messages, report, intent, confidence
+
+
+async def _await_memory_subsystems(repl: VeluneREPL) -> None:
+    """Give Tier-1 memory/retrieval a brief chance to finish warming.
+
+    Retrieval, three-brain, and repository cognition are warmed in the
+    background so the prompt is interactive immediately. Every helper below
+    degrades to an empty list when its subsystem is missing, and does so at
+    ``debug`` level — so a prompt typed during the warm-up window silently got
+    no memory, no retrieval, and no repository context, indistinguishable from
+    "nothing relevant was found".
+
+    ``ServiceContainer.wait_ready`` was built for exactly this and had no
+    callers. The wait is short and only ever pays out on the first turn or two
+    of a cold start; after that every key is already registered and each call
+    returns immediately.
+    """
+    container = repl.container
+    waiter = getattr(container, "wait_ready", None)
+    if waiter is None:
+        return
+
+    pending = [key for key in _WARM_GATED_KEYS if not container.is_ready(key)]
+    if not pending:
+        return
+
+    started = time.monotonic()
+    results = await asyncio.gather(
+        *(waiter(key, timeout=_WARMUP_WAIT_S) for key in pending),
+        return_exceptions=True,
+    )
+    waited = time.monotonic() - started
+
+    missing = [key for key, ok in zip(pending, results, strict=False) if ok is not True]
+    if missing:
+        _log.info(
+            "Proceeding with reduced context after %.1fs: %s still warming.",
+            waited,
+            ", ".join(sorted(missing)),
+        )
+    else:
+        _log.debug("Tier-1 memory subsystems became ready after %.2fs.", waited)
 
 
 def _record_retrieval_feedback(
@@ -397,9 +451,22 @@ async def _repository_snapshot_chunks(
     try:
         fresh = getattr(repo_service, "get_snapshot_fresh", None)
         if fresh is not None:
-            snapshot = await fresh()
+            # Bounded like its sibling _retrieve_hybrid. On a cold cache this
+            # call falls through to a full repository index, which previously
+            # ran unbounded inside the turn's gather — the first prompt in an
+            # unindexed repo blocked until the whole tree had been walked. The
+            # background auto-index warms the cache regardless, so a timeout
+            # here costs this turn some context, not the feature.
+            snapshot = await asyncio.wait_for(fresh(), timeout=_REPO_SNAPSHOT_TIMEOUT_S)
         else:  # defensive: mocks/older services without the fast path
             snapshot = repo_service.get_snapshot()
+    except asyncio.TimeoutError:
+        _log.debug(
+            "Repository snapshot exceeded %.1fs (likely a cold index); "
+            "continuing without repository context this turn.",
+            _REPO_SNAPSHOT_TIMEOUT_S,
+        )
+        return []
     except Exception as exc:
         _log.debug("Repository snapshot read failed (non-fatal): %s", exc)
         return []

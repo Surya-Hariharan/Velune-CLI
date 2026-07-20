@@ -78,16 +78,41 @@ class WorkingMemoryTier:
     # Turn management
     # ------------------------------------------------------------------
 
-    def add_turn(self, role: str, content: str, metadata: dict[str, Any] | None = None) -> None:
+    def bind_session(self, session_id: str) -> None:
+        """Adopt *session_id* as this tier's session.
+
+        The tier is constructed at Tier-1 warm-up, before the REPL's episodic
+        session exists, so it starts on the placeholder ``"default"``. Without
+        this, every session in the process shared one undifferentiated bucket
+        and ``get_turns()``'s session filter was decorative. Turns already
+        recorded under the placeholder are re-stamped so binding never orphans
+        the turns that came before it.
+        """
+        if not session_id or session_id == self._session_id:
+            return
+        previous = self._session_id
+        self._session_id = session_id
+        for turn in self._turns:
+            if turn.session_id == previous:
+                turn.session_id = session_id
+        logger.debug("Working memory bound to session %s (was %s)", session_id, previous)
+
+    def add_turn(
+        self,
+        role: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        session_id: str | None = None,
+    ) -> None:
         """Add a conversation turn to working memory."""
         turn = MemoryTurn(
             role=role,
             content=content,
             metadata=metadata or {},
-            session_id=self._session_id,
+            session_id=session_id or self._session_id,
         )
         self._turns.append(turn)
-        logger.debug("Added turn to working memory [session=%s role=%s]", self._session_id, role)
+        logger.debug("Added turn to working memory [session=%s role=%s]", turn.session_id, role)
 
     def get_turns(self) -> list[MemoryTurn]:
         """Get all turns for this session in chronological order."""

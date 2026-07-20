@@ -27,10 +27,7 @@ _LAZY: dict[str, str] = {
     "GroqDiscovery": "groq",
     "OpenRouterDiscovery": "openrouter",
     "MetaDiscovery": "meta",
-    "ZaiDiscovery": "zai",
     "GPUDetector": "gpu",
-    "CapabilityClassifier": "classifier",
-    "CapabilityBenchmark": "benchmarks",
 }
 
 __all__ = list(_LAZY)

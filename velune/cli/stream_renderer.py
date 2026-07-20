@@ -23,7 +23,7 @@ _log = logging.getLogger("velune.cli.stream_renderer")
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from velune.cli.interrupt_controller import InterruptController
+    from velune.cli.interrupts import InterruptController
 
 
 @dataclass

@@ -213,8 +213,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "grok",
                 "meta",
                 "llama",
-                "zai",
-                "glm",
                 "huggingface",
                 "ollama",
                 "api key",

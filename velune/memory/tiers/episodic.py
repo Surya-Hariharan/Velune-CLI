@@ -400,20 +400,27 @@ class EpisodicMemory:
         """Persist a conversation turn and return its ID."""
         turn_id = f"trn-{uuid.uuid4().hex[:12]}"
         try:
-            async with self._pool.read() as conn:
-                cursor = await conn.execute(
-                    "SELECT COUNT(*) FROM turns WHERE session_id = ?",
-                    (session_id,),
-                )
-                row = await cursor.fetchone()
-            turn_index: int = row[0] if row else 0
-
+            # The index must be derived inside the write transaction. Reading it
+            # from a separate read connection first let two concurrent
+            # record_turn calls — the user and assistant halves of one turn are
+            # both fire-and-forget — observe the same COUNT and insert duplicate
+            # turn_index values, which permanently corrupts ordering on replay.
             async with self._pool.write() as conn:
                 await conn.execute(
                     "INSERT INTO turns "
                     "(id, session_id, turn_index, role, content, model_used, tokens_used, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (turn_id, session_id, turn_index, role, content, model, tokens, time.time()),
+                    "SELECT ?, ?, COALESCE(MAX(turn_index) + 1, 0), ?, ?, ?, ?, ? "
+                    "FROM turns WHERE session_id = ?",
+                    (
+                        turn_id,
+                        session_id,
+                        role,
+                        content,
+                        model,
+                        tokens,
+                        time.time(),
+                        session_id,
+                    ),
                 )
         except Exception as exc:
             logger.error("Failed to record episodic turn: %s", exc)

@@ -73,7 +73,6 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "mistral": "MISTRAL_API_KEY",
     "cohere": "COHERE_API_KEY",
     "nvidia": "NVIDIA_API_KEY",
-    "zai": "ZAI_API_KEY",
     "meta": "LLAMA_API_KEY",
 }
 
@@ -96,6 +95,7 @@ class CredentialManager:
         self._credentials_file = self._config_dir / "credentials.json"
         self._cache: dict[str, dict[str, Any]] | None = None
         self._cache_lock = Lock()
+        self._key_revisions: dict[str, int] = {}
 
     def _load_disk(self, retry: bool = True) -> dict[str, dict[str, Any]]:
         """Load and decrypt the configuration from disk."""
@@ -222,6 +222,7 @@ class CredentialManager:
                 record["last_verified"] = datetime.now(timezone.utc).isoformat()
             self._cache[provider_id] = record
             self._save_disk(self._cache)
+            self._bump_revision(provider_id)
 
     def update_status(self, provider_id: str, status: str, **extra: Any) -> None:
         """Rewrite a provider's verification status without touching its key."""
@@ -252,6 +253,7 @@ class CredentialManager:
             if provider_id in self._cache:
                 del self._cache[provider_id]
                 self._save_disk(self._cache, removed={provider_id})
+                self._bump_revision(provider_id)
 
     def get_all_providers(self) -> dict[str, dict[str, Any]]:
         """Get a copy of all loaded providers."""
@@ -259,6 +261,29 @@ class CredentialManager:
             if self._cache is None:
                 self._cache = self._load_disk()
             return dict(self._cache)
+
+    # ------------------------------------------------------------------
+    # Key revisions
+    #
+    # Provider adapters bake their API key in at construction and are then
+    # memoized by ProviderRegistry for the life of the process. Rather than
+    # requiring every mutation site to remember to evict that cache — which is
+    # how ``/login`` came to be a no-op until restart — the registry pulls the
+    # revision below and rebuilds when it moves. Any future write path gets the
+    # behaviour for free as long as it goes through this class.
+    #
+    # Only *key material* bumps the revision. A pure status change
+    # (verified/invalid/stale) leaves the cached adapter correct.
+    # ------------------------------------------------------------------
+
+    def _bump_revision(self, provider_id: str) -> None:
+        """Signal that *provider_id*'s key material changed. Caller holds the lock."""
+        self._key_revisions[provider_id] = self._key_revisions.get(provider_id, 0) + 1
+
+    def key_revision(self, provider_id: str) -> int:
+        """Monotonic counter for *provider_id*'s key material within this process."""
+        with self._cache_lock:
+            return self._key_revisions.get(provider_id, 0)
 
 
 _manager = CredentialManager()
@@ -277,6 +302,16 @@ def save_key(provider_id: str, api_key: str, *, verified: bool = False) -> None:
         api_key,
         status=_STATUS_VERIFIED if verified else _STATUS_UNVERIFIED,
     )
+
+
+def key_revision(provider_id: str) -> int:
+    """Monotonic counter bumped whenever *provider_id*'s key material changes.
+
+    ``ProviderRegistry`` compares this against the revision it built a cached
+    adapter at, so a saved or deleted key takes effect on the next call instead
+    of requiring a process restart.
+    """
+    return _manager.key_revision(provider_id)
 
 
 def mark_verified(provider_id: str, *, model_count: int = 0) -> None:

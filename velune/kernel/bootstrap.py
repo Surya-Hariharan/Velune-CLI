@@ -84,6 +84,19 @@ class RuntimeBootstrapper:
                     exc,
                 )
                 continue
+            # A factory that returns None is declining to provide the subsystem
+            # (e.g. the intelligence engine when watch_files is off). Registering
+            # that None made container.has() report True while get() returned
+            # None, so every consumer guarding with has() got a false positive
+            # and every lifecycle hook was handed a None component.
+            if instance is None:
+                _logger.debug(
+                    "Module '%s' (%s) provided no instance; leaving it unregistered.",
+                    module.name,
+                    module.container_key,
+                )
+                continue
+
             env.container.register_instance(module.container_key, instance)
             env.container.mark_ready(module.container_key)
             if module.lifecycle_key:

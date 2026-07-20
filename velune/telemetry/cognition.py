@@ -26,9 +26,19 @@ class CognitivePerformanceAnalytics:
             self.sqlite_manager = sqlite_manager
             self.db_path = sqlite_manager.db_path
         else:
-            # Standalone mode (doctor command, tests)
+            # Standalone mode (doctor command, tests).
+            #
+            # Anchored to the resolved workspace rather than a bare relative
+            # path: ".velune/..." resolves against the *process* CWD, so the
+            # same session could read and write different databases depending
+            # on where the user happened to run the command from.
             if db_path is None:
-                self.db_path = Path(".velune") / "velune_cognitive_core.db"
+                try:
+                    from velune.core.paths import app_data_root
+
+                    self.db_path = app_data_root() / "velune_cognitive_core.db"
+                except Exception:
+                    self.db_path = Path.home() / ".velune" / "velune_cognitive_core.db"
             else:
                 self.db_path = Path(db_path)
 

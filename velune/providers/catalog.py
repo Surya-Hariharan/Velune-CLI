@@ -199,16 +199,6 @@ _PROVIDERS: tuple[ProviderMeta, ...] = (
         get_key_url="https://console.x.ai",
         env_var=PROVIDER_ENV_VARS.get("xai"),
     ),
-    ProviderMeta(
-        id="zai",
-        display_name="Z.ai",
-        description="Z.ai (Zhipu) — the GLM model family, including GLM-4.6.",
-        requires_key=True,
-        free_tier=True,
-        key_label="Z.ai API key",
-        get_key_url="https://z.ai/manage-apikey/apikey-list",
-        env_var=PROVIDER_ENV_VARS.get("zai"),
-    ),
 )
 
 _BY_ID: dict[str, ProviderMeta] = {p.id: p for p in _PROVIDERS}

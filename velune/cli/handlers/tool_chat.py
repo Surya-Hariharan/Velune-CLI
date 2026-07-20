@@ -154,13 +154,26 @@ def tool_loop_available(repl: VeluneREPL, model: ModelDescriptor, provider: Any)
             return False
     except Exception:
         return False
-    # Model-level signal, when present. Absence is not a veto — the
-    # first-turn fallback handles providers that reject tool payloads.
+    # Model-level veto, only when it is backed by measurement.
+    #
+    # The original code called ``.get("tool_use")`` on model.capabilities, which
+    # is a ModelCapabilityProfile (a Pydantic model, not a dict). That raised
+    # AttributeError on every turn and was swallowed below, so the veto never
+    # fired. It cannot simply be switched to getattr, though: tool_use *defaults*
+    # to CapabilityLevel.NONE and most discovery paths never set it — Ollama
+    # builds a bare profile and populates only coding/reasoning — so honouring a
+    # bare NONE would disable the tool loop for nearly every local model.
+    #
+    # ModelProfiler stamps "tool_use_demoted" when it demotes a model that
+    # repeatedly failed the structured-output check. That flag is the only NONE
+    # that means "measured as incapable" rather than "never assessed".
     try:
-        from velune.core.types.model import CapabilityLevel
-
-        level = (model.capabilities or {}).get("tool_use")
-        if level == CapabilityLevel.NONE:
+        if model.metadata.get("tool_use_demoted"):
+            _log.info(
+                "Model %s was demoted to tool_use=NONE by benchmarking; "
+                "using the plain chat path.",
+                model.model_id,
+            )
             return False
     except Exception:
         pass
@@ -229,7 +242,17 @@ async def run_tool_chat(
         if task is not None:
             uncancel_task(task)
         ui.close()
-        return ToolLoopResult(content="", turns=0, stop_reason="interrupted")
+        # Carry the already-executed calls out with the interrupt. Their side
+        # effects are on disk, so dropping them would leave the transcript
+        # claiming the turn never happened.
+        executed = runner.executed_invocations
+        repl._tool_call_count += len(executed)
+        return ToolLoopResult(
+            content="",
+            turns=0,
+            invocations=executed,
+            stop_reason="interrupted",
+        )
     except InferenceError as exc:
         ui.close()
         if ui.any_tool_ran:
@@ -258,6 +281,26 @@ async def run_tool_chat(
 # ── Approval UX ─────────────────────────────────────────────────────────────
 
 
+def _auto_accept_enabled(repl: VeluneREPL) -> bool:
+    """True when the user passed --yes (or auto-accept was set programmatically).
+
+    Both sources are consulted because ``app.py`` writes the flag to two places:
+    the container key ``runtime.auto_accept`` and the diff-preview module
+    global. Checking only one is how the tool loop came to ignore ``--yes``.
+    """
+    try:
+        if bool(repl.container.get("runtime.auto_accept")):
+            return True
+    except Exception:
+        pass
+    try:
+        from velune.execution.diff_preview import is_auto_accept
+
+        return bool(is_auto_accept())
+    except Exception:
+        return False
+
+
 def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI):
     from velune.orchestration.tool_loop import READONLY_PERMISSIONS
     from velune.tools.safety import ApprovalMode, classify_command
@@ -265,9 +308,16 @@ def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI):
     async def approver(name: str, arguments: dict[str, Any], permissions: set) -> bool:
         if permissions and permissions <= READONLY_PERMISSIONS:
             return True
+        # BLOCK is checked before auto-accept: an explicit block is a stronger
+        # statement than a blanket --yes.
         if repl._approval_mode is ApprovalMode.BLOCK:
             ui.note(f"[red]✗[/red] {name} denied (approval mode: block)")
             return False
+        # --yes / auto-accept. This was previously honoured only by the diff
+        # preview and confirm_destructive, so `velune --yes` still stopped to
+        # ask for approval on every single tool call.
+        if _auto_accept_enabled(repl):
+            return True
         if name == "execute_command" and isinstance(arguments.get("command"), str):
             verdict = classify_command(arguments["command"])
             if verdict.mode is ApprovalMode.BLOCK:
@@ -289,7 +339,6 @@ async def _prompt_approval(
     import json
 
     from rich.panel import Panel
-    from rich.prompt import Prompt
 
     ui.pause_status()
     diff = ui.compute_mutation_diff(name, arguments) if name in _FILE_MUTATORS else None
@@ -326,19 +375,38 @@ async def _prompt_approval(
                 padding=(0, 2),
             )
         )
+    # Routed through the shared prompt_toolkit widget, not rich.prompt.Prompt.
+    # The old call did a blocking stdin read from inside the running fullscreen
+    # application, which owns the terminal — two readers on one raw-mode stdin
+    # split the user's keystrokes, so approvals hung or read as denials.
+    from velune.cli.interactive import CANCEL, Option, is_interactive_tty, single_select
+
+    if not is_interactive_tty():
+        _log.debug("No interactive stdin; denying %s", name)
+        if diff is not None:
+            ui._diff_shown.discard((name, str(diff.path)))
+        return False
+
     try:
-        answer = await asyncio.to_thread(
-            Prompt.ask,
-            "  Allow? [bold]y[/bold]es / [bold]n[/bold]o / [bold]a[/bold]lways this session",
-            choices=["y", "n", "a"],
-            default="n",
-            console=repl.console,
+        answer = await single_select(
+            "Allow this tool call?",
+            [
+                Option(id="n", label="No — skip this call"),
+                Option(id="y", label="Yes — allow once"),
+                Option(id="a", label=f"Always — allow {name} for this session"),
+            ],
+            subtitle=name,
         )
     except KeyboardInterrupt:
         # A real interrupt must abort the turn, not read as a silent denial.
         raise
-    except (EOFError, Exception) as exc:
+    except Exception as exc:
         _log.debug("Approval prompt unavailable (%s); denying %s", exc, name)
+        if diff is not None:
+            ui._diff_shown.discard((name, str(diff.path)))
+        return False
+
+    if answer is CANCEL or answer is None:
         if diff is not None:
             ui._diff_shown.discard((name, str(diff.path)))
         return False

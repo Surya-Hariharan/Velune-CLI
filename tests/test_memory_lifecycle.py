@@ -172,7 +172,12 @@ async def test_record_turn_writes_episodic_semantic_and_working():
         session_id="ses-1", role="user", content="hello", model="m1", tokens=10
     )
     semantic.index_turn.assert_called_once()
-    working.add_turn.assert_called_once_with("user", "hello", {"model": "m1", "tokens": 10})
+    # The real session id must reach working memory. It previously did not, so
+    # every session in the process shared the placeholder tier id "default".
+    working.bind_session.assert_called_once_with("ses-1")
+    working.add_turn.assert_called_once_with(
+        "user", "hello", {"model": "m1", "tokens": 10}, session_id="ses-1"
+    )
     check.assert_awaited_once_with("ses-1")
 
 

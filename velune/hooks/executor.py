@@ -104,6 +104,13 @@ async def run_hook(
             proc.kill()
         except ProcessLookupError:
             pass
+        # kill() only sends the signal. Without the wait() the child is never
+        # reaped and its pipes stay open, leaving a zombie plus an asyncio
+        # transport warning behind on every hook timeout.
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except Exception as exc:
+            logger.debug("Hook process did not exit after kill (%s): %s", cmd, exc)
         logger.warning("Hook timed out after %ds: %s", timeout, cmd)
         return HookResult()
     except Exception as exc:

@@ -56,11 +56,11 @@ async def cmd_model(repl: VeluneREPL, args: str) -> None:
     if args.strip():
         model = model_registry.get(args.strip())
         if model:
-            repl.active_model = model
-            repl.console.print(
-                f"[green]Switched to[/green] [cyan]{model.model_id}[/cyan] "
-                f"[dim]({model.provider_id})[/dim]"
-            )
+            # Route through activate_model like /model use and /model connect do.
+            # Setting repl.active_model directly skipped persistence, the recents
+            # list, and the default-provider write, so `/model <name>` silently
+            # behaved differently from every other way of switching models.
+            await activate_model(repl, model)
         else:
             from velune.cli.rendering.error_panel import render_error
             from velune.core.errors.catalog import ModelNotFoundError
@@ -102,7 +102,10 @@ RECOMMENDED_MODELS = [
     },
     {
         "model_id": "gemini-1.5-pro",
-        "provider_id": "gemini",
+        # "google", not "gemini" — the registry, catalog, keystore, and
+        # validators all key on "google". Selecting this entry with the wrong id
+        # produced a ProviderNotFoundError at inference time.
+        "provider_id": "google",
         "display_name": "Gemini 1.5 Pro",
         "context_length": 1048576,
         "is_local": False,
@@ -603,6 +606,16 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
 async def activate_model(repl: VeluneREPL, model: ModelDescriptor) -> None:
     """Set *model* as active and persist it as the default for next launch."""
     repl.active_model = model
+
+    # Resize the context meter here rather than waiting for the next render.
+    # It was only re-synced during _refresh_status_state, so between the switch
+    # and the next frame the tracker still reported the previous model's window
+    # — switching 200k Claude to a 16k local model showed headroom that did not
+    # exist, while ContextBudget was already using the real value.
+    tracker = getattr(repl, "_context_tracker", None)
+    if tracker is not None:
+        tracker.max_tokens = model.context_length
+
     from velune.cli.model_prefs import add_recent, save_active_model
 
     save_active_model(model.provider_id, model.model_id)

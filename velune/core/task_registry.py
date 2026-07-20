@@ -52,6 +52,37 @@ def track(task: asyncio.Task[Any]) -> asyncio.Task[Any]:
     return task
 
 
+async def cancel_tracked(timeout: float = 5.0) -> None:
+    """Cancel every task registered via :func:`track` and wait for them to stop.
+
+    Shutdown closes shared resources — the SQLite pool, LanceDB, the embedding
+    pipeline — while fire-and-forget tasks may still be mid-write. Those tasks
+    live in ``_TRACKED_TASKS``, which ``BackgroundTaskRegistry.cancel_all`` does
+    not see, so without this they ran on against closed handles until the event
+    loop tore them down. Call this *before* lifecycle shutdown.
+    """
+    pending = [t for t in list(_TRACKED_TASKS) if not t.done()]
+    if not pending:
+        return
+
+    for task in pending:
+        task.cancel()
+
+    done, still_pending = await asyncio.wait(pending, timeout=timeout)
+    if still_pending:
+        logger.warning(
+            "%d tracked task(s) did not stop within %.1fs: %s",
+            len(still_pending),
+            timeout,
+            ", ".join(sorted(t.get_name() for t in still_pending)),
+        )
+
+
+def tracked_task_count() -> int:
+    """Number of live fire-and-forget tasks. Exposed for diagnostics and tests."""
+    return len([t for t in _TRACKED_TASKS if not t.done()])
+
+
 class BackgroundTaskRegistry:
     """Tracks in-flight asyncio tasks with timeout and cancellation support."""
 

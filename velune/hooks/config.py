@@ -128,15 +128,23 @@ def _parse_bindings(hooks_dict: dict[str, Any]) -> list[HookBinding]:
     return bindings
 
 
-def load_hooks(workspace: Path | None = None) -> list[HookBinding]:
+def load_hooks(workspace: Path | None = None, trusted: bool = False) -> list[HookBinding]:
     """Load all hook bindings for the given workspace.
 
     Sources are loaded in reverse priority order so higher-priority sources
     override lower-priority ones (project > user).
 
+    Project-level hooks run arbitrary shell commands, so they are only loaded
+    for a workspace the user has explicitly trusted — the same gate MCP servers
+    already sit behind. User-level hooks live under the user's own home
+    directory and are always trusted. ``trusted`` defaults to False so that a
+    caller which forgets to pass it fails closed.
+
     Args:
         workspace: Root directory of the active project. If None, only user-
                    level hooks are loaded.
+        trusted:   Whether the user has approved this workspace. When False,
+                   project-level hook sources are skipped entirely.
 
     Returns:
         Flat list of HookBinding objects (may be empty).
@@ -148,8 +156,8 @@ def load_hooks(workspace: Path | None = None) -> list[HookBinding]:
     if user_hooks.exists():
         sources.append(user_hooks)
 
-    # Project-level hooks (<workspace>/.velune/hooks.json)
-    if workspace:
+    # Project-level hooks (<workspace>/.velune/hooks.json) — trust-gated.
+    if workspace and trusted:
         project_hooks = Path(workspace) / ".velune" / "hooks.json"
         if project_hooks.exists():
             sources.append(project_hooks)
@@ -170,11 +178,15 @@ def load_hooks(workspace: Path | None = None) -> list[HookBinding]:
         except OSError as exc:
             logger.warning("Could not read hook config %s: %s", path, exc)
 
-    # Also read velune.toml [hooks] section if present (simple command list)
-    if workspace:
+    # Also read velune.toml [hooks] section if present (simple command list).
+    # Workspace-scoped, so it carries the same trust requirement.
+    if workspace and trusted:
         toml_path = Path(workspace) / "velune.toml"
         toml_bindings = _load_toml_hooks(toml_path)
         all_bindings.extend(toml_bindings)
+
+    if workspace and not trusted:
+        logger.debug("Workspace not trusted — project hook sources skipped: %s", workspace)
 
     return all_bindings
 

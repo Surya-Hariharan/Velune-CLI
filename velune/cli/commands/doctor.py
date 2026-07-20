@@ -485,10 +485,12 @@ def _check_sqlite() -> dict:
         velune_dir.mkdir(exist_ok=True)
         import sqlite3
 
-        conn = sqlite3.connect(str(db_file), timeout=3.0)
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        conn.close()
+        # closing() so an exception between connect and close cannot leak the
+        # handle — the previous bare close() was skipped on any failure path.
+        from contextlib import closing
+
+        with closing(sqlite3.connect(str(db_file), timeout=3.0)) as conn:
+            conn.execute("SELECT 1")
         return {
             "name": "SQLite DB Initializable",
             "status": "ok",
@@ -762,7 +764,8 @@ def _check_google() -> dict:
 
         key = get_key("google")
         r = httpx.get(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            headers={"x-goog-api-key": key or ""},
             timeout=5,
         )
         if r.status_code == 200:

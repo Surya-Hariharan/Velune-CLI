@@ -181,15 +181,31 @@ class MCPServerRegistry:
             logger.info("MCP server '%s' connected (%d tools).", name, len(entry.tools))
             return True
         except MCPTransportError as exc:
+            await self._abandon_connection(conn, name)
             entry.state = ServerState.ERROR
             entry.error = str(exc)
             logger.error("MCP server '%s' failed to connect: %s", name, exc)
             return False
         except Exception as exc:
+            await self._abandon_connection(conn, name)
             entry.state = ServerState.ERROR
             entry.error = str(exc)
             logger.error("Unexpected error connecting to '%s': %s", name, exc)
             return False
+
+    async def _abandon_connection(self, conn: Any, name: str) -> None:
+        """Tear down a connection that failed partway through handshake.
+
+        ``entry.connection`` is only assigned after a *successful* connect, so a
+        timeout during ``connect()`` or ``list_tools()`` used to leave the stdio
+        transport's already-spawned subprocess with no reference to it and
+        nothing to reap it. Cold ``npx -y @modelcontextprotocol/...`` starts
+        routinely exceed the connect timeout, so this was the common path.
+        """
+        try:
+            await conn.disconnect()
+        except Exception as exc:
+            logger.debug("Error tearing down failed connection '%s': %s", name, exc)
 
     async def disconnect(self, name: str) -> None:
         """Disconnect a single server by name."""
@@ -207,20 +223,44 @@ class MCPServerRegistry:
         self._rebuild_tool_index()
 
     async def connect_all(self, timeout: float = 30.0) -> dict[str, bool]:
-        """Connect all registered servers concurrently.
+        """Connect all registered servers concurrently, bounded by *timeout*.
 
-        Returns a dict of ``{name: success}``.
+        Returns a dict of ``{name: success}``. ``timeout`` was previously
+        accepted and ignored, so a slow or hanging server could hold the whole
+        connect pass — and with it the first prompt — open indefinitely. Servers
+        that miss the deadline are reported as failures and torn down.
         """
         if not self._entries:
             return {}
 
-        results = await asyncio.gather(
-            *[self.connect(name) for name in self._entries],
-            return_exceptions=True,
-        )
-        return {
-            name: (result is True) for name, result in zip(self._entries, results, strict=False)
-        }
+        names = list(self._entries)
+        tasks = [asyncio.create_task(self.connect(name), name=f"mcp.connect.{n}") for n, name in enumerate(names)]
+
+        done, pending = await asyncio.wait(tasks, timeout=timeout)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+            logger.warning(
+                "MCP connect deadline of %.0fs reached; %d server(s) still connecting.",
+                timeout,
+                len(pending),
+            )
+
+        results: dict[str, bool] = {}
+        for name, task in zip(names, tasks, strict=False):
+            if task in pending:
+                entry = self._entries.get(name)
+                if entry is not None and not entry.is_connected:
+                    entry.state = ServerState.ERROR
+                    entry.error = f"connect exceeded {timeout:.0f}s"
+                results[name] = False
+                continue
+            try:
+                results[name] = task.result() is True
+            except Exception:
+                results[name] = False
+        return results
 
     async def disconnect_all(self) -> None:
         """Disconnect all servers concurrently."""
@@ -282,15 +322,28 @@ class MCPServerRegistry:
                 entry.connection.call_tool(raw_name, arguments), timeout=60.0
             )
         except asyncio.TimeoutError:
+            # A timeout says the transport is unhealthy, so the server is marked
+            # down and can be reconnected.
             entry.state = ServerState.ERROR
             entry.error = "Tool execution timed out."
             raise MCPTransportError(
                 f"MCP tool '{qualified_name}' on '{server_name}' timed out after 60 seconds."
             )
-        except Exception as exc:
-            # Reconnect might be needed
+        except MCPTransportError:
+            # Genuine transport failure — the server really is unusable.
             entry.state = ServerState.ERROR
-            entry.error = str(exc)
+            raise
+        except Exception as exc:
+            # A tool-level error (bad argument, file not found) says nothing
+            # about the transport. Marking the server ERROR here disabled every
+            # other tool it exposed for the rest of the session, with no
+            # reconnect path outside the config-mtime watcher.
+            logger.debug(
+                "MCP tool '%s' on '%s' returned an error; server left connected: %s",
+                qualified_name,
+                server_name,
+                exc,
+            )
             raise MCPTransportError(f"MCP tool '{qualified_name}' execution failed: {exc}")
 
     async def read_resource(self, uri: str) -> str:
@@ -450,17 +503,37 @@ class MCPServerRegistry:
     # ------------------------------------------------------------------
 
     def _rebuild_tool_index(self) -> None:
-        """Rebuild the qualified-name → server-name lookup table."""
+        """Rebuild the qualified-name → server-name lookup table.
+
+        Bare tool names are indexed too, as a convenience, but only when exactly
+        one server exposes that name. Indexing them unconditionally made the
+        mapping last-connected-wins, so two servers both offering e.g. "search"
+        would silently route every bare call to whichever connected most
+        recently. Ambiguous names are dropped; the qualified form still resolves.
+        """
         self._tool_to_server.clear()
+
+        bare_owners: dict[str, set[str]] = {}
         for entry in self._entries.values():
             if not entry.is_connected:
                 continue
             for tool in entry.tools:
                 # Qualified name: "{server_name}_{tool_name}"
-                qualified = f"{entry.name}_{tool.name}"
-                self._tool_to_server[qualified] = entry.name
-                # Also index the raw name so both forms work
-                self._tool_to_server[tool.name] = entry.name
+                self._tool_to_server[f"{entry.name}_{tool.name}"] = entry.name
+                bare_owners.setdefault(tool.name, set()).add(entry.name)
+
+        for tool_name, owners in bare_owners.items():
+            if len(owners) == 1:
+                # Never let a bare name shadow a qualified one.
+                self._tool_to_server.setdefault(tool_name, next(iter(owners)))
+            else:
+                logger.debug(
+                    "MCP tool name '%s' is exposed by %d servers (%s); "
+                    "only the server-qualified form will resolve.",
+                    tool_name,
+                    len(owners),
+                    ", ".join(sorted(owners)),
+                )
 
 
 # ---------------------------------------------------------------------------

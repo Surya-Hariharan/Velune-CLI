@@ -52,6 +52,10 @@ class ProviderRegistry:
     def __init__(self, config: ProvidersConfig | None = None, *, trusted: bool = True):
         self._providers: dict[str, ModelProvider] = {}
         self._factories: dict[str, Callable[[], ModelProvider]] = {}
+        # Key revision each cached adapter was built at. Adapters bake their API
+        # key in at construction, so a cached one goes stale the moment the key
+        # changes; see ``get`` and ``keystore.key_revision``.
+        self._provider_key_revisions: dict[str, int] = {}
         # When False the workspace is untrusted: project-supplied ``base_url``
         # overrides are ignored so a cloned repo cannot redirect authenticated
         # provider traffic. Built-in defaults are always used in that case.
@@ -286,11 +290,6 @@ class ProviderRegistry:
             self._keyed_factory("velune.providers.adapters.meta", "MetaProvider", "meta"),
         )
 
-        self.register_factory(
-            "zai",
-            self._keyed_factory("velune.providers.adapters.zai", "ZaiProvider", "zai"),
-        )
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -302,13 +301,48 @@ class ProviderRegistry:
         self._factories[name] = factory
 
     def get(self, name: str) -> ModelProvider | None:
+        """Return the adapter for *name*, rebuilding it if its API key changed.
+
+        The cache is validated against the keystore's key revision rather than
+        being evicted by each write site. That way ``/login``, key deletion, and
+        any future credential path all take effect on the next call — the
+        previous behaviour cached the adapter (and its key) for the life of the
+        process, so a successful login had no effect until restart.
+        """
+        from velune.providers import keystore
+
+        revision = keystore.key_revision(name)
         if name in self._providers:
-            return self._providers[name]
+            # Only factory-built adapters can be rebuilt. An instance handed to
+            # us via register() is owned by the caller — evicting it would
+            # strand the provider entirely, since there is nothing to rebuild
+            # it from.
+            rebuildable = name in self._factories
+            if not rebuildable or self._provider_key_revisions.get(name) == revision:
+                return self._providers[name]
+            logger.debug("Provider '%s' key changed; rebuilding adapter.", name)
+            del self._providers[name]
+
         if name in self._factories:
             provider = self._factories[name]()
             self._providers[name] = provider
+            self._provider_key_revisions[name] = revision
             return provider
         return None
+
+    def invalidate(self, name: str | None = None) -> None:
+        """Drop cached adapter(s) so the next ``get`` rebuilds from current state.
+
+        ``get`` already self-heals on key changes; this is for the cases it
+        cannot see — a changed ``base_url``, a swapped config, or a test that
+        needs a clean slate. Passing None clears every provider.
+        """
+        if name is None:
+            self._providers.clear()
+            self._provider_key_revisions.clear()
+            return
+        self._providers.pop(name, None)
+        self._provider_key_revisions.pop(name, None)
 
     def get_or_raise(self, name: str) -> ModelProvider:
         provider = self.get(name)

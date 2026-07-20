@@ -181,6 +181,9 @@ class MemoryLifecycleManager:
 
         self._session_count = 0
         self._is_active = False
+        # Sessions with a compaction task in flight; guards against the user and
+        # assistant record_turn calls both starting one for the same session.
+        self._compactions_in_flight: set[str] = set()
 
     def _three_brain(self) -> Any:
         """Return the shared ThreeBrainCoordinator, building one lazily if needed."""
@@ -267,7 +270,18 @@ class MemoryLifecycleManager:
 
         if self.working:
             try:
-                self.working.add_turn(role, content, {"model": model, "tokens": tokens})
+                # Bind on first use: the tier is built during Tier-1 warm-up,
+                # before any session exists, so it would otherwise keep every
+                # session's turns under the placeholder id "default".
+                bind = getattr(self.working, "bind_session", None)
+                if bind is not None and session_id:
+                    bind(session_id)
+                self.working.add_turn(
+                    role,
+                    content,
+                    {"model": model, "tokens": tokens},
+                    session_id=session_id,
+                )
             except Exception as exc:
                 logger.warning("Failed to add turn to working: %s", exc)
 
@@ -294,11 +308,20 @@ class MemoryLifecycleManager:
             # Estimate current token count (rough)
             current_tokens = sum(len(t.content) // 4 for t in turns)
 
-            # Create compactor if needed
-            if not hasattr(self, "_compactor"):
+            # Build the compactor, or rebuild it if the last attempt captured no
+            # provider. Tier-1 warm-up can complete before any provider is
+            # configured, and the compactor was previously constructed exactly
+            # once: a None captured then was never re-resolved, so every later
+            # summarization raised, got swallowed, and compaction silently never
+            # worked again for the life of the process.
+            existing = getattr(self, "_compactor", None)
+            if existing is None or existing.provider is None:
                 from velune.memory.compaction import ContextCompactor
 
                 provider = self._resolve_compaction_provider()
+                if provider is None:
+                    logger.debug("No provider available for compaction yet; will retry next turn.")
+                    return
                 self._compactor = ContextCompactor(
                     provider=provider,
                     working_tier=self.working,
@@ -314,16 +337,28 @@ class MemoryLifecycleManager:
             )
 
             if should_compact:
-                # Schedule compaction as background task (non-blocking). Tracked
-                # so the loop's weak reference can't let it be GC'd mid-compaction.
+                # One compaction at a time per session. record_turn fires for both
+                # the user and assistant halves of a turn, so without this guard
+                # both can observe should_compact and start summarizing the same
+                # turns — two LLM calls, and the second one mutating a turn list
+                # the first has already rewritten.
+                if session_id in self._compactions_in_flight:
+                    logger.debug("Compaction already in flight for session %s.", session_id)
+                    return
+                self._compactions_in_flight.add(session_id)
+
+                # Scheduled as a background task (non-blocking). Tracked so the
+                # loop's weak reference can't let it be GC'd mid-compaction.
                 from velune.core.task_registry import track
 
-                track(
-                    asyncio.create_task(
-                        self._perform_compaction(session_id),
-                        name=f"memory_compaction_{session_id}",
-                    )
+                task = asyncio.create_task(
+                    self._perform_compaction(session_id),
+                    name=f"memory_compaction_{session_id}",
                 )
+                task.add_done_callback(
+                    lambda _t, sid=session_id: self._compactions_in_flight.discard(sid)
+                )
+                track(task)
         except Exception as exc:
             logger.debug("Error checking compaction trigger: %s", exc)
 

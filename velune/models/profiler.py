@@ -93,8 +93,19 @@ class ModelProfiler:
         # Update capability profile levels based on empirical benchmark results
         capabilities = getattr(descriptor, "capabilities", None)
         if capabilities and hasattr(capabilities, "tool_use") and metrics.json_validity < 0.5:
-            # Degrade tool use if model repeatedly fails structure test
+            # Degrade tool use if model repeatedly fails structure test.
+            #
+            # The demotion is also recorded on the descriptor because
+            # ModelCapabilityProfile.tool_use *defaults* to NONE: most discovery
+            # paths never set it, so a bare NONE says "unknown", not "incapable".
+            # Only this flag marks a NONE that is backed by measurement, and it
+            # is what the tool-loop gate keys off — otherwise honouring NONE
+            # would disable tools for every model with an unpopulated profile.
             capabilities.tool_use = CapabilityLevel.NONE
+            try:
+                descriptor.metadata["tool_use_demoted"] = True
+            except Exception:  # pragma: no cover - descriptor without metadata
+                pass
 
         return profile
 
