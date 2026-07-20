@@ -40,7 +40,7 @@ class PostgresConnector(SQLConnector):
             return True
         except ImportError:
             try:
-                import psycopg2  # pyright: ignore[reportMissingModuleSource]  # noqa: F401
+                import psycopg2  # type: ignore  # noqa: F401
 
                 return True
             except ImportError:
@@ -63,7 +63,7 @@ class PostgresConnector(SQLConnector):
 
             return psycopg.connect(**params, connect_timeout=int(config.get("timeout", 5)))
         except ImportError:
-            import psycopg2  # pyright: ignore[reportMissingModuleSource]
+            import psycopg2  # type: ignore
 
             return psycopg2.connect(**params, connect_timeout=int(config.get("timeout", 5)))
 
