@@ -276,10 +276,15 @@ class CommandPalette:
         commands: list[SlashCommand],
         recency_source: Callable[[], list[str]] | None = None,
         favorites: FavoritesStore | None = None,
+        suppressed: Callable[[], bool] | None = None,
     ) -> None:
         # No default store: tests and callers that don't pass one get a
         # palette with favorites disabled instead of surprise disk reads.
         self._favorites = favorites
+        # Predicate for "something else owns the prompt box right now" — an
+        # InlineFlow step, whose filter text may itself start with "/" and
+        # would otherwise light this palette up underneath it.
+        self._suppressed = suppressed
         self.model = CommandPaletteModel(
             commands,
             recency_source=recency_source,
@@ -300,6 +305,8 @@ class CommandPalette:
         return self.model.query_from_text(self._buffer_text())
 
     def is_active(self) -> bool:
+        if self._suppressed is not None and self._suppressed():
+            return False
         text = self._buffer_text()
         return self.model.query_from_text(text) is not None and text != self._dismissed_text
 

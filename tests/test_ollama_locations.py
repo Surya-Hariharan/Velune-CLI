@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from velune.providers.ollama_locations import OllamaLocationRegistry
 from velune.providers.ollama_store import OllamaModelStore
 

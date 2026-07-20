@@ -16,7 +16,7 @@ import pytest
 
 from velune.providers import catalog
 from velune.providers import keystore as ks
-from velune.providers.discovery.scanner import ModelDiscoveryScanner, _LOCAL_PROVIDERS
+from velune.providers.discovery.scanner import _LOCAL_PROVIDERS, ModelDiscoveryScanner
 from velune.providers.validation import _VALIDATORS
 
 

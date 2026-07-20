@@ -187,6 +187,8 @@ class ProviderPalette:
                 Option("status", "Provider Status", "Status table for every provider"),
             ],
             subtitle="Manage cloud AI provider connections",
+            palette=True,
+            frame_title="Providers",
         )
         if choice in (BACK, CANCEL):
             return
@@ -211,6 +213,8 @@ class ProviderPalette:
             [_row(p.id) for p in catalog.list_cloud_providers_alphabetical()],
             subtitle="Choose a provider to connect",
             filterable=True,
+            palette=True,
+            frame_title="Connect provider",
         )
         if pid in (BACK, CANCEL):
             return
@@ -229,6 +233,8 @@ class ProviderPalette:
                 hint=f"Get one at {meta.get_key_url}  ·  input is hidden",
                 password=True,
                 validate=_validate_key_shape,
+                palette=True,
+                frame_title=f"{meta.display_name} key",
             )
             if entered in (BACK, CANCEL):
                 return
@@ -269,6 +275,8 @@ class ProviderPalette:
                     ),
                     Option("cancel", "Cancel", "Return without saving"),
                 ],
+                palette=True,
+                frame_title=f"{meta.display_name} — not connected",
             )
             if action == "retry":
                 continue
@@ -310,6 +318,8 @@ class ProviderPalette:
                 rows,
                 subtitle="Select a provider to view or change",
                 filterable=True,
+                palette=True,
+                frame_title="Manage providers",
             )
             if pid in (BACK, CANCEL):
                 return
@@ -340,6 +350,8 @@ class ProviderPalette:
             meta.display_name,
             options,
             subtitle=self._detail_subtitle(pid),
+            palette=True,
+            frame_title=meta.display_name,
         )
         if action in (BACK, CANCEL):
             return
@@ -413,7 +425,13 @@ class ProviderPalette:
         options = [Option("__all__", "Test all", "Re-verify every configured provider")]
         options += [_row(pid) for pid in configured]
 
-        pid = await single_select("Test Connection", options, filterable=True)
+        pid = await single_select(
+            "Test Connection",
+            options,
+            filterable=True,
+            palette=True,
+            frame_title="Test connection",
+        )
         if pid in (BACK, CANCEL):
             return
 

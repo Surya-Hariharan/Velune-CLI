@@ -51,6 +51,16 @@ def _create_intelligence_engine(env: RuntimeEnvironment):
         else None
     )
 
+    # Background poll intervals scale with hardware tier: the git-state loop
+    # spawns real `git` subprocesses every tick regardless of whether anything
+    # changed, so a CRITICAL-tier machine backs this off rather than paying the
+    # same cadence as a workstation. RepositoryIntelligenceEngine's own
+    # defaults (engine.py's _DEFAULT_CHANGE_POLL / _DEFAULT_GIT_POLL) are
+    # mirrored here rather than imported, to avoid reaching into another
+    # module's private constants.
+    profile = env.container.get_optional("runtime.profile")
+    scale = profile.background_poll_scale if profile else 1.0
+
     return RepositoryIntelligenceEngine(
         workspace=env.workspace,
         cognition=cognition,
@@ -58,6 +68,8 @@ def _create_intelligence_engine(env: RuntimeEnvironment):
         bus=bus,
         retrieval=retrieval,
         job_registry=job_registry,
+        change_poll_interval=3.0 * scale,
+        git_poll_interval=10.0 * scale,
     )
 
 

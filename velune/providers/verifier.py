@@ -82,19 +82,19 @@ async def reverify(provider_id: str) -> ValidationResult:
     return result
 
 
-async def reverify_stale() -> list[ValidationResult]:
+async def reverify_stale(max_concurrency: int | None = None) -> list[ValidationResult]:
     """Re-verify every provider whose key has aged past the TTL.
 
     Safe to fire and forget on startup: it touches only providers already in
-    :attr:`KeyState.STALE`, never blocks on more than ``_MAX_CONCURRENCY``
-    requests at once, and swallows per-provider failures so one dead endpoint
-    can't take down the sweep.
+    :attr:`KeyState.STALE`, never blocks on more than *max_concurrency*
+    (default ``_MAX_CONCURRENCY``) requests at once, and swallows per-provider
+    failures so one dead endpoint can't take down the sweep.
     """
     stale = list_stale_providers()
     if not stale:
         return []
 
-    semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
+    semaphore = asyncio.Semaphore(max_concurrency or _MAX_CONCURRENCY)
 
     async def _one(pid: str) -> ValidationResult | None:
         async with semaphore:

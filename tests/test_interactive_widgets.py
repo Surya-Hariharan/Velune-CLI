@@ -23,9 +23,9 @@ def _options() -> list[Option]:
 def test_select_widget_move_wraps_around():
     w = SelectWidget(title="t", options=_options())
     assert w._index == 0
-    w._move(-1)
+    w.move(-1)
     assert w._index == 2  # wraps to last
-    w._move(1)
+    w.move(1)
     assert w._index == 0
 
 
@@ -33,16 +33,16 @@ def test_select_widget_single_submit_returns_highlighted_id():
     w = SelectWidget(title="t", options=_options())
     captured = {}
     w.on_submit = lambda v: captured.setdefault("v", v)
-    w._move(1)  # -> Beta
+    w.move(1)  # -> Beta
     w._submit()
     assert captured["v"] == "b"
 
 
 def test_select_widget_multi_toggle_and_submit_preserves_option_order():
     w = SelectWidget(title="t", options=_options(), multiple=True)
-    w._move(1)
+    w.move(1)
     w._toggle_current()  # check b
-    w._move(1)
+    w.move(1)
     w._toggle_current()  # check c
     captured = {}
     w.on_submit = lambda v: captured.setdefault("v", v)

@@ -118,10 +118,12 @@ class EmbeddingPipeline:
         provider: Any,  # OllamaProvider | None
         store: Any,  # LanceDBStore
         model_id: str = "nomic-embed-text",
+        concurrency: int = _BATCH_CONCURRENCY,
     ) -> None:
         self._provider = provider
         self._store = store
         self._model_id = model_id
+        self._concurrency = concurrency
         self._queue: asyncio.Queue[EmbedQueueItem] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
         self._worker_task: asyncio.Task | None = None
         self._running = False
@@ -159,7 +161,7 @@ class EmbeddingPipeline:
         """Embed multiple strings with bounded concurrency."""
         if not self._provider:
             raise RuntimeError("No embedding provider configured")
-        sem = asyncio.Semaphore(_BATCH_CONCURRENCY)
+        sem = asyncio.Semaphore(self._concurrency)
 
         async def _one(t: str) -> list[float]:
             async with sem:

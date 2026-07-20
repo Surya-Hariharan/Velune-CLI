@@ -32,6 +32,7 @@ class ProactiveWatcher:
         job_registry: JobRegistry,
         health_monitor: Any | None = None,
         status_state: StatusBarState | None = None,
+        periodic_interval_s: float | None = None,
     ) -> None:
         self._bus = bus
         self._store = alert_store
@@ -41,6 +42,11 @@ class ProactiveWatcher:
         self._subscriptions: list[Subscription] = []
         self._periodic_task: asyncio.Task | None = None
         self._running = False
+        # Instance override of the class default, scaled by hardware tier at
+        # construction (see kernel/entrypoint.py) — a weak machine shouldn't
+        # run this at the same cadence as a workstation.
+        if periodic_interval_s is not None:
+            self.PERIODIC_INTERVAL_S = periodic_interval_s
 
     # ------------------------------------------------------------------
     # Lifecycle

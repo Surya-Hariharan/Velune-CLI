@@ -10,10 +10,11 @@ from typing import Any
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app_or_none
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory, ConditionalAutoSuggest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.history import History
 from prompt_toolkit.key_binding import KeyBindings
@@ -22,6 +23,7 @@ from prompt_toolkit.layout.containers import Float, HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProcessor
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
 from rich.console import Console
@@ -174,9 +176,7 @@ class ToolCardHandle:
         )
         self._set_line(self._title_fragments("●", style))
         if summary:
-            self._ui.append_fragment_lines(
-                [[("class:conversation.tool.result", "  ⎿ "), *summary]]
-            )
+            self._ui.append_fragment_lines([[("class:conversation.tool.result", "  ⎿ "), *summary]])
         try:
             self._ui._live_cards.remove(self)
         except ValueError:
@@ -193,7 +193,11 @@ class ToolCardHandle:
         )
 
 
-def _build_floats(command_palette: Any | None, model_switcher: Any | None = None) -> list[Float]:
+def _build_floats(
+    command_palette: Any | None,
+    model_switcher: Any | None = None,
+    inline_flow: Any | None = None,
+) -> list[Float]:
     """The CompletionsMenu float (model-id/@@symbol completion), plus the
     command palette's float when one is supplied.
 
@@ -211,6 +215,23 @@ def _build_floats(command_palette: Any | None, model_switcher: Any | None = None
         floats.append(
             Float(
                 content=command_palette.container(),
+                left=2,
+                right=2,
+                top=1,
+                height=18,
+                allow_cover_cursor=True,
+                z_index=20,
+            )
+        )
+    if inline_flow is not None:
+        # Deliberately the palette's exact geometry: a slash command that opens
+        # a flow (`/connect`) should read as the palette staying put and
+        # changing what it lists, not as one panel closing and another opening
+        # somewhere else. The two are never active at once — the palette
+        # suppresses itself while a flow owns the prompt box.
+        floats.append(
+            Float(
+                content=inline_flow.container(),
                 left=2,
                 right=2,
                 top=1,
@@ -252,11 +273,13 @@ class FullscreenREPLUI:
         on_status_render: Any | None = None,
         command_palette: Any | None = None,
         model_switcher: Any | None = None,
+        inline_flow: Any | None = None,
         home_provider: Any | None = None,
         input: Any | None = None,
         output: Any | None = None,
     ) -> None:
         self._status_state = status_state
+        self._inline_flow = inline_flow
         self._on_status_render = on_status_render
         # Callable returning a fresh HomeState; rendered while the transcript
         # is empty. None falls back to a minimal wordmark line.
@@ -306,16 +329,39 @@ class FullscreenREPLUI:
                 buffer.reset(Document(""))
             return True
 
+        # While an InlineFlow step owns the prompt box, its text is a palette
+        # filter or an API key — not a prompt. Everything that assumes the
+        # latter has to stand down: completion popups, syntax validation, and
+        # above all history auto-suggest, which would otherwise ghost a
+        # previous command behind a key the user is pasting.
+        flow_idle = ~Condition(inline_flow.is_active) if inline_flow else True
+
         self.buffer = Buffer(
             history=history,
             completer=completer,
-            auto_suggest=AutoSuggestFromHistory(),
+            auto_suggest=ConditionalAutoSuggest(AutoSuggestFromHistory(), flow_idle),
             validator=validator,
-            complete_while_typing=True,
-            validate_while_typing=True,
+            complete_while_typing=flow_idle,
+            validate_while_typing=flow_idle,
             multiline=True,
             accept_handler=_on_accept,
         )
+        if inline_flow is not None:
+            inline_flow.bind(self.buffer, self.invalidate)
+
+        # Anything that draws as a Float and can close again. Watched as a group
+        # so the frame reclaims its rows whichever one was open — see
+        # `_note_overlay_state`.
+        self._overlay_probes = [
+            probe
+            for probe in (
+                getattr(command_palette, "is_active", None),
+                getattr(model_switcher, "is_visible", None),
+                getattr(inline_flow, "is_active", None),
+            )
+            if probe is not None
+        ]
+        self._overlays_were_active = False
 
         self.console = Console(
             file=_ConsoleSink(self),
@@ -391,6 +437,14 @@ class FullscreenREPLUI:
 
         @kb.add("c-c", eager=True)
         def _(event) -> None:
+            # Ordering note: two eager bindings on the same key resolve to the
+            # last one registered, and this one is registered after
+            # InlineFlow's. So the flow is deferred to here, explicitly, rather
+            # than by relying on who called kb.add() first.
+            if inline_flow is not None and inline_flow.is_active():
+                inline_flow.cancel()
+                event.app.invalidate()
+                return
             # A running turn takes priority over clearing the input buffer.
             # Previously any text in the buffer swallowed the interrupt, so a
             # user who typed while the model was generating could not cancel it
@@ -428,7 +482,20 @@ class FullscreenREPLUI:
                         always_hide_cursor=True,
                     ),
                     Window(
-                        BufferControl(buffer=self.buffer),
+                        BufferControl(
+                            buffer=self.buffer,
+                            input_processors=[
+                                # The API-key step types into this same box, so
+                                # masking has to be a property of the box rather
+                                # than of a separate password field.
+                                ConditionalProcessor(
+                                    PasswordProcessor(),
+                                    Condition(inline_flow.is_masked)
+                                    if inline_flow
+                                    else Condition(lambda: False),
+                                )
+                            ],
+                        ),
                         height=Dimension(min=1, max=_PROMPT_MAX_LINES, preferred=1),
                         wrap_lines=True,
                         style="class:prompt",
@@ -441,7 +508,7 @@ class FullscreenREPLUI:
                     ),
                 ]
             ),
-            floats=_build_floats(command_palette, model_switcher),
+            floats=_build_floats(command_palette, model_switcher, inline_flow),
         )
 
         self._app = Application(
@@ -595,7 +662,9 @@ class FullscreenREPLUI:
                 if cycle and tick % _THINKING_WORD_EVERY == 0:
                     self._thinking_idx = (self._thinking_idx + 1) % len(self._thinking_words)
                     self._stream_text = self._thinking_words[self._thinking_idx]
-                self._set_thinking_line(_SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)], self._stream_text)
+                self._set_thinking_line(
+                    _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)], self._stream_text
+                )
                 self.invalidate()
 
         from velune.core.task_registry import track
@@ -687,9 +756,7 @@ class FullscreenREPLUI:
 
         from velune.core.task_registry import track
 
-        handle._task = track(
-            asyncio.create_task(_spin(), name="velune.fullscreen_toolcard")
-        )
+        handle._task = track(asyncio.create_task(_spin(), name="velune.fullscreen_toolcard"))
         return handle
 
     def append_fragment_lines(self, lines: list[list[tuple[str, str]]]) -> None:
@@ -765,7 +832,9 @@ class FullscreenREPLUI:
             ("class:conversation.spinner", f"{spinner} "),
             ("class:conversation.thinking", word),
         ]
-        self._lines.append(_Line(f"{spinner} {word}", "class:conversation.thinking", fragments=frags))
+        self._lines.append(
+            _Line(f"{spinner} {word}", "class:conversation.thinking", fragments=frags)
+        )
         self._trim()
 
     def _append_gap(self) -> None:
@@ -866,9 +935,43 @@ class FullscreenREPLUI:
         committed, self._lines = self._lines[:limit], self._lines[limit:]
         if self._stream_start is not None:
             self._stream_start = max(0, self._stream_start - limit)
+        self._repaint(committed)
+
+    def collapse(self) -> None:
+        """Redraw from scratch so the frame can shrink back to its content.
+
+        `Renderer.render()` sizes a non-full-screen frame to
+        ``max(_min_available_height, last_height, preferred)`` — the height is
+        monotonically non-decreasing for as long as one screen is being diffed
+        against the next. So anything that makes the frame temporarily tall (a
+        floating panel: the command palette, an InlineFlow step) leaves that
+        many rows reserved forever after it closes, showing as a block of blank
+        lines above the status bar with the prompt box stretched to fill it.
+
+        `_flush_ready()` happens to cure this as a side effect — `erase()`
+        drops `_last_screen`, so the next render starts from `preferred` again
+        — which is why it never showed up before: something almost always
+        printed afterwards. A flow that ends without printing (`/connect`'s
+        final model-discovery step) had nothing to trigger it, so the panel's
+        18 rows stayed on screen.
+        """
+        self._repaint([])
+
+    def _repaint(self, committed: list[_Line]) -> None:
+        """Erase the live frame, emit *committed* to real scrollback, redraw.
+
+        Deliberately bypasses `prompt_toolkit.run_in_terminal` /
+        `print_formatted_text` — see `_flush_ready`'s docstring for why the
+        contextvar those rely on reads back empty from the REPL's main task.
+        """
+        if not self._running or self._app is None:
+            return
+        if self._app._running_in_terminal:
+            return
         app = self._app
         app.renderer.erase()
-        self._write_lines(committed)
+        if committed:
+            self._write_lines(committed)
         app.renderer.reset()
         app._request_absolute_cursor_position()
         app._redraw()
@@ -890,7 +993,36 @@ class FullscreenREPLUI:
     def _render_status(self) -> AnyFormattedText:
         if self._on_status_render is not None:
             self._on_status_render()
+        self._note_overlay_state()
         return render_status_bar(self._status_state)
+
+    def _note_overlay_state(self) -> None:
+        """On the render where the last overlay closes, reclaim its rows.
+
+        Floats are tall (18 rows for the palette and for an InlineFlow step)
+        and `Renderer.render()` sizes a non-full-screen frame to
+        ``max(_min_available_height, last_height, preferred)`` — never
+        shrinking while one screen is diffed against the next. So every overlay
+        permanently reserved its height, showing afterwards as a block of blank
+        lines above the status bar with the prompt box stretched to fill it.
+
+        Watched here, on the falling edge, rather than pushed by each overlay:
+        one rule covers the palette, the model switcher, and flow steps, and it
+        is naturally debounced across a multi-step flow — consecutive steps
+        close and reopen the panel without ever yielding to the event loop, so
+        no render observes the gap between them and the panel never blinks.
+
+        `collapse()` is deferred to the next loop turn because this runs
+        *inside* `Renderer.render()`, and collapse re-enters it.
+        """
+        active = any(probe() for probe in self._overlay_probes)
+        was_active, self._overlays_were_active = self._overlays_were_active, active
+        if not was_active or active:
+            return
+        try:
+            asyncio.get_running_loop().call_soon(self.collapse)
+        except RuntimeError:
+            pass
 
     def _render_prompt_top_border(self) -> AnyFormattedText:
         width = self._width()
@@ -898,11 +1030,14 @@ class FullscreenREPLUI:
 
     def _render_prompt_bottom_border(self) -> AnyFormattedText:
         width = self._width()
-        hint = (
-            "Ctrl+C interrupt"
-            if self._busy
-            else "Enter send  ·  Shift+Enter newline  ·  / commands  ·  @@ files"
-        )
+        if self._inline_flow is not None and self._inline_flow.is_active():
+            # The flow owns the box; the usual "Enter send / @@ files" hints
+            # describe keys that do something else entirely right now.
+            hint = self._inline_flow.hint()
+        elif self._busy:
+            hint = "Ctrl+C interrupt"
+        else:
+            hint = "Enter send  ·  Shift+Enter newline  ·  / commands  ·  @@ files"
         fill = width - 5 - len(hint)
         if fill >= 1:
             return FormattedText(
@@ -919,6 +1054,17 @@ class FullscreenREPLUI:
         # lines get matching blank padding so multi-line input stays aligned
         # inside the border instead of flush against the left edge.
         if line_number == 0 and wrap_count == 0:
+            label = self._inline_flow.prompt_label() if self._inline_flow is not None else ""
+            if label:
+                # Naming the step in the caret is what makes "the same box now
+                # wants your API key" legible without a separate field.
+                return FormattedText(
+                    [
+                        ("class:prompt.border", "│ "),
+                        ("class:prompt.hint", f"{label} "),
+                        ("class:prompt.arrow", "❯ "),
+                    ]
+                )
             return FormattedText([("class:prompt.border", "│ "), ("class:prompt.arrow", "❯ ")])
         return FormattedText([("class:prompt.border", "│ "), ("", "  ")])
 

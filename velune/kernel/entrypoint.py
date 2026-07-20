@@ -90,11 +90,19 @@ async def _async_main(runtime: Any) -> None:
         except Exception:
             health_monitor = None
 
+        profile = runtime.container.get_optional("runtime.profile")
+        periodic_interval = (
+            ProactiveWatcher.PERIODIC_INTERVAL_S * profile.background_poll_scale
+            if profile
+            else None
+        )
+
         watcher = ProactiveWatcher(
             bus=bus,
             alert_store=alert_store,
             job_registry=job_registry,
             health_monitor=health_monitor,
+            periodic_interval_s=periodic_interval,
         )
         runtime.container.register_instance("runtime.proactive_watcher", watcher)
         await watcher.start()

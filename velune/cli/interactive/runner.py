@@ -104,12 +104,24 @@ async def run_standalone(
         # Ctrl-C as "abandon the flow" fights that. Esc still backs out.
         kb = common_bindings(on_cancel=None, on_back=_back)
     else:
-        body = Window(FormattedTextControl(widget.render, focusable=True))
+        # A widget may supply its own container when a single Window can't
+        # express its layout — PaletteSelectWidget's framed two-column panel,
+        # for one. Key bindings are registered on the Application either way,
+        # so they work without the control being focusable.
+        own_container = getattr(widget, "container", None)
+        body = (
+            own_container
+            if own_container is not None
+            else Window(FormattedTextControl(widget.render, focusable=True))
+        )
         kb = merge_key_bindings(
             [widget.key_bindings(), common_bindings(on_cancel=_cancel, on_back=_back)]
         )
 
-    layout = Layout(HSplit([body, _footer_window(widget)]))
+    # Panelled widgets carry their key hints inside their own chrome; a second
+    # copy under the frame would just repeat them.
+    parts = [body] if getattr(widget, "shows_own_hints", False) else [body, _footer_window(widget)]
+    layout = Layout(HSplit(parts))
 
     app: Application = Application(
         layout=layout,

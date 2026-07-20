@@ -200,6 +200,7 @@ class VeluneREPL:
         from velune.cli.autocomplete import CommandEntry, SlashCompleter
         from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
         from velune.cli.fullscreen import FullscreenREPLUI
+        from velune.cli.inline_flow import InlineFlow
         from velune.cli.model_switcher import MODEL_SWITCHER_STYLES, ModelSwitcher
         from velune.cli.statusbar import STATUS_BAR_STYLES
         from velune.cli.validators import InlineSyntaxValidator
@@ -234,10 +235,17 @@ class VeluneREPL:
         )
         self._completer = completer
 
+        # Multi-step slash-command flows (/connect, /providers) render into the
+        # palette's own float and drive the prompt box, instead of each step
+        # standing up its own Application below it.
+        flow = InlineFlow()
+        self._inline_flow = flow
+
         palette = CommandPalette(
             self._registry.all_unique(),
             recency_source=completer.recent_commands,
             favorites=FavoritesStore(),
+            suppressed=flow.is_active,
         )
         self._command_palette = palette
 
@@ -247,6 +255,7 @@ class VeluneREPL:
         kb = KeyBindings()
         palette.add_bindings(kb)
         model_switcher.add_bindings(kb)
+        flow.add_bindings(kb)
 
         def _interrupt(event):
             # A generation or tool turn is running: a single Ctrl+C aborts it.
@@ -274,6 +283,7 @@ class VeluneREPL:
             on_status_render=self._refresh_status_state,
             command_palette=palette,
             model_switcher=model_switcher,
+            inline_flow=flow,
             home_provider=self._home_state,
         )
 
@@ -291,7 +301,9 @@ class VeluneREPL:
             from velune.providers.keystore import list_invalid_providers
             from velune.providers.verifier import reverify_stale
 
-            await reverify_stale()
+            profile = self.container.get_optional("runtime.profile")
+            concurrency = profile.background_concurrency if profile else None
+            await reverify_stale(max_concurrency=concurrency)
             self._status_state.invalid_keys = tuple(list_invalid_providers())
         except Exception as exc:
             _log.debug("Background key re-verification failed (non-fatal): %s", exc)
@@ -521,6 +533,13 @@ class VeluneREPL:
         ui_task = asyncio.create_task(ui.run(), name="velune.fullscreen_ui")
         ui_task.add_done_callback(lambda _task: ui.request_exit())
 
+        # From here until teardown, palette-styled steps run inside this UI
+        # rather than in Applications of their own. Uninstalled in the `finally`
+        # below so a `velune setup` in the same process still runs standalone.
+        from velune.cli.interactive import host as interactive_host
+
+        interactive_host.install(self._inline_flow)
+
         restore_active_model(self)
         await self._start_episodic_session()
 
@@ -555,8 +574,10 @@ class VeluneREPL:
                 ok = sum(1 for v in results.values() if v)
                 if ok:
                     _log.debug("MCP: %s/%s server(s) connected", ok, server_count)
+            profile = self.container.get_optional("runtime.profile")
+            watch_interval = 30.0 * profile.background_poll_scale if profile else 30.0
             self._mcp_watch_task = asyncio.create_task(
-                self._mcp_registry.watch(), name="velune.mcp_watch"
+                self._mcp_registry.watch(interval_secs=watch_interval), name="velune.mcp_watch"
             )
         except Exception as exc:
             _log.debug("MCP auto-connect error (non-fatal): %s", exc)
@@ -624,6 +645,7 @@ class VeluneREPL:
                     else:
                         self.console.print(render_unexpected_error(e))
         finally:
+            interactive_host.uninstall(self._inline_flow)
             self._interrupts.uninstall()
             try:
                 await self._shutdown_repl()
@@ -760,6 +782,12 @@ class VeluneREPL:
     # ------------------------------------------------------------------
 
     async def _handle_slash_command(self, text: str) -> None:
+        # Imported here, not at module scope: inline_flow pulls in
+        # prompt_toolkit, and this module is kept import-light so `velune
+        # --version` and friends stay fast.
+        from velune.cli import design
+        from velune.cli.inline_flow import FlowCancelled
+
         parts = text[1:].split(None, 1)
         cmd_name = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
@@ -786,6 +814,17 @@ class VeluneREPL:
             await cmd.handler(args)
         except SystemExit:
             raise
+        except FlowCancelled:
+            # Ctrl+C inside an interactive flow (/connect's provider picker or
+            # key field). The command is abandoned wherever it had got to and
+            # the prompt comes straight back — this is explicitly not an exit,
+            # and not an error worth a red panel.
+            self.console.print(f"[{design.MUTED}]Cancelled.[/{design.MUTED}]")
+            # The press was consumed by the flow, so it never reached the
+            # "press Ctrl+C again to exit" window. Clear that window anyway:
+            # an earlier stray press must not combine with this one to exit the
+            # REPL, when all the user asked for was to back out of /connect.
+            self._interrupts.reset_exit_window()
         except Exception as e:
             from velune.cli.rendering.error_panel import render_error, render_unexpected_error
             from velune.core.errors.catalog import VeluneError
@@ -794,6 +833,28 @@ class VeluneREPL:
                 self.console.print(render_error(e))
             else:
                 self.console.print(render_unexpected_error(e))
+        finally:
+            self._refresh_invalid_keys()
+
+    def _refresh_invalid_keys(self) -> None:
+        """Re-read which stored keys the provider has rejected.
+
+        The status bar's "<provider> key invalid — /connect" banner was
+        populated once, by the background sweep on REPL entry, and never again
+        — so connecting that very provider left the banner up, telling the user
+        to go and connect something they had just connected.
+
+        Done here, once per slash command, rather than in `_refresh_status_state`:
+        that runs on every render, and this reads the credential store from
+        disk. A command is the only thing that can change provider state from
+        the foreground, and the background sweep already sets this itself.
+        """
+        try:
+            from velune.providers.keystore import list_invalid_providers
+
+            self._status_state.invalid_keys = tuple(list_invalid_providers())
+        except Exception as exc:
+            _log.debug("Could not refresh invalid-key status (non-fatal): %s", exc)
 
     def _build_registry(self) -> SlashCommandRegistry:
         from velune.cli.slash_dispatcher import build_slash_registry
@@ -1212,9 +1273,7 @@ class VeluneREPL:
         self._conversation.append({"role": "assistant", "content": assistant_text})
         self._autosave()
         effective_tokens = tokens_used or len(assistant_text) // 4
-        self._display_usage(
-            model, effective_tokens, completion_tokens=len(assistant_text) // 4
-        )
+        self._display_usage(model, effective_tokens, completion_tokens=len(assistant_text) // 4)
         self._record_turn_async(
             role="assistant",
             content=assistant_text,

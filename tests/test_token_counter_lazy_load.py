@@ -15,8 +15,6 @@ from __future__ import annotations
 import importlib
 import sys
 
-import pytest
-
 
 def _fresh_token_counter_module():
     """Import token_counter with tiktoken (and it) purged from sys.modules,

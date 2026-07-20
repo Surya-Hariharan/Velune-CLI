@@ -75,11 +75,40 @@ class SelectWidget(Widget):
         scored = [(fuzzy_score(q, opt.label), opt) for opt in self.options if not opt.disabled]
         return [opt for score, opt in sorted(scored, key=lambda t: -t[0]) if score > 0]
 
-    def _move(self, delta: int) -> None:
+    # -- driving the widget --------------------------------------------------
+    #
+    # Public because two different hosts drive this widget: ``run_standalone``
+    # goes through ``key_bindings()`` below, while ``InlineFlow`` binds the
+    # REPL's own Application keys straight to these methods (it cannot merge a
+    # per-widget KeyBindings into a long-lived Application built at startup).
+    # Both paths therefore move the same state through the same entry points.
+
+    def move(self, delta: int) -> None:
         visible = self._visible()
         if not visible:
             return
         self._index = (self._index + delta) % len(visible)
+
+    def type_char(self, char: str) -> bool:
+        """Append *char* to the filter. Returns False if it wasn't consumed."""
+        if not self.filterable or not char or not char.isprintable():
+            return False
+        if char == " " and self.multiple:
+            return False
+        self._filter += char
+        self._index = 0
+        return True
+
+    def backspace(self) -> None:
+        if self.filterable and self._filter:
+            self._filter = self._filter[:-1]
+            self._index = 0
+
+    def submit(self) -> None:
+        self._submit()
+
+    def toggle_current(self) -> None:
+        self._toggle_current()
 
     def _toggle_current(self) -> None:
         visible = self._visible()
@@ -158,37 +187,32 @@ class SelectWidget(Widget):
         @kb.add("up")
         @kb.add("s-tab")
         def _up(event) -> None:
-            self._move(-1)
+            self.move(-1)
 
         @kb.add("down")
         @kb.add("tab")
         def _down(event) -> None:
-            self._move(1)
+            self.move(1)
 
         @kb.add("enter")
         def _enter(event) -> None:
-            self._submit()
+            self.submit()
 
         if self.multiple:
 
             @kb.add(" ")
             def _toggle(event) -> None:
-                self._toggle_current()
+                self.toggle_current()
 
         if self.filterable:
 
             @kb.add("backspace")
             def _bs(event) -> None:
-                if self._filter:
-                    self._filter = self._filter[:-1]
-                    self._index = 0
+                self.backspace()
 
             @kb.add("<any>")
             def _type(event) -> None:
-                ch = event.data
-                if ch and ch.isprintable() and not (ch == " " and self.multiple):
-                    self._filter += ch
-                    self._index = 0
+                self.type_char(event.data)
 
         return kb
 

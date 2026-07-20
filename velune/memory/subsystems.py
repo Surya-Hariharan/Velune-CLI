@@ -69,7 +69,10 @@ def _create_embedding_pipeline(env: RuntimeEnvironment):
         provider = provider_registry.get("ollama") if provider_registry else None
     except Exception:
         provider = None
-    return EmbeddingPipeline(provider, store)
+
+    profile = env.container.get_optional("runtime.profile")
+    kwargs = {"concurrency": profile.background_concurrency} if profile else {}
+    return EmbeddingPipeline(provider, store, **kwargs)
 
 
 def _create_semantic_memory_lance(env: RuntimeEnvironment):
