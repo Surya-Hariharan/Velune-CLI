@@ -293,7 +293,7 @@ def _auto_accept_enabled(repl: VeluneREPL) -> bool:
     try:
         from velune.execution.diff_preview import is_auto_accept
 
-        return bool(is_auto_accept())
+        return is_auto_accept()
     except Exception:
         return False
 

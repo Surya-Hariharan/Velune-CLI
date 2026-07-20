@@ -31,7 +31,7 @@ async def cmd_config(repl: VeluneREPL, args: str) -> None:
     if hasattr(config, "model_dump"):
         dump = config.model_dump()
     elif hasattr(config, "dict"):
-        dump = config.dict()
+        dump = config.dict()  # type: ignore
     else:
         dump = {}
 
