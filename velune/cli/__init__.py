@@ -7,6 +7,11 @@ Typer application and its heavy transitive dependencies. Building the app at
 package-import time used to cost ~1.9s on every ``velune.cli`` import.
 """
 
+import typing
+
+if typing.TYPE_CHECKING:
+    from velune.cli.main import app as app
+
 __all__ = ["app"]
 
 

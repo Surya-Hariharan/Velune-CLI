@@ -238,8 +238,14 @@ def _supports_color() -> bool:
     if no_color:
         return False
 
-    # Common terminals that support color
-    if term in ("dumb", ""):
+    if term == "dumb":
+        return False
+
+    # TERM is a POSIX-shell convention; native Windows consoles (cmd.exe,
+    # PowerShell, Windows Terminal) generally never set it even though they
+    # support ANSI color. Only treat a missing TERM as "no color" on POSIX,
+    # where its absence really does signal a minimal/non-interactive shell.
+    if term == "" and sys.platform != "win32":
         return False
 
     return True

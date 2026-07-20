@@ -1046,7 +1046,7 @@ def _save_model_assignments(coding_model: str, reasoning_model: str, fast_model:
     config = {}
     if config_file.exists():
         try:
-            config = json.loads(config_file.read_text())
+            config = json.loads(config_file.read_text(encoding="utf-8"))
         except Exception:
             pass
 
@@ -1056,7 +1056,7 @@ def _save_model_assignments(coding_model: str, reasoning_model: str, fast_model:
         "fast_model": fast_model,
     }
 
-    config_file.write_text(json.dumps(config, indent=2))
+    config_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
     console.print(f"[dim]Saved to {config_file}[/dim]")
 
 

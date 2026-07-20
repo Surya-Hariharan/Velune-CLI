@@ -119,7 +119,8 @@ def _wordmark_fragments(indent: str) -> list[tuple[str, str]]:
     denom = max(1, _WORDMARK_WIDTH - 1)
     # Precompute one color per column so every row shares the same vertical hue.
     col_style = [
-        f"bg:{design.BACKGROUND} {design.gradient_hex(x / denom)} bold" for x in range(_WORDMARK_WIDTH)
+        f"bg:{design.BACKGROUND} {design.gradient_hex(x / denom)} bold"
+        for x in range(_WORDMARK_WIDTH)
     ]
     bg_style = f"bg:{design.BACKGROUND}"
     for row in _WORDMARK_ROWS:
@@ -157,7 +158,11 @@ def _info_lines(state: HomeState, usable: int) -> list[list[tuple[str, str]]]:
         lines.append(segs)
     else:
         lines.append(
-            [dot(False), ("class:home.warn", "no model selected"), ("class:home.meta", "  — /model")]
+            [
+                dot(False),
+                ("class:home.warn", "no model selected"),
+                ("class:home.meta", "  — /model"),
+            ]
         )
 
     # Repository: path · branch · type · files
@@ -199,7 +204,11 @@ def _info_lines(state: HomeState, usable: int) -> list[list[tuple[str, str]]]:
         lines.append(segs)
     elif not state.providers:
         lines.append(
-            [dot(False), ("class:home.warn", "no providers configured"), ("class:home.meta", "  — /setup")]
+            [
+                dot(False),
+                ("class:home.warn", "no providers configured"),
+                ("class:home.meta", "  — /setup"),
+            ]
         )
 
     return lines
@@ -262,7 +271,10 @@ def render_home(state: HomeState, width: int) -> FormattedText:
     if hint_len <= usable:
         line(*hint_parts)
     else:
-        line(("class:home.hint.key", "/"), ("class:home.hint", " commands   "),
-             ("class:home.hint.key", "/help"))
+        line(
+            ("class:home.hint.key", "/"),
+            ("class:home.hint", " commands   "),
+            ("class:home.hint.key", "/help"),
+        )
 
     return FormattedText(frags)

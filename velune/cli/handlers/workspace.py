@@ -120,6 +120,8 @@ async def _project_status(repl: VeluneREPL) -> None:
                 capture_output=True,
                 text=True,
                 timeout=2.0,
+                encoding="utf-8",
+                errors="replace",
             )
             if res.returncode == 0:
                 for line in res.stdout.splitlines():

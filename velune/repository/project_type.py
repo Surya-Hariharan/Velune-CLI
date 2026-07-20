@@ -169,7 +169,7 @@ class ProjectTypeDetector:
             try:
                 import json
 
-                pkg = json.loads((workspace / "package.json").read_text())
+                pkg = json.loads((workspace / "package.json").read_text(encoding="utf-8"))
                 deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
                 if "next" in deps:
                     return ProjectType.NODE_NEXTJS, ["nextjs", "react"]
@@ -218,7 +218,7 @@ class ProjectTypeDetector:
                 fp = workspace / fname
                 if fp.exists():
                     try:
-                        combined += fp.read_text().lower()
+                        combined += fp.read_text(encoding="utf-8", errors="ignore").lower()
                     except Exception:
                         pass
             if "spring" in combined:
@@ -233,7 +233,7 @@ class ProjectTypeDetector:
             fp = workspace / fname
             if fp.exists():
                 try:
-                    parts.append(fp.read_text().lower())
+                    parts.append(fp.read_text(encoding="utf-8", errors="ignore").lower())
                 except Exception:
                     pass
         return " ".join(parts)

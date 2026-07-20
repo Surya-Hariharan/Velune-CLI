@@ -267,7 +267,17 @@ class CommandSpec:
     def from_string(cls, cmd: str, cwd: Path, timeout: float = 60.0) -> CommandSpec:
         """Parse a command string safely using shlex. Raises SandboxError if unsafe."""
         try:
-            parts = shlex.split(cmd)
+            # shlex.split()'s default posix mode treats backslash as an escape
+            # character, silently eating Windows-style path separators (e.g.
+            # "src\\utils\\foo.py" -> "srcutilsfoo.py"). Quoting still needs
+            # posix semantics to strip matching quotes, so disable just the
+            # escape handling rather than switching to posix=False (which
+            # would leave quote characters embedded in the token).
+            lexer = shlex.shlex(cmd, posix=True)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            lexer.escape = ""
+            parts = list(lexer)
         except ValueError as e:
             raise SandboxError(f"Malformed command string: {e}") from e
 

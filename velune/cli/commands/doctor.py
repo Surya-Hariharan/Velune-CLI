@@ -147,7 +147,7 @@ def check(
                 from velune.kernel.config import get_default_config
 
                 default_config = get_default_config()
-                with open(config_file, "w") as f:
+                with open(config_file, "w", encoding="utf-8") as f:
                     toml.dump(default_config.model_dump(), f)
                 console.print("[green]Created default velune.toml config file.[/green]")
             except Exception as e:
@@ -794,7 +794,7 @@ def _check_model_benchmarks() -> dict:
         try:
             import json
 
-            data = json.loads(profile_path.read_text())
+            data = json.loads(profile_path.read_text(encoding="utf-8"))
             if data:
                 return {
                     "name": "Empirical Model Benchmarks",

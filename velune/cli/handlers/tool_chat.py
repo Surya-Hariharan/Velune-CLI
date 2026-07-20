@@ -81,9 +81,7 @@ def _relativize(target: str, workspace: Path | None) -> str:
         return target
 
 
-def _describe_call(
-    name: str, arguments: Any, workspace: Path | None
-) -> tuple[str, str]:
+def _describe_call(name: str, arguments: Any, workspace: Path | None) -> tuple[str, str]:
     """(verb, primary argument) for a tool card title."""
     verb = _TOOL_VERBS.get(name, name)
     args = arguments if isinstance(arguments, dict) else {}
@@ -170,8 +168,7 @@ def tool_loop_available(repl: VeluneREPL, model: ModelDescriptor, provider: Any)
     try:
         if model.metadata.get("tool_use_demoted"):
             _log.info(
-                "Model %s was demoted to tool_use=NONE by benchmarking; "
-                "using the plain chat path.",
+                "Model %s was demoted to tool_use=NONE by benchmarking; using the plain chat path.",
                 model.model_id,
             )
             return False
@@ -535,13 +532,9 @@ class _ToolActivityUI:
             if card is not None:
                 card.resolve(summary, error=error)
             else:
-                self._fullscreen_ui.append_fragment_lines(
-                    [[(_RESULT_STYLE, "  ⎿ "), *summary]]
-                )
+                self._fullscreen_ui.append_fragment_lines([[(_RESULT_STYLE, "  ⎿ "), *summary]])
             if show_diff:
-                self._fullscreen_ui.append_fragment_lines(
-                    self._diff_fragments(diff)
-                )
+                self._fullscreen_ui.append_fragment_lines(self._diff_fragments(diff))
         else:
             mark = "[red]✗[/red]" if error else "[green]✓[/green]"
             plain = "".join(text for _style, text in summary)

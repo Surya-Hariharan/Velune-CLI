@@ -21,7 +21,7 @@ class ModelProfileCache:
         if not self.cache_path.exists():
             return None
         try:
-            data = json.loads(self.cache_path.read_text())
+            data = json.loads(self.cache_path.read_text(encoding="utf-8"))
             key = f"{provider_id}/{model_id}"
             entry = data.get(key)
             if not entry:
@@ -41,7 +41,7 @@ class ModelProfileCache:
         data = {}
         if self.cache_path.exists():
             try:
-                data = json.loads(self.cache_path.read_text())
+                data = json.loads(self.cache_path.read_text(encoding="utf-8"))
             except Exception:
                 pass
 

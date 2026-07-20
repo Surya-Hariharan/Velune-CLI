@@ -26,6 +26,8 @@ async def cmd_diff(repl: VeluneREPL, args: str) -> None:
         cwd=workspace,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if not stat.stdout.strip():
         repl.console.print("[dim]No uncommitted changes.[/dim]")
@@ -37,6 +39,8 @@ async def cmd_diff(repl: VeluneREPL, args: str) -> None:
         cwd=workspace,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     stat_text = stat.stdout.strip()
     diff_content = full.stdout[:8000] if full.stdout else ""
@@ -71,6 +75,8 @@ async def cmd_undo(repl: VeluneREPL, args: str) -> None:
         cwd=workspace,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if log.returncode != 0:
         repl.console.print("[red]No git repository found or git log failed.[/red]")
@@ -92,6 +98,8 @@ async def cmd_undo(repl: VeluneREPL, args: str) -> None:
         cwd=workspace,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if reset.returncode == 0:
         repl.console.print(

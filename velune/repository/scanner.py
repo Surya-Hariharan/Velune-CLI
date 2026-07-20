@@ -309,6 +309,8 @@ class FilesystemScanner:
                 capture_output=True,
                 text=True,
                 check=True,
+                encoding="utf-8",
+                errors="replace",
             )
             for line in res.stdout.splitlines():
                 if not line.strip():

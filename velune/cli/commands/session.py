@@ -121,7 +121,9 @@ def session_delete(
     if meta is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
         raise typer.Exit(1)
-    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Delete"):
+    if not _check_same_workspace(
+        store, cli_context, meta, any_workspace=any_workspace, verb="Delete"
+    ):
         raise typer.Exit(1)
 
     if not yes:
@@ -218,7 +220,9 @@ def session_show(
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
         raise typer.Exit(1)
     meta, conversation = loaded
-    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Show"):
+    if not _check_same_workspace(
+        store, cli_context, meta, any_workspace=any_workspace, verb="Show"
+    ):
         raise typer.Exit(1)
 
     if cli_context.json_mode:
@@ -295,7 +299,9 @@ def session_archive(
     if meta is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
         raise typer.Exit(1)
-    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Archive"):
+    if not _check_same_workspace(
+        store, cli_context, meta, any_workspace=any_workspace, verb="Archive"
+    ):
         raise typer.Exit(1)
     if meta.archived:
         console.print(f"[{design.MUTED}]Session '{session_id}' is already archived.[/]")
@@ -327,7 +333,9 @@ def session_unarchive(
     if meta is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
         raise typer.Exit(1)
-    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Unarchive"):
+    if not _check_same_workspace(
+        store, cli_context, meta, any_workspace=any_workspace, verb="Unarchive"
+    ):
         raise typer.Exit(1)
     if not meta.archived:
         console.print(f"[{design.MUTED}]Session '{session_id}' is not archived.[/]")
@@ -361,7 +369,9 @@ def session_export(
     if meta is None:
         console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/]")
         raise typer.Exit(1)
-    if not _check_same_workspace(store, cli_context, meta, any_workspace=any_workspace, verb="Export"):
+    if not _check_same_workspace(
+        store, cli_context, meta, any_workspace=any_workspace, verb="Export"
+    ):
         raise typer.Exit(1)
 
     md = store.export_markdown(session_id)

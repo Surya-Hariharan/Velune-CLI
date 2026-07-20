@@ -24,11 +24,13 @@ def daemon_start(workspace: Path = typer.Option(Path.cwd(), help="Workspace root
 
     workspace_abs = workspace.resolve()
 
-    # Detached background process spawn
+    # Detached background process spawn. start_new_session (setsid) is POSIX
+    # only; Windows needs its own creation flags to fully detach from the
+    # launching console (no shared console, own process group).
     if sys.platform == "win32":
         subprocess.Popen(
             [sys.executable, "-m", "velune.daemon.server", str(workspace_abs)],
-            start_new_session=True,
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

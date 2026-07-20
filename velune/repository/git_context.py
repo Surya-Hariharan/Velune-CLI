@@ -52,6 +52,8 @@ class GitContextProvider:
                 capture_output=True,
                 text=True,
                 check=False,
+                encoding="utf-8",
+                errors="replace",
             )
             return res.stdout.strip() if res.returncode == 0 else ""
 

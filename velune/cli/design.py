@@ -144,9 +144,7 @@ def gradient_hex(t: float) -> str:
         start, end, local = GRAD_MID, GRAD_END, (t - 0.5) / 0.5
     r1, g1, b1 = _hex_to_rgb(start)
     r2, g2, b2 = _hex_to_rgb(end)
-    return _rgb_to_hex(
-        (_lerp(r1, r2, local), _lerp(g1, g2, local), _lerp(b1, b2, local))
-    )
+    return _rgb_to_hex((_lerp(r1, r2, local), _lerp(g1, g2, local), _lerp(b1, b2, local)))
 
 
 def color_enabled() -> bool:

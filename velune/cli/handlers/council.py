@@ -466,6 +466,8 @@ async def _auto_commit_edits(repl: VeluneREPL, paths: list, task: str, workspace
         cwd=workspace,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if stage.returncode != 0:
         _log.warning("git add failed: %s", stage.stderr)
@@ -482,6 +484,8 @@ async def _auto_commit_edits(repl: VeluneREPL, paths: list, task: str, workspace
         cwd=workspace,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if commit.returncode != 0:
         _log.debug("git commit failed (maybe nothing staged): %s", commit.stderr)
@@ -503,6 +507,8 @@ async def _show_edit_summary_panel(repl: VeluneREPL, paths: list, workspace) -> 
         cwd=workspace,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     added = removed = 0
     for line in numstat.stdout.splitlines():

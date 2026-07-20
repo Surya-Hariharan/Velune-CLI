@@ -586,7 +586,9 @@ async def _validate_meta(api_key: str) -> ValidationResult:
                 "meta", ValidationStatus.RATE_LIMITED, "Meta Llama API key is rate-limited."
             )
         return ValidationResult(
-            "meta", ValidationStatus.UNKNOWN_ERROR, f"Meta Llama API returned HTTP {resp.status_code}."
+            "meta",
+            ValidationStatus.UNKNOWN_ERROR,
+            f"Meta Llama API returned HTTP {resp.status_code}.",
         )
     except Exception as e:
         return ValidationResult(

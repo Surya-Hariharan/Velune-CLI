@@ -90,7 +90,7 @@ def config_set(
     # Save back
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w") as f:
+        with open(config_path, "w", encoding="utf-8") as f:
             toml.dump(data, f)
         if cli_context.json_mode:
             import json

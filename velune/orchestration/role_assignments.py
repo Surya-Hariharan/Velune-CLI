@@ -87,7 +87,7 @@ class CouncilRoleMap:
         if not path.exists():
             return cls()
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             return cls.from_dict(data)
         except Exception:
             return cls()

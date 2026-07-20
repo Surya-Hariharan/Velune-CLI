@@ -1099,7 +1099,9 @@ class CouncilOrchestrator:
                 _critic_job(
                     "reviewer",
                     reviewer,
-                    lambda: reviewer.review(task=prompt, proposal=coder_proposal, context=repo_context),
+                    lambda: reviewer.review(
+                        task=prompt, proposal=coder_proposal, context=repo_context
+                    ),
                 )
             ]
             if challenger:
@@ -1296,8 +1298,8 @@ class CouncilOrchestrator:
                                 CouncilJob(
                                     name="reviewer",
                                     provider_id=reviewer.model.provider_id,
-                                    run=lambda: reviewer.review(
-                                        task=prompt, proposal=refined_proposal, context=repo_context
+                                    run=lambda rp=refined_proposal: reviewer.review(
+                                        task=prompt, proposal=rp, context=repo_context
                                     ),
                                 )
                             )
@@ -1308,9 +1310,9 @@ class CouncilOrchestrator:
                                     CouncilJob(
                                         name="scalability",
                                         provider_id=scalability_critic.model.provider_id,
-                                        run=lambda: scalability_critic.critique(
+                                        run=lambda rp=refined_proposal: scalability_critic.critique(
                                             task=prompt,
-                                            proposal=refined_proposal,
+                                            proposal=rp,
                                             context=repo_context,
                                         ),
                                     )
@@ -1321,9 +1323,9 @@ class CouncilOrchestrator:
                                     CouncilJob(
                                         name="security",
                                         provider_id=security_critic.model.provider_id,
-                                        run=lambda: security_critic.critique(
+                                        run=lambda rp=refined_proposal: security_critic.critique(
                                             task=prompt,
-                                            proposal=refined_proposal,
+                                            proposal=rp,
                                             context=repo_context,
                                         ),
                                     )
@@ -1334,9 +1336,9 @@ class CouncilOrchestrator:
                                     CouncilJob(
                                         name="performance",
                                         provider_id=performance_critic.model.provider_id,
-                                        run=lambda: performance_critic.critique(
+                                        run=lambda rp=refined_proposal: performance_critic.critique(
                                             task=prompt,
-                                            proposal=refined_proposal,
+                                            proposal=rp,
                                             context=repo_context,
                                         ),
                                     )
@@ -1347,10 +1349,12 @@ class CouncilOrchestrator:
                                     CouncilJob(
                                         name="maintainability",
                                         provider_id=maintainability_critic.model.provider_id,
-                                        run=lambda: maintainability_critic.critique(
-                                            task=prompt,
-                                            proposal=refined_proposal,
-                                            context=repo_context,
+                                        run=lambda rp=refined_proposal: (
+                                            maintainability_critic.critique(
+                                                task=prompt,
+                                                proposal=rp,
+                                                context=repo_context,
+                                            )
                                         ),
                                     )
                                 )

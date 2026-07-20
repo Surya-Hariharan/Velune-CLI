@@ -16,6 +16,7 @@ import hashlib
 import logging
 import os
 import uuid
+from collections.abc import Iterator
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -160,22 +161,27 @@ def get_or_create_master_key() -> bytes:
     return _get_fallback_key()
 
 
-def _candidate_master_keys() -> list[bytes]:
-    """All keys to try when decrypting, most-likely first, de-duplicated.
+def _candidate_master_keys() -> Iterator[bytes]:
+    """Yield keys to try when decrypting, most-likely first, de-duplicated.
 
-    Ordering keyring → passphrase → machine fallback lets a store survive a
+    Ordering keyring -> passphrase -> machine fallback lets a store survive a
     transient keyring failure or a host that gained a passphrase after a
-    machine-key-encrypted write, instead of failing closed.
+    machine-key-encrypted write, instead of failing closed. Each candidate is
+    computed lazily, one at a time: the caller's loop tries a candidate and
+    stops as soon as one decrypts successfully, so the (deliberately slow,
+    390k-iteration) passphrase KDF and the machine-fallback hash are only ever
+    paid for when the keyring candidate actually fails — not on every decrypt.
     """
-    keys: list[bytes] = []
-    for candidate in (
-        get_or_create_master_key(),  # primary source (keyring → passphrase → fallback)
-        _passphrase_master_key(),  # store written before a keyring became available
-        _get_fallback_key(),  # legacy machine-key store predating a passphrase
-    ):
-        if candidate is not None and candidate not in keys:
-            keys.append(candidate)
-    return keys
+    seen: list[bytes] = []
+
+    def _emit(candidate: bytes | None) -> Iterator[bytes]:
+        if candidate is not None and candidate not in seen:
+            seen.append(candidate)
+            yield candidate
+
+    yield from _emit(get_or_create_master_key())  # primary (keyring -> passphrase -> fallback)
+    yield from _emit(_passphrase_master_key())  # store written before a keyring became available
+    yield from _emit(_get_fallback_key())  # legacy machine-key store predating a passphrase
 
 
 def encrypt_credentials(plaintext: str) -> bytes:

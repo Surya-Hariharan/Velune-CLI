@@ -57,7 +57,15 @@ def _remote_hostname(url: str) -> str:
 def _git_run(cwd: Path, *args: str) -> str:
     import subprocess
 
-    res = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False)
+    res = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if res.returncode != 0:
         raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
     return res.stdout.strip()

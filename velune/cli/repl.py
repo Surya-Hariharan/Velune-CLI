@@ -909,7 +909,7 @@ class VeluneREPL:
             try:
                 import json
 
-                return json.loads(profile_path.read_text())
+                return json.loads(profile_path.read_text(encoding="utf-8"))
             except Exception:
                 pass
         try:

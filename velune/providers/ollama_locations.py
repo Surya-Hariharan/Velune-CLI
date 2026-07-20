@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import platform
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -161,11 +162,17 @@ class OllamaLocationRegistry:
 
     @staticmethod
     def _key(path: Path | str) -> str:
-        """Stable identity for duplicate detection (resolved, normalized)."""
+        """Stable identity for duplicate detection (resolved, normalized).
+
+        Case-folded on Windows/macOS, whose default filesystems are
+        case-insensitive; left case-sensitive on Linux, where two paths
+        differing only in case are genuinely distinct directories.
+        """
         try:
-            return str(Path(path).expanduser().resolve()).rstrip("\\/").lower()
+            normalized = str(Path(path).expanduser().resolve()).rstrip("\\/")
         except Exception:
-            return str(path).rstrip("\\/").lower()
+            normalized = str(path).rstrip("\\/")
+        return normalized.lower() if sys.platform in ("win32", "darwin") else normalized
 
     def add(self, path: Path | str, label: str = "") -> AddResult:
         """Validate and register *path*. Idempotent; reports clear diagnostics."""

@@ -30,7 +30,46 @@ _LAZY: dict[str, str] = {
     "GPUDetector": "gpu",
 }
 
-__all__ = list(_LAZY)
+import typing
+
+if typing.TYPE_CHECKING:
+    from velune.providers.discovery.anthropic import AnthropicDiscovery as AnthropicDiscovery
+    from velune.providers.discovery.docker import DockerDiscovery as DockerDiscovery
+    from velune.providers.discovery.gguf import GGUFDiscovery as GGUFDiscovery
+    from velune.providers.discovery.google import GoogleDiscovery as GoogleDiscovery
+    from velune.providers.discovery.gpu import GPUDetector as GPUDetector
+    from velune.providers.discovery.groq import GroqDiscovery as GroqDiscovery
+    from velune.providers.discovery.huggingface import HuggingFaceDiscovery as HuggingFaceDiscovery
+    from velune.providers.discovery.lmstudio import LMStudioDiscovery as LMStudioDiscovery
+    from velune.providers.discovery.meta import MetaDiscovery as MetaDiscovery
+    from velune.providers.discovery.nvidia_nim import NVIDIANIMDiscovery as NVIDIANIMDiscovery
+    from velune.providers.discovery.ollama import OllamaDiscovery as OllamaDiscovery
+    from velune.providers.discovery.openai import OpenAIDiscovery as OpenAIDiscovery
+    from velune.providers.discovery.openai_compat import (
+        OpenAICompatDiscovery as OpenAICompatDiscovery,
+    )
+    from velune.providers.discovery.openrouter import OpenRouterDiscovery as OpenRouterDiscovery
+    from velune.providers.discovery.scanner import ModelDiscoveryScanner as ModelDiscoveryScanner
+    from velune.providers.discovery.xai import XAIDiscovery as XAIDiscovery
+
+__all__ = [
+    "ModelDiscoveryScanner",
+    "OllamaDiscovery",
+    "LMStudioDiscovery",
+    "GGUFDiscovery",
+    "DockerDiscovery",
+    "NVIDIANIMDiscovery",
+    "OpenAICompatDiscovery",
+    "HuggingFaceDiscovery",
+    "OpenAIDiscovery",
+    "AnthropicDiscovery",
+    "XAIDiscovery",
+    "GoogleDiscovery",
+    "GroqDiscovery",
+    "OpenRouterDiscovery",
+    "MetaDiscovery",
+    "GPUDetector",
+]
 
 
 def __getattr__(name: str):

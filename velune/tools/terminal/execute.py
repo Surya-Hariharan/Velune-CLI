@@ -76,18 +76,22 @@ class ExecuteCommand(BaseTool):
                     if app is not None and app.is_running:
 
                         def _ask_user() -> str:
-                            print("\n\033[1;33mVelune wants to execute:\033[0m")
-                            print(f"  \033[1;36m{command}\033[0m")
+                            from rich.console import Console
+                            from rich.markup import escape
+
+                            out = Console()
+                            out.print("\n[bold yellow]Velune wants to execute:[/bold yellow]")
+                            out.print(f"  [bold cyan]{escape(command)}[/bold cyan]")
                             if directory:
-                                print(f"  \033[2m(in {directory})\033[0m")
-                            print("\nChoose:")
-                            print("  [1] Allow once")
-                            print("  [2] Always allow for this session")
-                            print("  [3] Skip")
-                            print("  [4] Cancel")
+                                out.print(f"  [dim]({escape('in ' + directory)})[/dim]")
+                            out.print("\nChoose:")
+                            out.print("  [1] Allow once")
+                            out.print("  [2] Always allow for this session")
+                            out.print("  [3] Skip")
+                            out.print("  [4] Cancel")
                             while True:
                                 try:
-                                    choice = input("\033[1mYour choice (1-4): \033[0m").strip()
+                                    choice = out.input("[bold]Your choice (1-4): [/bold]").strip()
                                     if choice in ("1", "2", "3", "4"):
                                         return choice
                                 except (KeyboardInterrupt, EOFError):

@@ -422,13 +422,23 @@ _OLLAMA_LIVE_TTL = 5.0
 _ollama_live_cache: tuple[bool, float] | None = None
 
 
-def is_ollama_live(timeout: float = 0.25) -> bool:
+def is_ollama_live(timeout: float = 0.05) -> bool:
     """Return True if a local Ollama server is reachable.
 
     Result is memoized for ``_OLLAMA_LIVE_TTL`` seconds so repeated callers
     (status/home rendering, provider polling) never hammer the socket. The
     ``timeout`` only applies on a cache miss. Callers that need a guaranteed
     fresh reading should probe the daemon directly.
+
+    The default is deliberately tiny: this is called on every process's
+    startup path (``onboarding_state`` -> ``list_configured_providers``), and
+    when nothing is listening, Windows' loopback stack can take the better
+    part of a quarter-second to refuse the connection — a live daemon,
+    in contrast, accepts in low single-digit milliseconds, so a short timeout
+    costs nothing in the common "Ollama running" case while capping the
+    worst-case "Ollama not installed" stall. Callers that need more headroom
+    against a slow-to-accept daemon (status displays, explicit /providers
+    checks) already pass their own larger ``timeout``.
     """
     global _ollama_live_cache
 

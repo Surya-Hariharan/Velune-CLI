@@ -114,7 +114,7 @@ def init_command(
     if not ignore_file.exists():
         from velune.repository.scanner import DEFAULT_VELUNEIGNORE
 
-        ignore_file.write_text(DEFAULT_VELUNEIGNORE)
+        ignore_file.write_text(DEFAULT_VELUNEIGNORE, encoding="utf-8")
         console.print(f"[{design.OK}]Created .veluneignore[/{design.OK}]")
 
     # config.toml
@@ -135,7 +135,7 @@ default_tier = "auto"
 [memory]
 enabled = true
 """
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         console.print(
             f"[{design.OK}]Created .velune/config.toml[/{design.OK}]"
             f" [{design.MUTED}](provider: {default_provider})[/{design.MUTED}]"
@@ -144,9 +144,9 @@ enabled = true
     # .gitignore
     gitignore = workspace / ".gitignore"
     if gitignore.exists():
-        content = gitignore.read_text()
+        content = gitignore.read_text(encoding="utf-8", errors="ignore")
         if ".velune/" not in content:
-            with open(gitignore, "a") as f:
+            with open(gitignore, "a", encoding="utf-8") as f:
                 f.write("\n# Velune\n.velune/\n")
             console.print(f"[{design.OK}]Added .velune/ to .gitignore[/{design.OK}]")
 

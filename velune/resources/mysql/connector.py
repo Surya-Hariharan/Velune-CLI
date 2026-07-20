@@ -31,14 +31,14 @@ class MySQLConnector(SQLConnector):
 
     def driver_available(self) -> bool:
         try:
-            import pymysql  # noqa: F401
+            import pymysql  # pyright: ignore[reportMissingModuleSource]  # noqa: F401
 
             return True
         except ImportError:
             return False
 
     def _open_connection(self, config: dict[str, Any]) -> Any:
-        import pymysql
+        import pymysql  # pyright: ignore[reportMissingModuleSource]
 
         kwargs: dict[str, Any] = {
             "host": config.get("host", "localhost"),

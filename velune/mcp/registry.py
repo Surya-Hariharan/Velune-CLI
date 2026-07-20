@@ -234,7 +234,10 @@ class MCPServerRegistry:
             return {}
 
         names = list(self._entries)
-        tasks = [asyncio.create_task(self.connect(name), name=f"mcp.connect.{n}") for n, name in enumerate(names)]
+        tasks = [
+            asyncio.create_task(self.connect(name), name=f"mcp.connect.{n}")
+            for n, name in enumerate(names)
+        ]
 
         done, pending = await asyncio.wait(tasks, timeout=timeout)
         for task in pending:

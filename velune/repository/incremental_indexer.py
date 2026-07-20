@@ -256,6 +256,8 @@ class IncrementalIndexer:
                 text=True,
                 cwd=str(self.workspace_root),
                 timeout=5,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode == 0:
                 return result.stdout.strip()
@@ -280,6 +282,8 @@ class IncrementalIndexer:
                 text=True,
                 cwd=str(self.workspace_root),
                 timeout=5,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode == 0:
                 return result.stdout.strip() == ""

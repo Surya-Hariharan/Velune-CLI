@@ -53,6 +53,8 @@ class CommitMessageGenerator:
                 cwd=workspace,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             added = removed = files = 0
             for line in result.stdout.splitlines():
