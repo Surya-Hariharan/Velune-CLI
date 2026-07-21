@@ -18,9 +18,8 @@ right after the done-render, which clears it either way. The only reliable
 signal is the actual bytes written to the terminal, which is what these tests
 check.
 
-Drives a real `Application` against a real `Vt100_Output` over `StringIO`,
-mirroring `test_overlay_collapse.py`'s harness — the bug lives in the
-renderer's shutdown path, not in any widget's rendering.
+Drives a real `Application` against a real `Vt100_Output` over `StringIO` —
+the bug lives in the renderer's shutdown path, not in any widget's rendering.
 """
 
 from __future__ import annotations
@@ -42,8 +41,7 @@ from velune.cli.statusbar import StatusBarState
 
 _SETTLE = 0.25
 
-# Chrome text that only appears via a fresh render of the live layout — never
-# part of anything `_write_lines` promotes to real scrollback.
+# Chrome text that only appears via a fresh render of the live layout.
 _CHROME_MARKERS = ("Enter send", "commands", "NORMAL")
 
 
@@ -101,10 +99,9 @@ def test_exit_erases_the_live_chrome_instead_of_repainting_it():
 
 
 @pytest.mark.timeout(30)
-def test_exit_after_a_turn_still_erases_the_chrome_and_keeps_scrollback():
-    """Same guarantee once real conversation content has been flushed to
-    scrollback — the fix must only remove the trailing live frame, never
-    already-promoted turns (that part is `test_overlay_collapse.py`'s job)."""
+def test_exit_after_a_turn_still_erases_the_chrome():
+    """Same guarantee once real conversation content is on screen — the fix
+    must only affect the final shutdown paint, not ordinary rendering."""
 
     async def _main():
         with create_pipe_input() as inp:
@@ -126,9 +123,8 @@ def test_exit_after_a_turn_still_erases_the_chrome_and_keeps_scrollback():
 
     for marker in _CHROME_MARKERS:
         assert marker not in delta
-    # The promoted lines went straight to the output stream before the exit
-    # sequence and are unaffected by the shutdown erase (which only ever
-    # touches what the renderer still has live on screen).
+    # Rendered as part of the ordinary live frame before `ui.stop()` — the
+    # shutdown erase only affects what happens *after* that point.
     assert "hello" in written_before_exit
     assert "Saving session" in written_before_exit
 
