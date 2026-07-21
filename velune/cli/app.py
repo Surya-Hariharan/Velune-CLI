@@ -243,6 +243,15 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                         )
                     raise typer.Exit()
 
+                # Clear the visible screen so only Velune's own output is on
+                # frame when the REPL takes over — hides the shell prompt/
+                # command the user just typed. This is a plain ED-2J clear
+                # (cursor home), not the alternate screen buffer: prior lines
+                # scroll out of view but stay in the terminal's native
+                # scrollback, so `fullscreen.py`'s scrollback-promotion
+                # guarantee is unaffected.
+                runtime.console.clear()
+
                 # Interactive: run state-machine onboarding.
                 from velune.cli.onboarding import (
                     onboarding_state,

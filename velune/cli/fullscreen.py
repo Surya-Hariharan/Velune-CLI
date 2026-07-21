@@ -19,7 +19,7 @@ from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText,
 from prompt_toolkit.history import History
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import FloatContainer, Layout
-from prompt_toolkit.layout.containers import Float, HSplit, Window
+from prompt_toolkit.layout.containers import Float, HorizontalAlign, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -58,6 +58,14 @@ def _strip_non_sgr_csi(text: str) -> str:
 _MAX_TRANSCRIPT_LINES = 4000
 _PROMPT_MAX_LINES = 5
 _MARKDOWN_STREAM_THROTTLE_S = 0.08
+
+# The REPL's content column never renders wider than this, however wide the
+# real terminal window is — resizing/maximizing the window (or zooming the
+# terminal's font out) just grows the side gutters, it never reflows the
+# conversation, borders, or banner. Purely cosmetic ceiling: it does not (and
+# cannot) stop the terminal emulator's own font-size zoom, which never
+# reaches this process as input.
+_MAX_CONTENT_WIDTH = 100
 
 # Braille spinner frames for the "thinking" indicator — advances every tick so
 # the wait feels alive, coloured with the brand accent.
@@ -461,7 +469,7 @@ class FullscreenREPLUI:
                 if should_exit:
                     self._queue.put_nowait("/exit")
 
-        root = FloatContainer(
+        content = FloatContainer(
             content=HSplit(
                 [
                     Window(
@@ -506,10 +514,22 @@ class FullscreenREPLUI:
                         height=1,
                         always_hide_cursor=True,
                     ),
-                ]
+                ],
+                # Never wider than `_MAX_CONTENT_WIDTH` — `_width()` mirrors
+                # this cap so border-drawing and the home screen match what
+                # actually gets allocated on screen.
+                width=Dimension(max=_MAX_CONTENT_WIDTH, preferred=_MAX_CONTENT_WIDTH),
             ),
             floats=_build_floats(command_palette, model_switcher, inline_flow),
         )
+
+        # `align=CENTER` makes VSplit auto-insert flexible zero-preferred-width
+        # gutters on both sides of `content` — since `content`'s own width is
+        # capped above, a terminal wider than `_MAX_CONTENT_WIDTH` grows those
+        # gutters instead of the conversation/prompt/status chrome. A narrower
+        # terminal just shrinks `content` below its preferred width as usual;
+        # this is a ceiling, not a fixed size that could break on a small window.
+        root = VSplit([content], align=HorizontalAlign.CENTER, style=f"bg:{design.BACKGROUND}")
 
         self._app = Application(
             layout=Layout(root, focused_element=self.buffer),
@@ -525,6 +545,19 @@ class FullscreenREPLUI:
             # card, the prompt box) so it renders fine without full-screen's
             # "fill the terminal" sizing.
             full_screen=False,
+            # Without this, prompt_toolkit's own shutdown path
+            # (`Application._redraw(render_as_done=True)`, run unconditionally
+            # in a `finally` around `run_async`'s wait — covers `.exit()`,
+            # `/exit`, and an interrupt/cancellation alike) repaints the live
+            # chrome (prompt box, borders, status bar, or the home screen) one
+            # last time in "done" state instead of removing it — that's the
+            # leftover UI fragment left sitting above the shell prompt after
+            # exit. `erase_when_done=True` makes that same finally-block erase
+            # it instead. Only the *live*, not-yet-promoted frame is affected:
+            # everything already written to real scrollback by `_write_lines`
+            # (finished turns, the "Saving session…" shutdown messages) went
+            # through the output stream directly and is untouched.
+            erase_when_done=True,
             mouse_support=False,
             min_redraw_interval=0.016,
             max_render_postpone_time=0.01,
@@ -1118,7 +1151,12 @@ class FullscreenREPLUI:
         if self._app is None:
             return 80
         try:
-            return max(20, self._app.output.get_size().columns)
+            # Mirrors the `_MAX_CONTENT_WIDTH` cap on the layout's content
+            # column (`__init__`, the `content = FloatContainer(...)` / `root
+            # = VSplit(...)` pair) — this is what the border, home screen,
+            # and markdown rendering actually get allocated, not the raw
+            # terminal width once the terminal is wider than the cap.
+            return min(_MAX_CONTENT_WIDTH, max(20, self._app.output.get_size().columns))
         except Exception:
             return 80
 
