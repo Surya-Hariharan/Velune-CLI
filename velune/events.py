@@ -7,9 +7,9 @@ import fnmatch
 import logging
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, Awaitable, cast
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 

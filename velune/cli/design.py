@@ -182,9 +182,7 @@ def themed_style(style_dict: dict[str, str]) -> dict[str, str]:
     cleaned: dict[str, str] = {}
     for key, value in style_dict.items():
         tokens = [
-            tok
-            for tok in value.split()
-            if not tok.startswith("#") and not tok.startswith("bg:#")
+            tok for tok in value.split() if not tok.startswith("#") and not tok.startswith("bg:#")
         ]
         cleaned[key] = " ".join(tokens)
     return cleaned

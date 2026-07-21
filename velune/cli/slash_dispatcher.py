@@ -642,8 +642,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="undo",
             aliases=["u"],
             description=(
-                "Revert the last Velune git commit — not a conversation undo "
-                "(keeps changes staged)"
+                "Revert the last Velune git commit — not a conversation undo (keeps changes staged)"
             ),
             usage="/undo",
             handler=repl._cmd_undo,

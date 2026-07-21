@@ -12,7 +12,6 @@ from velune.core.event_loop import submit
 from velune.core.runtime import build_runtime
 from velune.kernel.config import ConfigLoader
 
-
 console = Console()
 mcp_cmd = typer.Typer(help="Connect to or expose an MCP server.")
 
