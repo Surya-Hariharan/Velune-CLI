@@ -295,9 +295,9 @@ def test_legacy_machine_key_store_still_decrypts(monkeypatch):
 
 
 def test_reranker_trust_differentiates_real_sources():
-    from velune.retrieval.reranker import CrossEncoderReranker
+    from velune.retrieval.reranker import HeuristicReranker
 
-    r = CrossEncoderReranker()
+    r = HeuristicReranker()
     graph = r._calculate_trust_score(SimpleNamespace(source="graph"))
     vector = r._calculate_trust_score(SimpleNamespace(source="vector"))
     lexical = r._calculate_trust_score(SimpleNamespace(source="lexical"))
@@ -314,9 +314,9 @@ def test_reranker_trust_differentiates_real_sources():
 
 
 def test_reranker_intent_boost_applies_to_real_graph_source():
-    from velune.retrieval.reranker import CrossEncoderReranker
+    from velune.retrieval.reranker import HeuristicReranker
 
-    r = CrossEncoderReranker()
+    r = HeuristicReranker()
     base = r._calculate_trust_score(SimpleNamespace(source="graph"))
     boosted = r._calculate_trust_score(SimpleNamespace(source="graph"), "dependency_analysis")
     assert boosted > base

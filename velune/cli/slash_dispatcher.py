@@ -85,6 +85,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "stats": "System",
     "session": "System",
     "doctor": "System",
+    "trace": "System",
     "backup": "System",
     "restore": "System",
     "recover": "System",
@@ -253,6 +254,17 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             handler=repl._cmd_doctor,
             examples=("/doctor",),
             search_terms=("health", "diagnostics", "environment", "check", "broken", "debug setup"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="trace",
+            aliases=["logs"],
+            description="Show recent execution trace events for this workspace",
+            usage="/trace [limit] [type-filter]",
+            handler=repl._cmd_trace,
+            examples=("/trace", "/trace 50", "/trace 50 tool_call"),
+            search_terms=("trace", "logs", "events", "what happened", "execution log", "debug"),
         )
     )
     registry.register(

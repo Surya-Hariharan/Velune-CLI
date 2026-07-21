@@ -159,3 +159,32 @@ def color_enabled() -> bool:
     if os.environ.get("TERM") == "dumb":
         return False
     return sys.stdout.isatty()
+
+
+def themed_style(style_dict: dict[str, str]) -> dict[str, str]:
+    """Return *style_dict* as-is, or with every color token stripped.
+
+    The fullscreen REPL's ``prompt_toolkit`` theme (and the palette/status-bar/
+    model-switcher style dicts merged into it) are all built from this
+    module's hex constants — every value is a space-separated token string
+    like ``"bg:#0a0a0a #e8e8e6 bold"``. Route the assembled dict through this
+    function immediately before ``Style.from_dict()`` so :func:`color_enabled`
+    is the single, real gate on whether color reaches the terminal, instead
+    of each call site hardcoding hex values that ``NO_COLOR`` never touches.
+
+    Structural attributes (``bold``, ``italic``, ``underline``, ``reverse``,
+    ``noinherit``, ...) are left in place — only ``#rrggbb`` and ``bg:#rrggbb``
+    tokens are dropped — so emphasis and layout still read correctly in a
+    monochrome terminal.
+    """
+    if color_enabled():
+        return style_dict
+    cleaned: dict[str, str] = {}
+    for key, value in style_dict.items():
+        tokens = [
+            tok
+            for tok in value.split()
+            if not tok.startswith("#") and not tok.startswith("bg:#")
+        ]
+        cleaned[key] = " ".join(tokens)
+    return cleaned

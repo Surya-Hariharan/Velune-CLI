@@ -18,6 +18,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `/types`. Every old name keeps working as an alias — nothing breaks,
   tab-completion and `/help` just lead with the clearer name now.
 
+### Fixed
+
+- **CHANGELOG/CI documentation drift.** The `[0.6.0]` entry below describes
+  an Architecture Lint job, a 70%-minimum unit-test coverage gate, and a
+  dedicated startup-performance-regression job as part of CI. None of the
+  three are present in the current `.github/workflows/ci.yml` — that history
+  is left as-written below rather than rewritten, but is called out here so
+  the changelog isn't mistaken for a description of what gates a merge
+  today. Current CI is: lint (ruff + pyright), targeted security checks
+  (pip-audit, bandit, gitleaks, a `shell=True`/`create_subprocess_shell`
+  regression grep, an `asyncio.run()` count check), the full OS/Python test
+  matrix, a build check, and an install smoke test.
+
 ## [0.9.6] - 2026-07-18
 
 ### Added

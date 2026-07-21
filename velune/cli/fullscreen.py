@@ -555,12 +555,13 @@ class FullscreenREPLUI:
         # gutters instead of the conversation/prompt/status chrome. A narrower
         # terminal just shrinks `content` below its preferred width as usual;
         # this is a ceiling, not a fixed size that could break on a small window.
-        root = VSplit([content], align=HorizontalAlign.CENTER, style=f"bg:{design.BACKGROUND}")
+        root_style = f"bg:{design.BACKGROUND}" if design.color_enabled() else ""
+        root = VSplit([content], align=HorizontalAlign.CENTER, style=root_style)
 
         self._app = Application(
             layout=Layout(root, focused_element=self.buffer),
             key_bindings=kb,
-            style=Style.from_dict(style),
+            style=Style.from_dict(design.themed_style(style)),
             # The alternate screen buffer: Velune owns the terminal the way
             # vim/k9s/btop do — the shell prompt is fully hidden while this
             # app runs, and `erase_when_done=True` below makes exit restore

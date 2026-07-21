@@ -1,4 +1,11 @@
-"""Cross-encoder style reranking (simple scoring for Phase 2a).
+"""Heuristic reranking: a weighted-sum scorer, not an ML cross-encoder.
+
+Despite the class's former name (``CrossEncoderReranker``), this has never
+run a cross-encoder model — it's a hand-tuned linear combination of
+relevance/recency/trust signals. Renamed to ``HeuristicReranker`` so the name
+stops overclaiming; a real cross-encoder is still a plausible future upgrade
+(see the class docstring), but it would live behind this same interface, not
+replace this file's actual behavior today.
 
 Scoring reads through duck-typed accessors so it can rerank the
 :class:`~velune.retrieval.hybrid.HybridRetriever` caller's immutable
@@ -52,11 +59,12 @@ def _source(chunk: Any) -> str:
     return str(getattr(chunk, "source", "") or "")
 
 
-class CrossEncoderReranker:
-    """Reranks retrieved chunks using combined scoring.
+class HeuristicReranker:
+    """Reranks retrieved chunks using a weighted-sum heuristic — no ML model.
 
-    Phase 2a: Simple score formula (no ML model)
-    Phase 3+: Real cross-encoder when compute available
+    A real cross-encoder is a plausible future upgrade behind this same
+    ``rerank()`` interface when the compute cost is worth it; nothing here
+    currently loads or calls one.
     """
 
     # Score weights

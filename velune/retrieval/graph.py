@@ -103,7 +103,7 @@ class GraphRetriever:
 
                 if content:
                     # Stamp a recency signal the reranker already knows how to use
-                    # (CrossEncoderReranker._calculate_recency_score reads
+                    # (HeuristicReranker._calculate_recency_score reads
                     # metadata["timestamp"]) — recently-edited files/symbols rank
                     # higher without adding a new signal path, just populating a
                     # field the reranker already consumes.

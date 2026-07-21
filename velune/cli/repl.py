@@ -1359,6 +1359,11 @@ class VeluneREPL:
 
         await cmd_doctor(self, args)
 
+    async def _cmd_trace(self, args: str) -> None:
+        from velune.cli.handlers.trace import cmd_trace
+
+        await cmd_trace(self, args)
+
     async def _cmd_backup(self, args: str) -> None:
         from velune.cli.handlers.recovery import cmd_backup
 

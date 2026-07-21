@@ -10,7 +10,7 @@ logger = logging.getLogger("velune.retrieval.hybrid")
 
 from velune.retrieval.graph import GraphRetriever
 from velune.retrieval.keyword import BM25Retriever
-from velune.retrieval.reranker import CrossEncoderReranker
+from velune.retrieval.reranker import HeuristicReranker
 from velune.retrieval.schemas import (
     RetrievalDocument,
     RetrievalHit,
@@ -79,7 +79,7 @@ class HybridRetriever:
         )
         self.lexical_retriever = BM25Retriever()
         self.graph_retriever = GraphRetriever()
-        self.reranker = CrossEncoderReranker()
+        self.reranker = HeuristicReranker()
         # Path to the persisted BM25 corpus, plus the mtime we last loaded. The
         # corpus was previously hydrated exactly once at Tier-1 warm-up, so
         # after the first re-index lexical retrieval kept serving boot-time
