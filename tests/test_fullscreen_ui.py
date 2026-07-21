@@ -98,21 +98,23 @@ def _sample_commands() -> list[SlashCommand]:
 
 def test_no_palette_means_one_float_unchanged():
     ui = _make_ui(command_palette=None)
-    root = ui._app.layout.container
-    assert len(root.floats) == 1
+    # The root is a width-capping VSplit (see `_MAX_CONTENT_WIDTH` in
+    # fullscreen.py) wrapping the actual FloatContainer as its one child.
+    content = ui._app.layout.container.children[0]
+    assert len(content.floats) == 1
 
 
 def test_palette_float_is_composed_into_layout():
     palette = CommandPalette(_sample_commands())
     ui = _make_ui(command_palette=palette)
-    root = ui._app.layout.container
+    content = ui._app.layout.container.children[0]
 
-    assert len(root.floats) == 2
+    assert len(content.floats) == 2
     # This is the exact bug that was fixed: the palette's ConditionalContainer
     # (self-gated on is_active()) previously was never added to any Float
     # actually rendered by FullscreenREPLUI — .attach() only worked against
     # a PromptSession, which the fullscreen app doesn't use.
-    second = root.floats[1].content
+    second = content.floats[1].content
     assert type(second).__name__ == "ConditionalContainer"
 
 

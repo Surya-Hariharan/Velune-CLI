@@ -15,6 +15,7 @@ early; Esc cancels back to whatever was active before the cycle started.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -48,13 +49,20 @@ class _State:
 class ModelSwitcher:
     """Owns the Alt+Up/Down cycle state and its floating overlay."""
 
-    def __init__(self, repl: Any) -> None:
+    def __init__(self, repl: Any, *, suppressed: Callable[[], bool] | None = None) -> None:
         self._repl = repl
         self._state = _State()
         self._commit_task: asyncio.Task | None = None
+        # Predicate for "something else owns the prompt box right now" (an
+        # InlineFlow step or the command palette). Alt+Up/Down has no filter
+        # on its key binding — unlike the palette, which only lights up while
+        # typing "/" — so without this, cycling models while e.g. `/connect`
+        # is mid-flow pops a second float on top of it and silently swaps the
+        # active model out from under the flow.
+        self._suppressed = suppressed or (lambda: False)
 
     def is_visible(self) -> bool:
-        return self._state.visible
+        return self._state.visible and not self._suppressed()
 
     # -- model source ---------------------------------------------------
 
@@ -97,6 +105,8 @@ class ModelSwitcher:
         st.visible = bool(st.models)
 
     def move(self, amount: int) -> None:
+        if self._suppressed():
+            return
         st = self._state
         if not st.visible:
             self._open()
@@ -124,6 +134,12 @@ class ModelSwitcher:
     def _commit(self) -> None:
         st = self._state
         if not st.visible or not st.models:
+            return
+        if self._suppressed():
+            # A flow (e.g. `/connect`) opened mid-cycle, after the debounce
+            # was already scheduled. Revert the live preview instead of
+            # silently activating a model behind the flow's back.
+            self.cancel()
             return
         model = st.models[st.index]
         st.visible = False

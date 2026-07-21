@@ -249,7 +249,9 @@ class VeluneREPL:
         )
         self._command_palette = palette
 
-        model_switcher = ModelSwitcher(self)
+        model_switcher = ModelSwitcher(
+            self, suppressed=lambda: flow.is_active() or palette.is_active()
+        )
         self._model_switcher = model_switcher
 
         kb = KeyBindings()

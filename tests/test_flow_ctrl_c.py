@@ -169,8 +169,19 @@ def test_ctrl_c_during_verification_stops_the_in_flight_work():
 
 
 @pytest.mark.timeout(30)
-def test_the_frame_returns_to_its_idle_height_after_a_cancel():
-    """A cancelled flow must leave the terminal exactly as it found it."""
+def test_the_frame_stays_the_fixed_terminal_height_through_a_cancel():
+    """A cancelled flow must leave the terminal exactly as it found it.
+
+    Pre-alt-screen, `Renderer.render()` sized a non-full-screen frame to
+    ``max(_min_available_height, last_height, preferred)`` — a tall Float
+    (the InlineFlow panel) grew the frame and that height was never given
+    back once the panel closed, hence this test used to assert `during >
+    idle` and `after == idle`. Under `full_screen=True` the frame height is
+    always exactly `size.rows` regardless of what Floats are open
+    (`Renderer.render`'s `if self.full_screen: height = size.rows` branch
+    bypasses that growth logic entirely), so there is no longer any height
+    to leak — this now asserts the invariant that replaced it.
+    """
 
     async def _body(h: _Harness, pipe):
         idle = h.height()
@@ -188,8 +199,7 @@ def test_the_frame_returns_to_its_idle_height_after_a_cancel():
 
     idle, during, after = _run(_body)
 
-    assert during > idle
-    assert after == idle, f"frame kept {after - idle} blank rows after Ctrl+C"
+    assert idle == during == after == 45
 
 
 @pytest.mark.timeout(30)

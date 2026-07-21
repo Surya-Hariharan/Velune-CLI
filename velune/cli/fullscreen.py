@@ -18,8 +18,9 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.history import History
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import FloatContainer, Layout
-from prompt_toolkit.layout.containers import Float, HSplit, Window
+from prompt_toolkit.layout.containers import Float, HorizontalAlign, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -58,6 +59,14 @@ def _strip_non_sgr_csi(text: str) -> str:
 _MAX_TRANSCRIPT_LINES = 4000
 _PROMPT_MAX_LINES = 5
 _MARKDOWN_STREAM_THROTTLE_S = 0.08
+
+# The REPL's content column never renders wider than this, however wide the
+# real terminal window is — resizing/maximizing the window (or zooming the
+# terminal's font out) just grows the side gutters, it never reflows the
+# conversation, borders, or banner. Purely cosmetic ceiling: it does not (and
+# cannot) stop the terminal emulator's own font-size zoom, which never
+# reaches this process as input.
+_MAX_CONTENT_WIDTH = 100
 
 # Braille spinner frames for the "thinking" indicator — advances every tick so
 # the wait feels alive, coloured with the brand accent.
@@ -181,9 +190,6 @@ class ToolCardHandle:
             self._ui._live_cards.remove(self)
         except ValueError:
             pass
-        # Now that this card is no longer live, it (and the result line
-        # just appended above) can move to real scrollback.
-        self._ui._flush_ready()
         self._ui.invalidate()
 
     def cancel(self, note: str = "Interrupted") -> None:
@@ -286,12 +292,19 @@ class FullscreenREPLUI:
         self._home_provider = home_provider
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._lines: list[_Line] = []
-        # True once the conversation has produced its first line, ever —
-        # distinct from "self._lines is empty," which becomes true again
-        # after every turn once `_flush_ready()` promotes finished content
-        # to real scrollback. Without this, the home screen would flash
-        # back after every completed turn.
+        # True once the conversation has produced its first line, ever.
+        # Only `clear()` resets this alongside emptying `self._lines` — kept
+        # as an explicit flag (rather than just checking `self._lines`) so
+        # the home-screen-vs-blank distinction reads the same way at every
+        # call site that inspects it.
         self._history_started = False
+        # None = pinned to the bottom (live-follow, the only behavior before
+        # in-app scrolling existed). An int is an *absolute* index into
+        # `self._lines` for the line currently anchored in the viewport —
+        # absolute rather than "distance from the bottom" so that appending
+        # new lines while scrolled up never has to touch this value; only
+        # `_trim()` evicting from the front needs to shift it.
+        self._scroll_anchor: int | None = None
         self._stream_start: int | None = None
         self._stream_text = ""
         self._last_stream_render: float = 0.0
@@ -348,20 +361,6 @@ class FullscreenREPLUI:
         )
         if inline_flow is not None:
             inline_flow.bind(self.buffer, self.invalidate)
-
-        # Anything that draws as a Float and can close again. Watched as a group
-        # so the frame reclaims its rows whichever one was open — see
-        # `_note_overlay_state`.
-        self._overlay_probes = [
-            probe
-            for probe in (
-                getattr(command_palette, "is_active", None),
-                getattr(model_switcher, "is_visible", None),
-                getattr(inline_flow, "is_active", None),
-            )
-            if probe is not None
-        ]
-        self._overlays_were_active = False
 
         self.console = Console(
             file=_ConsoleSink(self),
@@ -461,15 +460,50 @@ class FullscreenREPLUI:
                 if should_exit:
                     self._queue.put_nowait("/exit")
 
-        root = FloatContainer(
+        # In-app scrolling of the conversation transcript — the alternate
+        # screen buffer has no native OS scrollback, so this is the only way
+        # to review history. Bound globally (not filtered to a focused
+        # window) since the conversation pane is never itself focusable;
+        # `eager=True` so these win over any default multiline-buffer
+        # binding on the same keys.
+        @kb.add("pageup", eager=True)
+        def _(event) -> None:
+            self.scroll_page_up()
+
+        @kb.add("pagedown", eager=True)
+        def _(event) -> None:
+            self.scroll_page_down()
+
+        @kb.add(Keys.ScrollUp, eager=True)
+        def _(event) -> None:
+            self.scroll_up(3)
+
+        @kb.add(Keys.ScrollDown, eager=True)
+        def _(event) -> None:
+            self.scroll_down(3)
+
+        @kb.add("c-home", eager=True)
+        def _(event) -> None:
+            self.scroll_to_top()
+
+        @kb.add("c-end", eager=True)
+        def _(event) -> None:
+            self.scroll_to_bottom()
+
+        # Named (not built anonymously in the HSplit list below) so scroll
+        # methods can nudge `.vertical_scroll` directly — see
+        # `_sync_conversation_scroll`.
+        self._conversation_window = Window(
+            FormattedTextControl(self._render_conversation),
+            style="class:conversation",
+            wrap_lines=True,
+            always_hide_cursor=True,
+        )
+
+        content = FloatContainer(
             content=HSplit(
                 [
-                    Window(
-                        FormattedTextControl(self._render_conversation),
-                        style="class:conversation",
-                        wrap_lines=True,
-                        always_hide_cursor=True,
-                    ),
+                    self._conversation_window,
                     Window(
                         FormattedTextControl(self._render_status),
                         height=1,
@@ -506,26 +540,53 @@ class FullscreenREPLUI:
                         height=1,
                         always_hide_cursor=True,
                     ),
-                ]
+                ],
+                # Never wider than `_MAX_CONTENT_WIDTH` — `_width()` mirrors
+                # this cap so border-drawing and the home screen match what
+                # actually gets allocated on screen.
+                width=Dimension(max=_MAX_CONTENT_WIDTH, preferred=_MAX_CONTENT_WIDTH),
             ),
             floats=_build_floats(command_palette, model_switcher, inline_flow),
         )
+
+        # `align=CENTER` makes VSplit auto-insert flexible zero-preferred-width
+        # gutters on both sides of `content` — since `content`'s own width is
+        # capped above, a terminal wider than `_MAX_CONTENT_WIDTH` grows those
+        # gutters instead of the conversation/prompt/status chrome. A narrower
+        # terminal just shrinks `content` below its preferred width as usual;
+        # this is a ceiling, not a fixed size that could break on a small window.
+        root = VSplit([content], align=HorizontalAlign.CENTER, style=f"bg:{design.BACKGROUND}")
 
         self._app = Application(
             layout=Layout(root, focused_element=self.buffer),
             key_bindings=kb,
             style=Style.from_dict(style),
-            # Never the alternate screen buffer: that buffer has no
-            # scrollback in virtually every terminal emulator, so anything
-            # drawn there is unreachable once it scrolls out of the visible
-            # rows, and it's discarded entirely on exit. Finalized content
-            # instead gets promoted to the real primary-buffer scrollback by
-            # `_flush_ready()` (see below); this layout only ever needs to
-            # hold the *live* tail (an in-flight stream, a ticking tool
-            # card, the prompt box) so it renders fine without full-screen's
-            # "fill the terminal" sizing.
-            full_screen=False,
-            mouse_support=False,
+            # The alternate screen buffer: Velune owns the terminal the way
+            # vim/k9s/btop do — the shell prompt is fully hidden while this
+            # app runs, and `erase_when_done=True` below makes exit restore
+            # the original primary-buffer content exactly (prompt_toolkit
+            # does this via a real second console buffer on Windows, ANSI
+            # 1049h/l elsewhere). The tradeoff is that this buffer has no
+            # native OS scrollback, so `self._lines` now stays resident for
+            # the whole session instead of being flushed out line-by-line —
+            # scrolling through history is handled in-app (see
+            # `scroll_up`/`scroll_page_up`/etc. and `_scroll_anchor` below)
+            # rather than via the terminal's own scrollback buffer.
+            full_screen=True,
+            # Without this, prompt_toolkit's own shutdown path
+            # (`Application._redraw(render_as_done=True)`, run unconditionally
+            # in a `finally` around `run_async`'s wait — covers `.exit()`,
+            # `/exit`, and an interrupt/cancellation alike) repaints the live
+            # chrome one last time in "done" state before leaving the
+            # alternate screen. `erase_when_done=True` makes that same
+            # finally-block erase instead of repaint — belt-and-suspenders,
+            # since leaving the alternate screen already discards whatever
+            # was drawn there, but this avoids a one-frame flash of the full
+            # chrome immediately before the screen swap.
+            erase_when_done=True,
+            # Needed for `Keys.ScrollUp`/`Keys.ScrollDown` (mouse wheel) to
+            # reach the key bindings below instead of being silently dropped.
+            mouse_support=True,
             min_redraw_interval=0.016,
             max_render_postpone_time=0.01,
             # No idle polling: every state change (submit, console output,
@@ -591,7 +652,6 @@ class FullscreenREPLUI:
         for raw in lines[1:]:
             self._lines.append(_Line(f"  {raw.rstrip()}", "class:conversation.user.text"))
         self._trim()
-        self._flush_ready()
 
     def append_console_line(self, line: str) -> None:
         if not line and (not self._lines or not self._lines[-1].text):
@@ -606,14 +666,12 @@ class FullscreenREPLUI:
         else:
             self._lines.append(_Line(line, "class:conversation.system"))
         self._trim()
-        self._flush_ready()
         self.invalidate()
 
     def append_system(self, text: str) -> None:
         self._history_started = True
         self._append_wrapped(text, "class:conversation.system")
         self._trim()
-        self._flush_ready()
         self.invalidate()
 
     def begin_assistant(
@@ -645,9 +703,6 @@ class FullscreenREPLUI:
                 )
             )
         self._stream_start = len(self._lines)
-        # Everything before the label is already final — commit it now so
-        # only the spinner (which changes every tick) stays in the live area.
-        self._flush_ready()
         self._thinking_idx = 0
         self._stream_text = text or self._thinking_words[0]
         self._set_thinking_line(_SPINNER_FRAMES[0], self._stream_text)
@@ -706,7 +761,6 @@ class FullscreenREPLUI:
         self._stream_start = None
         self._stream_text = ""
         self.set_busy_hint(False)
-        self._flush_ready()
         self.invalidate()
 
     def set_busy_hint(self, active: bool) -> None:
@@ -737,10 +791,6 @@ class FullscreenREPLUI:
         handle.tick(_SPINNER_FRAMES[0], 0.0)
         self._live_cards.append(handle)
         self._trim()
-        # The card itself stays live (registered above) but everything
-        # ahead of it — the gap, a just-finished assistant block — is done
-        # changing and can be promoted to real scrollback now.
-        self._flush_ready()
         self.invalidate()
 
         async def _spin() -> None:
@@ -766,13 +816,73 @@ class FullscreenREPLUI:
             plain = "".join(t for _s, t in frags)
             self._lines.append(_Line(plain, "class:conversation.system", fragments=frags))
         self._trim()
-        self._flush_ready()
         self.invalidate()
 
     def cancel_live_cards(self, note: str = "Interrupted") -> None:
         """Resolve any still-running cards (interrupt/teardown safety net)."""
         for handle in list(self._live_cards):
             handle.cancel(note)
+
+    # ── In-app scrolling ─────────────────────────────────────────────
+    #
+    # The alternate screen buffer has no native terminal scrollback, so
+    # reviewing history is handled entirely inside this class via
+    # `_scroll_anchor` (see its docstring in `__init__`) — moving *which*
+    # line carries the `[SetCursorPosition]` marker in `_render_conversation`
+    # is what moves the viewport (`Window._scroll_when_linewrapping` scrolls
+    # to keep that marker visible). That auto-scroll logic is stateful,
+    # though: it only forces `vertical_scroll` to change when the marker
+    # falls outside the *previous* visible range, so a small move (a
+    # mouse-wheel tick) can otherwise silently do nothing if it lands back
+    # inside the range that was already on screen. `_sync_conversation_scroll`
+    # sidesteps that by setting `vertical_scroll` directly whenever the
+    # anchor is concrete, which always renders the anchor line as the
+    # topmost visible row — deterministic regardless of move size.
+
+    def _sync_conversation_scroll(self) -> None:
+        if self._scroll_anchor is not None:
+            self._conversation_window.vertical_scroll = self._scroll_anchor
+        # `None` (resuming live-follow) is left alone: the marker moving
+        # back to the last line always violates the auto-scroll's own
+        # "keep the cursor from going below the bottom" bound (unless we
+        # were already at the bottom), which reliably snaps the viewport
+        # back down on its own.
+
+    def _page_size(self) -> int:
+        return max(3, self._height() - 2)
+
+    def scroll_up(self, n: int = 1) -> None:
+        current = self._scroll_anchor if self._scroll_anchor is not None else len(self._lines) - 1
+        self._scroll_anchor = max(0, current - n)
+        self._sync_conversation_scroll()
+        self.invalidate()
+
+    def scroll_down(self, n: int = 1) -> None:
+        if self._scroll_anchor is None:
+            return
+        new_anchor = self._scroll_anchor + n
+        if new_anchor >= len(self._lines) - 1:
+            self._scroll_anchor = None  # caught up — resume live-follow
+        else:
+            self._scroll_anchor = new_anchor
+        self._sync_conversation_scroll()
+        self.invalidate()
+
+    def scroll_page_up(self) -> None:
+        self.scroll_up(self._page_size())
+
+    def scroll_page_down(self) -> None:
+        self.scroll_down(self._page_size())
+
+    def scroll_to_top(self) -> None:
+        self._scroll_anchor = 0
+        self._sync_conversation_scroll()
+        self.invalidate()
+
+    def scroll_to_bottom(self) -> None:
+        self._scroll_anchor = None
+        self._sync_conversation_scroll()
+        self.invalidate()
 
     def _render_stream_markdown(self, *, final: bool) -> None:
         """Render the in-flight streamed response as real markdown + syntax-
@@ -808,16 +918,16 @@ class FullscreenREPLUI:
     def clear(self) -> None:
         """Reset the live view for `/clear`.
 
-        This can only clear prompt_toolkit's own live buffer, not the real
-        terminal scrollback above it — by design, finished turns are already
-        permanent scrollback by the time `/clear` runs (see `_flush_ready`),
-        the same way a shell's `clear` doesn't erase history either. The
-        home screen reappears since, as far as this view is concerned, the
-        conversation is starting over.
+        Unlike a real shell's `clear` (which only clears the visible screen,
+        leaving scrollback intact), this genuinely erases the conversation:
+        the alternate screen buffer has no scrollback for anything to
+        survive in. The home screen reappears since, as far as this view is
+        concerned, the conversation is starting over.
         """
         self._lines.clear()
         self._stream_start = None
         self._stream_text = ""
+        self._scroll_anchor = None
         self._history_started = False
         self.invalidate()
 
@@ -846,183 +956,29 @@ class FullscreenREPLUI:
             self._lines.append(_Line(raw.rstrip(), style))
 
     def _trim(self) -> None:
+        """Drop the oldest lines once the transcript exceeds the cap.
+
+        The alternate screen buffer has no scrollback, so unlike a real
+        terminal this cap is a hard memory bound, not just a viewport
+        clip — content evicted here is genuinely gone, the same tradeoff
+        `k9s`/`btop`-style TUIs make with their own internal buffers.
+        `_stream_start` and `_scroll_anchor` are absolute indices into
+        `self._lines`, so both need to shift down by however much was
+        evicted from the front.
+        """
         if len(self._lines) <= _MAX_TRANSCRIPT_LINES:
             return
-        if self._running and self._app is not None:
-            # Promote the finished prefix to real scrollback instead of
-            # discarding it. What's left after that is exactly the still-live
-            # region (an in-flight stream, a ticking tool card) — truncating
-            # that would silently delete part of an unfinished message (e.g.
-            # a single response long enough to blow past the cap before it
-            # finishes), so it's left to grow rather than dropped. It shrinks
-            # back down the moment the turn finishes and gets flushed.
-            self._flush_ready()
-            return
-        # No live app to promote into (e.g. unit tests driving this class
-        # without calling `run()`) — fall back to the old cap-by-discarding
-        # behavior so those callers keep working as before.
         overflow = len(self._lines) - _MAX_TRANSCRIPT_LINES
         self._lines = self._lines[overflow:]
         if self._stream_start is not None:
             self._stream_start = max(0, self._stream_start - overflow)
-
-    # ── Scrollback promotion ─────────────────────────────────────────
-    #
-    # `self._lines` is only ever meant to hold the *live* tail of the
-    # transcript — content still changing frame to frame (a streaming
-    # response, a ticking tool-card spinner). Everything else is written
-    # straight to the real terminal the moment it stops changing, so it
-    # lands in the terminal's own native scrollback instead of only
-    # existing inside this app's in-memory buffer. This is what actually
-    # fixes "can't scroll back": previously every line lived only in
-    # `self._lines`, rendered into a viewport clipped to the last N rows
-    # inside an alternate-screen application — nothing scrollable ever
-    # reached the terminal itself.
-
-    def _committable_prefix(self) -> int:
-        """Index up to which `self._lines` has stopped changing.
-
-        Capped by whichever live region starts earliest: an in-flight
-        assistant stream (`_stream_start`) or the earliest still-ticking
-        tool card. Cards are tracked by object identity, not index (see
-        `ToolCardHandle`), so trimming/flushing from the front never
-        misdirects one.
-        """
-        limit = len(self._lines)
-        if self._stream_start is not None:
-            limit = min(limit, self._stream_start)
-        for handle in self._live_cards:
-            try:
-                idx = self._lines.index(handle._line)
-            except ValueError:
-                continue
-            limit = min(limit, idx)
-        return max(0, limit)
-
-    def _flush_ready(self) -> None:
-        """Promote the finished prefix of `self._lines` to real scrollback.
-
-        No-op while the app isn't actually running (e.g. unit tests that
-        drive `FullscreenREPLUI` without calling `run()`) — there's no live
-        frame on screen to protect, and callers expect `self._lines` to keep
-        holding everything, matching this class's behavior before scrollback
-        promotion existed.
-
-        Deliberately bypasses `prompt_toolkit.run_in_terminal` /
-        `print_formatted_text`: both resolve "the current application"
-        through a contextvar that is only populated inside the task
-        executing `self._app.run_async()` (this class's own `run()`).
-        Callers of `_flush_ready()` run on the REPL's main task instead —
-        a sibling `asyncio.Task`, which gets its own copy of that context —
-        so the contextvar would read back empty there and those helpers
-        would print without coordinating with the live frame at all,
-        corrupting the on-screen prompt box. We already hold `self._app`
-        directly, so we drive the same erase → print → redraw sequence by
-        hand, keyed off that reference instead of the contextvar.
-        """
-        if not self._running or self._app is None:
-            return
-        if self._app._running_in_terminal:
-            # A blocking `run_in_terminal` call (e.g. the raw-stdin tool
-            # approval prompt) owns the terminal right now; writing here
-            # would interleave with its own output. Defer — the next state
-            # change that calls `_flush_ready()` after it releases the
-            # terminal will promote this content instead.
-            return
-        limit = self._committable_prefix()
-        if limit <= 0:
-            return
-        committed, self._lines = self._lines[:limit], self._lines[limit:]
-        if self._stream_start is not None:
-            self._stream_start = max(0, self._stream_start - limit)
-        self._repaint(committed)
-
-    def collapse(self) -> None:
-        """Redraw from scratch so the frame can shrink back to its content.
-
-        `Renderer.render()` sizes a non-full-screen frame to
-        ``max(_min_available_height, last_height, preferred)`` — the height is
-        monotonically non-decreasing for as long as one screen is being diffed
-        against the next. So anything that makes the frame temporarily tall (a
-        floating panel: the command palette, an InlineFlow step) leaves that
-        many rows reserved forever after it closes, showing as a block of blank
-        lines above the status bar with the prompt box stretched to fill it.
-
-        `_flush_ready()` happens to cure this as a side effect — `erase()`
-        drops `_last_screen`, so the next render starts from `preferred` again
-        — which is why it never showed up before: something almost always
-        printed afterwards. A flow that ends without printing (`/connect`'s
-        final model-discovery step) had nothing to trigger it, so the panel's
-        18 rows stayed on screen.
-        """
-        self._repaint([])
-
-    def _repaint(self, committed: list[_Line]) -> None:
-        """Erase the live frame, emit *committed* to real scrollback, redraw.
-
-        Deliberately bypasses `prompt_toolkit.run_in_terminal` /
-        `print_formatted_text` — see `_flush_ready`'s docstring for why the
-        contextvar those rely on reads back empty from the REPL's main task.
-        """
-        if not self._running or self._app is None:
-            return
-        if self._app._running_in_terminal:
-            return
-        app = self._app
-        app.renderer.erase()
-        if committed:
-            self._write_lines(committed)
-        app.renderer.reset()
-        app._request_absolute_cursor_position()
-        app._redraw()
-
-    def _write_lines(self, lines: list[_Line]) -> None:
-        from prompt_toolkit.renderer import print_formatted_text as pt_print_formatted_text
-
-        fragments: list[tuple[str, str]] = []
-        for line in lines:
-            if line.fragments is not None:
-                fragments.extend(line.fragments)
-            else:
-                fragments.append((line.style, line.text))
-            fragments.append(("", "\n"))
-        app = self._app
-        pt_print_formatted_text(app.output, FormattedText(fragments), app.style)
-        app.output.flush()
+        if self._scroll_anchor is not None:
+            self._scroll_anchor = max(0, self._scroll_anchor - overflow)
 
     def _render_status(self) -> AnyFormattedText:
         if self._on_status_render is not None:
             self._on_status_render()
-        self._note_overlay_state()
         return render_status_bar(self._status_state)
-
-    def _note_overlay_state(self) -> None:
-        """On the render where the last overlay closes, reclaim its rows.
-
-        Floats are tall (18 rows for the palette and for an InlineFlow step)
-        and `Renderer.render()` sizes a non-full-screen frame to
-        ``max(_min_available_height, last_height, preferred)`` — never
-        shrinking while one screen is diffed against the next. So every overlay
-        permanently reserved its height, showing afterwards as a block of blank
-        lines above the status bar with the prompt box stretched to fill it.
-
-        Watched here, on the falling edge, rather than pushed by each overlay:
-        one rule covers the palette, the model switcher, and flow steps, and it
-        is naturally debounced across a multi-step flow — consecutive steps
-        close and reopen the panel without ever yielding to the event loop, so
-        no render observes the gap between them and the panel never blinks.
-
-        `collapse()` is deferred to the next loop turn because this runs
-        *inside* `Renderer.render()`, and collapse re-enters it.
-        """
-        active = any(probe() for probe in self._overlay_probes)
-        was_active, self._overlays_were_active = self._overlays_were_active, active
-        if not was_active or active:
-            return
-        try:
-            asyncio.get_running_loop().call_soon(self.collapse)
-        except RuntimeError:
-            pass
 
     def _render_prompt_top_border(self) -> AnyFormattedText:
         width = self._width()
@@ -1036,6 +992,8 @@ class FullscreenREPLUI:
             hint = self._inline_flow.hint()
         elif self._busy:
             hint = "Ctrl+C interrupt"
+        elif self._scroll_anchor is not None:
+            hint = "↑ scrolled  ·  Ctrl+End for latest"
         else:
             hint = "Enter send  ·  Shift+Enter newline  ·  / commands  ·  @@ files"
         fill = width - 5 - len(hint)
@@ -1075,32 +1033,34 @@ class FullscreenREPLUI:
             # said," only "nothing is currently in flight."
             return FormattedText([]) if self._history_started else self._render_home()
 
-        # No viewport clipping: `self._lines` only ever holds the live tail
-        # (an in-flight stream, ticking tool cards) by the time this runs,
-        # since `_flush_ready()` promotes everything else to real
-        # scrollback as soon as it stops changing. Rendering it in full is
-        # what lets a non-full-screen layout size itself to content instead
-        # of pinning to a fixed "fill the terminal" height.
+        # `self._lines` holds the *entire* transcript (the alternate screen
+        # buffer has no native scrollback for anything trimmed out of it —
+        # see the `_scroll_anchor` docstring in `__init__`). No clipping
+        # here; the viewport is controlled purely by where the
+        # `[SetCursorPosition]` marker below lands.
+        last_idx = len(self._lines) - 1
+        anchor = self._scroll_anchor if self._scroll_anchor is not None else last_idx
+        anchor = max(0, min(anchor, last_idx))
         fragments: list[tuple[str, str]] = []
         for idx, line in enumerate(self._lines):
+            if idx == anchor:
+                # `Window`'s "keep the cursor visible" scroll logic scrolls
+                # to keep whichever line carries this zero-width marker in
+                # view (nothing in this control ever sets a real cursor,
+                # since `always_hide_cursor=True`). Anchoring the last line
+                # (the default, live-follow mode) keeps new output visible
+                # as it streams in; `scroll_up`/`scroll_page_up`/etc. move
+                # the anchor earlier so the user can review history without
+                # being yanked back down by new content arriving below it.
+                fragments.append(("[SetCursorPosition]", ""))
             if line.fragments is not None:
                 fragments.extend(line.fragments)
                 sep_style = ""
             else:
                 fragments.append((line.style, line.text))
                 sep_style = line.style
-            if idx < len(self._lines) - 1:
+            if idx < last_idx:
                 fragments.append((sep_style, "\n"))
-        # Anchor scroll to the bottom of the live region. Without this,
-        # `Window`'s "keep the cursor visible" scroll logic defaults to
-        # Point(0, 0) (nothing in this control ever sets a real cursor,
-        # since `always_hide_cursor=True`), so once the live tail — a long
-        # streamed response, several ticking tool cards — grows taller than
-        # the terminal, the viewport shows its *top* instead of following
-        # the newest content. This zero-width marker doesn't draw anything
-        # (the cursor glyph stays hidden); it only tells the scroll logic
-        # where "the bottom" is.
-        fragments.append(("[SetCursorPosition]", ""))
         return FormattedText(fragments)
 
     def _render_home(self) -> AnyFormattedText:
@@ -1118,7 +1078,12 @@ class FullscreenREPLUI:
         if self._app is None:
             return 80
         try:
-            return max(20, self._app.output.get_size().columns)
+            # Mirrors the `_MAX_CONTENT_WIDTH` cap on the layout's content
+            # column (`__init__`, the `content = FloatContainer(...)` / `root
+            # = VSplit(...)` pair) — this is what the border, home screen,
+            # and markdown rendering actually get allocated, not the raw
+            # terminal width once the terminal is wider than the cap.
+            return min(_MAX_CONTENT_WIDTH, max(20, self._app.output.get_size().columns))
         except Exception:
             return 80
 
