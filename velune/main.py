@@ -48,6 +48,28 @@ def _fatal_environment_error(exc: BaseException) -> None:
     raise SystemExit(1)
 
 
+def _install_crash_hook() -> None:
+    """Redact secrets from any exception that reaches Python's default excepthook.
+
+    Typer's own pretty-exception renderer is told not to show local variables
+    (see ``cli/app.py``), which closes the main leak vector — a decrypted
+    provider key sitting in a local when a command callback crashes. This is
+    a backstop for exceptions that never reach Typer's renderer at all, e.g.
+    ones raised while parsing argv or importing ``cli.app`` itself, which
+    would otherwise print through Python's default hook unredacted.
+    """
+
+    def _hook(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
+        import traceback
+
+        from velune.core.redaction import redact_secrets
+
+        rendered = "".join(traceback.format_exception(exc_type, exc, tb))  # type: ignore[arg-type]
+        sys.stderr.write(redact_secrets(rendered))
+
+    sys.excepthook = _hook
+
+
 def main() -> None:
     """Console-script entry point.
 
@@ -55,6 +77,7 @@ def main() -> None:
     importing ``velune.cli`` or any subsystem, then delegates everything else
     to the lazily-built Typer application.
     """
+    _install_crash_hook()
     argv = sys.argv[1:]
     if argv and argv[0] in ("--version", "-V") and "--help" not in argv:
         from velune import __version__

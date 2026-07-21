@@ -79,6 +79,10 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
         no_args_is_help=False,
         add_completion=True,
         rich_markup_mode="rich",
+        # Local variables can hold decrypted API keys (provider adapters,
+        # keystore code). Typer's default pretty-exception renderer prints
+        # them on any unhandled crash — never let that happen.
+        pretty_exceptions_show_locals=False,
     )
 
     @app.callback(invoke_without_command=True)

@@ -77,6 +77,36 @@ PROVIDER_ENV_VARS: dict[str, str] = {
 }
 
 
+def _restrict_to_current_user_windows(path: Path) -> None:
+    """Best-effort Windows equivalent of ``chmod 600`` for *path*.
+
+    ``Path.chmod`` is a no-op for real ACL enforcement on Windows, so the
+    encrypted credential file otherwise keeps whatever (often broader) ACL
+    it inherited from its parent directory. This strips inherited entries
+    and grants Full Control to the current user only, via ``icacls`` (no
+    extra dependency needed). Never allowed to block a credential save: a
+    failure here — e.g. ``icacls`` unavailable, or a filesystem without ACL
+    support — just leaves the file at its default permissions.
+    """
+    import subprocess
+
+    domain = os.environ.get("USERDOMAIN", "")
+    user = os.environ.get("USERNAME", "")
+    if not user:
+        return
+    account = f"{domain}\\{user}" if domain else user
+    try:
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:F"],
+            shell=False,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        logger.debug("Could not restrict ACL on %s (non-fatal)", path, exc_info=True)
+
+
 class CredentialManager:
     """Manages the encrypted credentials.json file."""
 
@@ -172,16 +202,24 @@ class CredentialManager:
                 os.fsync(f.fileno())
 
             # Create backup of known good state
+            backup_file = self._credentials_file.with_name("credentials.json.bak")
             if self._credentials_file.exists():
-                backup_file = self._credentials_file.with_name("credentials.json.bak")
                 shutil.copy2(self._credentials_file, backup_file)
 
             # Atomic replace
             temp_file.replace(self._credentials_file)
 
-            # Secure file permissions (Linux/macOS)
+            # Restrict the encrypted store (and its backup) to the current
+            # user only, so it isn't world-readable at the filesystem level
+            # on a shared machine.
             if os.name != "nt":
                 self._credentials_file.chmod(0o600)
+                if backup_file.exists():
+                    backup_file.chmod(0o600)
+            else:
+                _restrict_to_current_user_windows(self._credentials_file)
+                if backup_file.exists():
+                    _restrict_to_current_user_windows(backup_file)
         finally:
             if temp_file.exists():
                 try:

@@ -172,10 +172,11 @@ class DiffPreview:
 
         from rich.prompt import Prompt
 
+        # No default on purpose: a file mutation must never be accepted by an
+        # accidental bare Enter — the user has to type a, r, or s explicitly.
         action = Prompt.ask(
             "\n  [dim][a]ccept / [r]eject / [s]kip all[/dim]",
             choices=["a", "r", "s", "accept", "reject", "skip"],
-            default="a",
         )
         mapping = {
             "a": DiffDecision.ACCEPT,

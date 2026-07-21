@@ -88,6 +88,30 @@ jobs:
           bandit -c pyproject.toml -r velune/ || true
           bandit -c pyproject.toml -r velune/ --severity-level medium --confidence-level medium
 
+      - name: Bandit low-severity regression baseline
+        # Low-severity findings (183 as of writing — mostly broad
+        # try/except-pass patterns, not a mass rewrite worth blocking every
+        # PR on) aren't part of the gate above, so nothing stops that count
+        # from silently growing over time. This doesn't re-triage the
+        # existing 183; it only fails if new ones are added. Raise
+        # BASELINE_LOW deliberately, in the PR that adds the finding, only
+        # after confirming it's reviewed and accepted — the same convention
+        # already used for the asyncio.run() and create_subprocess_shell
+        # allowlists above.
+        run: |
+          BASELINE_LOW=183
+          bandit -c pyproject.toml -r velune/ -f json -o bandit_low.json --quiet || true
+          count=$(python -c "import json; print(json.load(open('bandit_low.json'))['metrics']['_totals']['SEVERITY.LOW'])")
+          rm -f bandit_low.json
+          echo "Low-severity bandit findings: $count (baseline: $BASELINE_LOW)"
+          if [ "$count" -gt "$BASELINE_LOW" ]; then
+            echo "❌ FATAL: low-severity bandit findings grew from $BASELINE_LOW to $count."
+            echo "Review the new finding(s); raise BASELINE_LOW in this file only once accepted."
+            exit 1
+          fi
+          echo "✓ No low-severity regression"
+          exit 0
+
       - name: Secret scan (gitleaks)
         # Run the gitleaks CLI directly rather than gitleaks/gitleaks-action:
         # the action calls the GitHub API to classify the account as an org
@@ -122,6 +146,24 @@ jobs:
             exit 1
           fi
           echo "✓ No shell=True found"
+          exit 0
+
+      - name: Check for un-allowlisted create_subprocess_shell usage (P0-2b regression)
+        run: |
+          # asyncio.create_subprocess_shell() is functionally shell=True and was
+          # invisible to the literal "shell=True" grep above. Every call site must
+          # be a reviewed, trust-gated, user-configured-command path — currently
+          # hooks/executor.py (session hooks, gated on workspace trust) and
+          # cli/commands/file_commands.py (TOML custom slash commands). Any other
+          # call site is a new, unreviewed shell-injection surface.
+          hits=$(grep -rln "create_subprocess_shell" velune/ \
+            --exclude="executor.py" --exclude="file_commands.py" 2>/dev/null || true)
+          if [ -n "$hits" ]; then
+            echo "❌ FATAL: create_subprocess_shell found outside the reviewed allowlist (P0-2b regression)"
+            echo "$hits"
+            exit 1
+          fi
+          echo "✓ create_subprocess_shell usage matches the reviewed allowlist"
           exit 0
 
       - name: Check asyncio.run() count (P0-1 regression)

@@ -104,8 +104,9 @@ async def cmd_undo(repl: VeluneREPL, args: str) -> None:
     )
     if reset.returncode == 0:
         repl.console.print(
-            "[green]Undo successful.[/green] "
-            "[dim]Last Velune commit reverted — changes kept staged.[/dim]"
+            "[green]Git commit reverted.[/green] "
+            "[dim]Changes kept staged. This only undoes the last Velune git "
+            "commit — it does not undo a conversation turn.[/dim]"
         )
     else:
         repl.console.print(f"[red]Undo failed:[/red] {reset.stderr.strip()}")

@@ -57,7 +57,11 @@ _TOOL_VERBS: dict[str, str] = {
     "git_branch": "Git branch",
     "git_commit": "Git commit",
     "git_checkout": "Git checkout",
-    "git_push": "Git push",
+    # No "git_push" entry: GitPushTool is intentionally not registered into
+    # the autonomous tool loop (velune/tools/subsystems.py) — pushing to a
+    # remote only happens through the explicit /push command, which has its
+    # own approval flow. A label here would misleadingly imply the model can
+    # call it directly.
 }
 
 _FILE_MUTATORS = {"write_file", "create_file", "delete_file"}

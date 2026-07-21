@@ -110,14 +110,15 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
 
     parts.append(_SEP)
 
-    # Context usage with visual bar
+    # Context usage with visual bar. Thresholds come from design.py so the
+    # status bar, prompt badge, and /context command all agree.
     pct = state.context_pct
-    if pct < 60:
-        ctx_style = "class:bottom-toolbar.ctx-ok"
-    elif pct < 85:
-        ctx_style = "class:bottom-toolbar.warn"
-    else:
-        ctx_style = "class:bottom-toolbar.danger"
+    ctx_style_by_state = {
+        "ok": "class:bottom-toolbar.ctx-ok",
+        "warn": "class:bottom-toolbar.warn",
+        "danger": "class:bottom-toolbar.danger",
+    }
+    ctx_style = ctx_style_by_state[design.context_state(pct)]
 
     ctx_bar = _context_bar(pct)
     if state.context_used is not None and state.context_max:

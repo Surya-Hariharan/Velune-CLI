@@ -36,17 +36,16 @@ Component catalog
     progress_bar(label, v, t)   inline labelled progress bar
     search_box(query)           search input display (pair with prompt_toolkit)
 
-  Classes (stateful / composable):
-    TableView    — data table with consistent column styling
-    ListView     — selectable item list with focus indicator
-    CommandPalette — command search result list
-
   Factory:
     make_console(**kwargs)      Console pre-configured with the Velune theme
 
+  Note: the interactive command palette lives in ``velune.cli.command_palette``
+  (prompt_toolkit-based, with fuzzy search and favorites) — not here. Static
+  table/list rendering needs are met inline with ``rich.table.Table`` directly.
+
 Usage
 ─────
-  from velune.cli.ui import header, error, success, TableView, ListView
+  from velune.cli.ui import header, error, success
 
   console.print(header("Providers", subtitle="3 active"))
   console.print(success("Model loaded"))
@@ -65,7 +64,6 @@ from rich import box
 from rich.console import Console, RenderableType
 from rich.panel import Panel
 from rich.rule import Rule
-from rich.table import Table
 from rich.text import Text
 
 from velune.cli import design
@@ -586,162 +584,6 @@ def search_box(
         box=box.ROUNDED,
         padding=design.PADDING_COMPACT,
     )
-
-
-# ---------------------------------------------------------------------------
-# TableView
-# ---------------------------------------------------------------------------
-
-
-class TableView:
-    """Data table with consistent Velune styling.
-
-    Columns are left-aligned by default; the first column is rendered in white,
-    subsequent columns in muted.  No inner vertical lines (SIMPLE_HEAD box).
-
-    Example::
-
-        tv = TableView(["Model", "Status", "Provider"])
-        tv.add_row("claude-3.5-sonnet", "active", "Anthropic")
-        tv.add_row("gpt-4o", "active", "OpenAI")
-        console.print(tv.render())
-    """
-
-    def __init__(
-        self,
-        columns: list[str],
-        title: str | None = None,
-        show_header: bool = True,
-        expand: bool = False,
-    ) -> None:
-        self._columns = columns
-        self._title = title
-        self._show_header = show_header
-        self._expand = expand
-        self._rows: list[tuple[Any, ...]] = []
-        self._row_styles: list[str | None] = []
-
-    def add_row(self, *values: Any, style: str | None = None) -> None:
-        """Append a data row.  Pass ``style`` to override per-row colour."""
-        self._rows.append(tuple(str(v) for v in values))
-        self._row_styles.append(style)
-
-    def render(self) -> Table:
-        table = Table(
-            box=box.SIMPLE_HEAD,
-            show_header=self._show_header,
-            header_style=f"bold {design.WHITE}",
-            border_style=design.FAINT,
-            title=f"[bold {design.ACCENT}]{self._title}[/]" if self._title else None,
-            title_style=f"bold {design.ACCENT}",
-            padding=design.PADDING_COMPACT,
-            expand=self._expand,
-            show_edge=False,
-        )
-        for i, col in enumerate(self._columns):
-            col_style = design.WHITE if i == 0 else design.MUTED
-            table.add_column(col, style=col_style, no_wrap=False)
-        for row, style in zip(self._rows, self._row_styles, strict=False):
-            table.add_row(*row, style=style or "")
-        return table
-
-
-# ---------------------------------------------------------------------------
-# ListView
-# ---------------------------------------------------------------------------
-
-
-class ListView:
-    """Selectable item list with a ▶ focus indicator.
-
-    Set ``selected`` to the 0-based index of the currently highlighted item
-    (-1 = no selection).
-
-    Example::
-
-        lv = ListView(["claude-3.5-sonnet", "gpt-4o", "llama3.2"])
-        lv.selected = 0
-        console.print(lv.render())
-    """
-
-    def __init__(
-        self,
-        items: list[str],
-        selected: int = -1,
-        show_index: bool = False,
-    ) -> None:
-        self.items = items
-        self.selected = selected
-        self.show_index = show_index
-
-    def render(self) -> Text:
-        text = Text()
-        for i, item in enumerate(self.items):
-            is_selected = i == self.selected
-            if is_selected:
-                text.append(f"  {design.ICON_SELECTED} ", style=f"bold {design.ACCENT}")
-                text.append(item, style=f"bold {design.WHITE}")
-            else:
-                text.append("    ")
-                if self.show_index:
-                    text.append(f"{i + 1}  ", style=design.FAINT)
-                text.append(item, style=design.MUTED)
-            text.append("\n")
-        return text
-
-
-# ---------------------------------------------------------------------------
-# CommandPalette
-# ---------------------------------------------------------------------------
-
-
-class CommandPalette:
-    """Command search result list rendered as a bordered panel.
-
-    Example::
-
-        cp = CommandPalette()
-        cp.add("/help",     "Show available commands")
-        cp.add("/model",    "Switch AI model")
-        cp.add("/provider", "Manage providers")
-        console.print(cp.render())
-    """
-
-    def __init__(self, title: str = "Commands", query: str = "") -> None:
-        self._title = title
-        self._query = query
-        self._entries: list[tuple[str, str]] = []
-
-    def add(self, command: str, description: str) -> None:
-        self._entries.append((command, description))
-
-    def render(self) -> Panel:
-        body = Text()
-
-        # Inline search prompt
-        if self._query:
-            body.append(f"  > {self._query}\n\n", style=design.WHITE)
-        else:
-            body.append("  > \n\n", style=design.FAINT)
-
-        if not self._entries:
-            body.append(
-                f"  {design.ICON_INFO}  No commands match.\n",
-                style=design.MUTED,
-            )
-        else:
-            cmd_width = max(len(cmd) for cmd, _ in self._entries) + 2
-            for cmd, desc in self._entries:
-                body.append(f"  {cmd:<{cmd_width}}", style=f"bold {design.ACCENT}")
-                body.append(f"  {desc}\n", style=design.MUTED)
-
-        return Panel(
-            body,
-            title=f"[{design.FAINT}]{self._title}[/]",
-            border_style=design.FAINT,
-            box=box.ROUNDED,
-            padding=design.PADDING_COMPACT,
-        )
 
 
 # ---------------------------------------------------------------------------
