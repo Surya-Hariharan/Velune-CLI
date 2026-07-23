@@ -10,6 +10,7 @@ from typing import Any
 from rich.console import Console
 
 from velune.cli.handlers.tool_chat import (
+    TurnProviderError,
     _make_approver,
     _ToolActivityUI,
     run_tool_chat,
@@ -18,7 +19,11 @@ from velune.cli.handlers.tool_chat import (
 from velune.cli.interrupts import InterruptController
 from velune.cli.modes import SessionMode
 from velune.context.budget import ContextBudget
-from velune.core.errors.provider import InferenceError
+from velune.core.errors.provider import (
+    InferenceError,
+    ProviderConnectionError,
+    RateLimitError,
+)
 from velune.core.types.inference import InferenceRequest, InferenceResponse, ToolCall
 from velune.core.types.model import ModelDescriptor
 from velune.tools.base.registry import ToolRegistry
@@ -223,6 +228,56 @@ async def test_run_tool_chat_falls_back_on_first_turn_rejection(tmp_path):
     result = await run_tool_chat(repl, _model(), provider, request)
     assert result is None  # caller falls back to legacy streaming
     assert "test-model" in repl._tools_unsupported_models
+
+
+async def test_run_tool_chat_raises_turn_provider_error_on_connection_failure(tmp_path):
+    """A provider outage on turn 1 must not be misclassified as "model can't
+    do tools" (that would permanently demote a perfectly good model). It
+    surfaces as TurnProviderError(safe_to_retry_elsewhere=True) instead, so
+    the REPL's fallback loop can try a different provider."""
+    provider = ScriptedProvider([ProviderConnectionError("connection refused")])
+    repl = _fake_repl(tmp_path, registry=_reg())
+    request = InferenceRequest(model_id="test-model", messages=[{"role": "user", "content": "hi"}])
+
+    try:
+        await run_tool_chat(repl, _model(), provider, request)
+        assert False, "expected TurnProviderError"
+    except TurnProviderError as exc:
+        assert exc.safe_to_retry_elsewhere is True
+        assert isinstance(exc.original, ProviderConnectionError)
+    assert "test-model" not in repl._tools_unsupported_models
+
+
+async def test_run_tool_chat_rate_limit_is_safe_to_retry_elsewhere(tmp_path):
+    provider = ScriptedProvider([RateLimitError("slow down", retry_after=5.0)])
+    repl = _fake_repl(tmp_path, registry=_reg())
+    request = InferenceRequest(model_id="test-model", messages=[{"role": "user", "content": "hi"}])
+
+    try:
+        await run_tool_chat(repl, _model(), provider, request)
+        assert False, "expected TurnProviderError"
+    except TurnProviderError as exc:
+        assert exc.safe_to_retry_elsewhere is True
+
+
+async def test_run_tool_chat_provider_failure_after_a_tool_ran_is_not_safe_to_retry(tmp_path):
+    """Once a tool has executed (a real side effect happened), a subsequent
+    provider failure must not be silently retried against a different
+    provider — that could redo the tool call, e.g. a second file write."""
+    provider = ScriptedProvider(
+        [
+            _tool_turn(ToolCall(id="c1", name="peek", arguments={})),
+            ProviderConnectionError("connection dropped"),
+        ]
+    )
+    repl = _fake_repl(tmp_path, registry=_reg())
+    request = InferenceRequest(model_id="test-model", messages=[{"role": "user", "content": "hi"}])
+
+    try:
+        await run_tool_chat(repl, _model(), provider, request)
+        assert False, "expected TurnProviderError"
+    except TurnProviderError as exc:
+        assert exc.safe_to_retry_elsewhere is False
 
 
 async def test_run_tool_chat_returns_none_when_gated_off(tmp_path):

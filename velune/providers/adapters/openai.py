@@ -12,10 +12,12 @@ from pydantic import SecretStr
 from velune.core.errors.provider import (
     InferenceError,
     ProviderAuthenticationError,
+    RateLimitError,
 )
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._http_errors import parse_retry_after
 from velune.providers.adapters._toolcalls import (
     OpenAIStreamToolAccumulator,
     attach_openai_tools,
@@ -75,6 +77,11 @@ class OpenAIProvider(ModelProvider):
             raise ProviderAuthenticationError(
                 f"{self.provider_id} rejected the API key "
                 f"(HTTP {exc.response.status_code}) during {action}."
+            ) from exc
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+            raise RateLimitError(
+                f"{self.provider_id} rate-limited (HTTP 429) during {action}.",
+                retry_after=parse_retry_after(exc.response.headers),
             ) from exc
         raise InferenceError(f"{self.provider_id} {action} failed: {exc}") from exc
 

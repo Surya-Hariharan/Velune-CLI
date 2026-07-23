@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from prompt_toolkit.application import Application
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import Window
 from prompt_toolkit.layout.controls import FormattedTextControl
@@ -87,6 +88,15 @@ async def run_councilmodel_ui(
                 selected_role_idx[0] = curr
                 break
 
+    # Mouse wheel — same convention as the main REPL transcript (fullscreen.py).
+    @kb1.add(Keys.ScrollUp, eager=True)
+    def _scroll_up(event) -> None:
+        _up(event)
+
+    @kb1.add(Keys.ScrollDown, eager=True)
+    def _scroll_down(event) -> None:
+        _down(event)
+
     @kb1.add("enter")
     def _select_role(event) -> None:
         role_result[0] = COUNCIL_ROLES[selected_role_idx[0]]
@@ -105,7 +115,7 @@ async def run_councilmodel_ui(
         ),
         key_bindings=kb1,
         full_screen=False,
-        mouse_support=False,
+        mouse_support=True,
     )
     await app1.run_async()
 
@@ -159,6 +169,15 @@ async def run_councilmodel_ui(
     def _down2(event) -> None:
         selected_model_idx[0] = (selected_model_idx[0] + 1) % len(model_options)
 
+    # Mouse wheel — same convention as the main REPL transcript (fullscreen.py).
+    @kb2.add(Keys.ScrollUp, eager=True)
+    def _scroll_up2(event) -> None:
+        _up2(event)
+
+    @kb2.add(Keys.ScrollDown, eager=True)
+    def _scroll_down2(event) -> None:
+        _down2(event)
+
     @kb2.add("enter")
     def _select_model(event) -> None:
         model_result[0] = model_options[selected_model_idx[0]]
@@ -177,7 +196,7 @@ async def run_councilmodel_ui(
         ),
         key_bindings=kb2,
         full_screen=False,
-        mouse_support=False,
+        mouse_support=True,
     )
     await app2.run_async()
 

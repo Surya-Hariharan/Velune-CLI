@@ -190,6 +190,15 @@ class ToolLoopRunner:
         self._max_turns = max(1, max_turns)
         self._max_result_chars = max_result_chars
         self._on_event = on_event
+        # Anthropic's prompt cache (cache_control on the system prompt + first
+        # user message) previously only ran through the Council path — every
+        # loop turn here re-sent that stable prefix uncached, even though a
+        # tool-calling conversation is exactly the case with the most turns
+        # sharing one prefix. NoOp for every other provider, so this is a
+        # dict-lookup no-op cost everywhere else.
+        from velune.context.cache.manager import make_cache_manager
+
+        self._cache_manager = make_cache_manager(getattr(provider, "provider_id", ""))
         # exposed (sanitized) name → ("local", BaseTool) | ("mcp", qualified_name)
         self._route: dict[str, tuple[str, Any]] = {}
         self._executed_invocations: list[ToolInvocation] = []
@@ -293,8 +302,10 @@ class ToolLoopRunner:
                     "tool_choice": request.tool_choice if turn == 1 else "auto",
                 }
             )
+            req = self._cache_manager.prepare(req)
             self._emit("turn", {"turn": turn, "max_turns": self._max_turns})
             response: InferenceResponse = await self._infer_turn(req)
+            self._cache_manager.record(response.metadata)
             tokens_used += response.tokens_used
             self._emit(
                 "turn_end",

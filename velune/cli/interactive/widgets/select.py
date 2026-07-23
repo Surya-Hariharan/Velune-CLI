@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 
 from velune.cli import design
 from velune.cli.autocomplete import fuzzy_score
@@ -192,6 +193,19 @@ class SelectWidget(Widget):
         @kb.add("down")
         @kb.add("tab")
         def _down(event) -> None:
+            self.move(1)
+
+        # Mouse wheel — both hosts (runner.run_standalone, chrome.WizardController)
+        # already enable mouse_support=True, but nothing consumed it: scrolling
+        # over any select list silently did nothing. Wired here once so every
+        # caller (single_select, multi_select, model/provider pickers, tool
+        # approval) gets it for free.
+        @kb.add(Keys.ScrollUp, eager=True)
+        def _scroll_up(event) -> None:
+            self.move(-1)
+
+        @kb.add(Keys.ScrollDown, eager=True)
+        def _scroll_down(event) -> None:
             self.move(1)
 
         @kb.add("enter")

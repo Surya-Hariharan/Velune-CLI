@@ -847,31 +847,35 @@ def _check_session_cost() -> dict:
 
 
 def _check_memory_health() -> dict:
-    import os
+    """Report the same MemoryHealth every other memory-health surface reports.
 
-    from velune.core.paths import cognitive_db_path, lancedb_store_path
+    Previously reimplemented its own file-size-only view (raw disk bytes,
+    no session/index counts) instead of going through
+    ``MemoryLifecycleManager.health()`` like ``velune memory stats`` and the
+    REPL's ``/memory`` — the three could show different numbers for the same
+    workspace. ``doctor`` is a deliberately fast/standalone diagnostic with
+    no shared runtime container (``bootstrap="light"``), so this builds a
+    throwaway manager via :func:`read_memory_health` rather than reaching
+    into a container that was never bootstrapped, but computes the exact
+    same metrics the other two surfaces do.
+    """
+    from velune.kernel.entrypoint import run_async
+    from velune.memory.lifecycle import read_memory_health
 
-    workspace = Path.cwd()
+    try:
+        health = run_async(read_memory_health(Path.cwd()))
+    except Exception as exc:
+        return {
+            "name": "Memory Subsystem",
+            "status": "warn",
+            "message": f"Could not read memory health: {exc}",
+        }
 
-    # Check cognitive DB
-    db_path = cognitive_db_path(workspace)
-    db_status = "missing"
-    if db_path.exists():
-        db_size = db_path.stat().st_size / (1024 * 1024)
-        db_status = f"{db_size:.1f} MB"
-
-    # Check LanceDB store
-    lancedb_path = lancedb_store_path(workspace)
-    lancedb_status = "missing"
-    if lancedb_path.exists() and lancedb_path.is_dir():
-        total_size = sum(
-            os.path.getsize(os.path.join(root, f))
-            for root, _, files in os.walk(lancedb_path)
-            for f in files
-        )
-        lancedb_status = f"{total_size / (1024 * 1024):.1f} MB"
-
-    message = f"Cognitive DB: {db_status} · LanceDB: {lancedb_status}"
+    message = (
+        f"Episodic: {health.episodic_sessions} session(s) · "
+        f"Semantic: {health.semantic_indexed_count} indexed · "
+        f"LanceDB: {health.lancedb_size_mb:.1f} MB"
+    )
 
     return {
         "name": "Memory Subsystem",

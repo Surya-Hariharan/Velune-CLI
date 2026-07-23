@@ -325,6 +325,9 @@ class ProviderRegistry:
 
         if name in self._factories:
             provider = self._factories[name]()
+            from velune.providers.retrying import RetryingProvider
+
+            provider = RetryingProvider(provider)
             self._providers[name] = provider
             self._provider_key_revisions[name] = revision
             return provider

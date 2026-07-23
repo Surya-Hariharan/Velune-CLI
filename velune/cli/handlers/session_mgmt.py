@@ -56,11 +56,45 @@ async def cmd_session(repl: VeluneREPL, args: str) -> None:
         out_path.write_text(md, encoding="utf-8")
         repl.console.print(f"[green]Exported to:[/green] {out_path}")
 
+    elif sub == "import":
+        if not sub_args:
+            repl.console.print("[yellow]Usage: /session import <path>[/yellow]")
+            return
+        await _cmd_session_import(repl, sub_args.strip(), workspace)
+
     else:
         repl.console.print(
             f"[red]Unknown subcommand: {sub!r}[/red]  "
-            "[dim]Use list | resume <id> | summary <id> | save | export[/dim]"
+            "[dim]Use list | resume <id> | summary <id> | save | export | import[/dim]"
         )
+
+
+async def _cmd_session_import(repl: VeluneREPL, raw_path: str, workspace: str) -> None:
+    """Import a single conversation JSON (not a whole-system backup archive)."""
+    import json
+    from pathlib import Path as _Path
+
+    path = _Path(raw_path).expanduser()
+    if not path.is_file():
+        repl.console.print(f"[red]File not found: {path}[/red]")
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        repl.console.print(f"[red]Could not parse {path}: {exc}[/red]")
+        return
+
+    try:
+        meta = repl._session_store.import_session(data, workspace=workspace)
+    except ValueError as exc:
+        repl.console.print(f"[red]{exc}[/red]")
+        return
+
+    repl.console.print(
+        f"[green]Imported[/green] [cyan]{meta.id}[/cyan] — {meta.title} "
+        f"[dim]({meta.turn_count} turns)[/dim]"
+    )
+    repl.console.print(f"[dim]Use /session resume {meta.id} to load it.[/dim]")
 
 
 async def _session_picker(repl: VeluneREPL, workspace: str) -> None:

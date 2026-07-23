@@ -13,12 +13,21 @@ from velune.core.errors.provider import InferenceError, ProviderAuthenticationEr
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._toolcalls import (
+    OpenAIStreamToolAccumulator,
+    attach_openai_tools,
+    parse_openai_tool_calls,
+)
 from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
 
 
 class MistralProvider(ModelProvider):
-    """Mistral AI provider — La Plateforme REST API."""
+    """Mistral AI provider — La Plateforme REST API (OpenAI-compatible wire format)."""
+
+    # La Plateforme's chat/completions endpoint speaks the same tool-call
+    # wire format as OpenAI, including streamed delta.tool_calls fragments.
+    SUPPORTS_STREAMING_TOOL_CALLS = True
 
     def __init__(
         self,
@@ -125,19 +134,27 @@ class MistralProvider(ModelProvider):
                 "max_tokens": request.max_tokens,
                 "top_p": request.top_p,
             }
+            attach_openai_tools(payload, request)
             response = await self.client.post("/chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
             latency = (time.perf_counter() - start) * 1000.0
             usage = data.get("usage", {})
+            message = data["choices"][0]["message"]
+            tool_calls = parse_openai_tool_calls(message)
             return InferenceResponse(
-                content=data["choices"][0]["message"]["content"],
+                content=message.get("content") or "",
                 model_id=request.model_id,
-                finish_reason=data["choices"][0].get("finish_reason") or "stop",
+                finish_reason=(
+                    "tool_calls"
+                    if tool_calls
+                    else (data["choices"][0].get("finish_reason") or "stop")
+                ),
                 tokens_used=usage.get("total_tokens", 0),
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 latency_ms=latency,
+                tool_calls=tool_calls,
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
@@ -149,6 +166,7 @@ class MistralProvider(ModelProvider):
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         await self.initialize()
         assert self.client is not None
+        accumulator = OpenAIStreamToolAccumulator()
         try:
             payload = {
                 "model": request.model_id,
@@ -158,6 +176,7 @@ class MistralProvider(ModelProvider):
                 "top_p": request.top_p,
                 "stream": True,
             }
+            attach_openai_tools(payload, request)
             async with self.client.stream("POST", "/chat/completions", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -168,12 +187,21 @@ class MistralProvider(ModelProvider):
                         try:
                             data = json.loads(data_str)
                             delta = data["choices"][0]["delta"]
+                            accumulator.add(delta.get("tool_calls"))
                             yield StreamChunk(
-                                content=delta.get("content", ""),
+                                content=delta.get("content") or "",
                                 finish_reason=data["choices"][0].get("finish_reason"),
                             )
                         except (json.JSONDecodeError, KeyError):
                             continue
+
+            tool_calls = accumulator.finalize()
+            if tool_calls:
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": tool_calls},
+                )
         except httpx.HTTPError as e:
             raise InferenceError(f"Mistral stream failed: {e}")
 

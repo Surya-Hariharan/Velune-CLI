@@ -33,6 +33,23 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("velune.cli.handlers.tool_chat")
 
+
+class TurnProviderError(Exception):
+    """A provider/connectivity failure during a chat turn.
+
+    Tags whether it's safe for the caller (``_handle_prompt``) to silently
+    retry the same request against a *different* provider —only true when no
+    tool has executed yet this turn. Once a tool ran, blindly retrying
+    elsewhere would risk re-running its side effects (a second file write, a
+    second git commit, ...), so that case must surface as a hard error
+    instead of triggering automatic cross-provider fallback.
+    """
+
+    def __init__(self, original: Exception, *, safe_to_retry_elsewhere: bool) -> None:
+        super().__init__(str(original))
+        self.original = original
+        self.safe_to_retry_elsewhere = safe_to_retry_elsewhere
+
 # Human-readable verbs for tool cards: `● Write(velune/x.py)` instead of
 # `● write_file {"file_path": ...}`. Unknown (e.g. MCP) tools show raw names.
 _TOOL_VERBS: dict[str, str] = {
@@ -200,7 +217,12 @@ async def run_tool_chat(
     are surfaced — silently rerunning the prompt could repeat side effects.
     """
     from velune._compat import uncancel_task
-    from velune.core.errors.provider import InferenceError
+    from velune.core.errors.provider import (
+        InferenceError,
+        ProviderAuthenticationError,
+        ProviderConnectionError,
+        RateLimitError,
+    )
     from velune.orchestration.tool_loop import ToolLoopResult, ToolLoopRunner
     from velune.tools.base.tool import ToolCallContext
 
@@ -254,6 +276,19 @@ async def run_tool_chat(
             invocations=executed,
             stop_reason="interrupted",
         )
+    except (ProviderConnectionError, ProviderAuthenticationError, RateLimitError) as exc:
+        # The provider itself is the problem (down, rejected the key, rate-
+        # limited) — not a "this model can't do tools" signal, so this must
+        # not fall through to the generic InferenceError branch below, which
+        # would misclassify a transient outage as a permanent tool-payload
+        # rejection and demote the model for the rest of the session.
+        # _handle_prompt decides whether to retry elsewhere, gated on
+        # safe_to_retry_elsewhere so a turn that already ran a tool never
+        # gets silently replayed against a different provider.
+        ui.close()
+        executed = runner.executed_invocations
+        repl._tool_call_count += len(executed)
+        raise TurnProviderError(exc, safe_to_retry_elsewhere=not executed) from exc
     except InferenceError as exc:
         ui.close()
         if ui.any_tool_ran:

@@ -81,6 +81,7 @@ async def browse_for_directory(
     from prompt_toolkit.application import Application
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.controls import FormattedTextControl
@@ -193,6 +194,15 @@ async def browse_for_directory(
     def _left(event) -> None:
         _go_up()
 
+    # Mouse wheel — same convention as the main REPL transcript (fullscreen.py).
+    @kb.add(Keys.ScrollUp, eager=True)
+    def _scroll_up(event) -> None:
+        _up(event)
+
+    @kb.add(Keys.ScrollDown, eager=True)
+    def _scroll_down(event) -> None:
+        _down(event)
+
     @kb.add("enter")
     def _enter(event) -> None:
         visible = _visible()
@@ -236,7 +246,7 @@ async def browse_for_directory(
         layout=Layout(Window(content=FormattedTextControl(_render, focusable=True))),
         key_bindings=kb,
         full_screen=False,
-        mouse_support=False,
+        mouse_support=True,
     )
     await app.run_async()
     return result[0]

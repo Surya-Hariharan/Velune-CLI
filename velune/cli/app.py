@@ -100,6 +100,13 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
         yes: bool = typer.Option(
             False, "--yes", "-y", help="Auto-accept all file changes without prompting"
         ),
+        plain: bool = typer.Option(
+            False,
+            "--plain",
+            help="Linear, non-alt-screen REPL mode — plain scrolling output "
+            "instead of the fullscreen UI (useful over some SSH/CI terminals, "
+            "or if you just prefer normal shell scrollback)",
+        ),
     ) -> None:
         """Initialize process-wide runtime state for every CLI invocation."""
 
@@ -289,7 +296,7 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                 _startup_mark("REPL handoff (prompt visible)")
                 from velune.kernel.entrypoint import launch
 
-                launch(runtime)
+                launch(runtime, plain=plain)
 
     register_commands(app, ServiceContainer(), only=register)
     return app

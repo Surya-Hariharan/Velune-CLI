@@ -24,6 +24,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -430,6 +431,8 @@ class MemoryLifecycleManager:
         query: str,
         workspace_root: str,
         budget: int = 4000,
+        *,
+        depth: int | None = None,
     ) -> RetrievedContext:
         """Multi-tier retrieval: working → episodic (LIKE) → semantic (ANN).
 
@@ -446,6 +449,12 @@ class MemoryLifecycleManager:
             Workspace path for scoping searches.
         budget:
             Token budget for results (approx 4000 tokens default).
+        depth:
+            Override for how many working/semantic/episodic hits the
+            coordinator fetches per tier (default 10/5/10 when omitted).
+            Callers that bias retrieval depth by intent — a DEBUG or EXPLAIN
+            turn wants more than a quick one-liner — pass this through
+            rather than being stuck with one fixed depth for every turn.
 
         Returns
         -------
@@ -460,9 +469,9 @@ class MemoryLifecycleManager:
                 query,
                 session_id=workspace_root or "default",
                 workspace_root=workspace_root,
-                working_limit=10,
-                semantic_limit=5,
-                episodic_limit=10,
+                working_limit=depth if depth is not None else 10,
+                semantic_limit=depth if depth is not None else 5,
+                episodic_limit=depth if depth is not None else 10,
             )
         except Exception as exc:
             logger.debug("ThreeBrainCoordinator query failed: %s", exc)
@@ -685,10 +694,18 @@ class MemoryLifecycleManager:
             health.embedding_queue_depth = self.embedding_pipeline._queue.qsize()
 
         if hasattr(self.semantic_memory, "_store") and self.semantic_memory._store:
+            store = self.semantic_memory._store
+            try:
+                health.semantic_indexed_count = store.table_size()
+            except Exception as exc:
+                logger.debug("Failed to read semantic indexed count: %s", exc)
             try:
                 import os
 
-                store_path = getattr(self.semantic_memory._store, "_path", None)
+                # LanceDBStore's attribute is `_store_path` — this previously
+                # read the never-set `_path`, so lancedb_size_mb was silently
+                # always 0.0 regardless of how much was actually indexed.
+                store_path = getattr(store, "_store_path", None)
                 if store_path and os.path.isdir(store_path):
                     total_size = sum(
                         os.path.getsize(os.path.join(root, f))
@@ -723,3 +740,56 @@ class MemoryLifecycleManager:
         if minutes >= 2:
             return f"{int(minutes)} minutes ago"
         return "just now"
+
+
+async def read_memory_health(workspace: Path) -> MemoryHealth:
+    """Compute :class:`MemoryHealth` for *workspace* from a cold start.
+
+    For callers that run before (or without) the full Tier-1 memory
+    subsystem bootstrap — currently just ``velune doctor``, which is a
+    deliberately fast/standalone diagnostic that never builds the shared
+    runtime container. Opens just enough — a SQLite pool and a LanceDB store,
+    no embedding pipeline or provider needed since :meth:`MemoryLifecycleManager.health`
+    doesn't touch either — to answer the same ``health()`` this manager's
+    container-registered instance answers, so ``doctor``, ``velune memory
+    stats``, and the REPL's ``/memory`` never disagree about the numbers.
+    Working-tier turns are always 0 here: an in-process turn buffer from a
+    live REPL session isn't visible to a separate ``doctor`` process, which
+    is honest, not wrong.
+    """
+    from velune.core.paths import cognitive_db_path, lancedb_store_path
+    from velune.memory.storage.lancedb_store import LanceDBStore
+    from velune.memory.storage.sqlite_pool import SQLiteConnectionPool
+    from velune.memory.tiers.episodic import EpisodicMemory
+    from velune.memory.tiers.semantic import SemanticMemory
+    from velune.memory.tiers.working import WorkingMemoryTier
+
+    pool = SQLiteConnectionPool(cognitive_db_path(workspace))
+    store = LanceDBStore(lancedb_store_path(workspace))
+    try:
+        await pool.startup()
+    except Exception as exc:
+        logger.debug("read_memory_health: SQLite pool startup failed: %s", exc)
+    try:
+        await store.startup()
+    except Exception as exc:
+        logger.debug("read_memory_health: LanceDB store startup failed: %s", exc)
+
+    manager = MemoryLifecycleManager(
+        working_tier=WorkingMemoryTier(),
+        episodic_memory=EpisodicMemory(pool),
+        semantic_memory=SemanticMemory(store, None),
+        embedding_pipeline=None,
+        lineage_tier=None,
+    )
+    try:
+        return await manager.health()
+    finally:
+        try:
+            await pool.shutdown()
+        except Exception as exc:
+            logger.debug("read_memory_health: SQLite pool shutdown failed: %s", exc)
+        try:
+            await store.shutdown()
+        except Exception as exc:
+            logger.debug("read_memory_health: LanceDB store shutdown failed: %s", exc)

@@ -12,11 +12,10 @@ _log = logging.getLogger("velune.cli.handlers.memory")
 
 
 async def cmd_memory(repl: VeluneREPL, args: str) -> None:
-    from rich.table import Table
+    from velune.cli.display.memory_view import MemoryDisplayView
 
     sub = args.strip().lower()
     working = repl.container.get("runtime.working_memory")
-    episodic = repl.container.get("runtime.episodic_memory")
 
     if sub == "clear":
         from velune.cli.handlers.confirm import confirm_destructive
@@ -28,36 +27,24 @@ async def cmd_memory(repl: VeluneREPL, args: str) -> None:
         repl.console.print("[green]Working memory cleared.[/green]")
         return
 
-    table = Table(title="Memory Tiers", border_style="dim", padding=(0, 1))
-    table.add_column("Tier", style="cyan")
-    table.add_column("Status", style="dim")
-    table.add_column("Records", style="white", justify="right")
-    table.add_column("Notes", style="dim")
-
-    working_turns = len(working.get_turns())
-    table.add_row(
-        "Tier 1 · Working",
-        "[green]active[/green]",
-        str(working_turns),
-        f"session: {working.session_id}",
-    )
-
-    episodic_count = 0
+    # MemoryLifecycleManager.health() — the same call `velune memory stats`
+    # and `velune doctor` use, so all three surfaces report the same numbers
+    # instead of each hand-rolling its own (previously disagreeing) view.
+    # This used to hardcode "Qdrant local" for the semantic tier and "—" for
+    # tiers 3-5 regardless of what was actually indexed.
     try:
-        episodic_count = len(await episodic.get_turns("default"))
+        manager = repl.container.get("runtime.memory_lifecycle")
     except Exception:
-        pass
-    table.add_row(
-        "Tier 2 · Episodic",
-        "[green]active[/green]",
-        str(episodic_count),
-        "SQLite persisted",
-    )
+        manager = None
 
-    table.add_row("Tier 3 · Semantic", "[green]active[/green]", "—", "Qdrant local")
-    table.add_row("Tier 4 · Graph", "[green]active[/green]", "—", "SQLite graph")
-    table.add_row("Tier 5 · Lineage", "[green]active[/green]", "—", "Decision + FEL store")
-    repl.console.print(table)
+    if manager is not None:
+        try:
+            health = await manager.health()
+            MemoryDisplayView(repl.console).render_memory_health(health)
+        except Exception as exc:
+            repl.console.print(f"[yellow]Could not read memory health: {exc}[/yellow]")
+    else:
+        repl.console.print("[yellow]Memory lifecycle manager is not available.[/yellow]")
 
     recent = working.get_recent_turns(3)
     if recent:

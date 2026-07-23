@@ -275,6 +275,48 @@ def session_show(
     console.print(f"[{design.MUTED}]Resume:[/] [bold]velune session resume {meta.id}[/bold]")
 
 
+@session_cmd.command("import")
+def session_import(
+    ctx: typer.Context,
+    path: Path = typer.Argument(..., help="Path to an exported session JSON file"),
+) -> None:
+    """Import a single conversation into the current workspace.
+
+    Unlike `velune restore` (which restores an entire backup archive — every
+    session plus config/providers/memory/trust), this imports just one
+    already-extracted conversation JSON — the same shape a file under
+    ``~/.velune/sessions/`` or a backup archive's ``sessions/`` folder uses —
+    as a new session here.
+    """
+    import json
+
+    from velune.cli.sessions import SessionStore
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    if not path.is_file():
+        console.print(f"[{design.DANGER}]File not found: {path}[/{design.DANGER}]")
+        raise typer.Exit(1)
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[{design.DANGER}]Could not parse {path}: {exc}[/{design.DANGER}]")
+        raise typer.Exit(1)
+
+    store = SessionStore()
+    try:
+        meta = store.import_session(data, workspace=str(cli_context.workspace.resolve()))
+    except ValueError as exc:
+        console.print(f"[{design.DANGER}]{exc}[/{design.DANGER}]")
+        raise typer.Exit(1)
+
+    console.print(f"[{design.OK}]Imported[/{design.OK}] [bold]{meta.id}[/bold] — {meta.title}")
+    console.print(f"[{design.MUTED}]Resume it:[/] [bold]velune session resume {meta.id}[/bold]")
+
+
 @session_cmd.command("archive")
 def session_archive(
     ctx: typer.Context,

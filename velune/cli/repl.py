@@ -132,6 +132,11 @@ class VeluneREPL:
             self._alert_store = None
         self._prev_ctx_pct: float = 0.0
         self._fullscreen_ui = None
+        # Built by _build_fullscreen_ui(); stays None in --plain (linear) mode,
+        # where there is no Application for a multi-step flow to draw into —
+        # interactive_host.install() is simply skipped, so /connect and
+        # friends fall back to their standalone-Application path instead.
+        self._inline_flow = None
         # Ollama liveness is refreshed off the UI thread by a background task
         # (see _ollama_probe_loop); the render path only ever reads this flag,
         # so a home-screen redraw never blocks on a socket connect.
@@ -192,25 +197,14 @@ class VeluneREPL:
     # Fullscreen UI
     # ------------------------------------------------------------------
 
-    def _build_fullscreen_ui(self):
-        from prompt_toolkit.history import FileHistory
-        from prompt_toolkit.key_binding import KeyBindings
+    def _build_completer(self):
+        """Build (and cache on self) the slash/model-id completer.
 
-        from velune.cli import design
+        Shared by the fullscreen UI and --plain mode's PromptSession — the
+        only completer this REPL has, so both input surfaces offer the same
+        `/command` and `@model-id` completions.
+        """
         from velune.cli.autocomplete import CommandEntry, SlashCompleter
-        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
-        from velune.cli.fullscreen import FullscreenREPLUI
-        from velune.cli.inline_flow import InlineFlow
-        from velune.cli.model_switcher import MODEL_SWITCHER_STYLES, ModelSwitcher
-        from velune.cli.statusbar import STATUS_BAR_STYLES
-        from velune.cli.validators import InlineSyntaxValidator
-
-        style_fragments = {
-            "prompt.arrow": f"{design.ACCENT_SOFT} bold",
-            **STATUS_BAR_STYLES,
-            **PALETTE_STYLES,
-            **MODEL_SWITCHER_STYLES,
-        }
 
         try:
             models = self.container.get("runtime.model_registry").list_all()
@@ -234,6 +228,54 @@ class VeluneREPL:
             show_command_completions=False,
         )
         self._completer = completer
+        return completer
+
+    def _build_plain_session(self):
+        """Build the --plain mode input reader: a linear, non-alt-screen prompt.
+
+        Unlike the fullscreen UI (a single long-lived ``Application`` owning
+        the whole terminal via the alternate screen buffer), this is a plain
+        ``PromptSession`` — the same primitive IPython/http-prompt use for a
+        readline-style prompt. Output (this REPL's own ``console.print`` calls
+        plus Rich ``Live`` streaming) goes straight to the real terminal with
+        native OS scrollback; nothing here ever takes over the screen.
+        """
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+        from prompt_toolkit.history import FileHistory
+
+        from velune.cli.validators import InlineSyntaxValidator
+
+        return PromptSession(
+            message="❯ ",
+            history=FileHistory(str(self._history_file)),
+            completer=self._build_completer(),
+            auto_suggest=AutoSuggestFromHistory(),
+            validator=InlineSyntaxValidator(),
+            validate_while_typing=False,
+            multiline=False,
+        )
+
+    def _build_fullscreen_ui(self):
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
+
+        from velune.cli import design
+        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
+        from velune.cli.fullscreen import FullscreenREPLUI
+        from velune.cli.inline_flow import InlineFlow
+        from velune.cli.model_switcher import MODEL_SWITCHER_STYLES, ModelSwitcher
+        from velune.cli.statusbar import STATUS_BAR_STYLES
+        from velune.cli.validators import InlineSyntaxValidator
+
+        style_fragments = {
+            "prompt.arrow": f"{design.ACCENT_SOFT} bold",
+            **STATUS_BAR_STYLES,
+            **PALETTE_STYLES,
+            **MODEL_SWITCHER_STYLES,
+        }
+
+        completer = self._build_completer()
 
         # Multi-step slash-command flows (/connect, /providers) render into the
         # palette's own float and drive the prompt box, instead of each step
@@ -523,24 +565,46 @@ class VeluneREPL:
     # Main loop
     # ------------------------------------------------------------------
 
-    async def run(self) -> None:
+    async def run(self, *, plain: bool = False) -> None:
+        """Run the interactive session.
+
+        ``plain=True`` selects the linear, non-alt-screen mode (``velune
+        --plain``): a normal ``PromptSession`` reading from — and Rich
+        printing straight to — the real terminal with native OS scrollback,
+        instead of the fullscreen ``Application`` that owns the alternate
+        screen buffer. Every turn-handling method (``_handle_prompt``,
+        ``_handle_slash_command``, ``StreamRenderer``, the tool-activity UI)
+        already branches on ``self._fullscreen_ui is None`` for its plain-Rich
+        rendering path — plain mode simply never sets it, rather than
+        needing a second implementation of any of that.
+        """
         from velune.cli.handlers.model import restore_active_model
-
-        ui = self._build_fullscreen_ui()
-        self._fullscreen_ui = ui
-        self.console = ui.console
-        self.runtime.console = ui.console
-        self.container.register_instance("runtime.console", ui.console)
-        self._stream_renderer.attach_fullscreen_ui(ui)
-        ui_task = asyncio.create_task(ui.run(), name="velune.fullscreen_ui")
-        ui_task.add_done_callback(lambda _task: ui.request_exit())
-
-        # From here until teardown, palette-styled steps run inside this UI
-        # rather than in Applications of their own. Uninstalled in the `finally`
-        # below so a `velune setup` in the same process still runs standalone.
         from velune.cli.interactive import host as interactive_host
 
-        interactive_host.install(self._inline_flow)
+        ui = None
+        ui_task: asyncio.Task | None = None
+        session = None
+
+        if plain:
+            session = self._build_plain_session()
+        else:
+            ui = self._build_fullscreen_ui()
+            self._fullscreen_ui = ui
+            self.console = ui.console
+            self.runtime.console = ui.console
+            self.container.register_instance("runtime.console", ui.console)
+            self._stream_renderer.attach_fullscreen_ui(ui)
+            ui_task = asyncio.create_task(ui.run(), name="velune.fullscreen_ui")
+            ui_task.add_done_callback(lambda _task: ui.request_exit())
+
+            # From here until teardown, palette-styled steps render inside
+            # this UI rather than in Applications of their own. Uninstalled
+            # in the `finally` below so a `velune setup` in the same process
+            # still runs standalone. Skipped entirely in --plain mode: there
+            # is no Application for a flow to draw into, so it falls back to
+            # its own standalone-Application path automatically (see
+            # velune.cli.interactive.host's module docstring).
+            interactive_host.install(self._inline_flow)
 
         restore_active_model(self)
         await self._start_episodic_session()
@@ -605,7 +669,7 @@ class VeluneREPL:
         try:
             while not self._exit_requested:
                 try:
-                    raw = await ui.read_input()
+                    raw = await (session.prompt_async() if plain else ui.read_input())
                     from velune.cli.handlers.council import poll_and_render_alerts
 
                     poll_and_render_alerts(self)
@@ -647,16 +711,17 @@ class VeluneREPL:
                     else:
                         self.console.print(render_unexpected_error(e))
         finally:
-            interactive_host.uninstall(self._inline_flow)
+            interactive_host.uninstall(self._inline_flow)  # no-op if never installed
             self._interrupts.uninstall()
             try:
                 await self._shutdown_repl()
             finally:
-                ui.stop()
-                try:
-                    await ui_task
-                except Exception:
-                    pass
+                if ui is not None:
+                    ui.stop()
+                    try:
+                        await ui_task
+                    except Exception:
+                        pass
 
     def _print_interrupted_frame(self) -> None:
         self.console.print("[dim]╭─[/dim] [yellow]Generation interrupted[/yellow]")
@@ -901,6 +966,30 @@ class VeluneREPL:
                 self.active_model = model
                 return model, provider
         return None, None
+
+    def _next_fallback_candidate(
+        self, tried_provider_ids: set[str]
+    ) -> tuple[ModelDescriptor, ModelProvider] | None:
+        """Next configured model/provider not already tried this turn.
+
+        Candidate order follows ``model_registry.list_all()`` (its own
+        provider/cost-aware ordering) filtered to providers not yet attempted
+        and with a usable adapter (a configured key). Returns None once every
+        configured provider has been tried, so the caller surfaces the last
+        real error instead of looping forever.
+        """
+        try:
+            model_registry = self.container.get("runtime.model_registry")
+            provider_registry = self.container.get("runtime.provider_registry")
+        except Exception:
+            return None
+        for candidate_model in model_registry.list_all():
+            if candidate_model.provider_id in tried_provider_ids:
+                continue
+            candidate_provider = provider_registry.get(candidate_model.provider_id)
+            if candidate_provider is not None:
+                return candidate_model, candidate_provider
+        return None
 
     def _load_project_profile(self):
         workspace = self.container.get("runtime.workspace")
@@ -1208,72 +1297,117 @@ class VeluneREPL:
         # Native tool loop first (models that support function calling can act
         # on the workspace); returns None when unsupported/disabled, in which
         # case the legacy streaming path below is used unchanged.
-        from velune.cli.handlers.tool_chat import run_tool_chat
+        #
+        # Wrapped in a fallback loop: a provider/connectivity failure (not a
+        # "this model can't do tools" rejection — see TurnProviderError) on a
+        # turn that hasn't executed any tool yet is safe to silently retry
+        # against the next configured provider, rather than surfacing a raw
+        # error to the user for an outage they had no part in. Once a tool has
+        # run, side effects are already real, so that case still surfaces as
+        # a hard error instead of risking a silent replay elsewhere.
+        from velune.cli.handlers.tool_chat import TurnProviderError, run_tool_chat
+        from velune.core.errors.provider import (
+            ProviderAuthenticationError,
+            ProviderConnectionError,
+            RateLimitError,
+        )
 
-        loop_result = await run_tool_chat(self, model, provider, request)
-        if loop_result is not None:
-            if loop_result.stop_reason == "interrupted":
-                self.console.print()
-                self._print_interrupted_frame()
-                # Tools that already ran changed the workspace. Keep the user
-                # turn and the record of those side effects; only a turn that
-                # did nothing at all is safe to erase.
-                if loop_result.invocations:
-                    from velune.orchestration.tool_loop import format_tool_activity
+        tried_provider_ids = {provider.provider_id}
+        while True:
+            try:
+                loop_result = await run_tool_chat(self, model, provider, request)
+                if loop_result is not None:
+                    if loop_result.stop_reason == "interrupted":
+                        self.console.print()
+                        self._print_interrupted_frame()
+                        # Tools that already ran changed the workspace. Keep the user
+                        # turn and the record of those side effects; only a turn that
+                        # did nothing at all is safe to erase.
+                        if loop_result.invocations:
+                            from velune.orchestration.tool_loop import format_tool_activity
 
-                    activity = format_tool_activity(loop_result.invocations)
-                    if activity:
-                        self._conversation.append(
-                            {
-                                "role": "tool",
-                                "content": activity + "\n[turn interrupted by user]",
-                            }
+                            activity = format_tool_activity(loop_result.invocations)
+                            if activity:
+                                self._conversation.append(
+                                    {
+                                        "role": "tool",
+                                        "content": activity + "\n[turn interrupted by user]",
+                                    }
+                                )
+                            self._autosave(force=True)
+                        elif self._conversation and self._conversation[-1].get("role") == "user":
+                            self._conversation.pop()
+                        return
+                    assistant_text = loop_result.content
+                    tokens_used = loop_result.tokens_used
+
+                    # Persist what the tools actually did. Previously only the final
+                    # assistant text survived the turn, so on the next prompt the model
+                    # had no record that it had read a file or run a command — and read
+                    # the same files again, every turn.
+                    if loop_result.invocations:
+                        from velune.orchestration.tool_loop import format_tool_activity
+
+                        activity = format_tool_activity(loop_result.invocations)
+                        if activity:
+                            self._conversation.append({"role": "tool", "content": activity})
+
+                    if loop_result.stop_reason == "max_turns" and not assistant_text.strip():
+                        assistant_text = (
+                            "[Velune] The tool loop reached its turn limit before the model "
+                            "produced a final answer. Partial work may have been applied — "
+                            "see the tool activity above."
                         )
-                    self._autosave(force=True)
-                elif self._conversation and self._conversation[-1].get("role") == "user":
-                    self._conversation.pop()
-                return
-            assistant_text = loop_result.content
-            tokens_used = loop_result.tokens_used
-
-            # Persist what the tools actually did. Previously only the final
-            # assistant text survived the turn, so on the next prompt the model
-            # had no record that it had read a file or run a command — and read
-            # the same files again, every turn.
-            if loop_result.invocations:
-                from velune.orchestration.tool_loop import format_tool_activity
-
-                activity = format_tool_activity(loop_result.invocations)
-                if activity:
-                    self._conversation.append({"role": "tool", "content": activity})
-
-            if loop_result.stop_reason == "max_turns" and not assistant_text.strip():
-                assistant_text = (
-                    "[Velune] The tool loop reached its turn limit before the model "
-                    "produced a final answer. Partial work may have been applied — "
-                    "see the tool activity above."
-                )
-                self.console.print(f"[yellow]{assistant_text}[/yellow]")
-        else:
-            render = await self._stream_renderer.render(provider, request)
-            full_content = render.full_content
-            tokens_used = render.tokens_used
-            interrupted = render.interrupted
-
-            if interrupted:
-                self.console.print()
-                self._print_interrupted_frame()
-                partial = "".join(full_content)
-                if partial.strip():
-                    self._conversation.append(
-                        {"role": "assistant", "content": partial + "\n\n[response interrupted]"}
-                    )
+                        self.console.print(f"[yellow]{assistant_text}[/yellow]")
                 else:
-                    if self._conversation and self._conversation[-1].get("role") == "user":
-                        self._conversation.pop()
-                return
+                    render = await self._stream_renderer.render(provider, request)
+                    full_content = render.full_content
+                    tokens_used = render.tokens_used
+                    interrupted = render.interrupted
 
-            assistant_text = "".join(full_content)
+                    if interrupted:
+                        self.console.print()
+                        self._print_interrupted_frame()
+                        partial = "".join(full_content)
+                        if partial.strip():
+                            self._conversation.append(
+                                {
+                                    "role": "assistant",
+                                    "content": partial + "\n\n[response interrupted]",
+                                }
+                            )
+                        else:
+                            if self._conversation and self._conversation[-1].get("role") == "user":
+                                self._conversation.pop()
+                        return
+
+                    assistant_text = "".join(full_content)
+                break
+            except (
+                TurnProviderError,
+                ProviderConnectionError,
+                ProviderAuthenticationError,
+                RateLimitError,
+            ) as exc:
+                # The legacy StreamRenderer path never executes tools, so a
+                # bare provider exception from it is always safe to retry
+                # elsewhere; TurnProviderError carries that verdict explicitly
+                # for the tool-loop path, where it isn't always true.
+                safe = exc.safe_to_retry_elsewhere if isinstance(exc, TurnProviderError) else True
+                original = exc.original if isinstance(exc, TurnProviderError) else exc
+                if not safe:
+                    raise original
+                fallback = self._next_fallback_candidate(tried_provider_ids)
+                if fallback is None:
+                    raise original
+                model, provider = fallback
+                tried_provider_ids.add(provider.provider_id)
+                request = request.model_copy(update={"model_id": model.model_id})
+                self.console.print(
+                    f"[dim]{original}[/dim]\n"
+                    f"[yellow]Falling back to {model.model_id} "
+                    f"({model.provider_id})...[/yellow]"
+                )
 
         try:
             _hook_msg = await self._hook_dispatcher.dispatch_message_display(

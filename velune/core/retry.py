@@ -88,7 +88,11 @@ async def retry_async(
             if attempt >= policy.max_attempts:
                 break
 
-            delay = policy._delay(attempt)
+            # A RateLimitError (or any exception carrying a provider-supplied
+            # `retry_after`, e.g. parsed from an HTTP Retry-After header)
+            # knows better than blind exponential backoff how long to wait.
+            retry_after = getattr(exc, "retry_after", None)
+            delay = retry_after if retry_after is not None else policy._delay(attempt)
 
             if bus is not None:
                 await _emit(

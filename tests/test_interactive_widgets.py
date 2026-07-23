@@ -78,6 +78,33 @@ def test_select_widget_footer_hint_reflects_mode():
     assert "Esc back" in single.footer_hint()
 
 
+def _handler_for(kb, key) -> list:
+    """Handlers bound to *key* across every registered binding (order matters:
+    multiple decorators on one function, e.g. @kb.add("up") @kb.add("s-tab"),
+    register separate Binding entries sharing the same handler)."""
+    return [b.handler for b in kb.bindings if key in b.keys]
+
+
+def test_select_widget_mouse_wheel_scrolls_like_arrow_keys():
+    """Mouse wheel previously did nothing at all — mouse_support=True on the
+    hosting Application (runner.py/chrome.py) had no consumer. Scrolling over
+    a select list must move the highlighted row exactly like arrow keys."""
+    from prompt_toolkit.keys import Keys
+
+    w = SelectWidget(title="t", options=_options())
+    kb = w.key_bindings()
+
+    scroll_down_handlers = _handler_for(kb, Keys.ScrollDown)
+    scroll_up_handlers = _handler_for(kb, Keys.ScrollUp)
+    assert scroll_down_handlers and scroll_up_handlers
+
+    fake_event = SimpleNamespace()
+    scroll_down_handlers[0](fake_event)
+    assert w._index == 1
+    scroll_up_handlers[0](fake_event)
+    assert w._index == 0
+
+
 # ── TextInputWidget ──────────────────────────────────────────────────────────
 
 

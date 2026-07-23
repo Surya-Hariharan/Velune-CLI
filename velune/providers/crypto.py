@@ -15,13 +15,16 @@ import base64
 import hashlib
 import logging
 import os
+import sys
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from platformdirs import user_config_dir
 
 logger = logging.getLogger("velune.providers.crypto")
 
@@ -79,9 +82,104 @@ def _get_fallback_key() -> bytes:
     return hasher.digest()
 
 
+def _passphrase_file_path() -> Path:
+    """Where a passphrase entered at the first-run prompt is persisted.
+
+    Only the passphrase's *hash-derived* consumption differs from the env var
+    — the passphrase text itself is stored here so the user is asked exactly
+    once rather than every process start. File permissions (0600 / a
+    current-user-only Windows ACL) are the security boundary, same tier as
+    the credentials file itself — strictly better than the machine-derived
+    fallback this replaces, though not as strong as a real OS keyring.
+    """
+    return Path(user_config_dir("Velune")) / "master.passphrase"
+
+
+def _stored_passphrase() -> str | None:
+    """Passphrase persisted by a previous first-run prompt, if any."""
+    try:
+        text = _passphrase_file_path().read_text(encoding="utf-8").strip()
+        return text or None
+    except OSError:
+        return None
+
+
+def _persist_passphrase(passphrase: str) -> None:
+    """Save *passphrase* so future processes don't re-prompt for it."""
+    path = _passphrase_file_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(passphrase, encoding="utf-8")
+        if os.name == "nt":
+            _restrict_passphrase_file_windows(path)
+        else:
+            path.chmod(0o600)
+    except OSError as e:
+        logger.debug("Could not persist master passphrase (non-fatal): %s", e)
+
+
+def _restrict_passphrase_file_windows(path: Path) -> None:
+    """Best-effort Windows ACL restriction, mirroring keystore.py's credential guard."""
+    import subprocess
+
+    domain = os.environ.get("USERDOMAIN", "")
+    user = os.environ.get("USERNAME", "")
+    if not user:
+        return
+    account = f"{domain}\\{user}" if domain else user
+    try:
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:F"],
+            shell=False,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        logger.debug("Could not restrict ACL on %s (non-fatal)", path, exc_info=True)
+
+
+def _credentials_file_exists() -> bool:
+    return (Path(user_config_dir("Velune")) / "credentials.json").exists()
+
+
+def _prompt_for_passphrase() -> str | None:
+    """Ask the user, once, to set a master passphrase.
+
+    Only runs when stdin is a real terminal — never in tests, CI, or a
+    piped/one-shot invocation, where blocking on input would hang the
+    process. Any failure (no tty despite the check, Ctrl-C, EOF) is treated
+    as "skip" rather than propagated, since declining just means falling
+    back to the existing weak machine-derived key.
+    """
+    if not sys.stdin.isatty():
+        return None
+    try:
+        import getpass
+
+        print(
+            "\nNo OS keyring is available on this system, so Velune cannot "
+            "auto-generate a secure encryption key for your stored API keys.\n"
+            "Set a passphrase now for stronger at-rest protection than the "
+            "machine-derived fallback (press Enter to skip).",
+            file=sys.stderr,
+        )
+        passphrase = getpass.getpass("Master passphrase (blank to skip): ")
+        return passphrase.strip() or None
+    except (EOFError, KeyboardInterrupt):
+        return None
+    except Exception as e:
+        logger.debug("Passphrase prompt failed (non-fatal): %s", e)
+        return None
+
+
 def _passphrase_master_key() -> bytes | None:
-    """Master key derived from ``VELUNE_MASTER_PASSPHRASE``, or None if unset."""
-    passphrase = os.environ.get(_ENV_PASSPHRASE)
+    """Master key derived from a configured passphrase, or None if unset.
+
+    Checks ``VELUNE_MASTER_PASSPHRASE`` first (explicit, session-scoped),
+    then a passphrase persisted by a previous first-run prompt.
+    """
+    passphrase = os.environ.get(_ENV_PASSPHRASE) or _stored_passphrase()
     if not passphrase:
         return None
     return _derive_key_from_passphrase(passphrase, _MASTER_PASSPHRASE_SALT)
@@ -140,6 +238,17 @@ def get_or_create_master_key() -> bytes:
     pk = _passphrase_master_key()
     if pk is not None:
         return pk
+
+    # First run (no credentials store yet), no keyring, no passphrase
+    # configured anywhere: give the user one interactive chance to opt into
+    # passphrase-based encryption before quietly falling back to the weak
+    # machine-derived key for the rest of this store's lifetime. Silently
+    # skipped outside a real terminal (tests, CI, scripted/one-shot runs).
+    if not _credentials_file_exists():
+        chosen = _prompt_for_passphrase()
+        if chosen:
+            _persist_passphrase(chosen)
+            return _derive_key_from_passphrase(chosen, _MASTER_PASSPHRASE_SALT)
 
     global _warned_no_protection
     if not _warned_no_protection:

@@ -12,10 +12,12 @@ from pydantic import SecretStr
 from velune.core.errors.provider import (
     InferenceError,
     ProviderAuthenticationError,
+    RateLimitError,
 )
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk, ToolCall
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._http_errors import parse_retry_after
 from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
 
@@ -45,6 +47,26 @@ class AnthropicProvider(ModelProvider):
     @property
     def provider_id(self) -> str:
         return "anthropic"
+
+    def _raise_provider_error(self, exc: httpx.HTTPError, action: str) -> None:
+        """Map an httpx failure to the right typed error.
+
+        A 401/403 is a verdict about the key; a 429 is a rate limit whose
+        ``Retry-After`` header (when present) should drive the retry delay
+        instead of blind exponential backoff — see
+        :class:`velune.providers.retrying.RetryingProvider`. Everything else
+        is a generic :class:`InferenceError`.
+        """
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
+            raise ProviderAuthenticationError(
+                f"Anthropic rejected the API key (HTTP {exc.response.status_code}) during {action}."
+            ) from exc
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+            raise RateLimitError(
+                f"Anthropic rate-limited (HTTP 429) during {action}.",
+                retry_after=parse_retry_after(exc.response.headers),
+            ) from exc
+        raise InferenceError(f"Anthropic {action} failed: {exc}") from exc
 
     async def initialize(self) -> None:
         """Initialize HTTP client with Anthropic specific headers."""
@@ -165,7 +187,8 @@ class AnthropicProvider(ModelProvider):
                 tool_calls=tool_calls or None,
             )
         except httpx.HTTPError as e:
-            raise InferenceError(f"Anthropic message completion failed: {e}")
+            self._raise_provider_error(e, "completion")
+            raise  # unreachable — _raise_provider_error always raises
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         """Perform streaming completion."""
@@ -223,7 +246,8 @@ class AnthropicProvider(ModelProvider):
                     metadata={"tool_calls": tool_calls},
                 )
         except httpx.HTTPError as e:
-            raise InferenceError(f"Anthropic stream failed: {e}")
+            self._raise_provider_error(e, "stream")
+            raise  # unreachable — _raise_provider_error always raises
 
     def _build_payload(self, request: InferenceRequest) -> dict:
         """Build the Anthropic API payload for *request*.

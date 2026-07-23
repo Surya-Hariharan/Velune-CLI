@@ -125,14 +125,14 @@ async def build_turn_context(
     #   - RETRIEVED_CONTEXT: three-brain fan-out (semantic/episodic/kg)
     #   - COGNITIVE_CONTINUITY: lineage decisions/failures
     #   - REPOSITORY_SNAPSHOT / ARCHITECTURAL_DRIFT
-    hybrid_chunks, three_brain_chunks, continuity_chunk, repo_chunks = await asyncio.gather(
+    hybrid_chunks, memory_chunks, continuity_chunk, repo_chunks = await asyncio.gather(
         _retrieve_hybrid(repl, text, depth, intent, confidence),
-        _retrieve_three_brain(repl, text, workspace, depth),
+        _retrieve_via_memory_lifecycle(repl, text, workspace, depth, budget.retrieval_allocation),
         _lineage_chunk(repl, text),
         _repository_snapshot_chunks(repl, repo_snapshot_budget),
     )
     chunks.extend(hybrid_chunks)
-    chunks.extend(three_brain_chunks)
+    chunks.extend(memory_chunks)
     if continuity_chunk is not None:
         chunks.append(continuity_chunk)
     chunks.extend(repo_chunks)
@@ -323,73 +323,66 @@ async def _retrieve_hybrid(
     return chunks
 
 
-async def _retrieve_three_brain(
-    repl: VeluneREPL, text: str, workspace: Path, depth: int
-) -> list[ContextChunk]:
-    """Query the single ThreeBrainCoordinator instance for semantic/episodic/kg context.
+_MEMORY_SOURCE_LABELS = {
+    "semantic": "semantic_memory",
+    "episodic": "episodic_memory",
+    "kg": "knowledge_graph",
+}
+_MEMORY_SOURCE_PRIORITY = {
+    "semantic": 0.5,
+    "episodic": 0.4,
+    "kg": 0.6,
+}
 
-    ``working_hits`` are intentionally never converted to chunks here:
-    ``repl._conversation`` already supplies WORKING_MEMORY directly, and once
-    ``record_turn()`` starts filling ``runtime.working_memory`` in parallel,
-    including its hits too would double-count the same turns.
+
+async def _retrieve_via_memory_lifecycle(
+    repl: VeluneREPL, text: str, workspace: Path, depth: int, budget_tokens: int
+) -> list[ContextChunk]:
+    """Vitality-aware semantic/episodic/kg retrieval via ``MemoryLifecycleManager``.
+
+    Previously this queried ``ThreeBrainCoordinator`` directly and reimplemented
+    a cruder version of trust shaping inline (flat 0.6-0.7 trust scores, no
+    age-based decay). ``MemoryLifecycleManager.retrieve()`` — built for exactly
+    this and already used elsewhere in this file for lineage warnings — wraps
+    the same coordinator (they're the same injected instance; see
+    ``velune/memory/subsystems.py::_create_memory_lifecycle``) and adds the
+    LIVE/ZOMBIE/ARCHIVED vitality classification and trust decay it was
+    designed for, so a stale semantic hit from a month ago no longer carries
+    the same weight as one from the current session.
+
+    ``working`` results are dropped: ``repl._conversation`` already supplies
+    WORKING_MEMORY directly, and once ``record_turn()`` fills
+    ``runtime.working_memory`` too, including its hits would double-count the
+    same turns.
     """
     try:
-        coordinator = repl.container.get("runtime.three_brain_coordinator")
+        manager = repl.container.get("runtime.memory_lifecycle")
     except Exception:
         return []
-    if not coordinator:
+    if not manager:
         return []
 
     try:
-        result = await coordinator.query(
-            text,
-            session_id=repl._episodic_session_id or "unknown",
-            workspace_root=str(workspace),
-            semantic_limit=depth,
-            episodic_limit=depth,
+        retrieved = await manager.retrieve(
+            text, workspace_root=str(workspace), budget=budget_tokens, depth=depth
         )
     except Exception as exc:
-        _log.debug("ThreeBrainCoordinator query failed (non-fatal): %s", exc)
+        _log.debug("MemoryLifecycleManager retrieval failed (non-fatal): %s", exc)
         return []
 
     chunks: list[ContextChunk] = []
-    for mem in result.semantic_hits:
-        content = getattr(mem, "content", "")
-        if not content:
+    for result in retrieved.results:
+        if result.source_type == "working" or not result.content:
             continue
         chunks.append(
             ContextChunk(
                 section=ContextSection.RETRIEVED_CONTEXT,
-                content=content,
-                token_count=estimate_tokens(content),
-                source="semantic_memory",
-                trust_score=max(0.0, min(1.0, getattr(mem, "trust_score", 0.6))),
-                priority=0.5,
-            )
-        )
-    for turn in result.episodic_hits:
-        content = getattr(turn, "content", "")
-        if not content:
-            continue
-        chunks.append(
-            ContextChunk(
-                section=ContextSection.RETRIEVED_CONTEXT,
-                content=content,
-                token_count=estimate_tokens(content),
-                source="episodic_memory",
-                trust_score=0.7,
-                priority=0.4,
-            )
-        )
-    if result.kg_context:
-        chunks.append(
-            ContextChunk(
-                section=ContextSection.RETRIEVED_CONTEXT,
-                content=result.kg_context,
-                token_count=estimate_tokens(result.kg_context),
-                source="knowledge_graph",
-                trust_score=0.7,
-                priority=0.6,
+                content=result.content,
+                token_count=estimate_tokens(result.content),
+                source=_MEMORY_SOURCE_LABELS.get(result.source_type, result.source_type),
+                trust_score=max(0.0, min(1.0, result.trust_score)),
+                priority=_MEMORY_SOURCE_PRIORITY.get(result.source_type, 0.5),
+                metadata={"vitality": result.vitality, "attribution": result.attribution},
             )
         )
     return chunks

@@ -40,7 +40,7 @@ class MemoryDisplayView:
                         + " days)\n"
                     ),
                     (
-                        "[bold blue]Tier 3: Semantic Qdrant[/bold blue]  ──► Vector code snippet indices (Similarity Threshold: "
+                        "[bold blue]Tier 3: Semantic LanceDB[/bold blue]  ──► Vector code snippet indices (Similarity Threshold: "
                         + str(stats.get("semantic_threshold", 0.85))
                         + ")\n"
                     ),
@@ -59,6 +59,55 @@ class MemoryDisplayView:
                 title_align="left",
             )
         )
+
+    def render_memory_health(self, health: Any) -> None:
+        """Render live ``MemoryHealth`` metrics — the one table every memory-
+        health surface (``velune memory stats``, the REPL's ``/memory``, and
+        ``velune doctor``'s one-line summary) now derives its numbers from,
+        instead of each hand-rolling its own (previously disagreeing) view.
+
+        Tier 3 is LanceDB, not Qdrant — the semantic tier migrated away from
+        Qdrant a while back, and the older label here (and in the REPL's
+        ``/memory``) was never updated, quietly describing a store this
+        system no longer uses.
+        """
+        table = Table(
+            title="[bold green]Memory Health[/bold green]",
+            box=ROUNDED,
+            border_style="green",
+            expand=True,
+        )
+        table.add_column("Tier", style="cyan")
+        table.add_column("Status", style="dim")
+        table.add_column("Count / Size", style="white", justify="right")
+        table.add_column("Notes", style="dim")
+
+        table.add_row(
+            "Tier 1 · Working",
+            "[green]active[/green]",
+            str(health.working_memory_turns),
+            "in-process turn buffer",
+        )
+        table.add_row(
+            "Tier 2 · Episodic",
+            "[green]active[/green]" if health.episodic_sessions else "[dim]empty[/dim]",
+            str(health.episodic_sessions),
+            "SQLite persisted",
+        )
+        table.add_row(
+            "Tier 3 · Semantic",
+            "[green]active[/green]" if health.semantic_indexed_count else "[dim]empty[/dim]",
+            str(health.semantic_indexed_count),
+            f"LanceDB · {health.lancedb_size_mb:.1f} MB",
+        )
+        table.add_row(
+            "Embedding queue",
+            "[yellow]backlogged[/yellow]" if health.embedding_queue_depth else "[green]clear[/green]",
+            str(health.embedding_queue_depth),
+            "pending semantic-index writes",
+        )
+        self.console.print(table)
+        self.console.print()
 
     def render_memory_records_table(self, records: list[dict[str, Any]], memory_type: str) -> None:
         """Render a structured table showing registered records across specific memory tiers."""

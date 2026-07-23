@@ -81,8 +81,14 @@ class StreamRenderer:
         from rich.live import Live
 
         from velune.cli.rendering import CustomMarkdown, MarkdownStreamBuffer, StreamStats
+        from velune.context.cache.manager import make_cache_manager
 
         result = RenderResult()
+        # NoOp for every provider but Anthropic, so this is a dict-lookup no-op
+        # cost on the fallback path used when the tool loop is unavailable
+        # (model/provider without function calling, or native_tools disabled).
+        cache_manager = make_cache_manager(getattr(provider, "provider_id", ""))
+        request = cache_manager.prepare(request)
 
         try:
             async with self._interrupts.foreground():
@@ -106,6 +112,7 @@ class StreamRenderer:
                         response = await provider.infer(request)
                         result.full_content.append(response.content)
                         result.tokens_used = response.tokens_used
+                        cache_manager.record(response.metadata)
                         if first_token_at is None:
                             first_token_at = time.perf_counter()
                         self._fullscreen_ui.update_assistant(response.content, final=True)
@@ -158,6 +165,7 @@ class StreamRenderer:
                     self._status_state.last_tokens_per_sec = None
                     result.full_content.append(response.content)
                     result.tokens_used = response.tokens_used
+                    cache_manager.record(response.metadata)
                     self._console.print(CustomMarkdown(response.content))
 
         except asyncio.CancelledError:

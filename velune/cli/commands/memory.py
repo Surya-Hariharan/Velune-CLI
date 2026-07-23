@@ -30,14 +30,25 @@ memory_cmd = typer.Typer(help="Inspect, clear, or compact AI memory tiers.")
 
 @memory_cmd.command("stats")
 def memory_stats(ctx: typer.Context) -> None:
-    """Show visual memory map and registered policy statistics."""
+    """Show live memory health plus registered policy configuration.
+
+    Health metrics (session/index counts, queue depth, store size) come from
+    ``MemoryLifecycleManager.health()`` — the same call ``velune doctor`` and
+    the REPL's ``/memory`` use, so all three agree on the numbers.
+    """
     cli_context = ctx.obj
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
+    from velune.core.event_loop import submit
+
+    submit(_memory_stats_async(cli_context))
+
+
+async def _memory_stats_async(cli_context: CLIContext) -> None:
     config = cli_context.config
 
-    # Compile memory statistics block
+    # Policy configuration — distinct from health, which is live per-tier data.
     stats = {
         "workspace": str(cli_context.workspace),
         "working_memory_ttl": config.memory.working_memory_ttl,
@@ -46,13 +57,35 @@ def memory_stats(ctx: typer.Context) -> None:
         "graph_enabled": config.memory.graph_enabled,
     }
 
+    health = None
+    lifecycle = cli_context.container.get("runtime.lifecycle")
+    try:
+        await lifecycle.startup()
+        manager = cli_context.container.get("runtime.memory_lifecycle")
+        if manager:
+            health = await manager.health()
+    except Exception as exc:
+        if not cli_context.json_mode:
+            console.print(f"[yellow]Could not read live memory health: {exc}[/yellow]")
+    finally:
+        # Without this, the SQLite pool / LanceDB store / embedding pipeline
+        # startup() just opened above keep background tasks alive and the
+        # process never exits — memory_inspect (right below) has the same
+        # startup()/shutdown() pairing for the same reason.
+        await lifecycle.shutdown()
+
     if cli_context.json_mode:
         import json
 
-        print(json.dumps(stats))
+        payload = dict(stats)
+        if health is not None:
+            payload["health"] = health.to_dict()
+        print(json.dumps(payload))
         return
 
     display = MemoryDisplayView(console)
+    if health is not None:
+        display.render_memory_health(health)
     display.render_memory_architecture(stats)
 
 

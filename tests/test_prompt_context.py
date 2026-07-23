@@ -18,13 +18,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from velune.cli.handlers.prompt_context import (
     _repository_snapshot_chunks,
     _retrieve_hybrid,
-    _retrieve_three_brain,
+    _retrieve_via_memory_lifecycle,
     build_turn_context,
 )
 from velune.cli.modes import ModeConfig, ModeManager, SessionMode
 from velune.cognition.intent import IntentType
 from velune.context.sections import ContextSection
-from velune.memory.three_brain import ThreeBrainResult
+from velune.memory.lifecycle import RetrievedContext, RetrievedResult
 from velune.retrieval.schemas import (
     RetrievalDocument,
     RetrievalHit,
@@ -186,43 +186,46 @@ async def test_retrieve_hybrid_clips_out_of_range_scores_to_valid_trust_score():
 
 
 # ---------------------------------------------------------------------------
-# _retrieve_three_brain — working_hits double-count regression guard
+# _retrieve_via_memory_lifecycle — vitality-aware retrieval, working_hits
+# double-count regression guard
 # ---------------------------------------------------------------------------
 
 
-async def test_three_brain_drops_working_hits_to_avoid_double_count():
+async def test_memory_lifecycle_drops_working_results_to_avoid_double_count():
     """repl._conversation already supplies WORKING_MEMORY directly; once
-    record_turn() starts filling runtime.working_memory too, converting
-    working_hits into chunks here would double-count the same turns."""
-    coordinator = MagicMock()
-    coordinator.query = AsyncMock(
-        return_value=ThreeBrainResult(
-            working_hits=[SimpleNamespace(content="should never appear", role="user")],
-            semantic_hits=[],
-            episodic_hits=[],
-            kg_context=None,
+    record_turn() starts filling runtime.working_memory too, converting a
+    "working" result into a chunk here would double-count the same turns."""
+    manager = MagicMock()
+    manager.retrieve = AsyncMock(
+        return_value=RetrievedContext(
+            results=[
+                RetrievedResult(content="should never appear", source_type="working"),
+            ]
         )
     )
-    repl = _make_repl({"runtime.three_brain_coordinator": coordinator})
-    chunks = await _retrieve_three_brain(
-        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+    repl = _make_repl({"runtime.memory_lifecycle": manager})
+    chunks = await _retrieve_via_memory_lifecycle(
+        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
     )
     assert chunks == []
 
 
-async def test_three_brain_converts_semantic_episodic_and_kg_hits():
-    coordinator = MagicMock()
-    coordinator.query = AsyncMock(
-        return_value=ThreeBrainResult(
-            working_hits=[],
-            semantic_hits=[SimpleNamespace(content="semantic memory", trust_score=0.8)],
-            episodic_hits=[SimpleNamespace(content="episodic memory")],
-            kg_context="Graph: 10 files",
+async def test_memory_lifecycle_converts_semantic_episodic_and_kg_results():
+    manager = MagicMock()
+    manager.retrieve = AsyncMock(
+        return_value=RetrievedContext(
+            results=[
+                RetrievedResult(
+                    content="semantic memory", source_type="semantic", trust_score=0.8
+                ),
+                RetrievedResult(content="episodic memory", source_type="episodic"),
+                RetrievedResult(content="Graph: 10 files", source_type="kg"),
+            ]
         )
     )
-    repl = _make_repl({"runtime.three_brain_coordinator": coordinator})
-    chunks = await _retrieve_three_brain(
-        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+    repl = _make_repl({"runtime.memory_lifecycle": manager})
+    chunks = await _retrieve_via_memory_lifecycle(
+        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
     )
 
     sources = {c.source for c in chunks}
@@ -230,23 +233,67 @@ async def test_three_brain_converts_semantic_episodic_and_kg_hits():
     assert all(c.section == ContextSection.RETRIEVED_CONTEXT for c in chunks)
 
 
-async def test_three_brain_degrades_silently_when_coordinator_missing():
-    repl = _make_repl({"runtime.three_brain_coordinator": None})
+async def test_memory_lifecycle_carries_vitality_into_chunk_metadata():
+    """The whole point of routing through MemoryLifecycleManager instead of
+    querying ThreeBrainCoordinator directly: a stale hit's vitality
+    classification (and its trust decay) must survive into the chunk."""
+    manager = MagicMock()
+    manager.retrieve = AsyncMock(
+        return_value=RetrievedContext(
+            results=[
+                RetrievedResult(
+                    content="old note",
+                    source_type="semantic",
+                    trust_score=0.2,
+                    vitality="archived",
+                    attribution="32 days ago",
+                ),
+            ]
+        )
+    )
+    repl = _make_repl({"runtime.memory_lifecycle": manager})
+    chunks = await _retrieve_via_memory_lifecycle(
+        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
+    )
+
+    assert len(chunks) == 1
+    assert chunks[0].trust_score == 0.2
+    assert chunks[0].metadata["vitality"] == "archived"
+    assert chunks[0].metadata["attribution"] == "32 days ago"
+
+
+async def test_memory_lifecycle_passes_budget_and_depth_through():
+    manager = MagicMock()
+    manager.retrieve = AsyncMock(return_value=RetrievedContext())
+    repl = _make_repl({"runtime.memory_lifecycle": manager})
+
+    await _retrieve_via_memory_lifecycle(
+        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=7, budget_tokens=3000
+    )
+
+    manager.retrieve.assert_awaited_once()
+    _, kwargs = manager.retrieve.call_args
+    assert kwargs["depth"] == 7
+    assert kwargs["budget"] == 3000
+
+
+async def test_memory_lifecycle_degrades_silently_when_manager_missing():
+    repl = _make_repl({"runtime.memory_lifecycle": None})
     assert (
-        await _retrieve_three_brain(
-            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+        await _retrieve_via_memory_lifecycle(
+            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
         )
         == []
     )
 
 
-async def test_three_brain_swallows_query_errors():
-    coordinator = MagicMock()
-    coordinator.query = AsyncMock(side_effect=RuntimeError("boom"))
-    repl = _make_repl({"runtime.three_brain_coordinator": coordinator})
+async def test_memory_lifecycle_swallows_retrieve_errors():
+    manager = MagicMock()
+    manager.retrieve = AsyncMock(side_effect=RuntimeError("boom"))
+    repl = _make_repl({"runtime.memory_lifecycle": manager})
     assert (
-        await _retrieve_three_brain(
-            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5
+        await _retrieve_via_memory_lifecycle(
+            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
         )
         == []
     )
@@ -313,7 +360,6 @@ def _container_map(**overrides):
     base = {
         "runtime.workspace": "/ws",
         "runtime.retrieval": None,
-        "runtime.three_brain_coordinator": None,
         "runtime.memory_lifecycle": None,
         "runtime.repository_cognition": None,
         "runtime.firewall": None,
@@ -332,18 +378,18 @@ async def test_fresh_repo_first_prompt_does_not_crash():
 
 
 async def test_debug_intent_biases_toward_deeper_retrieval_than_generate():
-    coordinator = MagicMock()
-    coordinator.query = AsyncMock(return_value=ThreeBrainResult())
-    repl = _make_repl(_container_map(**{"runtime.three_brain_coordinator": coordinator}))
+    manager = MagicMock()
+    manager.retrieve = AsyncMock(return_value=RetrievedContext())
+    repl = _make_repl(_container_map(**{"runtime.memory_lifecycle": manager}))
 
     await build_turn_context(repl, "Traceback (most recent call last): KeyError: 'x'", _model())
-    debug_call = coordinator.query.call_args
-    coordinator.query.reset_mock()
+    debug_call = manager.retrieve.call_args
+    manager.retrieve.reset_mock()
 
     await build_turn_context(repl, "write a new function to add two numbers", _model())
-    generate_call = coordinator.query.call_args
+    generate_call = manager.retrieve.call_args
 
-    assert debug_call.kwargs["semantic_limit"] > generate_call.kwargs["semantic_limit"]
+    assert debug_call.kwargs["depth"] > generate_call.kwargs["depth"]
 
 
 async def test_refactor_intent_biases_repository_snapshot_budget():
@@ -367,16 +413,16 @@ async def test_refactor_intent_biases_repository_snapshot_budget():
     assert captured_budgets[0] > captured_budgets[1]
 
 
-async def test_retrieval_depth_from_mode_flows_into_coordinator_query():
-    coordinator = MagicMock()
-    coordinator.query = AsyncMock(return_value=ThreeBrainResult())
+async def test_retrieval_depth_from_mode_flows_into_memory_lifecycle_retrieve():
+    manager = MagicMock()
+    manager.retrieve = AsyncMock(return_value=RetrievedContext())
     repl = _make_repl(
-        _container_map(**{"runtime.three_brain_coordinator": coordinator}),
+        _container_map(**{"runtime.memory_lifecycle": manager}),
         mode_config=_mode_config(retrieval_depth=20),
     )
 
     await build_turn_context(repl, "what does this function do?", _model())  # EXPLAIN → full depth
-    assert coordinator.query.call_args.kwargs["semantic_limit"] == 20
+    assert manager.retrieve.call_args.kwargs["depth"] == 20
 
 
 async def test_compression_runs_only_when_mode_enables_it():

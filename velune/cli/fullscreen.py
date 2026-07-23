@@ -30,6 +30,7 @@ from prompt_toolkit.validation import Validator
 from rich.console import Console
 
 from velune.cli import design
+from velune.cli.clipboard import copy_to_clipboard, extract_last_code_block
 from velune.cli.home import HOME_STYLES, HomeState, render_home
 from velune.cli.rendering.markdown import CustomMarkdown, MarkdownStreamBuffer
 from velune.cli.rendering.segments_to_pt import render_to_fragments
@@ -307,6 +308,13 @@ class FullscreenREPLUI:
         self._scroll_anchor: int | None = None
         self._stream_start: int | None = None
         self._stream_text = ""
+        # Full text of the most recently completed assistant turn — captured
+        # in `finish_assistant()` before `_stream_text` resets, so Ctrl+Y /
+        # Ctrl+G can copy it after the streaming state that produced it is
+        # long gone. A multi-turn tool-loop response overwrites this at each
+        # `finish_assistant()` call, so it always ends up holding the final
+        # answer segment rather than intermediate tool-narration text.
+        self._last_response_text = ""
         self._last_stream_render: float = 0.0
         self._running = False
         self._app: Application[None] | None = None
@@ -489,6 +497,16 @@ class FullscreenREPLUI:
         @kb.add("c-end", eager=True)
         def _(event) -> None:
             self.scroll_to_bottom()
+
+        # Clipboard actions via OSC 52 — works over SSH/tmux without any
+        # platform clipboard tool, since the terminal itself does the copy.
+        @kb.add("c-y", eager=True)
+        def _(event) -> None:
+            self.copy_last_response()
+
+        @kb.add("c-g", eager=True)
+        def _(event) -> None:
+            self.copy_last_code_block()
 
         # Named (not built anonymously in the HSplit list below) so scroll
         # methods can nudge `.vertical_scroll` directly — see
@@ -759,6 +777,8 @@ class FullscreenREPLUI:
 
         if self._stream_start is not None:
             self._render_stream_markdown(final=True)
+        if self._stream_text:
+            self._last_response_text = self._stream_text
         self._stream_start = None
         self._stream_text = ""
         self.set_busy_hint(False)
@@ -769,6 +789,35 @@ class FullscreenREPLUI:
         if self._busy != active:
             self._busy = active
             self.invalidate()
+
+    # ── Clipboard actions (OSC 52) ────────────────────────────────────
+
+    def copy_last_response(self) -> bool:
+        """Copy the last completed assistant response to the system clipboard."""
+        if not self._last_response_text:
+            self.console.print("[dim]Nothing to copy yet.[/dim]")
+            return False
+        ok = copy_to_clipboard(self._app, self._last_response_text)
+        self.console.print(
+            "[dim]Response copied to clipboard.[/dim]"
+            if ok
+            else "[dim]Clipboard copy failed — terminal may not support OSC 52.[/dim]"
+        )
+        return ok
+
+    def copy_last_code_block(self) -> bool:
+        """Copy the last fenced code block in the last assistant response."""
+        block = extract_last_code_block(self._last_response_text)
+        if not block:
+            self.console.print("[dim]No code block found in the last response.[/dim]")
+            return False
+        ok = copy_to_clipboard(self._app, block)
+        self.console.print(
+            "[dim]Code block copied to clipboard.[/dim]"
+            if ok
+            else "[dim]Clipboard copy failed — terminal may not support OSC 52.[/dim]"
+        )
+        return ok
 
     # ── Tool-activity cards ──────────────────────────────────────────
 
@@ -928,6 +977,7 @@ class FullscreenREPLUI:
         self._lines.clear()
         self._stream_start = None
         self._stream_text = ""
+        self._last_response_text = ""
         self._scroll_anchor = None
         self._history_started = False
         self.invalidate()

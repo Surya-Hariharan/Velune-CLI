@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
 from velune.core.errors.provider import InferenceError, ProviderAuthenticationError
-from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
+from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk, ToolCall
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
 from velune.providers.base import ModelProvider
@@ -101,22 +103,106 @@ GEMINI_MODELS = _MODELS
 
 
 def _build_contents(messages: list[dict]) -> tuple[list[dict], str]:
-    """Split messages into Gemini *contents* + system instruction text."""
+    """Split messages into Gemini *contents* + system instruction text.
+
+    Assistant ``tool_calls`` become ``functionCall`` parts; ``tool``-role
+    messages become ``functionResponse`` parts. Gemini's functionResponse
+    needs the function *name*, not an id, so a running id→name map (built
+    from each assistant turn's tool_calls) resolves the correlating name for
+    the ``tool_call_id`` on each subsequent tool message.
+    """
     system_parts: list[str] = []
     contents: list[dict] = []
+    id_to_name: dict[str, str] = {}
     for msg in messages:
         role = msg.get("role", "user")
-        text = msg.get("content", "")
+        text = msg.get("content") or ""
         if role == "system":
             system_parts.append(text)
+        elif role == "assistant":
+            parts: list[dict] = []
+            if text:
+                parts.append({"text": text})
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function", {}) or {}
+                args_raw = fn.get("arguments", "")
+                if isinstance(args_raw, dict):
+                    args = args_raw
+                else:
+                    try:
+                        args = json.loads(args_raw) if args_raw else {}
+                    except json.JSONDecodeError:
+                        args = {}
+                name = fn.get("name", "")
+                id_to_name[tc.get("id", "")] = name
+                parts.append({"functionCall": {"name": name, "args": args}})
+            contents.append({"role": "model", "parts": parts or [{"text": ""}]})
+        elif role == "tool":
+            name = id_to_name.get(msg.get("tool_call_id", ""), "")
+            contents.append(
+                {
+                    "role": "user",
+                    "parts": [{"functionResponse": {"name": name, "response": {"content": text}}}],
+                }
+            )
         else:
-            gemini_role = "model" if role == "assistant" else "user"
-            contents.append({"role": gemini_role, "parts": [{"text": text}]})
+            contents.append({"role": "user", "parts": [{"text": text}]})
     return contents, "\n".join(system_parts)
+
+
+def _to_gemini_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Convert OpenAI function-format tool definitions to Gemini's shape."""
+    if not tools:
+        return None
+    declarations = []
+    for t in tools:
+        fn = t.get("function", t)
+        declarations.append(
+            {
+                "name": fn.get("name", ""),
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+            }
+        )
+    return [{"functionDeclarations": declarations}] if declarations else None
+
+
+def _to_gemini_tool_config(tool_choice: str | dict[str, Any] | None) -> dict[str, Any] | None:
+    """Convert an OpenAI-style ``tool_choice`` to Gemini's ``toolConfig``."""
+    if tool_choice is None or tool_choice == "auto":
+        return None
+    if tool_choice == "none":
+        return {"functionCallingConfig": {"mode": "NONE"}}
+    if tool_choice == "required":
+        return {"functionCallingConfig": {"mode": "ANY"}}
+    if isinstance(tool_choice, dict):
+        name = (tool_choice.get("function") or {}).get("name")
+        if name:
+            return {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": [name]}}
+    return None
+
+
+def _parse_gemini_tool_calls(parts: list[dict[str, Any]]) -> list[ToolCall] | None:
+    """Extract ``functionCall`` parts into normalized ToolCalls (Gemini has no call IDs)."""
+    calls = [
+        ToolCall(
+            id=f"call_{uuid.uuid4().hex[:12]}",
+            name=p["functionCall"].get("name", ""),
+            arguments=p["functionCall"].get("args") or {},
+        )
+        for p in parts
+        if "functionCall" in p
+    ]
+    return calls or None
 
 
 class GoogleProvider(ModelProvider):
     """Google Gemini provider using the Generative Language REST API."""
+
+    # Gemini's SSE stream emits a whole functionCall part per chunk (not
+    # fragmented like OpenAI's delta.tool_calls), so accumulation across the
+    # stream and a final metadata["tool_calls"] chunk is straightforward.
+    SUPPORTS_STREAMING_TOOL_CALLS = True
 
     def __init__(self, api_key: str | None = None) -> None:
         self._api_key = api_key or get_key("google")
@@ -142,6 +228,12 @@ class GoogleProvider(ModelProvider):
         }
         if system_text:
             payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+        gemini_tools = _to_gemini_tools(request.tools)
+        if gemini_tools:
+            payload["tools"] = gemini_tools
+            tool_config = _to_gemini_tool_config(request.tool_choice)
+            if tool_config:
+                payload["toolConfig"] = tool_config
         return payload
 
     @property
@@ -181,14 +273,19 @@ class GoogleProvider(ModelProvider):
             latency = (time.perf_counter() - start) * 1000.0
 
             candidate = data.get("candidates", [{}])[0]
-            text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))
+            parts = candidate.get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts if "text" in p)
             usage = data.get("usageMetadata", {})
+            tool_calls = _parse_gemini_tool_calls(parts)
             return InferenceResponse(
                 content=text,
                 model_id=request.model_id,
-                finish_reason=(candidate.get("finishReason") or "STOP").lower(),
+                finish_reason=(
+                    "tool_calls" if tool_calls else (candidate.get("finishReason") or "STOP").lower()
+                ),
                 tokens_used=usage.get("totalTokenCount", 0),
                 latency_ms=latency,
+                tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
             raise InferenceError(f"Google Gemini inference failed: {e}")
@@ -201,6 +298,7 @@ class GoogleProvider(ModelProvider):
         try:
             url = f"/models/{request.model_id}:streamGenerateContent"
             params = {"alt": "sse"}
+            collected_calls: list[ToolCall] = []
             async with self.client.stream("POST", url, json=payload, params=params) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
@@ -210,7 +308,10 @@ class GoogleProvider(ModelProvider):
                         data = json.loads(line[6:])
                         candidate = data.get("candidates", [{}])[0]
                         parts = candidate.get("content", {}).get("parts", [])
-                        text = "".join(p.get("text", "") for p in parts)
+                        text = "".join(p.get("text", "") for p in parts if "text" in p)
+                        new_calls = _parse_gemini_tool_calls(parts)
+                        if new_calls:
+                            collected_calls.extend(new_calls)
                         finish = candidate.get("finishReason")
                         yield StreamChunk(
                             content=text,
@@ -218,6 +319,13 @@ class GoogleProvider(ModelProvider):
                         )
                     except (json.JSONDecodeError, IndexError):
                         continue
+
+            if collected_calls:
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": collected_calls},
+                )
         except httpx.HTTPError as e:
             raise InferenceError(f"Google Gemini stream failed: {e}")
 

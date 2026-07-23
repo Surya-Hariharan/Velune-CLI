@@ -207,6 +207,50 @@ class SessionStore:
         tmp.replace(path)
         return True
 
+    def import_session(
+        self,
+        data: dict,
+        *,
+        workspace: str,
+        session_id: str | None = None,
+    ) -> SessionMeta:
+        """Import a single conversation snapshot as a new local session.
+
+        Distinct from ``velune backup``/``restore``, which snapshot and
+        restore the *entire* store (every session, plus config/providers/
+        memory/trust) as one archive. This takes one already-extracted
+        conversation — the same ``{"meta": {...}, "conversation": [...]}``
+        shape ``save()`` writes, e.g. a file copied from another machine's
+        ``~/.velune/sessions/`` or pulled out of a backup archive's
+        ``sessions/`` folder — and adds it here as a new session.
+
+        Always re-tagged to *workspace*: an imported conversation is being
+        brought INTO the current project, not restored onto the machine it
+        came from. A source id that collides with an existing local session
+        gets a fresh one minted instead, so importing can never silently
+        overwrite something already here.
+        """
+        conversation = data.get("conversation")
+        if not isinstance(conversation, list):
+            raise ValueError("Import file has no 'conversation' array.")
+
+        meta_raw = data.get("meta") or {}
+        sid = session_id or meta_raw.get("id") or uuid.uuid4().hex[:8]
+        if self.load_meta(sid) is not None:
+            sid = uuid.uuid4().hex[:8]
+
+        return self.save(
+            conversation,
+            workspace=workspace,
+            model_id=meta_raw.get("model_id", "unknown"),
+            mode=meta_raw.get("mode", "normal"),
+            title=meta_raw.get("title"),
+            tags=meta_raw.get("tags"),
+            total_tokens=meta_raw.get("total_tokens", 0),
+            session_id=sid,
+            summary=meta_raw.get("summary"),
+        )
+
     def export_markdown(self, session_id: str) -> str | None:
         loaded = self.load(session_id)
         if loaded is None:

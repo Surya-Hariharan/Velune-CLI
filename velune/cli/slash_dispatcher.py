@@ -535,8 +535,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="session",
             aliases=["s"],
-            description="Pick, resume, save, or export sessions (no args = interactive picker)",
-            usage="/session [list|resume <id>|summary <id>|save|export]",
+            description="Pick, resume, save, export, or import sessions (no args = interactive picker)",
+            usage="/session [list|resume <id>|summary <id>|save|export|import <path>]",
             handler=repl._cmd_session,
             examples=("/session", "/session list", "/session resume", "/session save"),
             search_terms=(
@@ -546,6 +546,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "save session",
                 "past sessions",
                 "switch session",
+                "import conversation",
             ),
             shortcut="/s",
         )
