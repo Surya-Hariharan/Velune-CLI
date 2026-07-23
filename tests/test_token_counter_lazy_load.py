@@ -58,7 +58,9 @@ def test_load_failure_is_cached_not_retried_every_call(monkeypatch):
     tc = _fresh_token_counter_module()
 
     call_count = 0
-    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    real_import = (
+        __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    )
 
     def _fake_import(name, *args, **kwargs):
         nonlocal call_count

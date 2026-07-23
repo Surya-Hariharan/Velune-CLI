@@ -354,9 +354,21 @@ class EpisodicMemory:
 
     # ── Session management ───────────────────────────────────────────────────
 
-    async def start_session(self, workspace_root: str, model: str, mode: str) -> str:
-        """Create a new session row and return its ID."""
-        session_id = f"ses-{uuid.uuid4().hex[:12]}"
+    async def start_session(
+        self, workspace_root: str, model: str, mode: str, session_id: str | None = None
+    ) -> str:
+        """Create a new session row and return its ID.
+
+        *session_id*, when given, is used verbatim instead of minting a
+        fresh ``ses-<hex>`` id — callers should pass the canonical JSON
+        ``SessionStore`` id (``VeluneREPL._session_id``) so this session's
+        turns/summary/search-index rows are keyed by the same identifier the
+        user actually sees in ``/session list`` and ``velune session list``,
+        rather than an independently-generated id that can never be joined
+        back to it. Without a shared key, this store and the JSON store are
+        two unsynced records of the same live session.
+        """
+        session_id = session_id or f"ses-{uuid.uuid4().hex[:12]}"
         try:
             async with self._pool.write() as conn:
                 await conn.execute(

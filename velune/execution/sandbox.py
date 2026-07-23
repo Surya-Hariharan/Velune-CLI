@@ -239,8 +239,16 @@ class SubprocessSandbox:
     def execute(
         self,
         spec: CommandSpec,
+        cancel_event: threading.Event | None = None,
     ) -> SandboxResult:
-        """Synchronously execute command in process-isolated sandbox."""
+        """Synchronously execute command in process-isolated sandbox.
+
+        *cancel_event*, when given, is checked on every poll tick (same
+        cadence as the timeout check) so a caller can kill the process tree
+        promptly instead of waiting out ``spec.timeout`` — see
+        ``velune.execution.cancellation`` for why this can't just be
+        ``asyncio`` task cancellation.
+        """
         try:
             spec.validate(self.allowed_executables)  # raises SandboxError if not allowed
 
@@ -317,11 +325,16 @@ class SubprocessSandbox:
             pass
 
         timeout_occurred = False
+        cancelled = False
         try:
             while process.poll() is None:
                 elapsed = time.perf_counter() - start_time
                 if elapsed > spec.timeout:
                     timeout_occurred = True
+                    break
+
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
                     break
 
                 if ps_proc:
@@ -359,6 +372,11 @@ class SubprocessSandbox:
             raise SandboxError(
                 f"Command timed out after {spec.timeout} seconds.\nStdout: {stdout}\nStderr: {stderr}"
             )
+
+        if cancelled:
+            _kill_process_tree(process.pid)
+            _join_readers()
+            raise SandboxError("Command cancelled by user (Ctrl+C).")
 
         stdout, stderr = _join_readers()
         duration_ms = (time.perf_counter() - start_time) * 1000

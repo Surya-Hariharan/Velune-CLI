@@ -132,7 +132,9 @@ def test_default_roots_are_platform_appropriate(monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", "D:\\Users\\someone\\AppData\\Local")
     windows_roots = mod._default_roots()
     assert any("someone" in str(p) for p in windows_roots)
-    assert any(str(p).endswith("Ollama\\models") or str(p).endswith("Ollama/models") for p in windows_roots)
+    assert any(
+        str(p).endswith("Ollama\\models") or str(p).endswith("Ollama/models") for p in windows_roots
+    )
 
     monkeypatch.setattr(mod.platform, "system", lambda: "Linux")
     linux_roots = mod._default_roots()

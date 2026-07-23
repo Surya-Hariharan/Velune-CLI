@@ -23,6 +23,7 @@ def _make_repl() -> VeluneREPL:
     repl = VeluneREPL.__new__(VeluneREPL)  # bypass heavyweight __init__
     repl.container = MagicMock()
     repl._episodic_session_id = None
+    repl._session_id = "json-store-id"
     repl._mode_manager = MagicMock()
     repl._mode_manager.current = SessionMode.NORMAL
     repl.active_model = MagicMock(model_id="test-model")
@@ -45,8 +46,11 @@ async def test_start_episodic_session_uses_corrected_argument_shape():
 
     await repl._start_episodic_session()
 
+    # session_id is now threaded through so this store shares the JSON
+    # SessionStore's id instead of minting its own unrelated one — see
+    # tests/test_episodic_session_unification.py for the full rationale.
     episodic.start_session.assert_awaited_once_with(
-        workspace_root="/ws", model="test-model", mode="normal"
+        workspace_root="/ws", model="test-model", mode="normal", session_id="json-store-id"
     )
     assert repl._episodic_session_id == "ses-123"
 
@@ -112,7 +116,11 @@ async def test_record_turn_async_calls_memory_lifecycle_record_turn():
     await asyncio.sleep(0)  # let the fire-and-forget task run
 
     manager.record_turn.assert_awaited_once_with(
-        session_id="ses-1", role="user", content="hello", model="m1", tokens=5,
+        session_id="ses-1",
+        role="user",
+        content="hello",
+        model="m1",
+        tokens=5,
         workspace_root="/ws",
     )
 

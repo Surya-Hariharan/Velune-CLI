@@ -14,7 +14,9 @@ def _write_blob(root, digest: str, payload: dict) -> None:
     (blob_dir / normalized).write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _write_manifest(root, rel_parts: tuple[str, ...], config_digest: str, params_digest: str | None, size: int) -> None:
+def _write_manifest(
+    root, rel_parts: tuple[str, ...], config_digest: str, params_digest: str | None, size: int
+) -> None:
     manifest_dir = root / "manifests" / "/".join(rel_parts[:-1])
     manifest_dir.mkdir(parents=True, exist_ok=True)
     layers = [{"mediaType": "application/vnd.ollama.image.model", "size": size}]
@@ -25,7 +27,11 @@ def _write_manifest(root, rel_parts: tuple[str, ...], config_digest: str, params
 
 
 def test_default_library_namespace_is_stripped(tmp_path):
-    _write_blob(tmp_path, "sha256:cfg1", {"model_type": "8B", "file_type": "Q4_K_M", "model_family": "llama"})
+    _write_blob(
+        tmp_path,
+        "sha256:cfg1",
+        {"model_type": "8B", "file_type": "Q4_K_M", "model_family": "llama"},
+    )
     _write_manifest(
         tmp_path,
         ("registry.ollama.ai", "library", "llama3", "8b"),

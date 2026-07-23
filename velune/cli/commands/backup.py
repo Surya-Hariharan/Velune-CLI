@@ -126,7 +126,7 @@ def restore_cmd(
 
     if not dry_run and not yes:
         confirmed = typer.confirm(
-            "Restore will write files into your Velune state. Continue?", default=True
+            "Restore will write files into your Velune state. Continue?", default=False
         )
         if not confirmed:
             console.print(f"[{design.MUTED}]Aborted.[/{design.MUTED}]")

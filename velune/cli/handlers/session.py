@@ -100,6 +100,72 @@ async def cmd_new(repl: VeluneREPL, args: str) -> None:
     )
 
 
+async def cmd_fork(repl: VeluneREPL, args: str) -> None:
+    """Start a new session pre-populated with a prefix of the current one.
+
+    ``/fork`` (no arg) branches at the current end — a checkpoint before
+    trying something risky. ``/fork <turn>`` branches earlier, dropping
+    everything from that point on. Either way the *original* conversation is
+    archived intact under its own id first — forking never mutates it, it
+    only starts a new session next to it. This is deliberately just "a new
+    ordinary session seeded from a slice," not a tree/parent-pointer model:
+    there's no session schema change, and the two sessions are otherwise
+    unrelated once forked.
+    """
+    import uuid
+
+    from velune.cli.ui_components import print_notification
+
+    if not repl._conversation:
+        print_notification(repl.console, "Nothing to fork — the conversation is empty.", "info")
+        return
+
+    turn_index = len(repl._conversation)
+    if args.strip():
+        try:
+            turn_index = int(args.strip())
+        except ValueError:
+            print_notification(
+                repl.console, f"'{args.strip()}' is not a valid turn number.", "error"
+            )
+            return
+    turn_index = max(0, min(turn_index, len(repl._conversation)))
+
+    archived_note = ""
+    try:
+        has_exchange = any(m.get("role") == "assistant" for m in repl._conversation)
+        if has_exchange:
+            workspace = str(repl.container.get("runtime.workspace") or "")
+            from velune.cli.sessions import auto_title
+
+            meta = repl._session_store.save(
+                repl._conversation,
+                workspace=workspace,
+                model_id=repl.active_model.model_id if repl.active_model else "unknown",
+                mode=repl._mode_manager.current.value,
+                title=auto_title(repl._conversation),
+                total_tokens=repl.session_tokens,
+            )
+            archived_note = f" Original preserved as {meta.title!r}."
+    except Exception as exc:
+        _log.warning("Could not archive session before forking: %s", exc)
+
+    await repl._end_episodic_session()
+    repl._conversation = repl._conversation[:turn_index]
+    repl._session_id = uuid.uuid4().hex[:8]
+    repl.session_tokens = 0
+    repl.session_cost = 0.0
+    repl._context_tracker.update(repl._conversation)
+    await repl._start_episodic_session()
+
+    print_notification(
+        repl.console,
+        f"Forked at turn {turn_index} ({len(repl._conversation)} messages carried over)."
+        f"{archived_note}",
+        "success",
+    )
+
+
 async def cmd_history(repl: VeluneREPL, args: str) -> None:
     """Show REPL command execution history."""
     from velune.cli.ui_components import print_header, print_notification

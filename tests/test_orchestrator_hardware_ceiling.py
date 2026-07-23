@@ -89,7 +89,9 @@ def test_no_profile_registered_falls_back_to_config_only(monkeypatch):
         (RuntimeProfileName.MAXIMUM, "full"),
     ],
 )
-def test_each_profile_caps_the_default_config_correctly(monkeypatch, profile_name, expected_ceiling):
+def test_each_profile_caps_the_default_config_correctly(
+    monkeypatch, profile_name, expected_ceiling
+):
     profile = get_profile(profile_name)
     orch = _make_orchestrator(monkeypatch, profile)
     assert orch.tier_classifier.max_council_tier == expected_ceiling

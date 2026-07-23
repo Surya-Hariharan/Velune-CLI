@@ -1,7 +1,9 @@
 """Git state tools — GitStatus, GitBranch.
 
-Uses gitpython instead of raw subprocess calls.  PathGuard validates the
-directory parameter so the tools cannot be pointed outside the workspace.
+Shells out to the real ``git`` binary via ``subprocess.run(["git", *args], ...)``
+(no ``gitpython`` dependency is used, despite what an earlier version of this
+docstring claimed). PathGuard validates the directory parameter so the tools
+cannot be pointed outside the workspace.
 """
 
 from __future__ import annotations

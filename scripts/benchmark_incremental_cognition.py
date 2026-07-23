@@ -103,9 +103,7 @@ async def _bench_one(root: Path, n_files: int) -> dict:
 
     warm_t = await _time(service.get_snapshot_fresh())
 
-    (root / "pkg" / "mod_0.py").write_text(
-        "value_0 = 999  # edited for benchmark\n"
-    )
+    (root / "pkg" / "mod_0.py").write_text("value_0 = 999  # edited for benchmark\n")
     state_path = root / ".velune" / "index_state.json"
     inc = IncrementalIndexer(root, state_path)
     delta = await inc.compute_delta()
@@ -147,8 +145,10 @@ def main() -> None:
         print(json.dumps(results, indent=2))
         return
 
-    print(f"{'scenario':<8} {'files':>6} {'cold':>8} {'warm_noop':>10} {'speedup':>9} "
-          f"{'bg_refresh':>11} {'after_edit':>11}")
+    print(
+        f"{'scenario':<8} {'files':>6} {'cold':>8} {'warm_noop':>10} {'speedup':>9} "
+        f"{'bg_refresh':>11} {'after_edit':>11}"
+    )
     for r in results:
         print(
             f"{r['scenario']:<8} {r['n_files']:>6} {r['cold_s']:>8.4f} "

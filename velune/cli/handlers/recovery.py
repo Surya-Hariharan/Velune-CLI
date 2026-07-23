@@ -133,6 +133,15 @@ async def cmd_restore(repl: VeluneREPL, args: str) -> None:
     src = Path(positional[0])
     workspace = Path(str(repl.container.get("runtime.workspace") or Path.cwd()))
 
+    if not dry_run:
+        from velune.cli.handlers.confirm import confirm_destructive
+
+        if not await confirm_destructive(
+            repl, "Restore will write files into your Velune state. Continue?"
+        ):
+            console.print(f"[{design.MUTED}]Aborted.[/{design.MUTED}]")
+            return
+
     passphrase = None
     if (include is None or "providers" in include) and archive_has_encrypted_secrets(src):
         entered = console.input(

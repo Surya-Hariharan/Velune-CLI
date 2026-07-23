@@ -93,6 +93,13 @@ class InterruptController:
         if task is None or task.done():
             return False
         self._user_cancelled = True
+        # Also signal any subprocess-cancel events directly: asyncio task
+        # cancellation alone cannot interrupt work already running inside
+        # `asyncio.to_thread` (a shell tool call) — see
+        # `velune.execution.cancellation` for why.
+        from velune.execution.cancellation import cancel_all
+
+        cancel_all()
         loop = self._loop
         if loop is not None and loop.is_running():
             loop.call_soon_threadsafe(task.cancel)

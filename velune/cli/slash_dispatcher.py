@@ -153,6 +153,18 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     )
     registry.register(
         SlashCommand(
+            name="fork",
+            aliases=["f"],
+            description="Branch into a new session seeded from an earlier turn (original is preserved)",
+            usage="/fork [turn]",
+            handler=repl._cmd_fork,
+            examples=("/fork", "/fork 4"),
+            search_terms=("branch", "checkpoint", "explore alternative", "diverge", "save point"),
+            shortcut="/f",
+        )
+    )
+    registry.register(
+        SlashCommand(
             name="project",
             aliases=["proj", "workspace"],
             description="Open, close, or inspect project workspaces (no indexing)",
@@ -649,6 +661,17 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             examples=("/undo",),
             search_terms=("revert", "rollback", "git undo", "undo commit", "take back"),
             shortcut="/u",
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="retry",
+            aliases=[],
+            description="Regenerate the last response, optionally on a different model",
+            usage="/retry [model]",
+            handler=repl._cmd_retry,
+            examples=("/retry", "/retry gpt-4o"),
+            search_terms=("regenerate", "redo", "try again", "different model", "resubmit"),
         )
     )
     registry.register(

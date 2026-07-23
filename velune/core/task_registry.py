@@ -214,6 +214,13 @@ class JobRecord:
     result_preview: str | None = None
     error: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
+    #: Set by `JobRegistry.cancel()` alongside `task.cancel()`. `task.cancel()`
+    #: alone cannot interrupt a shell command already running inside
+    #: `asyncio.to_thread` (see `velune.execution.cancellation`) — a
+    #: background job wrapping one needs this to actually kill the OS
+    #: process instead of leaving it running past the job's "cancelled"
+    #: status.
+    cancel_event: threading.Event | None = field(default=None, repr=False)
 
 
 class JobRegistry:
@@ -263,5 +270,7 @@ class JobRegistry:
             return False
         if job.task is not None and not job.task.done():
             job.task.cancel()
+        if job.cancel_event is not None:
+            job.cancel_event.set()
         self.update(job_id, status=JobStatus.CANCELLED, completed_at=time.monotonic())
         return True

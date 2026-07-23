@@ -20,7 +20,9 @@ def test_scan_paths_uses_localappdata_env_var_not_hardcoded_drive(monkeypatch):
 
     assert len(lm_studio_paths) == 1
     assert str(lm_studio_paths[0]).startswith("D:\\Users\\someoneelse")
-    assert not any(str(p).startswith("C:/Users") or str(p).startswith("C:\\Users") for p in lm_studio_paths)
+    assert not any(
+        str(p).startswith("C:/Users") or str(p).startswith("C:\\Users") for p in lm_studio_paths
+    )
 
 
 def test_scan_paths_falls_back_without_localappdata(monkeypatch):

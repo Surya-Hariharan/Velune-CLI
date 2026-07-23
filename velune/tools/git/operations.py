@@ -1,11 +1,13 @@
 """Git operation tools — GitCommit, GitCheckout.
 
-Uses gitpython's high-level API instead of raw subprocess.  This eliminates
-two classes of injection risk:
-  - Shell injection (subprocess with a shell argument is not used; gitpython handles this).
-  - Argument injection: branch names are looked up by key in the Repo heads
-    dict rather than spliced into a command string, so ``--detach`` or similar
-    flag-like inputs cannot influence git's option parsing.
+Shells out to the real ``git`` binary via ``subprocess.run(["git", *args], ...)``
+(no ``gitpython`` dependency is used, despite what an earlier version of this
+docstring claimed). This still eliminates two classes of injection risk:
+  - Shell injection: args are passed as a list, never through a shell, so
+    there is no shell metacharacter interpretation to exploit.
+  - Argument injection: ``_validate_ref_name`` rejects any branch name that
+    starts with ``-`` before it reaches ``_git_run``, so a value like
+    ``--upload-pack=...`` can't be smuggled in as a flag instead of a ref.
 """
 
 from __future__ import annotations

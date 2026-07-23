@@ -515,7 +515,9 @@ class TestPipelineRefreshDownstreamTask:
         engine, bus, cognition, _ = self._make_engine(tmp_path)
         delta = IndexDelta(to_add=["a.py"], to_update=[], to_remove=[])
 
-        _run(engine._run_downstream_task(_DownstreamTask(task_type="pipeline_refresh", delta=delta)))
+        _run(
+            engine._run_downstream_task(_DownstreamTask(task_type="pipeline_refresh", delta=delta))
+        )
 
         cognition.refresh_pipeline_cache.assert_awaited_once()
 

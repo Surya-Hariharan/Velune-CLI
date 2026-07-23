@@ -6,15 +6,17 @@ import base64
 import json
 import sqlite3
 import tarfile
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from velune.cli.handlers.recovery import _split_args
+from velune.cli import design
+from velune.cli.handlers.recovery import _split_args, cmd_restore
 from velune.core.paths import cognitive_db_path
 from velune.core.trust import trust_file_path
 from velune.recovery import archive_has_encrypted_secrets, create_backup, restore_backup
-from velune.recovery.archive import MANIFEST_NAME
+from velune.recovery.archive import MANIFEST_NAME, _safe_extract
 
 ROUNDTRIP_SUBSYSTEMS = {"sessions", "config", "memory", "trust"}
 
@@ -222,6 +224,68 @@ def test_restore_missing_archive(env):
         restore_backup(env["workspace"] / "nope.tar.gz")
 
 
+# ── /restore confirmation gate ───────────────────────────────────────────────
+#
+# `cmd_restore` used to write straight into the user's Velune state with no
+# confirmation at all — the REPL counterpart to the CLI's `restore_cmd`, which
+# itself defaulted to *accept* on a bare Enter. Found during a production-
+# readiness audit pass; both are now behind `confirm_destructive` /
+# default=False, matching the guard `/memory clear` already got in an earlier
+# pass (see test_slash_command_permissions.py).
+
+
+def _make_repl(workspace):
+    repl = MagicMock()
+    repl.console = MagicMock()
+    repl.container.get.side_effect = lambda key: {"runtime.workspace": workspace}.get(key)
+    return repl
+
+
+async def test_cmd_restore_does_nothing_without_confirmation(env):
+    seed = _seed_state(env)
+    dest = env["workspace"] / "snap.tar.gz"
+    create_backup(dest, include={"sessions"}, workspace=env["workspace"])
+    session_file = env["sessions_dir"] / f"{seed['session_id']}.json"
+    session_file.unlink()
+
+    repl = _make_repl(env["workspace"])
+    with patch("velune.cli.handlers.confirm.confirm_destructive", AsyncMock(return_value=False)):
+        await cmd_restore(repl, f"{dest} --overwrite")
+
+    assert not session_file.exists(), "declined confirmation must not write anything"
+    repl.console.print.assert_any_call(f"[{design.MUTED}]Aborted.[/{design.MUTED}]")
+
+
+async def test_cmd_restore_proceeds_once_confirmed(env):
+    seed = _seed_state(env)
+    dest = env["workspace"] / "snap.tar.gz"
+    create_backup(dest, include={"sessions"}, workspace=env["workspace"])
+    session_file = env["sessions_dir"] / f"{seed['session_id']}.json"
+    session_file.unlink()
+
+    repl = _make_repl(env["workspace"])
+    with patch("velune.cli.handlers.confirm.confirm_destructive", AsyncMock(return_value=True)):
+        await cmd_restore(repl, f"{dest} --overwrite")
+
+    assert session_file.exists()
+
+
+async def test_cmd_restore_dry_run_skips_the_confirmation_prompt(env):
+    """A --dry-run writes nothing, so there's nothing to confirm."""
+    seed = _seed_state(env)
+    dest = env["workspace"] / "snap.tar.gz"
+    create_backup(dest, include={"sessions"}, workspace=env["workspace"])
+    session_file = env["sessions_dir"] / f"{seed['session_id']}.json"
+    session_file.unlink()
+
+    repl = _make_repl(env["workspace"])
+    confirm_mock = AsyncMock(return_value=False)
+    with patch("velune.cli.handlers.confirm.confirm_destructive", confirm_mock):
+        await cmd_restore(repl, f"{dest} --dry-run")
+
+    confirm_mock.assert_not_awaited()
+
+
 # ── Provider secrets: never written in the clear ────────────────────────────
 
 
@@ -405,3 +469,66 @@ def test_discard_autosave(env):
     assert store.discard_autosave("s") is True
     assert store.discard_autosave("s") is False
     assert store.list_orphaned_autosaves() == []
+
+
+# ── _safe_extract: zip-slip / path-escape protection ────────────────────────
+#
+# The original guard was `str(member_path).startswith(str(dest))` — a string
+# *prefix* test, not a containment test. `/x/dest-evil/f` starts with the
+# string `/x/dest`, without being inside `dest` at all, so a crafted member
+# name could still land a file next to (not inside) the restore directory.
+# Found untested during a production-readiness audit pass; fixed to match the
+# containment check `PathGuard.validate()` already uses elsewhere.
+
+
+def _build_tar_with_member(tmp_path, member_name: str, content: bytes = b"payload") -> Path:
+    import io
+    import tarfile as tarfile_mod
+
+    archive = tmp_path / "malicious.tar"
+    with tarfile_mod.open(archive, "w") as tar:
+        info = tarfile_mod.TarInfo(name=member_name)
+        info.size = len(content)
+        tar.addfile(info, io.BytesIO(content))
+    return archive
+
+
+def test_safe_extract_rejects_dotdot_traversal(tmp_path):
+    dest = tmp_path / "restore-dest"
+    dest.mkdir()
+    archive = _build_tar_with_member(tmp_path, "../../etc/passwd")
+
+    import tarfile as tarfile_mod
+
+    with tarfile_mod.open(archive) as tar, pytest.raises(ValueError, match="Unsafe path"):
+        _safe_extract(tar, dest)
+
+
+def test_safe_extract_rejects_sibling_directory_sharing_a_string_prefix(tmp_path):
+    """Regression test for the exact bug the naive startswith() check missed:
+    a sibling directory whose name has `dest`'s name as a string prefix."""
+    dest = tmp_path / "velune-restore"
+    dest.mkdir()
+    (tmp_path / "velune-restore-evil").mkdir()
+    archive = _build_tar_with_member(tmp_path, "../velune-restore-evil/planted")
+
+    import tarfile as tarfile_mod
+
+    with tarfile_mod.open(archive) as tar, pytest.raises(ValueError, match="Unsafe path"):
+        _safe_extract(tar, dest)
+    assert not (tmp_path / "velune-restore-evil" / "planted").exists()
+
+
+def test_safe_extract_allows_legitimate_nested_members(tmp_path):
+    dest = tmp_path / "restore-dest"
+    dest.mkdir()
+    archive = _build_tar_with_member(tmp_path, "sessions/session1.json", b'{"ok": true}')
+
+    import tarfile as tarfile_mod
+
+    with tarfile_mod.open(archive) as tar:
+        _safe_extract(tar, dest)
+
+    extracted = dest / "sessions" / "session1.json"
+    assert extracted.is_file()
+    assert extracted.read_bytes() == b'{"ok": true}'

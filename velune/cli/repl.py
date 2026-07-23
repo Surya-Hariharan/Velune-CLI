@@ -1050,6 +1050,7 @@ class VeluneREPL:
                 workspace_root=workspace,
                 model=model_id,
                 mode=self._mode_manager.current.value,
+                session_id=self._session_id,
             )
         except Exception as exc:
             _log.debug("Could not start episodic session: %s", exc)
@@ -1100,11 +1101,26 @@ class VeluneREPL:
             )
         )
 
-    async def _handle_prompt(self, text: str) -> None:
-        """Process a freeform (non-slash-command) user prompt."""
+    async def _handle_prompt(
+        self,
+        text: str,
+        *,
+        model_override: ModelDescriptor | None = None,
+        provider_override: ModelProvider | None = None,
+    ) -> None:
+        """Process a freeform (non-slash-command) user prompt.
+
+        *model_override*/*provider_override* let a caller (``/retry
+        <model>``) run this one turn against a specific model without
+        touching ``self.active_model`` — a real switch persists via
+        ``activate_model()``; this is deliberately a one-turn-only detour.
+        """
         from velune.core.types.inference import InferenceRequest
 
-        model, provider = await self._resolve_active_model_and_provider()
+        if model_override is not None and provider_override is not None:
+            model, provider = model_override, provider_override
+        else:
+            model, provider = await self._resolve_active_model_and_provider()
         if model is None or provider is None:
             from velune.cli.rendering.error_panel import render_error
             from velune.core.errors.catalog import NoModelsAvailableError
@@ -1324,6 +1340,11 @@ class VeluneREPL:
 
         await cmd_new(self, args)
 
+    async def _cmd_fork(self, args: str) -> None:
+        from velune.cli.handlers.session import cmd_fork
+
+        await cmd_fork(self, args)
+
     async def _cmd_history(self, args: str) -> None:
         from velune.cli.handlers.session import cmd_history
 
@@ -1516,6 +1537,11 @@ class VeluneREPL:
         from velune.cli.handlers.git import cmd_undo
 
         await cmd_undo(self, args)
+
+    async def _cmd_retry(self, args: str) -> None:
+        from velune.cli.handlers.retry import cmd_retry
+
+        await cmd_retry(self, args)
 
     async def _cmd_hunk(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_hunk

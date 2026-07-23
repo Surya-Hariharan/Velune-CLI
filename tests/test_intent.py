@@ -66,9 +66,7 @@ class TestNewIntents:
         assert intent == IntentType.SEARCH
 
     def test_test_generation(self):
-        intent, _ = IntentClassifier().classify_with_confidence(
-            "write a test for this function"
-        )
+        intent, _ = IntentClassifier().classify_with_confidence("write a test for this function")
         assert intent == IntentType.TEST_GENERATION
 
     def test_security(self):
@@ -85,9 +83,7 @@ class TestNewIntents:
         assert intent == IntentType.ARCHITECTURE
 
     def test_documentation(self):
-        intent, _ = IntentClassifier().classify_with_confidence(
-            "add docstrings to this module"
-        )
+        intent, _ = IntentClassifier().classify_with_confidence("add docstrings to this module")
         assert intent == IntentType.DOCUMENTATION
 
     def test_documentation_matches_plural_docstrings(self):

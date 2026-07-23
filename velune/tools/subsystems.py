@@ -32,10 +32,17 @@ def _create_tool_registry(env: RuntimeEnvironment):
     logger = logging.getLogger("velune.tools.module")
 
     execution_executor = env.container.get("runtime.execution_executor")
+    job_registry = (
+        env.container.get("runtime.job_registry")
+        if env.container.has("runtime.job_registry")
+        else None
+    )
 
     tool_registry = ToolRegistry()
     execute_cmd_tool = ExecuteCommand(
-        sandbox=execution_executor.sandbox, workspace_path=str(env.workspace)
+        sandbox=execution_executor.sandbox,
+        workspace_path=str(env.workspace),
+        job_registry=job_registry,
     )
     ws = env.workspace
     default_tools = [

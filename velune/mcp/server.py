@@ -887,7 +887,16 @@ class VeluneMCPServer:
             )
 
         logger.info(f"Starting Velune MCP server (HTTP on {host}:{port})")
-        logger.info("MCP HTTP auth token: %s", self.auth_token)
+        # Deliberately bypasses `logger` for the token itself: log records
+        # flow through handlers that may persist to a rotating log file
+        # (`velune/core/logging.py`), and the redacting filter there only
+        # recognizes known provider-key shapes and "bearer <token>"/"token
+        # <token>" phrasing — not "auth token: <value>" — so this would
+        # otherwise leave the live bearer credential sitting in cleartext in
+        # a log file indefinitely. A one-time `print` to the operator's own
+        # console is the same pattern Jupyter uses for its access token.
+        print(f"MCP HTTP auth token: {self.auth_token}")
+        logger.info("MCP HTTP auth token issued (see console output)")
         try:
             from aiohttp import web
 

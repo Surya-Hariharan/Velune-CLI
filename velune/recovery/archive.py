@@ -518,7 +518,13 @@ def _safe_extract(tar: tarfile.TarFile, dest: Path) -> None:
     dest = dest.resolve()
     for member in tar.getmembers():
         member_path = (dest / member.name).resolve()
-        if not str(member_path).startswith(str(dest)):
+        # A plain `str(...).startswith(str(dest))` check (the naive zip-slip
+        # guard) is a path-*prefix* test, not a containment test: a sibling
+        # directory like `dest`'s-parent/`<dest.name>-evil/...` shares the
+        # same string prefix as `dest` without being inside it, so a crafted
+        # member name could still escape. Match the containment check
+        # `PathGuard.validate()` uses instead (velune/execution/path_guard.py).
+        if member_path != dest and dest not in member_path.parents:
             raise ValueError(f"Unsafe path in archive: {member.name}")
     try:
         # Python 3.12+ supports the "data" extraction filter; members are also

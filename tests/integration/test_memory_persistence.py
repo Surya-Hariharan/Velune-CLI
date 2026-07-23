@@ -44,7 +44,9 @@ class _FakeProvider:
         return SimpleNamespace(content=self._summary)
 
 
-async def _make_manager(db_path: Path, provider=None) -> tuple[MemoryLifecycleManager, SQLiteConnectionPool]:
+async def _make_manager(
+    db_path: Path, provider=None
+) -> tuple[MemoryLifecycleManager, SQLiteConnectionPool]:
     pool = SQLiteConnectionPool(db_path)
     await pool.startup()
     episodic = EpisodicMemory(pool)

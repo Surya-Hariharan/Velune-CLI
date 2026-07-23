@@ -65,13 +65,9 @@ async def test_retrieve_preserves_result_shape_for_mcp_server_contract():
     coordinator = MagicMock()
     coordinator.query = AsyncMock(
         return_value=ThreeBrainResult(
-            working_hits=[
-                SimpleNamespace(content="working turn", session_id="s1", timestamp=0.0)
-            ],
+            working_hits=[SimpleNamespace(content="working turn", session_id="s1", timestamp=0.0)],
             episodic_hits=[
-                SimpleNamespace(
-                    content="episodic turn", session_id="s1", created_at=0.0
-                )
+                SimpleNamespace(content="episodic turn", session_id="s1", created_at=0.0)
             ],
             semantic_hits=[
                 SimpleNamespace(

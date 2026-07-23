@@ -122,11 +122,15 @@ async def _resume_snapshot(repl: VeluneREPL, session_id: str) -> bool:
 
 
 async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
-    from datetime import datetime
-
+    """List sessions from the canonical JSON `SessionStore` — the same store
+    `velune session list` (the top-level CLI command) reads. Previously this
+    queried the separate SQLite episodic tier instead, which mints its own
+    independent session id — the two could show different, unsynced session
+    lists depending on whether you asked from the shell or the REPL. Now both
+    surfaces read the one source of truth.
+    """
     try:
-        episodic = repl.container.get("runtime.episodic_session_memory")
-        sessions = await episodic.list_recent_sessions(workspace, limit=10)
+        sessions = repl._session_store.list(workspace=workspace, limit=10)
     except Exception as exc:
         from velune.cli.ui_components import print_notification
 
@@ -139,13 +143,11 @@ async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
         print_notification(repl.console, "No sessions found for this workspace.", type="info")
         return
 
-    table = create_table("ID", "Started", "Model", "Tokens", "First Prompt")
+    table = create_table("ID", "Started", "Model", "Tokens", "Title")
 
-    for s in sessions:
-        dt = datetime.fromtimestamp(s.started_at).strftime("%m-%d %H:%M")
-        first = s.first_prompt or ""
-        preview = first[:50] + ("…" if len(first) > 50 else "")
-        table.add_row(s.id, dt, s.model_used or "—", str(s.total_tokens), preview)
+    for m in sessions:
+        dt = m.created_at[:16].replace("T", " ") if m.created_at else "—"
+        table.add_row(m.id, dt, m.model_id or "—", str(m.total_tokens), m.title)
 
     print_header(repl.console, "Recent Sessions")
     repl.console.print(table)

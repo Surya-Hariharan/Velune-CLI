@@ -1,8 +1,9 @@
 """Git history tools — GitLog, GitDiff, GitBlame.
 
-All three tools use gitpython (``import git``) rather than raw subprocess so
-that:
-  - No shell is ever invoked.
+All three tools shell out to the real ``git`` binary via
+``subprocess.run(["git", *args], ...)`` (no ``gitpython`` dependency is used,
+despite what an earlier version of this docstring claimed):
+  - No shell is ever invoked — args are passed as a list, not a shell string.
   - File-path arguments are validated by ``PathGuard`` before being passed to
     git, preventing path-traversal escapes.
   - The ``--`` path separator is always used in commands that accept file paths,
