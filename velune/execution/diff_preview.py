@@ -81,6 +81,22 @@ def diff_stats(diff: FileDiff) -> tuple[int, int]:
     return (added, removed)
 
 
+def format_stat_bar(added: int, removed: int, *, width: int = 24, label: str = "") -> str:
+    """A `git --stat`-style `+`/`-` bar: a size-at-a-glance summary line.
+
+    Shared by :class:`DiffPreview` and :class:`~velune.execution.hunk_review.
+    HunkReviewer` so a very large diff — either a truncated unified diff or a
+    long run of individual hunks to click through — shows its scale up front
+    instead of making the reviewer infer it by scrolling.
+    """
+    total = added + removed
+    plus_w = round(width * added / total) if total else 0
+    minus_w = width - plus_w
+    bar = f"[green]{'+' * plus_w}[/green][red]{'-' * minus_w}[/red]"
+    prefix = f"{label}  " if label else ""
+    return f"  [dim]{prefix}{total} lines changed[/dim]  [green]+{added}[/green] [red]-{removed}[/red]  {bar}"
+
+
 # ---------------------------------------------------------------------------
 # DiffPreview
 # ---------------------------------------------------------------------------
@@ -149,9 +165,16 @@ class DiffPreview:
             self.console.print(f"[dim]No changes to {rel}[/dim]")
             return
 
+        is_large = len(udiff) > 200
         diff_text = "\n".join(udiff[:200])
-        if len(udiff) > 200:
+        if is_large:
             diff_text += f"\n... ({len(udiff) - 200} more lines)"
+            # Oriented before the wall of (truncated) diff text below — a
+            # reviewer deciding accept/reject/skip should know the shape of
+            # the change (mostly additions? a near-total rewrite?) before
+            # scrolling through hundreds of lines to find out for themselves.
+            added, removed = diff_stats(diff)
+            self.console.print(format_stat_bar(added, removed))
 
         self.console.print(
             Panel(

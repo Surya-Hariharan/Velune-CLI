@@ -31,3 +31,18 @@ repos:
     rev: 1.1.350
     hooks:
       - id: pyright
+
+  # Local secret scan, pre-push only — see .githooks/pre-push-secret-scan.sh
+  # for why this runs at push time (not commit time) and how it degrades
+  # gracefully when gitleaks isn't installed. CI's gitleaks step is the real
+  # gate; this just catches a secret before it ever leaves your machine.
+  # Requires `pre-commit install --hook-type pre-push` in addition to the
+  # default `pre-commit install` — see CONTRIBUTING.md.
+  - repo: local
+    hooks:
+      - id: gitleaks-pre-push
+        name: Secret scan (gitleaks, pre-push)
+        language: script
+        entry: .githooks/pre-push-secret-scan.sh
+        stages: [pre-push]
+        pass_filenames: false

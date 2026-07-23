@@ -111,6 +111,119 @@ async def cmd_approve(repl: VeluneREPL, args: str) -> None:
     repl.console.print(f"[{style}]Approval mode set to:[/{style}] [bold]{new_mode.value}[/bold]")
 
 
+async def cmd_theme(repl: VeluneREPL, args: str) -> None:
+    """Show or toggle display appearance options: colorblind palette, reduced motion."""
+    from velune.cli import design
+
+    # name -> (aliases, config key, getter, setter, label)
+    options = {
+        "colorblind": (
+            ("cb",),
+            "colorblind_mode",
+            design.is_colorblind_mode,
+            design.set_colorblind_mode,
+            "Colorblind-safe severity palette",
+        ),
+        "motion": (
+            ("animation", "animations"),
+            "reduced_motion",
+            lambda: not design.reduced_motion_enabled(),
+            lambda v: design.set_reduced_motion(not v),
+            "Spinner animation",
+        ),
+    }
+
+    sub = args.strip().lower()
+
+    if sub in ("", "status"):
+        lines = [f"[cyan]{label}:[/cyan] [bold]{'on' if getter() else 'off'}[/bold]" for _, _, getter, _, label in options.values()]
+        repl.console.print(
+            "\n".join(lines) + "\n[dim]Usage: /theme <colorblind|motion> [on|off][/dim]"
+        )
+        return
+
+    parts = sub.split()
+    name = parts[0]
+    resolved = next(
+        (key for key, (aliases, *_rest) in options.items() if name == key or name in aliases),
+        None,
+    )
+    if resolved is None:
+        repl.console.print(
+            f"[red]Unknown /theme option: {name!r}[/red]  [dim]Try: colorblind | motion[/dim]"
+        )
+        return
+
+    _aliases, config_key, getter, setter, label = options[resolved]
+
+    if len(parts) > 1:
+        if parts[1] in ("on", "true", "1", "enable"):
+            new_val = True
+        elif parts[1] in ("off", "false", "0", "disable"):
+            new_val = False
+        else:
+            repl.console.print(f"[red]Unknown value: {parts[1]!r}[/red]  [dim]Use on|off[/dim]")
+            return
+    else:
+        new_val = not getter()
+
+    setter(new_val)
+    save_setting_to_toml(repl, "display", config_key, new_val)
+    _update_runtime_config(repl, "display", config_key, new_val)
+
+    state = "enabled" if new_val else "disabled"
+    repl.console.print(
+        f"[cyan]{label} {state}.[/cyan] "
+        f"[dim]Saved to velune.toml — applies to this and future sessions.[/dim]"
+    )
+
+
+async def cmd_crashreports(repl: VeluneREPL, args: str) -> None:
+    """Show or toggle opt-in local crash reporting.
+
+    Off by default (see "Zero telemetry" in SECURITY.md). Enabling this never
+    transmits anything anywhere — it only writes a redacted JSON snapshot of
+    an unhandled crash (exception, traceback, versions; no local variables,
+    no prompts/conversation content) to ~/.velune/crash_reports/, for the
+    user's own diagnosis or to attach to a GitHub issue themselves.
+    """
+    from velune.cli.crash_reporter import CRASH_REPORT_DIR, is_enabled
+
+    sub = args.strip().lower()
+
+    if sub in ("", "status"):
+        state = "on" if is_enabled() else "off"
+        repl.console.print(
+            f"[cyan]Local crash reporting:[/cyan] [bold]{state}[/bold]\n"
+            f"[dim]Nothing is ever transmitted anywhere — reports are written locally to "
+            f"{CRASH_REPORT_DIR} only. Usage: /crashreports [on|off][/dim]"
+        )
+        return
+
+    if sub in ("on", "true", "1", "enable"):
+        new_val = True
+    elif sub in ("off", "false", "0", "disable"):
+        new_val = False
+    else:
+        repl.console.print(f"[red]Unknown value: {sub!r}[/red]  [dim]Use on|off[/dim]")
+        return
+
+    save_setting_to_toml(repl, "telemetry", "crash_reports_enabled", new_val)
+    _update_runtime_config(repl, "telemetry", "crash_reports_enabled", new_val)
+
+    state = "enabled" if new_val else "disabled"
+    detail = (
+        f"A redacted crash snapshot will be written locally to {CRASH_REPORT_DIR} "
+        "if Velune ever crashes unhandled. Nothing is transmitted anywhere."
+        if new_val
+        else "No crash data will be written."
+    )
+    repl.console.print(
+        f"[cyan]Local crash reporting {state}.[/cyan] [dim]{detail} "
+        f"Saved to velune.toml.[/dim]"
+    )
+
+
 async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
     from velune.cli.commands.doctor import (
         _check_anthropic_api_key,
@@ -127,6 +240,7 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_python_version,
         _check_qdrant,
         _check_sqlite,
+        _check_telemetry,
         _check_treesitter,
         _check_velune_dir,
         _check_vram,
@@ -146,6 +260,7 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_sqlite,
         _check_qdrant,
         _check_config,
+        _check_telemetry,
         _check_treesitter,
         _check_git,
         _check_gpu,

@@ -317,6 +317,102 @@ def session_import(
     console.print(f"[{design.MUTED}]Resume it:[/] [bold]velune session resume {meta.id}[/bold]")
 
 
+@session_cmd.command("rename")
+def session_rename(
+    ctx: typer.Context,
+    session_id: str = typer.Argument(..., help="Session ID to rename"),
+    title: str = typer.Argument(..., help="New title"),
+    any_workspace: bool = typer.Option(
+        False, "--any-workspace", help="Allow acting on a session from a different workspace"
+    ),
+) -> None:
+    """Rename a session's title — the auto-generated one, or a previous rename."""
+    from velune.cli.sessions import SessionStore
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    store = SessionStore()
+    meta = store.load_meta(session_id)
+    if meta is None:
+        console.print(f"[{design.DANGER}]Session '{session_id}' not found.[/{design.DANGER}]")
+        raise typer.Exit(1)
+    if not _check_same_workspace(
+        store, cli_context, meta, any_workspace=any_workspace, verb="Rename"
+    ):
+        raise typer.Exit(1)
+
+    try:
+        updated = store.rename(session_id, title)
+    except ValueError as exc:
+        console.print(f"[{design.DANGER}]{exc}[/{design.DANGER}]")
+        raise typer.Exit(1)
+
+    console.print(
+        f"[{design.OK}]Renamed[/{design.OK}] [bold]{session_id}[/bold] to "
+        f"[cyan]{updated.title}[/cyan]"
+    )
+
+
+@session_cmd.command("search")
+def session_search(
+    ctx: typer.Context,
+    query: str = typer.Argument(..., help="Text to search for across session content"),
+    all_workspaces: bool = typer.Option(
+        False, "--all", "-a", help="Search sessions from all workspaces"
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help="Maximum sessions to display"),
+) -> None:
+    """Search session *content* (not just titles) for text you remember saying."""
+    from velune.cli.sessions import SessionStore
+
+    cli_context = ctx.obj
+    if not isinstance(cli_context, CLIContext):
+        raise typer.BadParameter("CLI context was not properly initialized")
+
+    store = SessionStore()
+    workspace = None if all_workspaces else str(cli_context.workspace.resolve())
+    hits = store.search_content(query, workspace=workspace, limit=limit)
+
+    if cli_context.json_mode:
+        import json
+
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": h.meta.id,
+                        "title": h.meta.title,
+                        "project": h.meta.project_name,
+                        "updated_at": h.meta.updated_at,
+                        "match_count": h.match_count,
+                        "snippets": h.snippets,
+                    }
+                    for h in hits
+                ]
+            )
+        )
+        return
+
+    if not hits:
+        label = "any workspace" if all_workspaces else str(cli_context.workspace)
+        console.print(f"[{design.MUTED}]No sessions in {label} matched '{query}'.[/]")
+        return
+
+    console.print(f"[{design.OK}]{len(hits)} session(s) matched '{query}':[/{design.OK}]\n")
+    for hit in hits:
+        m = hit.meta
+        console.print(
+            f"[bold {design.ACCENT}]{m.id}[/] {m.title}  "
+            f"[{design.MUTED}]({m.updated_at[:16].replace('T', ' ')} · "
+            f"{hit.match_count} match(es))[/]"
+        )
+        for snippet in hit.snippets:
+            console.print(f"    [{design.MUTED}]…{snippet}…[/]")
+    console.print(f"\n[{design.MUTED}]Resume:[/] [bold]velune session resume <id>[/bold]")
+
+
 @session_cmd.command("archive")
 def session_archive(
     ctx: typer.Context,

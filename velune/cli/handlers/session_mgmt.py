@@ -62,10 +62,24 @@ async def cmd_session(repl: VeluneREPL, args: str) -> None:
             return
         await _cmd_session_import(repl, sub_args.strip(), workspace)
 
+    elif sub == "rename":
+        rename_parts = sub_args.strip().split(None, 1)
+        if len(rename_parts) < 2:
+            repl.console.print("[yellow]Usage: /session rename <id> <new title>[/yellow]")
+            return
+        await _cmd_session_rename(repl, rename_parts[0], rename_parts[1])
+
+    elif sub == "search":
+        if not sub_args:
+            repl.console.print("[yellow]Usage: /session search <query>[/yellow]")
+            return
+        await _cmd_session_search(repl, sub_args.strip(), workspace)
+
     else:
         repl.console.print(
             f"[red]Unknown subcommand: {sub!r}[/red]  "
-            "[dim]Use list | resume <id> | summary <id> | save | export | import[/dim]"
+            "[dim]Use list | resume <id> | summary <id> | save | export | import | "
+            "rename <id> <title> | search <query>[/dim]"
         )
 
 
@@ -95,6 +109,37 @@ async def _cmd_session_import(repl: VeluneREPL, raw_path: str, workspace: str) -
         f"[dim]({meta.turn_count} turns)[/dim]"
     )
     repl.console.print(f"[dim]Use /session resume {meta.id} to load it.[/dim]")
+
+
+async def _cmd_session_rename(repl: VeluneREPL, session_id: str, new_title: str) -> None:
+    try:
+        meta = repl._session_store.rename(session_id, new_title)
+    except ValueError as exc:
+        repl.console.print(f"[red]{exc}[/red]")
+        return
+    if meta is None:
+        repl.console.print(f"[red]Session '{session_id}' not found.[/red]")
+        return
+    repl.console.print(f"[green]Renamed[/green] [cyan]{session_id}[/cyan] to {meta.title}")
+
+
+async def _cmd_session_search(repl: VeluneREPL, query: str, workspace: str) -> None:
+    """Search session *content* (not just titles) for *query*."""
+    hits = repl._session_store.search_content(query, workspace=workspace)
+    if not hits:
+        repl.console.print(f"[dim]No sessions matched '{query}'.[/dim]")
+        return
+
+    repl.console.print(f"[cyan]{len(hits)} session(s) matched '{query}':[/cyan]\n")
+    for hit in hits:
+        m = hit.meta
+        repl.console.print(
+            f"[bold cyan]{m.id}[/bold cyan]  {m.title}  "
+            f"[dim]({m.updated_at[:16].replace('T', ' ')} · {hit.match_count} match(es))[/dim]"
+        )
+        for snippet in hit.snippets:
+            repl.console.print(f"    [dim]…{snippet}…[/dim]")
+    repl.console.print("\n[dim]Use /session resume <id> to load one.[/dim]")
 
 
 async def _session_picker(repl: VeluneREPL, workspace: str) -> None:

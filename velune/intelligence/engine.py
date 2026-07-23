@@ -349,7 +349,10 @@ class RepositoryIntelligenceEngine:
                 job_id = self._job_registry.new_id()
                 self._job_registry.register(
                     JobRecord(
-                        job_id=job_id, name="cognition:pipeline_refresh", status=JobStatus.RUNNING
+                        job_id=job_id,
+                        name="cognition:pipeline_refresh",
+                        kind="cognition",
+                        status=JobStatus.RUNNING,
                     )
                 )
             except Exception as exc:

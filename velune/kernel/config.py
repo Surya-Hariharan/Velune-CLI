@@ -71,6 +71,11 @@ class ExecutionConfig(BaseModel):
     auto_snapshot: bool = True
     require_confirmation: bool = True
     dry_run_default: bool = False
+    # Per-workspace default for `/hunk` (hunk-by-hunk diff review before
+    # applying edits). Persisted to this workspace's velune.toml by the
+    # `/hunk` command itself, so toggling it once carries over to the next
+    # session in the same workspace instead of resetting every launch.
+    hunk_review_default: bool = False
     low_resource_mode: bool = False
     # Docker sandbox — when True, all agent-executed commands run inside a
     # per-session Docker container instead of the host subprocess sandbox.
@@ -126,6 +131,16 @@ class ProvidersConfig(BaseModel):
         default=0.01,
         description="Prompt for confirmation before cloud calls estimated to cost more than this (USD). Set to 0 to always ask.",
     )
+    max_concurrent_requests: int = Field(
+        default=4,
+        ge=1,
+        description=(
+            "Max in-flight infer()/stream() calls per provider at once (e.g. "
+            "council agents fanning out concurrently). Extra callers queue "
+            "rather than firing all at once — protects against tripping a "
+            "provider's own per-key rate limit under concurrent load."
+        ),
+    )
     openai: ProviderEntry | None = Field(
         default_factory=lambda: ProviderEntry(
             api_key_env="OPENAI_API_KEY", base_url="https://api.openai.com/v1"
@@ -154,12 +169,40 @@ class ProvidersConfig(BaseModel):
     )
 
 
+class DisplayConfig(BaseModel):
+    """Terminal UI layout options for the fullscreen REPL."""
+
+    # Caps how wide the REPL's content column (conversation, borders, banner)
+    # ever renders, regardless of actual terminal width — see the comment on
+    # `_MAX_CONTENT_WIDTH` in velune/cli/fullscreen.py for why 100 is the
+    # default. A wider terminal just grows empty side gutters instead of
+    # reflowing content; set this higher to use the full window width, or
+    # lower for a narrower reading column.
+    content_max_width: int = Field(default=100, ge=20)
+    # Swaps the OK/WARN/DANGER severity colors for a colorblind-safe
+    # (Okabe-Ito) alternate palette — see `set_colorblind_mode()` in
+    # velune/cli/design.py. Toggle live with `/theme colorblind`.
+    colorblind_mode: bool = False
+    # Freezes the thinking/tool-card spinners to a static frame instead of
+    # animating them — see `set_reduced_motion()` in velune/cli/design.py.
+    # Toggle live with `/theme motion`, or set VELUNE_REDUCED_MOTION=1.
+    reduced_motion: bool = False
+
+
 class TelemetryConfig(BaseModel):
     """Observability options."""
 
     enabled: bool = True
     export_otlp: bool = False
     log_level: str = "INFO"
+    # Off by default — Velune is "zero telemetry" (see SECURITY.md): nothing
+    # is written and nothing is ever transmitted anywhere unless a user
+    # explicitly opts in. When True, an unhandled crash gets a redacted JSON
+    # snapshot (exception, traceback, versions — no local variables, no
+    # prompts/conversation content) written to ~/.velune/crash_reports/ for
+    # the user's own diagnosis; Velune has no server to send it to. See
+    # velune/cli/crash_reporter.py. Toggle with `/crashreports on`.
+    crash_reports_enabled: bool = False
 
 
 class MCPConfig(BaseModel):
@@ -233,6 +276,7 @@ class VeluneConfig(BaseSettings):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
+    display: DisplayConfig = Field(default_factory=DisplayConfig)
 
     # ---------------------------------------------------------------------------
     # Startup validation
@@ -364,6 +408,7 @@ def _hardcoded_defaults() -> dict:
         mcp=MCPConfig(),
         cognition=CognitionConfig(),
         resources=ResourcesConfig(),
+        display=DisplayConfig(),
     )
     return instance.model_dump()
 

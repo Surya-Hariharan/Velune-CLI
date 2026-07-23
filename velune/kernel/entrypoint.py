@@ -157,10 +157,26 @@ def launch(runtime: Any, *, plain: bool = False) -> None:
 
     Catches ``KeyboardInterrupt`` (Ctrl-C outside the REPL loop) so Typer sees
     a clean exit.  ``SystemExit`` is re-raised so ``typer.Exit`` works normally.
+
+    Any other exception is a genuine crash: if the user has opted in (see
+    ``velune.cli.crash_reporter``, off by default), a redacted local report is
+    written before the exception is re-raised unchanged — this never
+    suppresses or alters what the user sees on a crash, it only optionally
+    keeps a local copy of it.
     """
     try:
         run_async(_async_main(runtime, plain=plain))
     except KeyboardInterrupt:
         pass
     except SystemExit:
+        raise
+    except Exception as exc:
+        try:
+            from velune.cli.crash_reporter import write_crash_report
+
+            report_path = write_crash_report(exc)
+            if report_path is not None:
+                _logger.error("Crash report written to %s", report_path)
+        except Exception:
+            pass
         raise

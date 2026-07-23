@@ -187,7 +187,7 @@ async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool, silent: bo
         return
 
     job_id = repl._job_registry.new_id()
-    repl._job_registry.register(JobRecord(job_id=job_id, name=f"cognition:{mode}"))
+    repl._job_registry.register(JobRecord(job_id=job_id, name=f"cognition:{mode}", kind="cognition"))
     repl._cognition_job_id = job_id
 
     def _progress(processed: int, total: int, rel_path: str) -> None:

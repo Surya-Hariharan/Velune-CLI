@@ -52,8 +52,19 @@ pip install -e ".[dev]"
 `[dev]` installs `ruff`, `pyright`, `pre-commit`, `pip-audit`,
 `bandit[toml]`, `build`, `twine`, `pytest`, and `pytest-asyncio` — everything
 CI runs, minus the OS-level Go/Rust toolchains (only needed if you're
-touching `ext/go` or `ext/rust`). There is no committed lockfile; dependency
-resolution is `pyproject.toml` version floors, the same way CI resolves them.
+touching `ext/go` or `ext/rust`).
+
+`uv.lock` pins the exact resolved dependency graph (versions + hashes) on top
+of `pyproject.toml`'s version floors, so a dev machine, CI, and a release
+build all resolve identically instead of drifting on "whatever's newest
+today". CI's `Verify lockfile reproducibility` step (`uv lock --check`) fails
+the build if the two have gone out of sync. If you change a dependency in
+`pyproject.toml`, regenerate the lock in the same commit:
+
+```bash
+pip install uv   # or: pipx install uv
+uv lock
+```
 
 Optionally, install the pre-commit hooks so lint/format run automatically on
 `git commit` (ruff --fix, ruff-format, trailing-whitespace, end-of-file-fixer,
@@ -63,6 +74,20 @@ then pyright):
 ```bash
 pre-commit install
 ```
+
+Also install the pre-push hook stage to run a local secret scan
+(`.githooks/pre-push-secret-scan.sh`) before anything leaves your machine —
+`pre-commit install` alone only wires the commit-time hooks above; push-time
+hooks are a separate install:
+
+```bash
+pre-commit install --hook-type pre-push
+```
+
+This needs [gitleaks](https://github.com/gitleaks/gitleaks#installing) on
+your `PATH`; without it, the hook prints a warning and skips itself rather
+than blocking your push — CI's own gitleaks step (`.github/workflows/ci.yml`)
+is the real, always-on gate either way, this is just an earlier local catch.
 
 Verify the install:
 

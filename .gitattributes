@@ -1,0 +1,6 @@
+# Shell scripts must keep LF line endings regardless of a contributor's local
+# core.autocrlf setting — a CRLF shebang line breaks execution outright on
+# Linux/macOS/Git Bash. This repo's own scripts are invoked directly
+# (pre-commit's `language: script`, CI `run:` steps), so this isn't just a
+# style preference.
+*.sh text eol=lf

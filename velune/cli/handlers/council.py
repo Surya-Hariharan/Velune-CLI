@@ -26,8 +26,17 @@ async def cmd_council(repl: VeluneREPL, args: str) -> None:
     await execute_council_task(repl, args, force_tier="full")
 
 
+_JOB_KINDS = ("task", "cognition", "shell")
+
+
 async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
-    """List background jobs or cancel one with /jobs cancel <id>."""
+    """List background jobs, filter by kind, or cancel one with /jobs cancel <id>.
+
+    ``/jobs`` on its own lists everything; ``/jobs cognition`` (or ``task`` /
+    ``shell``) narrows the listing to just that kind — useful once a session
+    has a mix of `/run --bg` reasoning jobs, indexing refreshes, and
+    background shell commands all in flight at once.
+    """
     from rich.table import Table as RichTable
 
     from velune.cli.constants import JOB_STATUS_STYLES
@@ -49,19 +58,36 @@ async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
             repl.console.print(f"[red]Job not found or already finished:[/red] {job_id}")
         return
 
+    kind_filter: str | None = None
+    if sub in _JOB_KINDS:
+        kind_filter = sub
+    elif sub:
+        repl.console.print(
+            f"[red]Unknown /jobs filter: {sub!r}[/red]  "
+            f"[dim]Try: {' | '.join(_JOB_KINDS)} | cancel <id>[/dim]"
+        )
+        return
+
     if repl._job_registry is None:
         repl.console.print("[dim]Job registry unavailable.[/dim]")
         return
 
     jobs = repl._job_registry.all_jobs()
+    if kind_filter:
+        jobs = [j for j in jobs if getattr(j, "kind", "task") == kind_filter]
+
     if not jobs:
-        repl.console.print(
-            "[dim]No background jobs yet. Use [bold]/run --bg <task>[/bold] to start one.[/dim]"
-        )
+        if kind_filter:
+            repl.console.print(f"[dim]No {kind_filter} jobs.[/dim]")
+        else:
+            repl.console.print(
+                "[dim]No background jobs yet. Use [bold]/run --bg <task>[/bold] to start one.[/dim]"
+            )
         return
 
-    table = RichTable(border_style="dim", padding=(0, 1))
+    table = RichTable(border_style="dim", padding=(0, 1), title=f"Jobs: {kind_filter}" if kind_filter else None)
     table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Kind", style="dim", width=9)
     table.add_column("Task", max_width=42)
     table.add_column("Status", width=11)
     table.add_column("Phase", style="dim", width=16)
@@ -75,6 +101,7 @@ async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
         preview = job.result_preview or job.error or "—"
         table.add_row(
             job.job_id,
+            getattr(job, "kind", "task"),
             job.name,
             f"[{color}]{st}[/{color}]",
             job.current_phase or "—",

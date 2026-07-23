@@ -79,6 +79,24 @@ def mark_onboarding_complete() -> None:
     _write_progress_file(data)
 
 
+def has_shown_alt_screen_notice() -> bool:
+    """Whether the one-time "Velune takes over your terminal" note has run.
+
+    Tracked separately from ``onboarding_state()`` (which flips to "returning"
+    once providers/model are configured) because the alt-screen takeover is a
+    REPL-launch behavior, not an onboarding step — a user who runs
+    ``velune onboard`` and exits without ever launching the fullscreen REPL
+    should still see the note the first time they actually do.
+    """
+    return bool(_read_progress_file().get("alt_screen_notice_shown"))
+
+
+def mark_alt_screen_notice_shown() -> None:
+    data = _read_progress_file()
+    data["alt_screen_notice_shown"] = True
+    _write_progress_file(data)
+
+
 def onboarding_state() -> Literal["returning", "partial", "fresh"]:
     """Classify the current installation state.
 

@@ -60,10 +60,30 @@ class StreamRenderer:
         self._interrupts = interrupts
         self._status_state = status_state
         self._fullscreen_ui: Any | None = None
+        # Provider IDs that have already gotten the "doesn't support
+        # streaming" hint this session — shown once per provider, not on
+        # every non-streaming turn, so it explains rather than nags.
+        self._nonstream_hint_shown: set[str] = set()
 
     def attach_fullscreen_ui(self, ui: Any | None) -> None:
         """Route streaming updates into the fullscreen transcript when active."""
         self._fullscreen_ui = ui
+
+    def _nonstream_hint(self, provider: Any) -> str | None:
+        """First-time-only explanation for why a turn didn't stream.
+
+        Returns None on every call after the first for a given provider, so
+        callers can unconditionally check the return value instead of
+        tracking their own "already shown" state.
+        """
+        provider_id = getattr(provider, "provider_id", None) or "This provider"
+        if provider_id in self._nonstream_hint_shown:
+            return None
+        self._nonstream_hint_shown.add(provider_id)
+        return (
+            f"{provider_id} doesn't support streaming — replies arrive all at "
+            "once instead of token-by-token."
+        )
 
     async def render(self, provider: Any, request: Any) -> RenderResult:
         """Run the provider call and render its output.
@@ -96,6 +116,10 @@ class StreamRenderer:
                 supports_stream = getattr(capabilities, "supports_streaming", False)
 
                 if self._fullscreen_ui is not None:
+                    if not supports_stream:
+                        hint = self._nonstream_hint(provider)
+                        if hint:
+                            self._fullscreen_ui.append_system(f"ℹ {hint}")
                     t0 = time.perf_counter()
                     first_token_at: float | None = None
                     self._fullscreen_ui.begin_assistant("Thinking...")
@@ -158,6 +182,9 @@ class StreamRenderer:
                     self._status_state.last_tokens_per_sec = stats.tokens_per_second
 
                 else:
+                    hint = self._nonstream_hint(provider)
+                    if hint:
+                        self._console.print(f"[dim]ℹ {hint}[/dim]")
                     t0 = time.perf_counter()
                     with self._console.status("[dim]Thinking…[/dim]"):
                         response = await provider.infer(request)

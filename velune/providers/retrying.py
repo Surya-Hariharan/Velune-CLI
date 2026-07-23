@@ -1,4 +1,4 @@
-"""Transparent retry wrapper around ModelProvider.infer()/stream().
+"""Transparent retry + concurrency-limiting wrapper around ModelProvider.infer()/stream().
 
 Wired in once, at :meth:`velune.providers.registry.ProviderRegistry.get`, so
 every call site (Council, the native tool loop, the REPL's fallback chat
@@ -10,6 +10,13 @@ A :class:`~velune.core.errors.provider.RateLimitError` carrying a
 ``retry_after`` (parsed from the provider's own ``Retry-After`` header — see
 ``adapters/_http_errors.py``) drives the wait directly instead of blind
 exponential backoff, when the provider tells us how long to wait.
+
+A per-instance ``asyncio.Semaphore`` also caps how many ``infer()``/``stream()``
+calls to the *same* provider can be in flight at once (``providers.
+max_concurrent_requests``, default 4) — a full council run fanning several
+agents out concurrently would otherwise fire them all at the same provider
+simultaneously, which is exactly the shape of traffic that trips a per-key
+rate limit. Extra callers simply queue rather than fail.
 """
 
 from __future__ import annotations
@@ -42,7 +49,9 @@ class RetryingProvider(ModelProvider):
     through unchanged.
     """
 
-    def __init__(self, inner: ModelProvider, *, max_attempts: int = 3) -> None:
+    def __init__(
+        self, inner: ModelProvider, *, max_attempts: int = 3, max_concurrent: int = 4
+    ) -> None:
         self._inner = inner
         # Adapters that support streamed tool-call turns advertise it as a
         # class attribute the tool loop checks via getattr(provider, ...) —
@@ -56,17 +65,24 @@ class RetryingProvider(ModelProvider):
             jitter=True,
             retryable_exceptions=RETRYABLE_EXCEPTIONS,
         )
+        # Caps concurrent infer()/stream() calls to this one provider — e.g. a
+        # council run fanning multiple agents out at once would otherwise
+        # fire them all simultaneously and trip the provider's own per-key
+        # rate limit. Extra callers simply queue on the semaphore rather than
+        # failing; this is throughput shaping, not a hard rejection.
+        self._concurrency_gate = asyncio.Semaphore(max(1, max_concurrent))
 
     @property
     def provider_id(self) -> str:
         return self._inner.provider_id
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
-        return await retry_async(
-            self._policy,
-            lambda: self._inner.infer(request),
-            source=f"provider.{self._inner.provider_id}",
-        )
+        async with self._concurrency_gate:
+            return await retry_async(
+                self._policy,
+                lambda: self._inner.infer(request),
+                source=f"provider.{self._inner.provider_id}",
+            )
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         """Retries only a stream that fails before its first chunk arrives.
@@ -77,32 +93,33 @@ class RetryingProvider(ModelProvider):
         untouched, exactly as it did before this wrapper existed.
         """
         attempt = 0
-        while True:
-            attempt += 1
-            started = False
-            try:
-                async for chunk in self._inner.stream(request):
-                    started = True
-                    yield chunk
-                return
-            except asyncio.CancelledError:
-                raise
-            except RETRYABLE_EXCEPTIONS as exc:
-                if started or attempt >= self._policy.max_attempts:
+        async with self._concurrency_gate:
+            while True:
+                attempt += 1
+                started = False
+                try:
+                    async for chunk in self._inner.stream(request):
+                        started = True
+                        yield chunk
+                    return
+                except asyncio.CancelledError:
                     raise
-                delay = getattr(exc, "retry_after", None)
-                if delay is None:
-                    delay = self._policy._delay(attempt)
-                logger.warning(
-                    "Retrying %s.stream() attempt %d/%d after %.1fs (%s: %s)",
-                    self._inner.provider_id,
-                    attempt,
-                    self._policy.max_attempts,
-                    delay,
-                    type(exc).__name__,
-                    exc,
-                )
-                await asyncio.sleep(delay)
+                except RETRYABLE_EXCEPTIONS as exc:
+                    if started or attempt >= self._policy.max_attempts:
+                        raise
+                    delay = getattr(exc, "retry_after", None)
+                    if delay is None:
+                        delay = self._policy._delay(attempt)
+                    logger.warning(
+                        "Retrying %s.stream() attempt %d/%d after %.1fs (%s: %s)",
+                        self._inner.provider_id,
+                        attempt,
+                        self._policy.max_attempts,
+                        delay,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
 
     async def list_models(self) -> list[ModelDescriptor]:
         return await self._inner.list_models()

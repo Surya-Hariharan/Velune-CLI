@@ -56,6 +56,31 @@ class SessionMeta:
     archived: bool = False
 
 
+@dataclass(slots=True)
+class SessionSearchHit:
+    """One session matched by :meth:`SessionStore.search_content`."""
+
+    meta: SessionMeta
+    match_count: int
+    snippets: list[str] = field(default_factory=list)
+
+
+def _excerpt(content: str, needle: str, *, radius: int = 60) -> str:
+    """Short, single-line excerpt of *content* centered on *needle*."""
+    flat = " ".join(content.split())
+    idx = flat.lower().find(needle)
+    if idx == -1:
+        return flat[: radius * 2].rstrip()
+    start = max(0, idx - radius)
+    end = min(len(flat), idx + len(needle) + radius)
+    excerpt = flat[start:end]
+    if start > 0:
+        excerpt = "…" + excerpt
+    if end < len(flat):
+        excerpt = excerpt + "…"
+    return excerpt
+
+
 def auto_title(conversation: list[dict], max_words: int = 6, max_chars: int = 48) -> str:
     """Derive a human-readable session title from the conversation's intent.
 
@@ -182,6 +207,58 @@ class SessionStore:
         metas.sort(key=lambda m: m.updated_at, reverse=True)
         return metas[:limit]
 
+    def search_content(
+        self,
+        query: str,
+        *,
+        workspace: str | None = None,
+        limit: int = 20,
+        include_archived: bool = False,
+        max_snippets: int = 3,
+    ) -> list[SessionSearchHit]:
+        """Case-insensitive substring search across every session's turns.
+
+        Unlike ``list()`` (browsing by recency/title), this is "I said
+        something about X a while back, which conversation was that" —
+        searches actual turn *content*, not just the auto-generated title.
+        Matching sessions are sorted by match count (most relevant first),
+        each carrying up to *max_snippets* short excerpts so the caller can
+        show why it matched without loading the full conversation.
+        """
+        if not self.root.exists() or not query.strip():
+            return []
+        needle = query.strip().lower()
+        hits: list[SessionSearchHit] = []
+
+        for f in self.root.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                meta = self._meta_from(data)
+            except Exception:
+                continue
+            if workspace is not None and not self._same_workspace(meta.workspace, workspace):
+                continue
+            if meta.archived and not include_archived:
+                continue
+
+            snippets: list[str] = []
+            match_count = 0
+            if needle in meta.title.lower():
+                match_count += 1
+            for turn in data.get("conversation", []):
+                content = turn.get("content") or ""
+                if needle not in content.lower():
+                    continue
+                match_count += 1
+                if len(snippets) < max_snippets:
+                    snippets.append(_excerpt(content, needle))
+
+            if match_count:
+                hits.append(SessionSearchHit(meta=meta, match_count=match_count, snippets=snippets))
+
+        hits.sort(key=lambda h: (h.match_count, h.meta.updated_at), reverse=True)
+        return hits[:limit]
+
     def delete(self, session_id: str) -> bool:
         path = self.root / f"{session_id}.json"
         if not path.exists():
@@ -206,6 +283,28 @@ class SessionStore:
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(path)
         return True
+
+    def rename(self, session_id: str, new_title: str) -> SessionMeta | None:
+        """Rename a session's title in place. Returns the updated meta, or
+        None if the session doesn't exist.
+
+        Like ``set_archived()``, this only touches the meta block — the
+        conversation, project memory, and embeddings are untouched.
+        """
+        new_title = new_title.strip()
+        if not new_title:
+            raise ValueError("Session title cannot be empty.")
+        data = self._read(session_id)
+        if data is None:
+            return None
+        meta = self._meta_from(data)
+        meta.title = new_title
+        payload = {"meta": asdict(meta), "conversation": data.get("conversation", [])}
+        path = self.root / f"{session_id}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+        return meta
 
     def import_session(
         self,

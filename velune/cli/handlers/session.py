@@ -13,16 +13,45 @@ _log = logging.getLogger("velune.cli.handlers.session")
 
 
 async def cmd_help(repl: VeluneREPL, args: str) -> None:
-    from velune.cli.autocomplete import CATEGORY_ORDER
+    from velune.cli.autocomplete import CATEGORY_ORDER, fuzzy_score
     from velune.cli.ui_components import create_table
 
-    show_hidden = any(tok in ("--all", "-a", "all") for tok in args.split())
+    tokens = args.split()
+    show_hidden = any(tok in ("--all", "-a", "all") for tok in tokens)
+    query = " ".join(tok for tok in tokens if tok not in ("--all", "-a", "all")).strip()
 
     grouped: dict[str, list] = {}
     for cmd in repl._registry.all_unique():
         if cmd.hidden and not show_hidden:
             continue
         grouped.setdefault(cmd.category, []).append(cmd)
+
+    if query:
+        # Search across name, aliases, description, and search_terms — the
+        # same corpus the command palette fuzzy-matches against — so
+        # "/help <word>" finds a command by what it does, not just its name.
+        def _best_score(cmd) -> int:
+            haystacks = [cmd.name, cmd.description, *cmd.aliases, *cmd.search_terms]
+            return max((fuzzy_score(query, h) for h in haystacks), default=0)
+
+        matches = [(cmd, _best_score(cmd)) for cmds in grouped.values() for cmd in cmds]
+        matches = sorted((m for m in matches if m[1] > 0), key=lambda m: -m[1])
+
+        if not matches:
+            repl.console.print(f"[dim]No commands match {query!r}.[/dim]")
+            return
+
+        table = create_table(
+            "Command", "Aliases", "Description", title=f"Search: {query!r}"
+        )
+        for cmd, _score in matches:
+            aliases = ", ".join(f"/{a}" for a in cmd.aliases) if cmd.aliases else ""
+            name = f"[cyan]/{cmd.name}[/cyan]" + (" [dim](dev)[/dim]" if cmd.hidden else "")
+            table.add_row(name, f"[dim white]{aliases}[/dim white]", cmd.description)
+        repl.console.print(table)
+        repl.console.print()
+        repl.console.print(f"[dim]{len(matches)} match(es)  ·  /help with no args to see everything[/dim]")
+        return
 
     ordered = [c for c in CATEGORY_ORDER if c in grouped]
     ordered += sorted(c for c in grouped if c not in CATEGORY_ORDER)
@@ -42,6 +71,7 @@ async def cmd_help(repl: VeluneREPL, args: str) -> None:
         "  ·  type [bold]/[/bold] to open command palette"
         "  ·  [bold]@file.py[/bold] to mention files in prompts"
         "  ·  [bold]/help --all[/bold] for dev commands"
+        "  ·  [bold]/help <word>[/bold] to search"
         "[/dim]"
     )
 

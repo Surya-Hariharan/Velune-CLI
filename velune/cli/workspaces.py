@@ -39,7 +39,7 @@ _WORKSPACE_SCOPED_KEYS = frozenset(
     {
         "runtime.sqlite_pool",
         "runtime.episodic_memory",
-        "runtime.semantic_memory",
+        "runtime.code_vector_client",
         "runtime.graph_memory",
         "runtime.lineage_memory",
         "runtime.lancedb_store",

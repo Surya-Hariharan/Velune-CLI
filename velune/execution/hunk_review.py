@@ -11,7 +11,7 @@ import difflib
 from dataclasses import dataclass, field
 from enum import Enum
 
-from velune.execution.diff_preview import FileDiff
+from velune.execution.diff_preview import FileDiff, diff_stats, format_stat_bar
 
 
 class HunkDecision(Enum):
@@ -97,6 +97,16 @@ class HunkReviewer:
         hunk_groups = self.split_into_hunks(diff)
         if not hunk_groups:
             return diff.proposed
+
+        # A file split into many hunks is exactly the case where a reviewer
+        # benefits from knowing the overall scale before clicking through
+        # them one at a time — same rationale as DiffPreview's stat bar for
+        # a large unified diff.
+        if len(hunk_groups) > 5:
+            added, removed = diff_stats(diff)
+            self.console.print(
+                format_stat_bar(added, removed, label=f"{len(hunk_groups)} hunks to review")
+            )
 
         results: list[HunkResult] = []
         for idx, group in enumerate(hunk_groups):

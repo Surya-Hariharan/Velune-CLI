@@ -212,6 +212,12 @@ isolation for plugins is tracked as future work.
 - The `.veluneignore` template excludes `.env`, `*.pem`, `*.key`, and other credential
   files from indexing; runtime artifacts (`*.db-wal`, `*.db-shm`, `velune.local.toml`)
   are excluded from commits and indexing.
+- **Secret scanning**: `gitleaks` runs on every push/PR in CI (`.github/workflows/ci.yml`,
+  scanning only the commits actually introduced, not full history) as the real gate.
+  Contributors can additionally opt in to a local pre-push scan
+  (`pre-commit install --hook-type pre-push`; see CONTRIBUTING.md) that catches a
+  secret before it ever leaves their machine, instead of only after it's already
+  on the remote.
 
 ### Backup and recovery secrets
 
@@ -246,6 +252,15 @@ the clear:
 No analytics, crash reports, or code snippets are transmitted to external servers.
 All indexes and logs live exclusively in local, non-synced application storage.
 
+An opt-in, off-by-default local crash reporter (`telemetry.crash_reports_enabled`,
+or `/crashreports on`) writes a redacted JSON snapshot of an unhandled crash —
+exception, traceback, OS/Python/Velune versions; explicitly no local
+variables and no prompt/conversation content — to `~/.velune/crash_reports/`
+on the user's own machine. This does not transmit anything anywhere; there is
+no server for it to send to. It exists purely so a user can attach a report
+to a GitHub issue themselves if they choose to. See
+`velune/cli/crash_reporter.py`.
+
 ### Dependency security
 
 - `mcp>=1.28.1` is pinned in `pyproject.toml` specifically to floor out
@@ -254,6 +269,32 @@ All indexes and logs live exclusively in local, non-synced application storage.
   in `diskcache ≤ 5.6.3`, which has an unpatched unsafe pickle-deserialization RCE
   risk with no fixed version available. See [Optional extras](README.md#optional-extras)
   in the README for the current extras list.
+- `uv.lock` pins the exact resolved dependency graph (versions + hashes); CI's
+  `Verify lockfile reproducibility` step (`uv lock --check`) fails the build
+  if it drifts out of sync with `pyproject.toml`, so what CI audits and
+  scans is guaranteed to be what actually gets installed.
+
+### Static analysis (Bandit)
+
+Every PR is gated on `bandit -c pyproject.toml -r velune/ --severity-level
+medium --confidence-level medium` — any medium+ severity/confidence finding
+fails the build. A full low-severity report also runs (for visibility) but
+does not gate the build directly; instead, a separate regression-baseline
+step fails the build if the low-severity count *grows* past a checked-in
+baseline (183 as of writing).
+
+This is a deliberate choice, not an oversight: the existing low-severity
+findings are overwhelmingly broad `try/except: pass` patterns used
+throughout the codebase as an intentional resilience strategy (a failed
+best-effort background probe, cache write, or telemetry span must never
+crash the interactive session) — triaging and rewriting all ~183 in one pass
+isn't a security fix, it's a mass refactor with its own regression risk, and
+blocking every unrelated PR on it would just train reviewers to bypass the
+gate. The baseline instead makes sure the count only ever goes down or stays
+flat, never grows unnoticed; raising it is only valid in the same PR that
+introduces and justifies the new finding.
+
+See `.github/workflows/ci.yml` (`security` job) for the exact commands.
 
 ---
 

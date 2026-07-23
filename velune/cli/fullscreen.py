@@ -67,6 +67,15 @@ _MARKDOWN_STREAM_THROTTLE_S = 0.08
 # conversation, borders, or banner. Purely cosmetic ceiling: it does not (and
 # cannot) stop the terminal emulator's own font-size zoom, which never
 # reaches this process as input.
+#
+# 100 columns was picked as a prose-readability measure — it's close to the
+# ~66-90 character line length typography guides recommend for comfortable
+# reading, wide enough for most `git diff`/table output to avoid wrapping,
+# and narrow enough to leave visible gutters on a maximized 1080p terminal.
+# It is a default, not a hard limit: override it with `display.content_max_width`
+# in velune.toml (or `VELUNE_DISPLAY__CONTENT_MAX_WIDTH`) — see
+# `FullscreenREPLUI.__init__`'s `max_content_width` param, which is what
+# actually threads a configured value through to `_width()` below.
 _MAX_CONTENT_WIDTH = 100
 
 # Braille spinner frames for the "thinking" indicator — advances every tick so
@@ -284,8 +293,12 @@ class FullscreenREPLUI:
         home_provider: Any | None = None,
         input: Any | None = None,
         output: Any | None = None,
+        max_content_width: int | None = None,
     ) -> None:
         self._status_state = status_state
+        # `None`/non-positive falls back to the documented default rather than
+        # producing a zero-or-negative Dimension.
+        self._max_content_width = max_content_width if max_content_width and max_content_width > 0 else _MAX_CONTENT_WIDTH
         self._inline_flow = inline_flow
         self._on_status_render = on_status_render
         # Callable returning a fresh HomeState; rendered while the transcript
@@ -559,10 +572,10 @@ class FullscreenREPLUI:
                         always_hide_cursor=True,
                     ),
                 ],
-                # Never wider than `_MAX_CONTENT_WIDTH` — `_width()` mirrors
+                # Never wider than `self._max_content_width` — `_width()` mirrors
                 # this cap so border-drawing and the home screen match what
                 # actually gets allocated on screen.
-                width=Dimension(max=_MAX_CONTENT_WIDTH, preferred=_MAX_CONTENT_WIDTH),
+                width=Dimension(max=self._max_content_width, preferred=self._max_content_width),
             ),
             floats=_build_floats(command_palette, model_switcher, inline_flow),
         )
@@ -728,6 +741,11 @@ class FullscreenREPLUI:
         self.set_busy_hint(True)
         self.invalidate()
 
+        if design.reduced_motion_enabled():
+            # Static frame only — no cycling glyph/verb, no ticking task.
+            self._thinking_task = None
+            return
+
         async def _thinking_anim():
             tick = 0
             while True:
@@ -842,6 +860,10 @@ class FullscreenREPLUI:
         self._live_cards.append(handle)
         self._trim()
         self.invalidate()
+
+        if design.reduced_motion_enabled():
+            # Static frame only — no cycling glyph, no ticking task.
+            return handle
 
         async def _spin() -> None:
             tick = 0
@@ -1129,12 +1151,12 @@ class FullscreenREPLUI:
         if self._app is None:
             return 80
         try:
-            # Mirrors the `_MAX_CONTENT_WIDTH` cap on the layout's content
+            # Mirrors the `self._max_content_width` cap on the layout's content
             # column (`__init__`, the `content = FloatContainer(...)` / `root
             # = VSplit(...)` pair) — this is what the border, home screen,
             # and markdown rendering actually get allocated, not the raw
             # terminal width once the terminal is wider than the cap.
-            return min(_MAX_CONTENT_WIDTH, max(20, self._app.output.get_size().columns))
+            return min(self._max_content_width, max(20, self._app.output.get_size().columns))
         except Exception:
             return 80
 

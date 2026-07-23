@@ -183,6 +183,7 @@ def check(
         _check_sqlite,
         _check_qdrant,
         _check_config,
+        _check_telemetry,
         _check_treesitter,
         _check_git,
         _check_runtime_safety,
@@ -552,6 +553,48 @@ def _check_config() -> dict:
             "name": "velune.toml Config File",
             "status": "fail",
             "message": f"Invalid velune.toml format or schema validation error: {e}",
+        }
+
+
+def _check_telemetry() -> dict:
+    """Surface the resolved telemetry opt-in/out state.
+
+    Velune is local-first and telemetry never leaves the machine by default
+    (see "Zero telemetry" in SECURITY.md) — this check exists so a user can
+    confirm that from `doctor` instead of having to read source or guess from
+    silence, and so it's visible if a workspace config has changed it.
+    """
+    try:
+        from velune.kernel.config import ConfigLoader
+
+        config_file = Path.cwd() / "velune.toml"
+        cfg = ConfigLoader(config_file if config_file.exists() else None).load()
+        enabled = cfg.telemetry.enabled
+        export_otlp = cfg.telemetry.export_otlp
+
+        if export_otlp:
+            return {
+                "name": "Telemetry",
+                "status": "warn",
+                "message": (
+                    "telemetry.export_otlp = true — spans/logs are exported to an "
+                    "OTLP endpoint. Nothing is sent anywhere else; Velune has no "
+                    "built-in analytics or crash-reporting transmission."
+                ),
+            }
+        return {
+            "name": "Telemetry",
+            "status": "ok",
+            "message": (
+                f"telemetry.enabled = {enabled} (local observability only — spans/logs "
+                "stay on this machine; export_otlp = false, nothing is transmitted)."
+            ),
+        }
+    except Exception as e:
+        return {
+            "name": "Telemetry",
+            "status": "warn",
+            "message": f"Could not read telemetry config: {e}",
         }
 
 

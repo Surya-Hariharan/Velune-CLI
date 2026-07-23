@@ -76,6 +76,8 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "settings": "Settings",
     "config": "Settings",
     "approve": "Settings",
+    "theme": "Settings",
+    "crashreports": "Settings",
     # System
     "help": "System",
     "exit": "System",
@@ -107,11 +109,11 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="help",
             aliases=["h", "?"],
-            description="Show all available commands grouped by category",
-            usage="/help [--all]",
+            description="Show all available commands, or search them by keyword",
+            usage="/help [--all] [query]",
             handler=repl._cmd_help,
-            examples=("/help", "/help --all"),
-            search_terms=("commands", "reference", "documentation", "list"),
+            examples=("/help", "/help --all", "/help git"),
+            search_terms=("commands", "reference", "documentation", "list", "search"),
             shortcut="/?",
         )
     )
@@ -496,11 +498,21 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="jobs",
             aliases=["job"],
-            description="List background jobs or cancel one (/jobs cancel <id>)",
-            usage="/jobs [cancel <id>]",
+            description="List background jobs (optionally filtered by kind) or cancel one",
+            usage="/jobs [task|cognition|shell] [cancel <id>]",
             handler=repl._cmd_jobs,
-            examples=("/jobs", "/jobs cancel abc123"),
-            search_terms=("background", "running", "tasks", "cancel job", "progress", "queue"),
+            examples=("/jobs", "/jobs cognition", "/jobs shell", "/jobs cancel abc123"),
+            search_terms=(
+                "background",
+                "running",
+                "tasks",
+                "cancel job",
+                "progress",
+                "queue",
+                "filter",
+                "indexing",
+                "shell",
+            ),
         )
     )
     registry.register(
@@ -535,8 +547,11 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="session",
             aliases=["s"],
-            description="Pick, resume, save, export, or import sessions (no args = interactive picker)",
-            usage="/session [list|resume <id>|summary <id>|save|export|import <path>]",
+            description="Pick, resume, save, export, import, rename, or search sessions (no args = interactive picker)",
+            usage=(
+                "/session [list|resume <id>|summary <id>|save|export|import <path>|"
+                "rename <id> <title>|search <query>]"
+            ),
             handler=repl._cmd_session,
             examples=("/session", "/session list", "/session resume", "/session save"),
             search_terms=(
@@ -547,6 +562,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "past sessions",
                 "switch session",
                 "import conversation",
+                "rename session",
+                "search sessions",
+                "find conversation",
             ),
             shortcut="/s",
         )
@@ -695,6 +713,46 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             handler=repl._cmd_approve,
             examples=("/approve safe", "/approve ask", "/approve block"),
             search_terms=("permissions", "safety", "tool approval", "confirmation", "auto-approve"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="theme",
+            aliases=["appearance"],
+            description="Show or toggle display appearance options (colorblind palette, reduced motion)",
+            usage="/theme <colorblind|motion> [on|off]",
+            handler=repl._cmd_theme,
+            examples=("/theme", "/theme colorblind on", "/theme motion off"),
+            search_terms=(
+                "colorblind",
+                "color blind",
+                "accessibility",
+                "palette",
+                "severity colors",
+                "okabe-ito",
+                "reduced motion",
+                "animation",
+                "spinner",
+            ),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="crashreports",
+            aliases=["crash-reports"],
+            description="Show or toggle opt-in local crash reporting (off by default, never transmitted)",
+            usage="/crashreports [on|off]",
+            handler=repl._cmd_crashreports,
+            examples=("/crashreports", "/crashreports on", "/crashreports off"),
+            search_terms=(
+                "crash",
+                "crash report",
+                "telemetry",
+                "diagnostics",
+                "bug report",
+                "traceback",
+                "zero telemetry",
+            ),
         )
     )
 

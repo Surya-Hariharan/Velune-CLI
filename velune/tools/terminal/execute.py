@@ -176,7 +176,9 @@ class ExecuteCommand(BaseTool):
         job_id = self._job_registry.new_id()
         cancel_event = threading.Event()
         self._job_registry.register(
-            JobRecord(job_id=job_id, name=f"shell:{command[:40]}", cancel_event=cancel_event)
+            JobRecord(
+                job_id=job_id, name=f"shell:{command[:40]}", kind="shell", cancel_event=cancel_event
+            )
         )
 
         async def _run() -> None:

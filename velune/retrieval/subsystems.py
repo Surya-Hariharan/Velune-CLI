@@ -10,10 +10,10 @@ def _create_hybrid_retriever(env: RuntimeEnvironment):
     from velune.retrieval.hybrid import HybridRetriever, load_lexical_documents
 
     vector_path = str(qdrant_store_path(env.workspace))
-    semantic_tier = env.container.get("runtime.semantic_memory")
+    code_vector_client = env.container.get("runtime.code_vector_client")
     retriever = HybridRetriever(
         location=vector_path,
-        client_provider=lambda: semantic_tier.client,
+        client_provider=lambda: code_vector_client.client,
     )
 
     # Populate BM25 from the persisted retrieval index written by
@@ -56,7 +56,7 @@ RETRIEVAL_MODULES = [
         factory=_create_hybrid_retriever,
         container_key="runtime.retrieval",
         lifecycle_key="retrieval",
-        dependencies=["runtime.semantic_memory"],
+        dependencies=["runtime.code_vector_client"],
     ),
     # No lifecycle_key: a plain, stateful-but-async-free object (an
     # intent->weights lookup table plus a small result cache) — nothing to

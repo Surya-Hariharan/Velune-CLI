@@ -57,7 +57,13 @@ class VeluneREPL:
         self._history_file = Path.home() / ".velune" / "repl_history"
         self._history_file.parent.mkdir(parents=True, exist_ok=True)
         self._conversation: list[dict] = []
-        self._hunk_review_mode: bool = False
+        try:
+            _config = self.container.get_optional("runtime.config")
+            self._hunk_review_mode: bool = bool(
+                getattr(getattr(_config, "execution", None), "hunk_review_default", False)
+            )
+        except Exception:
+            self._hunk_review_mode = False
         from velune.cli.interrupts import InterruptController
         from velune.cli.sessions import SessionStore
         from velune.cli.workspaces import WorkspaceRegistry
@@ -260,6 +266,8 @@ class VeluneREPL:
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.key_binding import KeyBindings
 
+        from velune.cli.prompt_recall import PromptRecallState
+
         from velune.cli import design
         from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
         from velune.cli.fullscreen import FullscreenREPLUI
@@ -301,6 +309,47 @@ class VeluneREPL:
         model_switcher.add_bindings(kb)
         flow.add_bindings(kb)
 
+        # Edit-and-resend: Up/Down on an empty (or already-recalled) prompt
+        # box cycles through this session's own previously *sent* chat
+        # messages — not slash commands, and not FileHistory's flat mix of
+        # everything ever typed — so you can fix a typo or rephrase without
+        # retyping the whole thing. See prompt_recall.py for the state
+        # machine; here it's just wired to the live buffer. Non-eager, so it
+        # falls through to normal cursor-move/FileHistory behavior
+        # (`buf.auto_up()`/`auto_down()`, prompt_toolkit's own default
+        # binding for these keys) whenever recall doesn't apply — and
+        # palette/flow's own eager up/down bindings above still win outright
+        # whenever they're active, since eager beats non-eager regardless of
+        # registration order.
+        recall = PromptRecallState()
+
+        def _sent_prompts() -> list[str]:
+            return [
+                m.get("content", "")
+                for m in self._conversation
+                if m.get("role") == "user" and m.get("content")
+            ]
+
+        @kb.add("up")
+        def _recall_up(event) -> None:
+            buf = event.current_buffer
+            new_text = recall.recall_up(buf.text, _sent_prompts())
+            if new_text is None:
+                buf.auto_up()
+                return
+            buf.text = new_text
+            buf.cursor_position = len(buf.text)
+
+        @kb.add("down")
+        def _recall_down(event) -> None:
+            buf = event.current_buffer
+            new_text = recall.recall_down(buf.text, _sent_prompts())
+            if new_text is None:
+                buf.auto_down()
+                return
+            buf.text = new_text
+            buf.cursor_position = len(buf.text)
+
         def _interrupt(event):
             # A generation or tool turn is running: a single Ctrl+C aborts it.
             # In the fullscreen app SIGINT never fires (raw mode), so this key
@@ -316,6 +365,13 @@ class VeluneREPL:
             event.app.invalidate()
             return False
 
+        max_content_width = None
+        try:
+            config = self.container.get_optional("runtime.config")
+            max_content_width = getattr(getattr(config, "display", None), "content_max_width", None)
+        except Exception:
+            pass
+
         return FullscreenREPLUI(
             status_state=self._status_state,
             history=FileHistory(str(self._history_file)),
@@ -329,6 +385,7 @@ class VeluneREPL:
             model_switcher=model_switcher,
             inline_flow=flow,
             home_provider=self._home_state,
+            max_content_width=max_content_width,
         )
 
     async def _reverify_stale_keys(self) -> None:
@@ -1681,6 +1738,16 @@ class VeluneREPL:
         from velune.cli.handlers.git import cmd_hunk
 
         await cmd_hunk(self, args)
+
+    async def _cmd_theme(self, args: str) -> None:
+        from velune.cli.handlers.settings import cmd_theme
+
+        await cmd_theme(self, args)
+
+    async def _cmd_crashreports(self, args: str) -> None:
+        from velune.cli.handlers.settings import cmd_crashreports
+
+        await cmd_crashreports(self, args)
 
     async def _cmd_push(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_push

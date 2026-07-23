@@ -266,19 +266,27 @@ Five tiers, each with its own class and backing store, wired in
 | --- | --- | --- |
 | Working | `WorkingMemoryTier` | in-process, TTL-evicted, no persistence |
 | Episodic | `EpisodicMemoryTier` / `EpisodicMemory` | shared SQLite |
-| Semantic | `SemanticMemoryTier` (Qdrant) / `SemanticMemory` (LanceDB) | two vector stores, see below |
+| Semantic | `SemanticMemory` (LanceDB) | one vector store, see below |
 | Graph | `GraphMemoryTier` | shared SQLite |
 | Lineage | `LineageMemoryTier` | shared SQLite |
 
-> **Two vector stores exist in parallel, deliberately, not by accident:**
-> `SemanticMemoryTier` is Qdrant-backed and feeds `HybridRetriever` (the
-> BM25 + vector + graph retrieval used for chat context); `SemanticMemory` is
-> LanceDB-backed via an `EmbeddingPipeline` and feeds `MemoryLifecycleManager`
+> **There is exactly one conversational-memory vector store, `SemanticMemory`
+> (LanceDB)** — via an `EmbeddingPipeline`, feeding `MemoryLifecycleManager`
 > and `ThreeBrainCoordinator` (the working/semantic/episodic/graph fusion used
-> for "fix the auth thing from yesterday"-style recall). Don't collapse these
-> into "the vector store" when documenting or debugging memory issues — a bug
-> report about retrieval quality and one about cross-session recall usually
-> point at different stores.
+> for "fix the auth thing from yesterday"-style recall). A second Qdrant
+> class used to sit alongside it, also named and framed like a competing
+> "Tier 3: Semantic Memory" — but nothing outside its own file ever called
+> its read/write API; the only thing anything still used from it was a lazy
+> `.client` property. That class is `CodeVectorConnection` now
+> (`velune/memory/tiers/semantic.py`, container key
+> `runtime.code_vector_client`), stripped down to just that — a connection
+> `HybridRetriever` uses for repository/symbol vector search (BM25 + vector +
+> graph retrieval over *code*, not conversation turns). It is not a second
+> memory tier and never was in practice; don't reintroduce a tier-shaped API
+> on it. A bug report about retrieval quality (code search) and one about
+> cross-session recall (conversational memory) still point at genuinely
+> different code paths — just one memory tier and one retrieval connection,
+> not two memory tiers.
 >
 > **Three graph-like stores also exist, and they are not the same thing:**
 > `GraphMemoryTier` (`velune/memory/tiers/graph.py`) is a lightweight

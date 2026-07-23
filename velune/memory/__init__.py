@@ -11,7 +11,7 @@ from velune.memory.three_brain import ThreeBrainCoordinator, ThreeBrainResult
 from velune.memory.tiers.episodic import EpisodicMemoryTier, EpisodicStep, EpisodicTurn
 from velune.memory.tiers.graph import GraphEdge, GraphMemoryTier, GraphNode
 from velune.memory.tiers.lineage import LineageMemoryTier
-from velune.memory.tiers.semantic import SemanticMemoryTier
+from velune.memory.tiers.semantic import CodeVectorConnection
 from velune.memory.tiers.working import MemoryTurn, WorkingMemoryTier
 
 __all__ = [
@@ -20,7 +20,10 @@ __all__ = [
     "EpisodicMemoryTier",
     "EpisodicTurn",
     "EpisodicStep",
-    "SemanticMemoryTier",
+    # Qdrant connection for code/repository vector search — not a
+    # conversational memory tier (that's SemanticMemory, LanceDB-backed;
+    # see velune.memory.tiers.semantic for why there's only one of those).
+    "CodeVectorConnection",
     "GraphMemoryTier",
     "GraphNode",
     "GraphEdge",

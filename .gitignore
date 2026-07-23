@@ -66,8 +66,6 @@ velune/cognition/prompts/_premium.py
 # Dev container
 .devcontainer/
 
-# Benchmarks
-.benchmarks/
 
 # Scripts (local utility scripts)
 scripts/*.sh

@@ -76,6 +76,74 @@ CONTROL = ACCENT  # orchestration/control
 PRIVACY = PRIMARY_GREEN  # local-first, secure
 SPEED = HIGHLIGHT  # performance, energy
 
+# --- Colorblind-safe alternate severity palette -----------------------------
+# Okabe-Ito palette (https://jfly.uni-koeln.de/color/) — chosen because its
+# hues stay distinguishable under deuteranopia, protanopia, and tritanopia,
+# the three common forms of color vision deficiency, unlike the default
+# amber/sage/brick-red trio which leans on a red-green contrast that two of
+# those three conditions collapse.
+#
+# `set_colorblind_mode()` reassigns the OK/WARN/DANGER/SUCCESS/ERROR module
+# globals in place. Every call site in the codebase reads these through
+# `design.OK` etc. (attribute access on the module, not a `from ... import`
+# copy), so the swap takes effect immediately for anything rendered after the
+# call — no cache to invalidate.
+_DEFAULT_SEVERITY = {"OK": OK, "WARN": WARN, "DANGER": DANGER}
+_COLORBLIND_SEVERITY = {
+    "OK": "#009e73",  # bluish green
+    "WARN": "#e69f00",  # orange
+    "DANGER": "#d55e00",  # vermillion
+}
+
+_colorblind_mode = False
+
+
+def set_colorblind_mode(enabled: bool) -> None:
+    """Switch OK/WARN/DANGER (and their SUCCESS/ERROR aliases) between the
+    default palette and the colorblind-safe alternate above."""
+    global _colorblind_mode, OK, WARN, DANGER, SUCCESS, ERROR
+    _colorblind_mode = bool(enabled)
+    palette = _COLORBLIND_SEVERITY if _colorblind_mode else _DEFAULT_SEVERITY
+    OK, WARN, DANGER = palette["OK"], palette["WARN"], palette["DANGER"]
+    SUCCESS, ERROR = OK, DANGER
+
+
+def is_colorblind_mode() -> bool:
+    """Return whether the colorblind-safe severity palette is active."""
+    return _colorblind_mode
+
+
+# --- Reduced motion ----------------------------------------------------------
+_reduced_motion = False
+
+
+def set_reduced_motion(enabled: bool) -> None:
+    """Enable/disable reduced-motion mode.
+
+    When enabled, the fullscreen REPL's thinking/tool-card spinners render a
+    single static frame instead of animating — no cycling glyph, no cycling
+    verb text, no periodic `invalidate()` calls from an animation task.
+    """
+    global _reduced_motion
+    _reduced_motion = bool(enabled)
+
+
+def reduced_motion_enabled() -> bool:
+    """Return True when animated UI elements (spinners) should stay static.
+
+    Checks the explicit toggle set via `set_reduced_motion()` first (config-
+    driven, persisted via `/theme motion off`), then falls back to the
+    ``VELUNE_REDUCED_MOTION`` environment variable — the same opt-in
+    convention ``NO_COLOR`` uses for `color_enabled()` above — so a terminal
+    or OS-level "prefers reduced motion" preference can be honored without
+    touching velune.toml.
+    """
+    if _reduced_motion:
+        return True
+    val = os.environ.get("VELUNE_REDUCED_MOTION", "").strip().lower()
+    return val not in ("", "0", "false", "no")
+
+
 # --- Icons (semantic glyphs) ----------------------------------------------
 # Single-width chars guaranteed to render in any modern terminal.
 ICON_SUCCESS = "✓"

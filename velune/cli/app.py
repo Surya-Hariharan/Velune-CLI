@@ -293,6 +293,29 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
                     # Fresh install — run the full guided wizard.
                     run_onboarding(runtime)
 
+                if not plain:
+                    from velune.cli.onboarding import (
+                        has_shown_alt_screen_notice,
+                        mark_alt_screen_notice_shown,
+                    )
+
+                    # One-time, regardless of onboarding state: the wizard
+                    # above (fresh installs only) already takes over the
+                    # screen itself, but "partial"/"returning" users land
+                    # here directly, so gate on this flag rather than
+                    # `state` to make sure everyone sees it exactly once
+                    # before the terminal is ever taken over.
+                    if not has_shown_alt_screen_notice():
+                        runtime.console.print(
+                            Text.from_markup(
+                                f"[{design.MUTED}]Velune takes over this terminal window while it's"
+                                " running — like vim or htop — and restores your normal shell"
+                                " prompt on exit. Press [bold]Ctrl+C[/bold] twice, or type"
+                                f" [bold]/exit[/bold], to leave.[/{design.MUTED}]"
+                            )
+                        )
+                        mark_alt_screen_notice_shown()
+
                 _startup_mark("REPL handoff (prompt visible)")
                 from velune.kernel.entrypoint import launch
 

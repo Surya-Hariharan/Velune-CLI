@@ -28,11 +28,11 @@ def _create_episodic_tier(env: RuntimeEnvironment):
     return EpisodicMemoryTier(pool)
 
 
-def _create_semantic_tier(env: RuntimeEnvironment):
+def _create_code_vector_connection(env: RuntimeEnvironment):
     from velune.core.paths import qdrant_store_path
-    from velune.memory.tiers.semantic import SemanticMemoryTier
+    from velune.memory.tiers.semantic import CodeVectorConnection
 
-    return SemanticMemoryTier(path=str(qdrant_store_path(env.workspace)))
+    return CodeVectorConnection(path=str(qdrant_store_path(env.workspace)))
 
 
 def _create_graph_tier(env: RuntimeEnvironment):
@@ -183,9 +183,15 @@ MEMORY_MODULES = [
         dependencies=["runtime.sqlite_pool"],
     ),
     SubsystemModule(
-        name="semantic_memory",
-        factory=_create_semantic_tier,
-        container_key="runtime.semantic_memory",
+        # Qdrant connection for code/repository vector search (used by
+        # HybridRetriever) — not a conversational memory tier. Renamed from
+        # "semantic_memory" alongside CodeVectorConnection (see
+        # velune.memory.tiers.semantic) specifically so this can no longer be
+        # mistaken for a second, competing implementation of
+        # "runtime.semantic_memory_lance" (the real one, LanceDB-backed).
+        name="code_vector_client",
+        factory=_create_code_vector_connection,
+        container_key="runtime.code_vector_client",
     ),
     SubsystemModule(
         name="graph_memory",

@@ -71,6 +71,14 @@ def build_runtime(
         config = get_default_config()
     mark("config loaded")
 
+    # Applies before any Console/theme is built below so the very first frame
+    # already reflects the configured palette, not just frames after a
+    # `/theme colorblind` toggle.
+    from velune.cli import design as _design
+
+    _design.set_colorblind_mode(bool(getattr(config.display, "colorblind_mode", False)))
+    _design.set_reduced_motion(bool(getattr(config.display, "reduced_motion", False)))
+
     container = ServiceContainer()
     lifecycle = LifecycleCoordinator()
     lifecycle.container = container

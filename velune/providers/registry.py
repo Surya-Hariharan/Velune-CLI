@@ -327,7 +327,8 @@ class ProviderRegistry:
             provider = self._factories[name]()
             from velune.providers.retrying import RetryingProvider
 
-            provider = RetryingProvider(provider)
+            max_concurrent = getattr(self._config, "max_concurrent_requests", 4) or 4
+            provider = RetryingProvider(provider, max_concurrent=max_concurrent)
             self._providers[name] = provider
             self._provider_key_revisions[name] = revision
             return provider

@@ -113,12 +113,29 @@ async def cmd_undo(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_hunk(repl: VeluneREPL, args: str) -> None:
-    """Toggle hunk-by-hunk review mode for edit sessions."""
+    """Toggle hunk-by-hunk review mode for edit sessions.
+
+    Persisted to this workspace's velune.toml (``execution.hunk_review_default``)
+    so the choice carries over to the next session opened in the same
+    workspace, instead of resetting to off on every launch.
+    """
+    from velune.cli.handlers.settings import save_setting_to_toml
+
     repl._hunk_review_mode = not repl._hunk_review_mode
     state = "enabled" if repl._hunk_review_mode else "disabled"
+
+    save_setting_to_toml(repl, "execution", "hunk_review_default", repl._hunk_review_mode)
+    try:
+        config = repl.container.get_optional("runtime.config")
+        if config is not None and hasattr(config, "execution"):
+            config.execution.hunk_review_default = repl._hunk_review_mode
+    except Exception:
+        pass
+
     repl.console.print(
         f"[cyan]Hunk review mode {state}.[/cyan] "
-        f"[dim]{'Each hunk in a diff will be reviewed individually.' if repl._hunk_review_mode else 'Diffs are reviewed file-by-file (default).'}[/dim]"
+        f"[dim]{'Each hunk in a diff will be reviewed individually.' if repl._hunk_review_mode else 'Diffs are reviewed file-by-file (default).'} "
+        f"Saved as this workspace's default.[/dim]"
     )
 
 

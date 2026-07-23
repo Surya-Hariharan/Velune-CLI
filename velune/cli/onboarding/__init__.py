@@ -11,13 +11,17 @@ from __future__ import annotations
 
 from velune.cli.onboarding.logic import (
     _STAGE_NAMES,
+    has_shown_alt_screen_notice,
     load_stage_progress,
+    mark_alt_screen_notice_shown,
     onboarding_state,
 )
 
 __all__ = [
     "_STAGE_NAMES",
+    "has_shown_alt_screen_notice",
     "load_stage_progress",
+    "mark_alt_screen_notice_shown",
     "onboarding_state",
     "run_onboarding",
 ]

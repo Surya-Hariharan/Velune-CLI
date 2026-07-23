@@ -81,6 +81,17 @@ jobs:
           # which are installed normally and audited as usual.
           pip-audit --skip-editable
 
+      - name: Verify lockfile reproducibility
+        # `uv.lock` pins the exact resolved dependency graph (versions +
+        # hashes) so a dev machine, CI, and a release build all resolve
+        # identically instead of drifting apart on "whatever's newest today".
+        # `uv lock --check` fails instead of silently re-resolving if
+        # pyproject.toml's declared dependencies and uv.lock have gone out of
+        # sync — e.g. a dependency bump that forgot to regenerate the lock.
+        run: |
+          pip install -q uv
+          uv lock --check
+
       - name: Bandit static security scan
         # Gate on medium+ severity & confidence; full low-severity report is
         # printed for visibility but does not fail the build.
