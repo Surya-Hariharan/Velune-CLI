@@ -1,20 +1,16 @@
-"""Velune Plugin Subsystem - dynamic plugins, hooks, and registry.
+"""Velune Plugin Subsystem — declarative, markdown-based plugins.
 
-WARNING: This subsystem does NOT provide sandbox isolation. Plugin loading is
-experimental, disabled by default, and runs plugins in-process with full
-process privileges. See velune/plugins/loader.py and
-VELUNE_ARCHITECTURE_BIBLE.md §9.6.
+Plugins are discovered from directories containing a manifest (see
+``velune.plugins.declarative``) and are loaded and managed by
+:class:`velune.plugins.manager.PluginManager`. There is no in-process or
+subprocess code-execution loader: plugin surface area is markdown commands,
+SKILL.md context injection, subprocess lifecycle hooks (``velune.hooks``),
+and MCP server registration — no arbitrary plugin Python code runs inside or
+alongside the CLI process.
 """
 
 from velune.plugins.declarative.manifest import DeclarativePluginManifest
-from velune.plugins.hooks import PluginHookDispatcher
-from velune.plugins.loader import EXPERIMENTAL_PLUGINS_ENV, PluginLoader
-from velune.plugins.registry import PluginRegistry
 
 __all__ = [
     "DeclarativePluginManifest",
-    "PluginHookDispatcher",
-    "PluginRegistry",
-    "PluginLoader",
-    "EXPERIMENTAL_PLUGINS_ENV",
 ]

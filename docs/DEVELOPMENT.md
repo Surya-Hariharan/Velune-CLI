@@ -152,7 +152,7 @@ gated by a final `ci-pass` aggregation job:
 | Job | What it does |
 | --- | --- |
 | `lint` | `ruff check`, `ruff format --check`, and `pyright velune/` — all blocking |
-| `security` | `pip-audit --skip-editable` (dependency vulnerabilities), `bandit` (static analysis, medium+ severity gates the build), a gitleaks secret scan (incremental on PRs — only the commits introduced by the push; full history on a fresh branch), plus two regression guards: no `shell=True` anywhere in `velune/`, and no more than one `asyncio.run()` call outside `plugins/runner.py` (a subprocess worker where it's intentional) |
+| `security` | `pip-audit --skip-editable` (dependency vulnerabilities), `bandit` (static analysis, medium+ severity gates the build), a gitleaks secret scan (incremental on PRs — only the commits introduced by the push; full history on a fresh branch), plus two regression guards: no `shell=True` anywhere in `velune/`, and no more than one `asyncio.run()` call anywhere in `velune/` |
 | `test` | `pip install -e ".[all,dev]"` then `pytest`, across the matrix: Python 3.10–3.13 × Ubuntu/Windows/macOS |
 | `build` | Builds sdist + wheel via **Hatchling** (`[build-system] requires = ["hatchling"]` in `pyproject.toml`), `twine check --strict`, verifies the wheel is pure-python (`py3-none-any` — no compiled extension required for the PyPI package), reproducible via `SOURCE_DATE_EPOCH` pinned to the commit date |
 | `build-go` | Builds/tests/vets the optional Go launcher under `ext/go/cmd/velune`, Go 1.26, matrix across all three OSes |

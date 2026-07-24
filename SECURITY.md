@@ -186,12 +186,15 @@ read-only (`safe`), or are rejected outright (`block`).
 
 ### Plugin trust model
 
-Plugin sandboxing is **not yet implemented**. Plugins load in-process with full
-process privileges, so discovery is **disabled by default** and unreachable from any
-shipped CLI command; it requires an explicit opt-in
-(`VELUNE_ENABLE_EXPERIMENTAL_PLUGINS=1` or `PluginLoader(experimental=True)`) and emits
-loud warnings. Treat any plugin as arbitrary code you are choosing to run. Subprocess
-isolation for plugins is tracked as future work.
+Plugins are declarative (markdown commands, `SKILL.md` context injection, subprocess
+lifecycle hooks via `velune.hooks.HookDispatcher`, and MCP server registration —
+`velune/plugins/manager.py` + `velune/plugins/declarative/`). There is no in-process or
+subprocess loader for arbitrary plugin Python code: a prior experimental code-plugin
+loader (`PluginLoader`/`PluginSandbox`, disabled by default and never reachable from any
+shipped CLI command) was removed rather than finished, since the declarative system
+covers the same needs without running third-party code inside or alongside the CLI
+process. Treat plugin hook scripts (subprocess lifecycle hooks) as arbitrary code you
+are choosing to run.
 
 ### Secrets protection
 

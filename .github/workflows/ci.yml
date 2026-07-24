@@ -179,12 +179,10 @@ jobs:
 
       - name: Check asyncio.run() count (P0-1 regression)
         run: |
-          # plugins/runner.py is a subprocess worker — asyncio.run() there is intentional.
-          count=$(grep -rn "asyncio\.run(" velune/ \
-            --exclude="runner.py" | wc -l)
+          count=$(grep -rn "asyncio\.run(" velune/ | wc -l)
           if [ "$count" -gt 1 ]; then
             echo "❌ FATAL: Found $count asyncio.run() calls outside allowlist (P0-1 regression)"
-            grep -rn "asyncio\.run(" velune/ --exclude="runner.py"
+            grep -rn "asyncio\.run(" velune/
             exit 1
           fi
           echo "✓ asyncio.run() count is acceptable ($count)"
