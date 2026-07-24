@@ -323,7 +323,7 @@ async def _project_list(repl: VeluneREPL) -> None:
 
 
 async def _project_picker(repl: VeluneREPL) -> None:
-    from velune.cli.picker import PickItem, pick
+    from velune.cli.interactive import BACK, CANCEL, Option, single_select
 
     workspaces = repl._workspace_registry.list()
     if not workspaces:
@@ -332,20 +332,20 @@ async def _project_picker(repl: VeluneREPL) -> None:
         )
         return
     current = str(Path(repl.container.get("runtime.workspace")).resolve())
-    items = [
-        PickItem(
+    options = [
+        Option(
             id=w.path,
             label=w.name,
             meta=w.project_type or ("git" if w.is_git else ""),
             group="Projects",
-            is_current=(w.path == current),
+            badge="current" if w.path == current else None,
         )
         for w in workspaces
     ]
-    chosen = await pick("Project workspaces", items)
-    if chosen is None or chosen.is_current:
+    chosen = await single_select("Project workspaces", options, filterable=True)
+    if chosen in (BACK, CANCEL) or chosen == current:
         return
-    await switch_workspace(repl, Path(chosen.id))
+    await switch_workspace(repl, Path(chosen))
 
 
 async def _project_switch_target(repl: VeluneREPL, target: str) -> None:

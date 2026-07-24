@@ -1,17 +1,10 @@
-"""Interactive two-stage TUI for assigning models to council agent roles."""
+"""Interactive two-stage flow for assigning models to council agent roles."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from prompt_toolkit.application import Application
-from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import Window
-from prompt_toolkit.layout.controls import FormattedTextControl
-
+from velune.cli.interactive import BACK, CANCEL, Option, single_select
 from velune.orchestration.role_assignments import (
     COUNCIL_ROLES,
     ROLE_DESCRIPTIONS,
@@ -23,8 +16,11 @@ if TYPE_CHECKING:
 
     from velune.core.types.model import ModelDescriptor
 
-# Sentinel to distinguish "user pressed Escape" from "user selected clear"
-_CANCELLED = object()
+# Roles not yet wired into the orchestrator — excluded from the picker.
+# `/roles show` still lists every role, including these, for visibility.
+_DISABLED_ROLES = {"architect", "security", "challenger", "synthesizer"}
+
+_CLEAR = "\x00clear"
 
 
 async def run_councilmodel_ui(
@@ -32,187 +28,57 @@ async def run_councilmodel_ui(
     available_models: list[ModelDescriptor],
     console: Console,
 ) -> CouncilRoleMap | None:
-    """Two-stage interactive UI: select a role, then select a model for it.
+    """Two-stage interactive flow: select a role, then select a model for it.
 
     Returns the updated role_map, or None if cancelled at the role-select stage.
     """
-
     # ── Stage 1: Role selection ────────────────────────────────────────
-    disabled_roles = {"architect", "security", "challenger", "synthesizer"}
-    active_indices = [i for i, r in enumerate(COUNCIL_ROLES) if r not in disabled_roles]
-    selected_role_idx = [active_indices[0] if active_indices else 0]
-    role_result: list[str | None] = [None]
+    role_options = []
+    for role in COUNCIL_ROLES:
+        if role in _DISABLED_ROLES:
+            continue
+        desc = ROLE_DESCRIPTIONS.get(role, "")
+        current = role_map.get(role)
+        meta = f"{desc}   currently: {current.model_id}" if current else desc
+        role_options.append(Option(id=role, label=role, meta=meta))
 
-    def render_role_list() -> FormattedText:
-        lines: list[tuple[str, str]] = []
-        lines.append(("bold", "  Assign model to council role\n"))
-        lines.append(("fg:ansibrightblack", "  ↑↓ navigate · Enter select · Esc cancel\n\n"))
-        for i, role in enumerate(COUNCIL_ROLES):
-            is_active = i == selected_role_idx[0]
-            prefix = "❯ " if is_active else "  "
-
-            if role in disabled_roles:
-                row_style = "fg:ansibrightblack"
-                tag = " [disabled]"
-                prefix = "  "
-                desc = ROLE_DESCRIPTIONS.get(role, "")
-                lines.append((row_style, f"  {prefix}{role:<14} {desc}{tag}\n"))
-            else:
-                row_style = "bold fg:cyan" if is_active else ""
-                desc = ROLE_DESCRIPTIONS.get(role, "")
-                lines.append((row_style, f"  {prefix}{role:<14} {desc}\n"))
-                current = role_map.get(role)
-                if current:
-                    lines.append(
-                        ("fg:ansibrightblack", f"               currently: {current.model_id}\n")
-                    )
-        return FormattedText(lines)
-
-    kb1 = KeyBindings()
-
-    @kb1.add("up")
-    def _up(event) -> None:
-        curr = selected_role_idx[0]
-        while True:
-            curr = (curr - 1) % len(COUNCIL_ROLES)
-            if curr in active_indices:
-                selected_role_idx[0] = curr
-                break
-
-    @kb1.add("down")
-    def _down(event) -> None:
-        curr = selected_role_idx[0]
-        while True:
-            curr = (curr + 1) % len(COUNCIL_ROLES)
-            if curr in active_indices:
-                selected_role_idx[0] = curr
-                break
-
-    # Mouse wheel — same convention as the main REPL transcript (fullscreen.py).
-    @kb1.add(Keys.ScrollUp, eager=True)
-    def _scroll_up(event) -> None:
-        _up(event)
-
-    @kb1.add(Keys.ScrollDown, eager=True)
-    def _scroll_down(event) -> None:
-        _down(event)
-
-    @kb1.add("enter")
-    def _select_role(event) -> None:
-        role_result[0] = COUNCIL_ROLES[selected_role_idx[0]]
-        event.app.exit()
-
-    @kb1.add("escape")
-    @kb1.add("c-c")
-    def _cancel_role(event) -> None:
-        event.app.exit()  # role_result stays None
-
-    app1 = Application(
-        layout=Layout(
-            Window(
-                content=FormattedTextControl(render_role_list, focusable=True),
-            )
-        ),
-        key_bindings=kb1,
-        full_screen=False,
-        mouse_support=True,
-    )
-    await app1.run_async()
-
-    selected_role = role_result[0]
-    if selected_role is None:
+    selected_role = await single_select("Assign model to council role", role_options)
+    if selected_role in (BACK, CANCEL):
         return None  # cancelled at role stage
 
     # ── Stage 2: Model selection for chosen role ───────────────────────
-    # First entry is None = "clear assignment"
-    model_options: list[ModelDescriptor | None] = [None] + list(available_models)
-    selected_model_idx = [0]
-    model_result: list[object] = [_CANCELLED]
-
-    def render_model_list() -> FormattedText:
-        lines: list[tuple[str, str]] = []
-        lines.append(("bold", f"  Select model for [{selected_role}]\n"))
-        lines.append(("fg:ansibrightblack", "  ↑↓ navigate · Enter select · Esc back\n\n"))
-
-        for i, model in enumerate(model_options):
-            is_active = i == selected_model_idx[0]
-            prefix = "❯ " if is_active else "  "
-            row_style = "bold fg:cyan" if is_active else ""
-
-            if model is None:
-                lines.append((row_style, f"  {prefix}(clear — use default routing)\n"))
-                continue
-
-            current = role_map.get(selected_role)
-            is_current = current is not None and current.model_id == model.model_id
-            current_marker = " ← current" if is_current else ""
-            local_cloud = "local" if model.is_local else "cloud"
-            cost = getattr(model, "cost_per_1k_tokens", None)
-            free_str = " free" if cost == 0.0 else ""
-            lines.append(
-                (
-                    row_style,
-                    f"  {prefix}{model.model_id:<42}"
-                    f" [{local_cloud}{free_str} · {model.speed_tier}]"
-                    f"{current_marker}\n",
-                )
+    # Options are keyed by index (not model_id) so a duplicate model_id
+    # across two providers can't resolve to the wrong ModelDescriptor.
+    current = role_map.get(selected_role)
+    model_options = [Option(id=_CLEAR, label="(clear — use default routing)")]
+    for i, model in enumerate(available_models):
+        is_current = current is not None and current.model_id == model.model_id
+        local_cloud = "local" if model.is_local else "cloud"
+        cost = getattr(model, "cost_per_1k_tokens", None)
+        free_str = " free" if cost == 0.0 else ""
+        model_options.append(
+            Option(
+                id=str(i),
+                label=model.model_id,
+                meta=f"[{local_cloud}{free_str} · {model.speed_tier}]",
+                badge="current" if is_current else None,
             )
-        return FormattedText(lines)
-
-    kb2 = KeyBindings()
-
-    @kb2.add("up")
-    def _up2(event) -> None:
-        selected_model_idx[0] = (selected_model_idx[0] - 1) % len(model_options)
-
-    @kb2.add("down")
-    def _down2(event) -> None:
-        selected_model_idx[0] = (selected_model_idx[0] + 1) % len(model_options)
-
-    # Mouse wheel — same convention as the main REPL transcript (fullscreen.py).
-    @kb2.add(Keys.ScrollUp, eager=True)
-    def _scroll_up2(event) -> None:
-        _up2(event)
-
-    @kb2.add(Keys.ScrollDown, eager=True)
-    def _scroll_down2(event) -> None:
-        _down2(event)
-
-    @kb2.add("enter")
-    def _select_model(event) -> None:
-        model_result[0] = model_options[selected_model_idx[0]]
-        event.app.exit()
-
-    @kb2.add("escape")
-    @kb2.add("c-c")
-    def _cancel_model(event) -> None:
-        event.app.exit()  # model_result stays _CANCELLED
-
-    app2 = Application(
-        layout=Layout(
-            Window(
-                content=FormattedTextControl(render_model_list, focusable=True),
-            )
-        ),
-        key_bindings=kb2,
-        full_screen=False,
-        mouse_support=True,
-    )
-    await app2.run_async()
-
-    if model_result[0] is _CANCELLED:
-        return role_map  # user backed out — return map unchanged
-
-    chosen_model = model_result[0]
-    if chosen_model is None:
-        role_map.clear_role(selected_role)
-        console.print(f"[yellow]Cleared assignment for [{selected_role}][/yellow]")
-    else:
-        role_map.assign(selected_role, chosen_model.model_id, chosen_model.provider_id)
-        console.print(
-            f"[green][{selected_role}][/green] → "
-            f"[cyan]{chosen_model.model_id}[/cyan] "
-            f"[dim]({chosen_model.provider_id})[/dim]"
         )
 
+    chosen = await single_select(f"Select model for [{selected_role}]", model_options)
+    if chosen in (BACK, CANCEL):
+        return role_map  # user backed out — return map unchanged
+
+    if chosen == _CLEAR:
+        role_map.clear_role(selected_role)
+        console.print(f"[yellow]Cleared assignment for [{selected_role}][/yellow]")
+        return role_map
+
+    chosen_model = available_models[int(chosen)]
+    role_map.assign(selected_role, chosen_model.model_id, chosen_model.provider_id)
+    console.print(
+        f"[green][{selected_role}][/green] → "
+        f"[cyan]{chosen_model.model_id}[/cyan] "
+        f"[dim]({chosen_model.provider_id})[/dim]"
+    )
     return role_map

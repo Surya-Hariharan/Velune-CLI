@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
+from pathlib import Path
+
 from velune.cli.interactive import host
 from velune.cli.interactive.result import BACK, CANCEL, WidgetResult
 from velune.cli.interactive.runner import run_standalone
@@ -19,6 +21,7 @@ from velune.cli.interactive.runner import run_with_status as _run_with_status
 from velune.cli.interactive.tty import is_interactive_tty
 from velune.cli.interactive.widgets import (
     ConfirmWidget,
+    DirBrowserWidget,
     Option,
     PaletteSelectWidget,
     PickItem,
@@ -39,6 +42,7 @@ __all__ = [
     "multi_select",
     "text_input",
     "confirm",
+    "browse_directory",
     "run_with_status",
 ]
 
@@ -181,4 +185,15 @@ async def confirm(
         return await installed.confirm(question, hint=hint, default=default)
 
     widget = ConfirmWidget(question=question, hint=hint, default=default)
+    return await run_standalone(widget)
+
+
+async def browse_directory(
+    *,
+    title: str = "Select a folder",
+    start: Path | None = None,
+    validate: Callable[[Path], bool] | None = None,
+) -> WidgetResult:
+    """Navigable directory browser. Returns the chosen ``Path``, or BACK/CANCEL."""
+    widget = DirBrowserWidget(title=title, start=start, validate=validate)
     return await run_standalone(widget)

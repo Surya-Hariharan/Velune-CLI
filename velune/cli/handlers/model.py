@@ -821,7 +821,7 @@ async def _model_remove(repl: VeluneREPL, name: str) -> None:
 
 
 async def _model_locate(repl: VeluneREPL) -> None:
-    from velune.cli.dir_browser import browse_for_directory
+    from velune.cli.interactive import BACK, CANCEL, browse_directory
     from velune.providers.ollama_locations import OllamaLocationRegistry
     from velune.providers.ollama_store import OllamaModelStore
 
@@ -831,14 +831,14 @@ async def _model_locate(repl: VeluneREPL) -> None:
         "Use ← to go up to drives/volumes.[/dim]"
     )
     try:
-        chosen = await browse_for_directory(
+        chosen = await browse_directory(
             title="Locate your Ollama model store",
             validate=OllamaModelStore.is_valid_root,
         )
     except Exception as exc:
         repl.console.print(f"[red]Could not open the browser:[/red] {exc}")
         return
-    if chosen is None:
+    if chosen in (BACK, CANCEL):
         repl.console.print("[dim]Cancelled.[/dim]")
         return
 
@@ -968,13 +968,16 @@ async def cmd_pull(repl: VeluneREPL, args: str) -> None:
         if success:
             await _refresh_model_registry(repl)
     else:
-        from velune.cli.pull_ui import run_pull_ui
+        from velune.cli.interactive import BACK, CANCEL, run_standalone
+        from velune.cli.interactive.widgets.model_pull import ModelPullWidget
 
         local_models = await manager.list_local_models()
         hardware = repl.container.get("runtime.hardware")
         ram_gb = float(hardware.total_ram_gb) if hardware else 16.0
-        chosen = await run_pull_ui(local_models, ram_gb, repl.console)
-        if chosen:
+        chosen = await run_standalone(
+            ModelPullWidget(local_models=local_models, hardware_ram_gb=ram_gb)
+        )
+        if chosen not in (BACK, CANCEL):
             if chosen in local_models:
                 repl.console.print(f"[yellow]{chosen} is already installed.[/yellow]")
                 return

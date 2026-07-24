@@ -150,7 +150,7 @@ async def _session_picker(repl: VeluneREPL, workspace: str) -> None:
     """Interactive session picker: archived snapshots, resumable on Enter."""
     from pathlib import Path
 
-    from velune.cli.picker import PickItem, pick
+    from velune.cli.interactive import BACK, CANCEL, Option, single_select
 
     metas = repl._session_store.list(limit=50)
     if not metas:
@@ -167,8 +167,8 @@ async def _session_picker(repl: VeluneREPL, workspace: str) -> None:
             return m.workspace == workspace
 
     metas.sort(key=lambda m: (not _is_current_ws(m), m.project_name))
-    items = [
-        PickItem(
+    options = [
+        Option(
             id=m.id,
             label=m.title,
             meta=f"{m.updated_at[:16].replace('T', ' ')} · {m.model_id} · {m.turn_count} turns",
@@ -176,10 +176,10 @@ async def _session_picker(repl: VeluneREPL, workspace: str) -> None:
         )
         for m in metas
     ]
-    chosen = await pick("Resume a session", items)
-    if chosen is None:
+    chosen = await single_select("Resume a session", options, filterable=True)
+    if chosen in (BACK, CANCEL):
         return
-    await _resume_snapshot(repl, chosen.id)
+    await _resume_snapshot(repl, chosen)
 
 
 async def _resume_snapshot(repl: VeluneREPL, session_id: str) -> bool:
