@@ -6,6 +6,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from rich.table import Table
+
+from velune.cli import design
+
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
 
@@ -233,9 +237,15 @@ async def _project_status(repl: VeluneREPL) -> None:
         pending_warnings.append("No AI providers configured — run /providers to add API keys")
 
     # Clean table layout
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
-    table = create_table("Key", "Value")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Key", "Value"):
+        table.add_column(col, style=design.MUTED)
 
     table.add_row("Workspace", ws_name)
     table.add_row("Path", ws_path)
@@ -250,12 +260,14 @@ async def _project_status(repl: VeluneREPL) -> None:
     table.add_row("MCP Status", mcp_status_str)
     table.add_row("Memory Status", memory_status)
 
-    print_header(repl.console, "Workspace Overview")
+    repl.console.print(ui.header("Workspace Overview"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print()
 
     if recent_jobs:
-        print_header(repl.console, "Recent Tasks")
+        repl.console.print(ui.header("Recent Tasks"))
+        repl.console.print(ui.rule())
         for job in recent_jobs:
             status_color = (
                 "yellow"
@@ -267,26 +279,37 @@ async def _project_status(repl: VeluneREPL) -> None:
             )
         repl.console.print()
 
-    print_header(repl.console, "Pending Warnings")
+    repl.console.print(ui.header("Pending Warnings"))
+    repl.console.print(ui.rule())
     if pending_warnings:
         for warn in pending_warnings:
-            print_notification(repl.console, warn, type="warning")
+            repl.console.print(ui.notification(warn, kind="warning"))
     else:
-        print_notification(repl.console, "No pending warnings. System is healthy.", type="success")
+        repl.console.print(
+            ui.notification("No pending warnings. System is healthy.", kind="success")
+        )
     repl.console.print()
 
 
 async def _project_list(repl: VeluneREPL) -> None:
-    from velune.cli.ui_components import create_table, print_notification
+    from velune.cli import ui
 
     workspaces = repl._workspace_registry.list()
     if not workspaces:
-        print_notification(
-            repl.console, "No workspaces registered. Use /project add <path>.", type="info"
+        repl.console.print(
+            ui.notification(
+                "No workspaces registered. Use /project add <path>.", kind="info"
+            )
         )
         return
     current = str(Path(repl.container.get("runtime.workspace")).resolve())
-    table = create_table("Project", "Type", "Last Opened", "Path")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Project", "Type", "Last Opened", "Path"):
+        table.add_column(col, style=design.MUTED)
     for w in workspaces:
         name = f"[bold]{w.name}[/bold] [green](current)[/green]" if w.path == current else w.name
         table.add_row(

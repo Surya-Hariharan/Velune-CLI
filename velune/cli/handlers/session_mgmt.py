@@ -5,6 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from rich.table import Table
+
+from velune.cli import design
+
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
 
@@ -208,27 +212,34 @@ async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
     lists depending on whether you asked from the shell or the REPL. Now both
     surfaces read the one source of truth.
     """
+    from velune.cli import ui
+
     try:
         sessions = repl._session_store.list(workspace=workspace, limit=10)
     except Exception as exc:
-        from velune.cli.ui_components import print_notification
-
-        print_notification(repl.console, f"Could not load sessions: {exc}", type="error")
+        repl.console.print(ui.notification(f"Could not load sessions: {exc}", kind="error"))
         return
-
-    from velune.cli.ui_components import create_table, print_header, print_notification
 
     if not sessions:
-        print_notification(repl.console, "No sessions found for this workspace.", type="info")
+        repl.console.print(
+            ui.notification("No sessions found for this workspace.", kind="info")
+        )
         return
 
-    table = create_table("ID", "Started", "Model", "Tokens", "Title")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("ID", "Started", "Model", "Tokens", "Title"):
+        table.add_column(col, style=design.MUTED)
 
     for m in sessions:
         dt = m.created_at[:16].replace("T", " ") if m.created_at else "—"
         table.add_row(m.id, dt, m.model_id or "—", str(m.total_tokens), m.title)
 
-    print_header(repl.console, "Recent Sessions")
+    repl.console.print(ui.header("Recent Sessions"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print()
 

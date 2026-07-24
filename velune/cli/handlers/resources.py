@@ -12,6 +12,9 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from rich.table import Table
+
+from velune.cli import design
 from velune.resources.base import AuthorizationRequest, ResourcePermission, ResourceState
 
 if TYPE_CHECKING:
@@ -54,14 +57,20 @@ async def cmd_resource(repl: VeluneREPL, args: str) -> None:
 
 
 def _show_status(repl: VeluneREPL) -> None:
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     rows = repl._resource_manager.all_status()
     if not rows:
-        print_notification(repl.console, "No resource connectors registered.", type="info")
+        repl.console.print(ui.notification("No resource connectors registered.", kind="info"))
         return
 
-    table = create_table("Resource", "State", "Detail", "Info")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Resource", "State", "Detail", "Info"):
+        table.add_column(col, style=design.MUTED)
     for st in rows:
         style = _STATE_STYLE.get(st.state, "dim")
         err = f" ({st.error[:40]})" if st.error else ""
@@ -73,7 +82,8 @@ def _show_status(repl: VeluneREPL) -> None:
             info_bits or "—",
         )
 
-    print_header(repl.console, "Resources")
+    repl.console.print(ui.header("Resources"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print(
         "\n[dim]Sub-commands: /resource discover | configure <id> | connect <id> | "
@@ -82,23 +92,31 @@ def _show_status(repl: VeluneREPL) -> None:
 
 
 async def _discover(repl: VeluneREPL) -> None:
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     repl.console.print("[dim]Scanning environment for resources…[/dim]")
     hints = await repl._resource_manager.discover()
     if not hints:
-        print_notification(
-            repl.console,
-            "No resources detected. Install Docker or configure a database to get started.",
-            type="info",
+        repl.console.print(
+            ui.notification(
+                "No resources detected. Install Docker or configure a database to get started.",
+                kind="info",
+            )
         )
         return
 
-    table = create_table("Resource", "Detected", "Source")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Resource", "Detected", "Source"):
+        table.add_column(col, style=design.MUTED)
     for hint in hints:
         table.add_row(hint.display_name, hint.detail or "—", hint.source or "—")
 
-    print_header(repl.console, "Discovered Resources")
+    repl.console.print(ui.header("Discovered Resources"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
 
     ids = sorted({h.resource_id for h in hints})
@@ -245,15 +263,17 @@ async def _disconnect(repl: VeluneREPL, resource_id: str) -> None:
 
 
 def _info(repl: VeluneREPL, resource_id: str) -> None:
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     if not resource_id:
         repl.console.print("[yellow]Usage: /resource info <id>[/yellow]")
         return
     caps = repl._resource_manager.capabilities(resource_id)
     if not caps:
-        print_notification(
-            repl.console, f"No connector '{resource_id}' (unknown or disabled).", type="warning"
+        repl.console.print(
+            ui.notification(
+                f"No connector '{resource_id}' (unknown or disabled).", kind="warning"
+            )
         )
         return
 
@@ -263,13 +283,20 @@ def _info(repl: VeluneREPL, resource_id: str) -> None:
         ResourcePermission.EXECUTE: "yellow",
         ResourcePermission.ADMIN: "red",
     }
-    table = create_table("Action", "Permission", "Description")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Action", "Permission", "Description"):
+        table.add_column(col, style=design.MUTED)
     for cap in caps:
         style = _perm_style.get(cap.permission, "white")
         label = cap.permission.value.upper() + (" ⚠" if cap.destructive else "")
         table.add_row(cap.action, f"[{style}]{label}[/{style}]", cap.description)
 
-    print_header(repl.console, f"{resource_id} capabilities")
+    repl.console.print(ui.header(f"{resource_id} capabilities"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print(
         "\n[dim]READ actions run without prompting; WRITE/EXECUTE/ADMIN require approval.[/dim]"

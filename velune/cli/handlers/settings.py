@@ -6,6 +6,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from rich.table import Table
+
+from velune.cli import design
+
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
 
@@ -17,11 +21,17 @@ async def cmd_config(repl: VeluneREPL, args: str) -> None:
     import logging as _logging
     from pathlib import Path
 
-    from velune.cli.ui_components import create_table, print_header
+    from velune.cli import ui
 
     config = repl.runtime.config
 
-    table = create_table("Setting", "Value")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Setting", "Value"):
+        table.add_column(col, style=design.MUTED)
 
     table.add_row("Config Path", str(repl.runtime.config_path or "default (memory)"))
     table.add_row("Workspace Root", str(repl.runtime.workspace or Path.cwd()))
@@ -45,25 +55,34 @@ async def cmd_config(repl: VeluneREPL, args: str) -> None:
 
     flatten_dict(dump)
 
-    print_header(repl.console, "Velune System Configuration")
+    repl.console.print(ui.header("Velune System Configuration"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print()
 
 
 async def cmd_hooks(repl: VeluneREPL, args: str) -> None:
     """List active hook bindings from project + user config."""
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     rows = repl._hook_dispatcher.summary()
     if not rows:
-        print_notification(
-            repl.console,
-            "No hooks configured. Create .velune/hooks.json or ~/.velune/hooks.json to add lifecycle hooks.",
-            type="info",
+        repl.console.print(
+            ui.notification(
+                "No hooks configured. Create .velune/hooks.json or "
+                "~/.velune/hooks.json to add lifecycle hooks.",
+                kind="info",
+            )
         )
         return
 
-    table = create_table("Event", "Matcher", "Command", "Timeout", "If Condition")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Event", "Matcher", "Command", "Timeout", "If Condition"):
+        table.add_column(col, style=design.MUTED)
 
     for row in rows:
         table.add_row(
@@ -74,7 +93,8 @@ async def cmd_hooks(repl: VeluneREPL, args: str) -> None:
             row.get("if", "") or "—",
         )
 
-    print_header(repl.console, "Lifecycle Hooks")
+    repl.console.print(ui.header("Lifecycle Hooks"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print(
         f"\n[dim]{len(rows)} hook(s) loaded. "

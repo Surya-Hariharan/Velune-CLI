@@ -149,17 +149,17 @@ def usage_summary(
 
 
 def _render_provider_table(provider_data: list) -> None:
-    from velune.cli.ui_components import create_table, print_header
+    from velune.cli import ui
 
-    print_header(console, "Provider Summary")
-    table = create_table(
-        "Provider",
-        "Requests",
-        "Tokens",
-        "Cost (USD)",
-        "Avg Latency",
-        "Models Used",
+    console.print(ui.header("Provider Summary"))
+    console.print(ui.rule())
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
     )
+    for col in ("Provider", "Requests", "Tokens", "Cost (USD)", "Avg Latency", "Models Used"):
+        table.add_column(col, style=design.MUTED)
     table.add_column("Success %", justify="right")
 
     for p in provider_data:
@@ -183,17 +183,17 @@ def _render_provider_table(provider_data: list) -> None:
 
 
 def _render_model_table(model_data: list) -> None:
-    from velune.cli.ui_components import create_table, print_header
+    from velune.cli import ui
 
-    print_header(console, "Model Usage")
-    table = create_table(
-        "Model",
-        "Provider",
-        "Requests",
-        "Tokens",
-        "Cost (USD)",
-        "Avg Latency",
+    console.print(ui.header("Model Usage"))
+    console.print(ui.rule())
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
     )
+    for col in ("Model", "Provider", "Requests", "Tokens", "Cost (USD)", "Avg Latency"):
+        table.add_column(col, style=design.MUTED)
 
     for m in model_data:
         cost_str = f"${m.cost_usd:.4f}" if m.cost_usd else "—"
@@ -326,16 +326,13 @@ def quota_overview(
         console.print()
 
     # Per-provider quota table
-    from velune.cli.ui_components import create_table
-
-    table = create_table(
-        "Provider",
-        "Requests",
-        "Tokens",
-        "Cost (USD)",
-        "Failures",
-        "Utilization",
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
     )
+    for col in ("Provider", "Requests", "Tokens", "Cost (USD)", "Failures", "Utilization"):
+        table.add_column(col, style=design.MUTED)
 
     max_tokens = max((p.total_tokens for p in provider_data), default=1) or 1
 

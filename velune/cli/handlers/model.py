@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from rich.table import Table
+
 from velune.cli import design
 
 if TYPE_CHECKING:
@@ -574,7 +576,7 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
         return
     all_models = model_registry.list_all()
 
-    from velune.cli.ui_components import create_table, print_header
+    from velune.cli import ui
 
     if not all_models:
         from velune.cli.rendering.error_panel import render_error
@@ -583,7 +585,13 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
         repl.console.print(render_error(NoModelsAvailableError()))
         return
 
-    table = create_table("Model", "Provider", "Type", "Speed", "Context", "Top Skill")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Model", "Provider", "Type", "Speed", "Context", "Top Skill"):
+        table.add_column(col, style=design.MUTED)
 
     skill_attrs = ["coding", "reasoning", "planning", "summarization"]
     for m in all_models:
@@ -605,7 +613,8 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
             f"{m.context_length // 1000}k",
             top_skill,
         )
-    print_header(repl.console, "Available Models")
+    repl.console.print(ui.header("Available Models"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print()
     repl.console.print(
@@ -884,7 +893,7 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
         repl.console.print(f"[{style}]{result.message}[/{style}]")
         return
 
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     if sub in ("remove", "rm", "delete"):
         if not rest:
@@ -892,21 +901,30 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
             return
         ok = reg.remove(rest)
         if ok:
-            print_notification(repl.console, f"Removed location: {rest}", type="success")
+            repl.console.print(ui.notification(f"Removed location: {rest}", kind="success"))
         else:
-            print_notification(repl.console, f"Not a registered location: {rest}", type="warning")
+            repl.console.print(
+                ui.notification(f"Not a registered location: {rest}", kind="warning")
+            )
         return
 
     roots = reg.resolve_roots()
     if not roots:
-        print_notification(
-            repl.console,
-            "No model locations resolved. Run /model locate to register one.",
-            type="info",
+        repl.console.print(
+            ui.notification(
+                "No model locations resolved. Run /model locate to register one.",
+                kind="info",
+            )
         )
         return
 
-    table = create_table("Location", "Source", "Status")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Location", "Source", "Status"):
+        table.add_column(col, style=design.MUTED)
     for rr in roots:
         if rr.disconnected:
             status = "[yellow]disconnected (device unavailable)[/yellow]"
@@ -918,16 +936,19 @@ async def _model_locations(repl: VeluneREPL, args: str) -> None:
             status = "[red]not an Ollama store[/red]"
         table.add_row(str(rr.path), rr.source, status)
 
-    print_header(repl.console, "Model Locations")
+    repl.console.print(ui.header("Model Locations"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print()
 
     disconnected = [rr for rr in roots if rr.disconnected]
     if disconnected:
-        print_notification(
-            repl.console,
-            "Reconnect the drive(s) above and the models reappear automatically — no re-setup needed.",
-            type="info",
+        repl.console.print(
+            ui.notification(
+                "Reconnect the drive(s) above and the models reappear automatically — "
+                "no re-setup needed.",
+                kind="info",
+            )
         )
 
 

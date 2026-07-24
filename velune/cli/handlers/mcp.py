@@ -5,6 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from rich.table import Table
+
+from velune.cli import design
+
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
 
@@ -67,18 +71,25 @@ async def cmd_mcp(repl: VeluneREPL, args: str) -> None:
 
 
 async def _mcp_show_servers(repl: VeluneREPL) -> None:
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     rows = repl._mcp_registry.status()
     if not rows:
-        print_notification(
-            repl.console,
-            "No MCP servers configured. Create .mcp.json in the workspace to add servers.",
-            type="info",
+        repl.console.print(
+            ui.notification(
+                "No MCP servers configured. Create .mcp.json in the workspace to add servers.",
+                kind="info",
+            )
         )
         return
 
-    table = create_table("Name", "State", "Transport", "Endpoint", "Tools", "Resources")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Name", "State", "Transport", "Endpoint", "Tools", "Resources"):
+        table.add_column(col, style=design.MUTED)
 
     _state_style = {
         "connected": "green",
@@ -100,7 +111,8 @@ async def _mcp_show_servers(repl: VeluneREPL) -> None:
             str(row["resources"]),
         )
 
-    print_header(repl.console, "MCP Servers")
+    repl.console.print(ui.header("MCP Servers"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print(
         "\n[dim]Sub-commands: /mcp tools | /mcp resources | /mcp connect <name> | "
@@ -109,7 +121,7 @@ async def _mcp_show_servers(repl: VeluneREPL) -> None:
 
 
 def _mcp_show_tools(repl: VeluneREPL, server_filter: str | None = None) -> None:
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     all_tools = repl._mcp_registry.all_tools()
     if server_filter:
@@ -117,10 +129,16 @@ def _mcp_show_tools(repl: VeluneREPL, server_filter: str | None = None) -> None:
 
     if not all_tools:
         label = f" from '{server_filter}'" if server_filter else ""
-        print_notification(repl.console, f"No tools available{label}.", type="info")
+        repl.console.print(ui.notification(f"No tools available{label}.", kind="info"))
         return
 
-    table = create_table("Server", "Tool", "Description")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Server", "Tool", "Description"):
+        table.add_column(col, style=design.MUTED)
 
     for tool in all_tools:
         desc = tool.description
@@ -128,13 +146,14 @@ def _mcp_show_tools(repl: VeluneREPL, server_filter: str | None = None) -> None:
             desc = desc[:77] + "..."
         table.add_row(tool.server_name, tool.name, desc)
 
-    print_header(repl.console, "MCP Tools")
+    repl.console.print(ui.header("MCP Tools"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print(f"\n[dim]{len(all_tools)} tool(s) available.[/dim]")
 
 
 def _mcp_show_resources(repl: VeluneREPL, server_filter: str | None = None) -> None:
-    from velune.cli.ui_components import create_table, print_header, print_notification
+    from velune.cli import ui
 
     all_resources = repl._mcp_registry.all_resources()
     if server_filter:
@@ -142,10 +161,16 @@ def _mcp_show_resources(repl: VeluneREPL, server_filter: str | None = None) -> N
 
     if not all_resources:
         label = f" from '{server_filter}'" if server_filter else ""
-        print_notification(repl.console, f"No resources available{label}.", type="info")
+        repl.console.print(ui.notification(f"No resources available{label}.", kind="info"))
         return
 
-    table = create_table("Server", "URI", "Name", "MIME Type")
+    table = Table(
+        box=None,
+        pad_edge=False,
+        padding=design.PADDING_DEFAULT,
+    )
+    for col in ("Server", "URI", "Name", "MIME Type"):
+        table.add_column(col, style=design.MUTED)
 
     for res in all_resources:
         table.add_row(
@@ -155,6 +180,7 @@ def _mcp_show_resources(repl: VeluneREPL, server_filter: str | None = None) -> N
             res.mime_type or "—",
         )
 
-    print_header(repl.console, "MCP Resources")
+    repl.console.print(ui.header("MCP Resources"))
+    repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print(f"\n[dim]{len(all_resources)} resource(s) available.[/dim]")
