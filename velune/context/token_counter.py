@@ -2,6 +2,18 @@
 
 Supports accurate token counting for OpenAI-family models via tiktoken,
 with conservative fallback for other model families.
+
+Claude-family counts are an approximation, not an exact count — Anthropic
+does not distribute an offline tokenizer for local use (only a remote
+``POST /v1/messages/count_tokens`` API call, unsuitable for this
+synchronous, frequently-called, offline-capable budgeting path: it would
+add network+auth+latency to every context-assembly pass, including
+sessions that only ever talk to a local model). See
+``TokenCounter._count_claude_approx`` for the approximation and its
+documented safety margin — docs/REPOSITORY_INTELLIGENCE_BASELINE.md's
+finding that Claude counts silently reused GPT's tokenizer with no
+acknowledgment of the gap, risking assembled context silently exceeding
+the real window.
 """
 
 from __future__ import annotations
@@ -62,9 +74,15 @@ class TokenCounter:
         # Detect model family if not specified
         family = detect_family(model.model_id)
 
-        # OpenAI-family models: use tiktoken for accuracy
-        if family in (ModelFamily.CLAUDE, ModelFamily.GPT):
+        if family == ModelFamily.GPT:
+            # tiktoken is GPT's actual real tokenizer — exact, not an
+            # approximation.
             return TokenCounter._count_openai_family(text, model.model_id)
+
+        if family == ModelFamily.CLAUDE:
+            # tiktoken is NOT Claude's tokenizer — see module docstring.
+            # This is a validated-margin approximation, not an exact count.
+            return TokenCounter._count_claude_approx(text)
 
         # Other families: conservative heuristic
         return TokenCounter._count_heuristic(text)
@@ -114,6 +132,44 @@ class TokenCounter:
             return len(encoding.encode(text, disallowed_special=()))
         except Exception as e:
             logger.debug(f"tiktoken counting failed for {model_id}: {e}; falling back to heuristic")
+            return TokenCounter._count_heuristic(text)
+
+    # Anthropic does not distribute an offline BPE tokenizer for Claude
+    # (only the exact-but-remote ``/v1/messages/count_tokens`` API — see
+    # module docstring for why that's unsuitable here). Anthropic's own
+    # public guidance has historically cited roughly 3.5 characters per
+    # token for Claude versus roughly 4 for GPT-family/cl100k_base, i.e.
+    # Claude's real tokenizer produces *more* tokens per character than the
+    # proxy this used to silently reuse — meaning the old bare tiktoken
+    # count under-counted Claude, which is the dangerous direction for a
+    # context budget (baseline: "a heuristic under-count could let
+    # assembled context silently exceed a ... real window while ...
+    # bookkeeping reports it as under budget"). This inflates the tiktoken
+    # base count by a margin chosen to bound the error toward
+    # over-counting instead: a caller that trims to fit a reported count
+    # trims slightly more than strictly necessary, never less.
+    _CLAUDE_APPROXIMATION_MARGIN = 1.15
+
+    @staticmethod
+    def _count_claude_approx(text: str) -> int:
+        """Approximate Claude token count via tiktoken's cl100k_base plus a
+        documented safety margin — not an exact count. See
+        ``_CLAUDE_APPROXIMATION_MARGIN`` above for the reasoning."""
+        tiktoken_mod = _tiktoken_module()
+        if tiktoken_mod is None:
+            return TokenCounter._count_heuristic(text)
+
+        try:
+            encoding_name = "cl100k_base"
+            if encoding_name not in TokenCounter._ENCODING_CACHE:
+                TokenCounter._ENCODING_CACHE[encoding_name] = tiktoken_mod.get_encoding(
+                    encoding_name
+                )
+            encoding = TokenCounter._ENCODING_CACHE[encoding_name]
+            base_count = len(encoding.encode(text, disallowed_special=()))
+            return max(1, int(base_count * TokenCounter._CLAUDE_APPROXIMATION_MARGIN))
+        except Exception as e:
+            logger.debug(f"tiktoken-based Claude approximation failed: {e}; falling back to heuristic")
             return TokenCounter._count_heuristic(text)
 
     @staticmethod
