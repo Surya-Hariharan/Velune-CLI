@@ -267,35 +267,46 @@ class RepositoryCognitionService:
         must go through :meth:`run_deep` / :meth:`run_incremental`, or wrap it in
         ``asyncio.to_thread``; calling it directly from a coroutine freezes the
         REPL for as long as the walk takes.
+
+        Marked as a ``cold_start_scope`` for the duration of the call —
+        any LLM-reasoning pass (directly or transitively) invoked from
+        within this method raises immediately rather than silently adding
+        an unbounded, network-dependent delay to an already-unbounded cold
+        start. See ``velune.repository.llm_gate`` for why: the outer 5s
+        context-assembly timeout that degrades to zero repository context
+        on a slow index doesn't cancel work already in flight, so it
+        doesn't actually protect against this.
         """
         from velune.repository.incremental_indexer import IncrementalIndexer
+        from velune.repository.llm_gate import cold_start_scope
 
-        # Refuse to walk an unbounded tree. probe_for_changes() and the CLI
-        # handler both check this, but index() is reachable directly (the
-        # orchestrator and the MCP server call it), and in $HOME or C:\ that
-        # means recursively hashing the entire drive.
-        reason = self.unsafe_reason()
-        if reason:
-            logger.warning("Refusing to index — workspace is %s.", reason)
-            return RepositorySnapshot(root_path=str(self.root_path))
+        with cold_start_scope():
+            # Refuse to walk an unbounded tree. probe_for_changes() and the CLI
+            # handler both check this, but index() is reachable directly (the
+            # orchestrator and the MCP server call it), and in $HOME or C:\ that
+            # means recursively hashing the entire drive.
+            reason = self.unsafe_reason()
+            if reason:
+                logger.warning("Refusing to index — workspace is %s.", reason)
+                return RepositorySnapshot(root_path=str(self.root_path))
 
-        inc = IncrementalIndexer(self.root_path, self._state_path)
+            inc = IncrementalIndexer(self.root_path, self._state_path)
 
-        if not force and inc.git_sha() == self._stored_commit_sha():
-            clean = inc.working_tree_is_clean()
-            if clean:
-                cached = self.get_snapshot()
-                if cached:
-                    logger.debug("Fast path: reusing cached snapshot (git SHA matches).")
-                    return self._run_pipeline(cached)
+            if not force and inc.git_sha() == self._stored_commit_sha():
+                clean = inc.working_tree_is_clean()
+                if clean:
+                    cached = self.get_snapshot()
+                    if cached:
+                        logger.debug("Fast path: reusing cached snapshot (git SHA matches).")
+                        return self._run_pipeline(cached)
 
-        # Slow path: file-level incremental index
-        snapshot = self.indexer.index(force=force)
+            # Slow path: file-level incremental index
+            snapshot = self.indexer.index(force=force)
 
-        # Persist updated IndexState so the next session benefits from the fast path
-        self._persist_index_state(inc, snapshot)
+            # Persist updated IndexState so the next session benefits from the fast path
+            self._persist_index_state(inc, snapshot)
 
-        return self._run_pipeline(snapshot)
+            return self._run_pipeline(snapshot)
 
     # ------------------------------------------------------------------
     # Read-only snapshot accessor (no indexing)
