@@ -92,3 +92,7 @@ def test_knowledge_graph_patcher_treats_oversized_file_as_opaque(tmp_path):
     # No symbol nodes should have been created for the oversized file.
     assert result.nodes_added == 1  # just the file node
     assert result.edges_added == 0
+    # An opaque node asserts less than a fully-parsed one — lower confidence,
+    # not the default 1.0 a real structural parse would carry.
+    assert node.confidence < 1.0
+    assert "opaque_size_guard" in node.provenance

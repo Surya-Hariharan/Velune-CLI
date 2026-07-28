@@ -40,6 +40,8 @@ _SCHEMA_SQL = """
         line_start  INTEGER,
         line_end    INTEGER,
         metadata    TEXT NOT NULL DEFAULT '{}',
+        confidence  REAL NOT NULL DEFAULT 1.0,
+        provenance  TEXT NOT NULL DEFAULT '[]',
         updated_at  REAL NOT NULL
     );
 
@@ -49,6 +51,8 @@ _SCHEMA_SQL = """
         edge_type   TEXT NOT NULL,
         weight      REAL NOT NULL DEFAULT 1.0,
         metadata    TEXT NOT NULL DEFAULT '{}',
+        confidence  REAL NOT NULL DEFAULT 1.0,
+        provenance  TEXT NOT NULL DEFAULT '[]',
         PRIMARY KEY (source, target, edge_type),
         FOREIGN KEY (source) REFERENCES kg_nodes(id) ON DELETE CASCADE,
         FOREIGN KEY (target) REFERENCES kg_nodes(id) ON DELETE CASCADE
@@ -65,6 +69,20 @@ _SCHEMA_SQL = """
     CREATE INDEX IF NOT EXISTS idx_kg_edges_target   ON kg_edges(target);
     CREATE INDEX IF NOT EXISTS idx_kg_edges_type     ON kg_edges(edge_type);
 """
+
+# Columns added after the original schema shipped. A DB file created before
+# this change has kg_nodes/kg_edges without them — CREATE TABLE IF NOT
+# EXISTS is a no-op against an existing table, so initialize() must ALTER
+# TABLE them in explicitly. SQLite has no "ADD COLUMN IF NOT EXISTS"; a
+# duplicate-column error is the expected, harmless outcome on a DB that
+# already has the column (either migrated in a prior run, or created
+# fresh from the CREATE TABLE above) and is swallowed accordingly.
+_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("kg_nodes", "confidence", "REAL NOT NULL DEFAULT 1.0"),
+    ("kg_nodes", "provenance", "TEXT NOT NULL DEFAULT '[]'"),
+    ("kg_edges", "confidence", "REAL NOT NULL DEFAULT 1.0"),
+    ("kg_edges", "provenance", "TEXT NOT NULL DEFAULT '[]'"),
+)
 
 _WRITE_PRAGMAS = (
     "PRAGMA journal_mode=WAL",
@@ -105,12 +123,20 @@ class KnowledgeGraph:
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Create tables and indexes if they do not exist yet."""
+        """Create tables and indexes if they do not exist yet, and migrate
+        columns added to the schema after a DB file may already have been
+        created."""
         async with self._write() as conn:
             for stmt in _SCHEMA_SQL.split(";"):
                 stmt = stmt.strip()
                 if stmt:
                     await conn.execute(stmt)
+            for table, column, coltype in _MIGRATION_COLUMNS:
+                try:
+                    await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+                except aiosqlite.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
         logger.debug("KnowledgeGraph schema initialized at %s", self._db_path)
 
     async def clear(self) -> None:
@@ -158,8 +184,8 @@ class KnowledgeGraph:
             await conn.execute(
                 """
                 INSERT INTO kg_nodes (id, node_type, label, file_path, line_start, line_end,
-                                      metadata, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                      metadata, confidence, provenance, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     node_type  = excluded.node_type,
                     label      = excluded.label,
@@ -167,6 +193,8 @@ class KnowledgeGraph:
                     line_start = excluded.line_start,
                     line_end   = excluded.line_end,
                     metadata   = excluded.metadata,
+                    confidence = excluded.confidence,
+                    provenance = excluded.provenance,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -177,6 +205,8 @@ class KnowledgeGraph:
                     node.line_start,
                     node.line_end,
                     meta,
+                    node.confidence,
+                    json.dumps(node.provenance),
                     time.time(),
                 ),
             )
@@ -206,6 +236,8 @@ class KnowledgeGraph:
                 n.line_start,
                 n.line_end,
                 json.dumps(n.metadata),
+                n.confidence,
+                json.dumps(n.provenance),
                 time.time(),
             )
             for n in nodes
@@ -213,8 +245,8 @@ class KnowledgeGraph:
         await conn.executemany(
             """
             INSERT INTO kg_nodes (id, node_type, label, file_path, line_start, line_end,
-                                  metadata, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                  metadata, confidence, provenance, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 node_type  = excluded.node_type,
                 label      = excluded.label,
@@ -222,6 +254,8 @@ class KnowledgeGraph:
                 line_start = excluded.line_start,
                 line_end   = excluded.line_end,
                 metadata   = excluded.metadata,
+                confidence = excluded.confidence,
+                provenance = excluded.provenance,
                 updated_at = excluded.updated_at
             """,
             rows,
@@ -233,13 +267,23 @@ class KnowledgeGraph:
         async with self._write() as conn:
             await conn.execute(
                 """
-                INSERT INTO kg_edges (source, target, edge_type, weight, metadata)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO kg_edges (source, target, edge_type, weight, metadata, confidence, provenance)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, target, edge_type) DO UPDATE SET
-                    weight   = excluded.weight,
-                    metadata = excluded.metadata
+                    weight     = excluded.weight,
+                    metadata   = excluded.metadata,
+                    confidence = excluded.confidence,
+                    provenance = excluded.provenance
                 """,
-                (edge.source, edge.target, edge.edge_type.value, edge.weight, meta),
+                (
+                    edge.source,
+                    edge.target,
+                    edge.edge_type.value,
+                    edge.weight,
+                    meta,
+                    edge.confidence,
+                    json.dumps(edge.provenance),
+                ),
             )
 
     async def upsert_edges_bulk(self, edges: list[KnowledgeEdge]) -> None:
@@ -259,15 +303,26 @@ class KnowledgeGraph:
         if not edges:
             return
         rows = [
-            (e.source, e.target, e.edge_type.value, e.weight, json.dumps(e.metadata)) for e in edges
+            (
+                e.source,
+                e.target,
+                e.edge_type.value,
+                e.weight,
+                json.dumps(e.metadata),
+                e.confidence,
+                json.dumps(e.provenance),
+            )
+            for e in edges
         ]
         await conn.executemany(
             """
-            INSERT INTO kg_edges (source, target, edge_type, weight, metadata)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO kg_edges (source, target, edge_type, weight, metadata, confidence, provenance)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source, target, edge_type) DO UPDATE SET
-                weight   = excluded.weight,
-                metadata = excluded.metadata
+                weight     = excluded.weight,
+                metadata   = excluded.metadata,
+                confidence = excluded.confidence,
+                provenance = excluded.provenance
             """,
             rows,
         )
@@ -306,6 +361,27 @@ class KnowledgeGraph:
             rows = await cursor.fetchall()
         return [_row_to_node(r) for r in rows]
 
+    async def existing_node_ids(self, ids: list[str]) -> set[str]:
+        """Return the subset of *ids* that already exist as nodes.
+
+        A single batched query rather than one ``get_node`` call per id —
+        used by ``KnowledgeGraphPatcher`` to filter out edges whose target
+        isn't (yet) a real node before inserting them, since ``kg_edges``
+        has a foreign-key constraint on both endpoints and a per-file
+        parse pass has no way to know in advance whether an import target
+        resolves to something already in the graph.
+        """
+        if not ids:
+            return set()
+        unique_ids = list(dict.fromkeys(ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        async with self._read() as conn:
+            cursor = await conn.execute(
+                f"SELECT id FROM kg_nodes WHERE id IN ({placeholders})", unique_ids
+            )
+            rows = await cursor.fetchall()
+        return {row["id"] for row in rows}
+
     async def get_nodes_by_type(self, node_type: NodeType) -> list[KnowledgeNode]:
         """Return all nodes of a given type."""
         async with self._read() as conn:
@@ -340,8 +416,10 @@ class KnowledgeGraph:
             params: list[Any] = [node_id]
             sql = f"""
                 SELECT e.source, e.target, e.edge_type, e.weight, e.metadata,
+                       e.confidence as econf, e.provenance as eprov,
                        n.id as nid, n.node_type, n.label, n.file_path,
-                       n.line_start, n.line_end, n.metadata as nmeta
+                       n.line_start, n.line_end, n.metadata as nmeta,
+                       n.confidence as nconf, n.provenance as nprov
                 FROM kg_edges e
                 JOIN kg_nodes n ON e.{tgt_col} = n.id
                 WHERE e.{src_col} = ?
@@ -361,6 +439,8 @@ class KnowledgeGraph:
                     line_start=row["line_start"],
                     line_end=row["line_end"],
                     metadata=json.loads(row["nmeta"] or "{}"),
+                    confidence=row["nconf"] if row["nconf"] is not None else 1.0,
+                    provenance=json.loads(row["nprov"] or "[]"),
                 )
                 edge = KnowledgeEdge(
                     source=row["source"],
@@ -368,6 +448,8 @@ class KnowledgeGraph:
                     edge_type=EdgeType(row["edge_type"]),
                     weight=row["weight"],
                     metadata=json.loads(row["metadata"] or "{}"),
+                    confidence=row["econf"] if row["econf"] is not None else 1.0,
+                    provenance=json.loads(row["eprov"] or "[]"),
                 )
                 results.append((node, edge))
 
@@ -547,4 +629,6 @@ def _row_to_node(row: aiosqlite.Row) -> KnowledgeNode:
         line_start=row["line_start"],
         line_end=row["line_end"],
         metadata=json.loads(row["metadata"] or "{}"),
+        confidence=row["confidence"] if row["confidence"] is not None else 1.0,
+        provenance=json.loads(row["provenance"] or "[]"),
     )

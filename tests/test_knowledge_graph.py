@@ -106,23 +106,43 @@ class TestSchemas:
         assert NodeType.FUNCTION == "function"
         assert NodeType.METHOD == "method"
         assert NodeType.MODULE == "module"
+        assert NodeType.CAPABILITY == "capability"
+        assert NodeType.RUNTIME_ENTRYPOINT == "runtime_entrypoint"
 
     def test_edge_type_values(self):
         assert EdgeType.IMPORTS == "imports"
         assert EdgeType.CONTAINS == "contains"
         assert EdgeType.DEFINES == "defines"
         assert EdgeType.INHERITS == "inherits"
+        assert EdgeType.CALLS == "calls"
+        assert EdgeType.TESTS == "tests"
+        assert EdgeType.EVOLVED_FROM == "evolved_from"
 
     def test_knowledge_node_construction(self):
         node = KnowledgeNode(id="x", node_type=NodeType.FILE, label="x.py")
         assert node.id == "x"
         assert node.node_type == NodeType.FILE
         assert node.metadata == {}
+        assert node.confidence == 1.0
+        assert node.provenance == []
+
+    def test_knowledge_node_confidence_and_provenance(self):
+        node = KnowledgeNode(
+            id="x",
+            node_type=NodeType.CAPABILITY,
+            label="auth",
+            confidence=0.6,
+            provenance=["llm_proposed", "structural_cohesion"],
+        )
+        assert node.confidence == 0.6
+        assert node.provenance == ["llm_proposed", "structural_cohesion"]
 
     def test_knowledge_edge_construction(self):
         edge = KnowledgeEdge(source="a", target="b", edge_type=EdgeType.IMPORTS)
         assert edge.weight == 1.0
         assert edge.metadata == {}
+        assert edge.confidence == 1.0
+        assert edge.provenance == []
 
     def test_stats_defaults(self):
         stats = KnowledgeGraphStats()
@@ -282,6 +302,111 @@ class TestKnowledgeGraphPersistence:
         fetched = _run(graph.get_node("m1"))
         assert fetched.metadata["language"] == "python"
         assert fetched.metadata["size_bytes"] == 1024
+
+    def test_node_confidence_and_provenance_roundtrip(self, graph: KnowledgeGraph):
+        node = KnowledgeNode(
+            id="cap1",
+            node_type=NodeType.CAPABILITY,
+            label="auth",
+            confidence=0.65,
+            provenance=["llm_proposed", "structural_cohesion"],
+        )
+        _run(graph.upsert_node(node))
+        fetched = _run(graph.get_node("cap1"))
+        assert fetched.confidence == 0.65
+        assert fetched.provenance == ["llm_proposed", "structural_cohesion"]
+
+    def test_edge_confidence_and_provenance_roundtrip(self, graph: KnowledgeGraph):
+        _run(
+            graph.upsert_nodes_bulk(
+                [
+                    KnowledgeNode(id="a", node_type=NodeType.FILE, label="a.py"),
+                    KnowledgeNode(id="b", node_type=NodeType.FILE, label="b.py"),
+                ]
+            )
+        )
+        edge = KnowledgeEdge(
+            source="a",
+            target="b",
+            edge_type=EdgeType.IMPORTS,
+            weight=0.5,
+            confidence=0.5,
+            provenance=["imports_dynamic"],
+        )
+        _run(graph.upsert_edge(edge))
+
+        results = _run(graph.neighbors("a"))
+        assert len(results) == 1
+        _, fetched_edge = results[0]
+        assert fetched_edge.confidence == 0.5
+        assert fetched_edge.provenance == ["imports_dynamic"]
+
+    def test_bulk_upsert_preserves_confidence_and_provenance(
+        self, graph: KnowledgeGraph, sample_edges
+    ):
+        nodes = [
+            KnowledgeNode(
+                id="cap1",
+                node_type=NodeType.CAPABILITY,
+                label="auth",
+                confidence=0.7,
+                provenance=["llm_proposed"],
+            )
+        ]
+        _run(graph.upsert_nodes_bulk(nodes))
+        fetched = _run(graph.get_node("cap1"))
+        assert fetched.confidence == 0.7
+        assert fetched.provenance == ["llm_proposed"]
+
+    def test_migration_adds_columns_to_a_pre_existing_database(self, tmp_path):
+        """A DB file created before confidence/provenance existed must be
+        migrated in place by initialize(), not require a fresh rebuild."""
+        import sqlite3
+
+        db_path = tmp_path / "old_schema.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE kg_nodes (
+                id TEXT PRIMARY KEY, node_type TEXT NOT NULL, label TEXT NOT NULL,
+                file_path TEXT, line_start INTEGER, line_end INTEGER,
+                metadata TEXT NOT NULL DEFAULT '{}', updated_at REAL NOT NULL
+            );
+            CREATE TABLE kg_edges (
+                source TEXT NOT NULL, target TEXT NOT NULL, edge_type TEXT NOT NULL,
+                weight REAL NOT NULL DEFAULT 1.0, metadata TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (source, target, edge_type)
+            );
+            CREATE TABLE kg_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            """
+        )
+        conn.execute(
+            "INSERT INTO kg_nodes VALUES ('file:x.py','file','x.py',NULL,NULL,NULL,'{}',1.0)"
+        )
+        conn.commit()
+        conn.close()
+
+        graph = KnowledgeGraph(db_path)
+        _run(graph.initialize())  # must not raise
+
+        node = _run(graph.get_node("file:x.py"))
+        assert node.confidence == 1.0  # column-default backfill for pre-existing rows
+        assert node.provenance == []
+
+        # And the migrated DB is now fully writable with the new columns.
+        _run(
+            graph.upsert_node(
+                KnowledgeNode(
+                    id="file:y.py", node_type=NodeType.FILE, label="y.py", confidence=0.5
+                )
+            )
+        )
+        assert _run(graph.get_node("file:y.py")).confidence == 0.5
+
+    def test_initialize_is_idempotent_after_migration(self, graph: KnowledgeGraph):
+        """Calling initialize() twice on an already-migrated DB (the normal
+        case — every app start calls it) must not raise a duplicate-column error."""
+        _run(graph.initialize())
 
 
 # ---------------------------------------------------------------------------

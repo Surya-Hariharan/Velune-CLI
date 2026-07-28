@@ -86,3 +86,5 @@ def test_knowledge_graph_patcher_treats_generated_marker_as_opaque(tmp_path):
     assert node.metadata.get("generated") is True
     assert result.nodes_added == 1
     assert result.edges_added == 0
+    assert node.confidence < 1.0
+    assert "generated_marker" in node.provenance

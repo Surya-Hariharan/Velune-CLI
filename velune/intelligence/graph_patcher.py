@@ -102,12 +102,13 @@ class KnowledgeGraphPatcher:
                 result.files_patched += 1
 
         if remove_files or nodes_to_add or edges_to_add:
+            valid_edges = await self._drop_edges_to_unknown_targets(nodes_to_add, edges_to_add)
             removed = await self._graph.apply_patch(
-                remove_files=remove_files, nodes=nodes_to_add, edges=edges_to_add
+                remove_files=remove_files, nodes=nodes_to_add, edges=valid_edges
             )
             result.nodes_removed += removed
             result.nodes_added += len(nodes_to_add)
-            result.edges_added += len(edges_to_add)
+            result.edges_added += len(valid_edges)
 
         logger.info(
             "KnowledgeGraph patched: +%d/-%d nodes, +%d edges across %d files (%d errors)",
@@ -118,6 +119,35 @@ class KnowledgeGraphPatcher:
             result.errors,
         )
         return result
+
+    async def _drop_edges_to_unknown_targets(
+        self, nodes_to_add: list[KnowledgeNode], edges_to_add: list[KnowledgeEdge]
+    ) -> list[KnowledgeEdge]:
+        """Filter out edges whose target isn't a real node.
+
+        Each file is parsed independently here (unlike
+        ``RepositoryGrapher.resolve_import_dependencies``, which receives
+        the *entire* repo's file list precisely so it can resolve a dotted
+        import name or a dynamic-import prefix to a concrete file). A
+        one-file-at-a-time parse has no such list to check against, so an
+        edge's target — a stdlib/third-party module name for an ordinary
+        static import, or an unresolved literal prefix for a dynamic one
+        (e.g. "plugins", not "plugins/plugin_a.py") — often isn't a real
+        node at all. kg_edges has a foreign-key constraint on both
+        endpoints, so inserting one of these unconditionally raised
+        ``IntegrityError`` and aborted the whole (now-atomic, see
+        ``KnowledgeGraph.apply_patch``) transaction. Dropping the edge
+        rather than fabricating a node for an unresolved reference is the
+        same "an absent edge beats a wrong one" principle
+        ``_extract_dynamic_imports`` already applies one layer up.
+        """
+        if not edges_to_add:
+            return []
+        known_ids = {n.id for n in nodes_to_add}
+        unresolved = {e.target for e in edges_to_add if e.target not in known_ids}
+        if unresolved:
+            known_ids |= await self._graph.existing_node_ids(list(unresolved))
+        return [e for e in edges_to_add if e.target in known_ids]
 
     # ------------------------------------------------------------------
     # Internal: synchronous parse (runs in thread pool)
@@ -155,6 +185,12 @@ class KnowledgeGraphPatcher:
                     label=rel_path,
                     file_path=rel_path,
                     metadata={"language": lang.value, "size_bytes": size_bytes, "opaque": True},
+                    # Present and language-tagged, but deliberately never
+                    # read — the node asserts less than a fully-parsed file
+                    # would (no symbol children), so it carries less
+                    # confidence too.
+                    confidence=0.5,
+                    provenance=["opaque_size_guard"],
                 )
             ], []
 
@@ -171,6 +207,8 @@ class KnowledgeGraphPatcher:
                     label=rel_path,
                     file_path=rel_path,
                     metadata={"language": lang.value, "size_bytes": size_bytes, "generated": True},
+                    confidence=0.5,
+                    provenance=["generated_marker"],
                 )
             ], []
 
@@ -191,6 +229,7 @@ class KnowledgeGraphPatcher:
                 label=rel_path,
                 file_path=rel_path,
                 metadata={"language": lang.value, "size_bytes": size_bytes},
+                provenance=["structural_parse"],
             )
         )
 
@@ -198,6 +237,21 @@ class KnowledgeGraphPatcher:
         for sym in symbols:
             node_type = _KIND_TO_NODE_TYPE.get(sym.kind, NodeType.FUNCTION)
             nid = sym.symbol_id or f"sym:{rel_path}:{sym.name}"
+            # A symbol from the universal fallback extractor (any language
+            # without a dedicated AST/tree-sitter/regex pattern set — see
+            # parser._GENERIC_FALLBACK_PATTERNS) is a heuristic keyword
+            # match, not a grammar-verified structural fact; score it lower
+            # accordingly instead of presenting it as equally certain.
+            is_generic_fallback = sym.metadata.get("extraction") == "generic_fallback"
+            is_dynamic = bool(sym.metadata.get("dynamic"))
+            confidence = float(
+                sym.metadata.get("resolution_confidence", 0.5 if is_generic_fallback else 1.0)
+            )
+            provenance = (
+                ["generic_fallback_regex"]
+                if is_generic_fallback
+                else (["dynamic_import"] if is_dynamic else ["structural_parse"])
+            )
             nodes.append(
                 KnowledgeNode(
                     id=nid,
@@ -207,6 +261,8 @@ class KnowledgeGraphPatcher:
                     line_start=sym.line_start,
                     line_end=sym.line_end,
                     metadata={"qualified_name": sym.qualified_name or sym.name},
+                    confidence=confidence,
+                    provenance=provenance,
                 )
             )
             edges.append(KnowledgeEdge(source=file_nid, target=nid, edge_type=EdgeType.DEFINES))
@@ -239,6 +295,14 @@ class KnowledgeGraphPatcher:
                         target=tgt_nid,
                         edge_type=edge_type,
                         weight=repo_edge.weight,
+                        # weight already carries a dynamic-import's
+                        # resolution confidence (see
+                        # RepositorySnapshotParser._classify_dynamic_import_arg)
+                        # — mirrored here so a caller reading .confidence
+                        # doesn't need to know weight means the same thing
+                        # for this particular edge type.
+                        confidence=repo_edge.weight,
+                        provenance=[repo_edge.edge_type],
                     )
                 )
 
