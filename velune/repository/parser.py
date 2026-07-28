@@ -479,64 +479,230 @@ class RepositorySnapshotParser:
         PythonVisitor().visit(tree)
         return symbols, edges
 
+    # Languages with a dedicated, reasonably-precise pattern set below. Any
+    # language tagged by EXTENSION_LANGUAGE_MAP but absent from this dict
+    # falls through to _GENERIC_FALLBACK_PATTERNS instead of yielding zero
+    # symbols — the "no generic path for unsupported languages" gap named in
+    # docs/REPOSITORY_INTELLIGENCE_BASELINE.md §8/Recommendation 4.
+    _LANGUAGE_PATTERNS: dict[RepositoryLanguage, list[tuple[str, RepositorySymbolKind]]] = {
+        RepositoryLanguage.JAVASCRIPT: [
+            (r"(?:export\s+)?class\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"(?:export\s+)?function\s+(\w+)", RepositorySymbolKind.FUNCTION),
+            (r"import\s+.*?from\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.TYPESCRIPT: [
+            (r"(?:export\s+)?class\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"(?:export\s+)?(?:async\s+)?function\s+(\w+)", RepositorySymbolKind.FUNCTION),
+            (r"import\s+.*?from\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.GO: [
+            (r"type\s+(\w+)\s+struct", RepositorySymbolKind.CLASS),
+            (r"func\s+(\w+)", RepositorySymbolKind.FUNCTION),
+            (r"import\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.RUST: [
+            (r"(?:pub\s+)?struct\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"(?:pub\s+)?(?:async\s+)?fn\s+(\w+)", RepositorySymbolKind.FUNCTION),
+            (r"use\s+([^;]+);", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.JAVA: [
+            (
+                r"(?:public\s+|final\s+|abstract\s+)*(?:class|interface|record|enum)\s+(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (
+                # method: modifiers + return type + name(  — conservative,
+                # anchored on an opening brace to skip declarations.
+                r"(?:public|protected|private|static)[\w\s<>\[\],]*?\s(\w+)\s*\([^;{)]*\)[\w\s,]*\{",
+                RepositorySymbolKind.FUNCTION,
+            ),
+            (r"import\s+(?:static\s+)?([\w.]+(?:\.\*)?);", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.CPP: [
+            (r"(?:class|struct)\s+(\w+)\s*[:{]", RepositorySymbolKind.CLASS),
+            (
+                # free function / method definition: name( ... ) {
+                r"[\w:<>*&~\]\[]+\s+([\w:~]+)\s*\([^;{)]*\)\s*(?:const\s*)?(?:noexcept\s*)?\{",
+                RepositorySymbolKind.FUNCTION,
+            ),
+            (r"#include\s+[<\"]([^>\"]+)[>\"]", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.CSHARP: [
+            (
+                r"(?:public\s+|private\s+|internal\s+|protected\s+|static\s+|sealed\s+|abstract\s+|partial\s+)*(?:class|interface|struct|record|enum)\s+(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (
+                r"(?:public|private|internal|protected|static)[\w\s<>\[\],?]*?\s(\w+)\s*\([^;{)]*\)\s*\{",
+                RepositorySymbolKind.FUNCTION,
+            ),
+            (r"using\s+([\w.]+)\s*;", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.PHP: [
+            (
+                r"(?:abstract\s+|final\s+)?(?:class|interface|trait|enum)\s+(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (
+                r"(?:public\s+|private\s+|protected\s+|static\s+)*function\s+&?(\w+)\s*\(",
+                RepositorySymbolKind.FUNCTION,
+            ),
+            (
+                r"(?:require|require_once|include|include_once)\s*\(?['\"]([^'\"]+)['\"]",
+                RepositorySymbolKind.IMPORT,
+            ),
+        ],
+        RepositoryLanguage.RUBY: [
+            (r"\b(?:class|module)\s+(\w+(?:::\w+)*)", RepositorySymbolKind.CLASS),
+            (r"\bdef\s+(?:self\.)?(\w+[?!=]?)", RepositorySymbolKind.FUNCTION),
+            (r"\brequire(?:_relative)?\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.SWIFT: [
+            (
+                r"(?:public\s+|private\s+|internal\s+|final\s+|open\s+)*(?:class|struct|protocol|enum|extension)\s+(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (
+                r"(?:public\s+|private\s+|internal\s+|static\s+|override\s+)*func\s+(\w+)",
+                RepositorySymbolKind.FUNCTION,
+            ),
+            (r"import\s+(\w+)", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.KOTLIN: [
+            (
+                r"(?:public\s+|private\s+|internal\s+|open\s+|abstract\s+|sealed\s+|data\s+)*(?:class|interface|object|enum\s+class)\s+(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (
+                r"(?:public\s+|private\s+|internal\s+|override\s+|suspend\s+)*fun\s+(?:<[^>]+>\s*)?(\w+)",
+                RepositorySymbolKind.FUNCTION,
+            ),
+            (r"import\s+([\w.]+)", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.DART: [
+            (
+                r"(?:abstract\s+)?(?:class|mixin|enum)\s+(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (
+                r"(?:static\s+|final\s+)?[\w<>?]+\s+(\w+)\s*\([^;{)]*\)\s*(?:async\s*)?\{",
+                RepositorySymbolKind.FUNCTION,
+            ),
+            (r"import\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
+        ],
+        RepositoryLanguage.SCALA: [
+            (
+                r"(?:sealed\s+|abstract\s+|final\s+|case\s+)*(?:class|trait|object)\s+(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (r"def\s+(\w+)", RepositorySymbolKind.FUNCTION),
+            (r"import\s+([\w.{}, ]+)", RepositorySymbolKind.IMPORT),
+        ],
+        # Schema/DDL DSLs — no functions/classes, but their top-level
+        # declarations (tables, types, messages, models) are the meaningful
+        # unit and are captured as CLASS-kind symbols.
+        RepositoryLanguage.SQL: [
+            (
+                r"CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"\[]?(\w+)",
+                RepositorySymbolKind.CLASS,
+            ),
+            (r"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+[`\"\[]?(\w+)", RepositorySymbolKind.CLASS),
+            (
+                r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+[`\"\[]?(\w+)",
+                RepositorySymbolKind.FUNCTION,
+            ),
+        ],
+        RepositoryLanguage.GRAPHQL: [
+            (r"\btype\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"\binterface\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"\benum\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"\binput\s+(\w+)", RepositorySymbolKind.CLASS),
+        ],
+        RepositoryLanguage.PROTO: [
+            (r"\bmessage\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"\bservice\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"\benum\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"\brpc\s+(\w+)", RepositorySymbolKind.FUNCTION),
+        ],
+        RepositoryLanguage.PRISMA: [
+            (r"\bmodel\s+(\w+)", RepositorySymbolKind.CLASS),
+            (r"\benum\s+(\w+)", RepositorySymbolKind.CLASS),
+        ],
+    }
+
+    # True universal fallback: applied to any tagged language with no entry
+    # above (Objective-C, Scala's cousins, Clojure, Elixir, Erlang, Haskell,
+    # OCaml, F#, Lua, R, Julia, shell, PowerShell, Vue/Svelte SFCs, ...).
+    # Deliberately broad rather than per-language-precise — a low-confidence
+    # signal is the explicit goal here, not a grammar. Every symbol this
+    # produces is tagged metadata={"extraction": "generic_fallback"} so a
+    # downstream confidence layer can discount it relative to a tree-sitter/
+    # AST/dedicated-regex result.
+    _GENERIC_FALLBACK_PATTERNS: list[tuple[str, RepositorySymbolKind]] = [
+        (
+            r"\b(?:class|struct|interface|trait|protocol|module|record|defmodule)\s+(\w+)",
+            RepositorySymbolKind.CLASS,
+        ),
+        (
+            r"\b(?:def|fn|func|function|sub|defn|defun)\s+(\w+[?!]?)",
+            RepositorySymbolKind.FUNCTION,
+        ),
+        (
+            r"^\s*(\w+)\s*(?:<-|=)\s*function\s*\(",  # R: name <- function(...)
+            RepositorySymbolKind.FUNCTION,
+        ),
+        (
+            r"\b(?:import|require|require_relative|use|include|include_once|open)\s+['\"]?([\w./:-]+)['\"]?",
+            RepositorySymbolKind.IMPORT,
+        ),
+    ]
+
+    # Languages with no meaningful function/class symbol concept at all —
+    # markup/templates, not code in the sense the rest of this parser
+    # models. Zero symbols here is a correct answer, not a gap.
+    _NO_SYMBOL_LANGUAGES = frozenset({RepositoryLanguage.HTML, RepositoryLanguage.TEMPLATE})
+
     def _parse_regex(
         self, file_path: Path, code: str, lang: RepositoryLanguage
     ) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
-        """Universal regex symbol extractor fallback."""
-        patterns = {
-            RepositoryLanguage.JAVASCRIPT: [
-                (r"(?:export\s+)?class\s+(\w+)", RepositorySymbolKind.CLASS),
-                (r"(?:export\s+)?function\s+(\w+)", RepositorySymbolKind.FUNCTION),
-                (r"import\s+.*?from\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
-            ],
-            RepositoryLanguage.TYPESCRIPT: [
-                (r"(?:export\s+)?class\s+(\w+)", RepositorySymbolKind.CLASS),
-                (r"(?:export\s+)?(?:async\s+)?function\s+(\w+)", RepositorySymbolKind.FUNCTION),
-                (r"import\s+.*?from\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
-            ],
-            RepositoryLanguage.GO: [
-                (r"type\s+(\w+)\s+struct", RepositorySymbolKind.CLASS),
-                (r"func\s+(\w+)", RepositorySymbolKind.FUNCTION),
-                (r"import\s+['\"]([^'\"]+)['\"]", RepositorySymbolKind.IMPORT),
-            ],
-            RepositoryLanguage.RUST: [
-                (r"(?:pub\s+)?struct\s+(\w+)", RepositorySymbolKind.CLASS),
-                (r"(?:pub\s+)?(?:async\s+)?fn\s+(\w+)", RepositorySymbolKind.FUNCTION),
-                (r"use\s+([^;]+);", RepositorySymbolKind.IMPORT),
-            ],
-            RepositoryLanguage.JAVA: [
-                (
-                    r"(?:public\s+|final\s+|abstract\s+)*(?:class|interface|record|enum)\s+(\w+)",
-                    RepositorySymbolKind.CLASS,
-                ),
-                (
-                    # method: modifiers + return type + name(  — conservative,
-                    # anchored on an opening brace to skip declarations.
-                    r"(?:public|protected|private|static)[\w\s<>\[\],]*?\s(\w+)\s*\([^;{)]*\)[\w\s,]*\{",
-                    RepositorySymbolKind.FUNCTION,
-                ),
-                (r"import\s+(?:static\s+)?([\w.]+(?:\.\*)?);", RepositorySymbolKind.IMPORT),
-            ],
-            RepositoryLanguage.CPP: [
-                (r"(?:class|struct)\s+(\w+)\s*[:{]", RepositorySymbolKind.CLASS),
-                (
-                    # free function / method definition: name( ... ) {
-                    r"[\w:<>*&~\]\[]+\s+([\w:~]+)\s*\([^;{)]*\)\s*(?:const\s*)?(?:noexcept\s*)?\{",
-                    RepositorySymbolKind.FUNCTION,
-                ),
-                (r"#include\s+[<\"]([^>\"]+)[>\"]", RepositorySymbolKind.IMPORT),
-            ],
-        }
+        """Regex symbol extractor: per-language patterns, or a generic fallback.
+
+        Every ``EXTENSION_LANGUAGE_MAP``-tagged language reaches either a
+        dedicated pattern set above or ``_GENERIC_FALLBACK_PATTERNS`` — the
+        prior behavior (silently zero symbols for anything outside a fixed
+        enumeration) is what let a legacy PHP codebase, for instance, index
+        as "7 files, 0 symbols, language: unknown" with no signal that the
+        tool simply didn't support it (baseline §6.2).
+        """
+        if lang in self._NO_SYMBOL_LANGUAGES:
+            return [], []
+
+        patterns = self._LANGUAGE_PATTERNS.get(lang)
+        generic = patterns is None
+        if patterns is None:
+            patterns = self._GENERIC_FALLBACK_PATTERNS
 
         symbols: list[RepositorySymbol] = []
         edges: list[RepositoryEdge] = []
         file_path_str = str(file_path)
+        seen: set[tuple[int, str, RepositorySymbolKind]] = set()
 
-        for pattern, kind in patterns.get(lang, []):
-            for match in re.finditer(pattern, code):
+        for pattern, kind in patterns:
+            for match in re.finditer(pattern, code, re.MULTILINE):
                 value = match.group(1).strip()
+                if not value:
+                    continue
                 start_char = match.start()
                 line_no = code[:start_char].count("\n") + 1
+
+                # The generic fallback's patterns can double-match the same
+                # declaration (e.g. a name matching both the class and
+                # function keyword lists in a language we don't actually
+                # know the grammar of) — dedupe by (line, name, kind).
+                dedupe_key = (line_no, value, kind)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
 
                 if kind == RepositorySymbolKind.IMPORT:
                     edges.append(
@@ -550,6 +716,7 @@ class RepositorySnapshotParser:
                         file_path=file_path_str,
                         line_start=line_no,
                         line_end=line_no,
+                        metadata={"extraction": "generic_fallback"} if generic else {},
                     )
                 )
 

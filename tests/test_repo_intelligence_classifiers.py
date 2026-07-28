@@ -85,12 +85,12 @@ def test_poorly_named_no_false_positive_framework(tmp_path):
     assert "fastapi" not in analyzer.detected_project_types
 
 
-# ── legacy_php_style: PHP is now correctly *tagged*, but still has no ──────
-# structural symbol extractor (open gap — see todo: universal fallback
-# extractor for unsupported languages).
+# ── legacy_php_style: PHP is now both tagged AND structurally parsed ──────
+# (previously a total blind spot — baseline §6.2 — fixed by adding a
+# dedicated PHP pattern set to RepositorySnapshotParser._parse_regex).
 
 
-def test_legacy_php_style_language_tagged_but_no_symbols(tmp_path):
+def test_legacy_php_style_language_tagged_and_parsed(tmp_path):
     root = materialize("legacy_php_style", tmp_path)
     svc = RepositoryCognitionService(root)
     snapshot = svc.index(force=True)
@@ -101,8 +101,11 @@ def test_legacy_php_style_language_tagged_but_no_symbols(tmp_path):
         "PHP must be tagged as its own language, not silently folded into "
         "js_generic or unknown (the pre-consolidation extension table gap)"
     )
-    # Still-open gap: no PHP symbol extractor exists yet.
-    assert all(len(f.symbols) == 0 for f in php_files)
+    # index.php declares no function/class itself (just require_once calls),
+    # but includes/auth.php and includes/db.php each declare one function —
+    # both must now be extracted instead of silently yielding zero symbols.
+    total_php_symbols = sum(len(f.symbols) for f in php_files)
+    assert total_php_symbols > 0, "PHP files must no longer be a total blind spot"
 
 
 # ── notebook_ml: .ipynb is now discovered and structurally parsed ─────────
