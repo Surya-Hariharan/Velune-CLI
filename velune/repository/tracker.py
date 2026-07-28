@@ -250,3 +250,62 @@ class GitTracker:
                 "Unexpected error in get_all_file_volatility: %s", e
             )
             return {}
+
+    def get_co_change_clusters(
+        self, days: int = 90, min_shared_commits: int = 2, max_files_per_commit: int = 20
+    ) -> list[tuple[str, str, int]]:
+        """Files that repeatedly change together — often a better module
+        boundary signal than folder structure (docs/
+        REPOSITORY_INTELLIGENCE_BASELINE.md's Repository Evolution
+        discussion: "co-change clusters... often reveal true module
+        boundaries better than folder structure does").
+
+        Uses the same ``git log --name-only`` call shape as
+        ``get_all_file_volatility``, but groups lines back into their
+        per-commit boundaries (a blank line separates commits, since
+        ``--pretty=format:`` emits nothing for the commit header itself)
+        instead of flattening into one global count.
+
+        Commits touching more than *max_files_per_commit* files are
+        skipped — a repo-wide rename/formatting sweep would otherwise
+        connect every pair of files in the repo, drowning out genuine
+        co-change signal in noise.
+
+        Returns ``(file_a, file_b, shared_commit_count)`` tuples, sorted by
+        count descending, for pairs meeting *min_shared_commits*. Empty
+        list if not a git repo.
+        """
+        if not self.is_git:
+            return []
+        try:
+            result = self._run_git(
+                ["log", f"--since={days} days ago", "--pretty=format:", "--name-only"]
+            )
+        except (subprocess.CalledProcessError, Exception):
+            return []
+
+        pair_counts: dict[tuple[str, str], int] = {}
+        current_commit_files: list[str] = []
+
+        def _flush() -> None:
+            if 0 < len(current_commit_files) <= max_files_per_commit:
+                files = sorted(set(current_commit_files))
+                for i, a in enumerate(files):
+                    for b in files[i + 1 :]:
+                        key = (a, b)
+                        pair_counts[key] = pair_counts.get(key, 0) + 1
+
+        for line in result.splitlines():
+            line = line.strip()
+            if not line:
+                _flush()
+                current_commit_files = []
+                continue
+            current_commit_files.append(line.replace("\\", "/"))
+        _flush()  # the last commit has no trailing blank line to trigger this
+
+        clusters = [
+            (a, b, count) for (a, b), count in pair_counts.items() if count >= min_shared_commits
+        ]
+        clusters.sort(key=lambda t: t[2], reverse=True)
+        return clusters

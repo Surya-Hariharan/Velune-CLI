@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,8 +24,21 @@ from velune.knowledge.graph import KnowledgeGraph
 from velune.knowledge.schemas import EdgeType, KnowledgeEdge, KnowledgeNode, NodeType
 from velune.repository.incremental_indexer import IndexDelta
 from velune.repository.schemas import RepositorySymbolKind
+from velune.repository.tracker import GitTracker
 
 logger = logging.getLogger("velune.intelligence.graph_patcher")
+
+# Churn-weighted confidence decay for FILE nodes (docs/
+# REPOSITORY_INTELLIGENCE_BASELINE.md's Repository Evolution discussion:
+# "churn-weighted decay applied to confidence for capability claims
+# resting on recently-rewritten code"). _CHURN_DECAY_SCALE is the commit
+# count (within the volatility window) at which confidence has halved;
+# _CHURN_CONFIDENCE_FLOOR bounds how far decay can go — a highly volatile
+# file's mere *existence* is still certain, only whether its current
+# structure is "settled" is in question.
+_CHURN_DECAY_SCALE = 8.0
+_CHURN_CONFIDENCE_FLOOR = 0.5
+_VOLATILITY_CACHE_TTL_SECONDS = 600.0
 
 _KIND_TO_NODE_TYPE = {
     RepositorySymbolKind.CLASS: NodeType.CLASS,
@@ -56,6 +70,38 @@ class KnowledgeGraphPatcher:
     def __init__(self, graph: KnowledgeGraph, workspace_root: Path) -> None:
         self._graph = graph
         self._workspace_root = workspace_root.resolve()
+        self._tracker = GitTracker(self._workspace_root)
+        self._volatility_cache: tuple[float, dict[str, int]] | None = None
+
+    def _get_volatility_cached(self) -> dict[str, int]:
+        """TTL-cached ``GitTracker.get_all_file_volatility`` — reflects commit
+        history, not local edits, so recomputing it on every patch (every
+        few seconds while the tree is dirty) would be pure waste. Not
+        locked against concurrent access from parallel ``_parse_file``
+        threads; a stale-cache race just means an occasional redundant
+        git-log call, not an incorrect one.
+        """
+        now = time.time()
+        if self._volatility_cache is not None:
+            cached_at, data = self._volatility_cache
+            if now - cached_at < _VOLATILITY_CACHE_TTL_SECONDS:
+                return data
+        data = self._tracker.get_all_file_volatility(days=90)
+        self._volatility_cache = (now, data)
+        return data
+
+    def _churn_confidence(self, rel_path: str) -> float:
+        """Confidence discount from how often *rel_path* has changed recently.
+
+        A file rewritten frequently is still certain to exist and be
+        language-tagged (that's not what's being discounted) — but its
+        current structure is less likely to be "the settled design," so a
+        capability/architecture claim resting on it should be held more
+        loosely than one resting on stable, rarely-touched code.
+        """
+        commit_count = self._get_volatility_cached().get(rel_path, 0)
+        decayed = 1.0 / (1.0 + commit_count / _CHURN_DECAY_SCALE)
+        return max(_CHURN_CONFIDENCE_FLOOR, decayed)
 
     async def patch(self, delta: IndexDelta) -> PatchResult:
         """Apply delta to the knowledge graph. Returns a PatchResult."""
@@ -72,6 +118,13 @@ class KnowledgeGraphPatcher:
         # must not leave deleted-but-not-reinserted nodes).
         remove_files = list(delta.to_remove) + list(delta.to_update)
 
+        # A rename's new path still appears in delta.to_add (see
+        # IndexDelta.renames' docstring — it's an additive, informational
+        # overlay, not a rewrite of to_add/to_remove) — this just tells
+        # _parse_file which old path a new one's node should record as its
+        # git lineage.
+        rename_source_of: dict[str, str] = {new: old for old, new in delta.renames}
+
         nodes_to_add: list[KnowledgeNode] = []
         edges_to_add: list[KnowledgeEdge] = []
 
@@ -80,7 +133,7 @@ class KnowledgeGraphPatcher:
             # Parse files concurrently (bounded by to_thread)
             parse_tasks = [
                 asyncio.create_task(
-                    asyncio.to_thread(self._parse_file, rel_path),
+                    asyncio.to_thread(self._parse_file, rel_path, rename_source_of.get(rel_path)),
                     name=f"kg-patch-{rel_path}",
                 )
                 for rel_path in to_process
@@ -153,7 +206,9 @@ class KnowledgeGraphPatcher:
     # Internal: synchronous parse (runs in thread pool)
     # ------------------------------------------------------------------
 
-    def _parse_file(self, rel_path: str) -> tuple[list[KnowledgeNode], list[KnowledgeEdge]] | None:
+    def _parse_file(
+        self, rel_path: str, renamed_from: str | None = None
+    ) -> tuple[list[KnowledgeNode], list[KnowledgeEdge]] | None:
         """Parse a single file and return KnowledgeNodes + KnowledgeEdges.
 
         Returns None when the file does not exist (not an error; the caller
@@ -164,6 +219,14 @@ class KnowledgeGraphPatcher:
         symbol nodes/edges) and are never read for structural parsing — the
         same opaque-file guard applied at the repository-indexer layer,
         needed here too since the KG patcher parses independently.
+
+        *renamed_from*, when given (see ``IncrementalIndexer._detect_renames``),
+        is recorded as git-lineage metadata on the file node. It is *not* a
+        graph edge to the old path's node: that node is deleted in the same
+        transaction (the old file no longer exists), and kg_edges' foreign-
+        key constraint means an edge can't reference a node that won't
+        exist once the transaction commits. Metadata records the lineage
+        fact without requiring the old identity to persist as a live node.
         """
         from velune.repository.parser import RepositorySnapshotParser
         from velune.repository.schemas import MAX_STRUCTURAL_PARSE_BYTES, is_generated_content
@@ -221,15 +284,27 @@ class KnowledgeGraphPatcher:
         nodes: list[KnowledgeNode] = []
         edges: list[KnowledgeEdge] = []
 
-        # File node
+        # File node. Confidence is churn-discounted: a frequently-rewritten
+        # file's current structure is less likely to be "the settled
+        # design" than stable, rarely-touched code (see _churn_confidence).
+        file_metadata: dict = {"language": lang.value, "size_bytes": size_bytes}
+        file_provenance = ["structural_parse"]
+        if renamed_from is not None:
+            # Git lineage, recorded as metadata rather than a graph edge —
+            # see the docstring above for why a live EVOLVED_FROM edge to
+            # the (about to be deleted) old path's node isn't possible here.
+            file_metadata["renamed_from"] = renamed_from
+            file_provenance.append("rename_lineage")
+
         nodes.append(
             KnowledgeNode(
                 id=file_nid,
                 node_type=NodeType.FILE,
                 label=rel_path,
                 file_path=rel_path,
-                metadata={"language": lang.value, "size_bytes": size_bytes},
-                provenance=["structural_parse"],
+                metadata=file_metadata,
+                confidence=self._churn_confidence(rel_path),
+                provenance=file_provenance,
             )
         )
 

@@ -60,6 +60,7 @@ class RepositoryCognitionService:
         # refresh_pipeline_cache() — see get_snapshot_fresh().
         self._pipeline_cache_path = self.root_path / ".velune" / _PIPELINE_CACHE_FILENAME
         self._volatility_cache: tuple[float, dict[str, int]] | None = None  # (cached_at, data)
+        self._co_change_cache: tuple[float, list[tuple[str, str, int]]] | None = None
         self.pipeline_cache_hits = 0
         self.pipeline_cache_misses = 0
         self.files_recomputed_last_run = 0
@@ -655,6 +656,19 @@ class RepositoryCognitionService:
         self._volatility_cache = (now, data)
         return data
 
+    def _get_co_change_clusters_cached(self) -> list[tuple[str, str, int]]:
+        """TTL-cached ``GitTracker.get_co_change_clusters`` — same reflects-
+        history-not-local-edits reasoning as ``_get_volatility_cached``, and
+        the same full ``git log`` scan cost."""
+        now = time.time()
+        if self._co_change_cache is not None:
+            cached_at, data = self._co_change_cache
+            if now - cached_at < _VOLATILITY_TTL_SECONDS:
+                return data
+        data = self.tracker.get_co_change_clusters(days=90)
+        self._co_change_cache = (now, data)
+        return data
+
     def _log_tech_stack_claims(self, tech_stack: TechStack) -> None:
         """Record this run's tech-stack claims to the confidence-calibration log.
 
@@ -797,6 +811,10 @@ class RepositoryCognitionService:
                     "high_volatility_files": sorted(
                         file_volatility.items(), key=lambda x: x[1], reverse=True
                     )[:5],
+                    # Files that repeatedly change together — often a
+                    # better module-boundary signal than folder structure
+                    # (see GitTracker.get_co_change_clusters).
+                    "co_change_clusters": self._get_co_change_clusters_cached()[:10],
                 },
                 "api_map": api_map_data,
             }
