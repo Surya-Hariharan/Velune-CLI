@@ -32,18 +32,16 @@ from velune.cli.interactive import (
     text_input,
 )
 from velune.providers import catalog
+from velune.providers.credential_manager import CredentialAddResult, add_credential, persist_credential
 from velune.providers.discovery.scanner import ModelDiscoveryScanner
 from velune.providers.keystore import (
     KeyState,
     delete_key,
     get_key,
     is_ollama_live,
-    mark_verified,
-    save_key,
     verification_state,
 )
 from velune.providers.validation import (
-    ValidationResult,
     ValidationStatus,
     validate_provider,
 )
@@ -241,26 +239,30 @@ class ProviderPalette:
 
             key = str(entered).strip()
 
-            result: ValidationResult = await run_with_status(
-                validate_provider(pid, key),
+            # set_as_first_default=False: the REPL's /providers add has never
+            # auto-adopted the first-connected provider as the workspace
+            # default — only `velune provider add` (commands/providers.py)
+            # does that. Routing both through add_credential must not
+            # silently change either one's existing behavior.
+            result: CredentialAddResult = await run_with_status(
+                add_credential(pid, key, set_as_first_default=False),
                 pending=f"Verifying with {meta.display_name}…",
                 ok=lambda r: (
-                    f"Verified — {len(r.models)} model{'s' if len(r.models) != 1 else ''} available"
-                    if r.models
+                    f"Verified — {len(r.validation.models)} "
+                    f"model{'s' if len(r.validation.models) != 1 else ''} available"
+                    if r.validation and r.validation.models
                     else "Verified — key accepted"
                 ),
-                fail=lambda r: r.human_message(),
+                fail=lambda r: r.validation.human_message() if r.validation else "Verification failed",
                 is_ok=lambda r: r.ok,
             )
 
             if result.ok:
-                save_key(pid, key, verified=True)
-                mark_verified(pid, model_count=len(result.models))
                 self._report_saved(meta.display_name)
                 await self._discover_one(pid)
                 return
 
-            hint = _FAILURE_HINTS.get(result.status)
+            hint = _FAILURE_HINTS.get(result.validation.status) if result.validation else None
             if hint:
                 self.console.print(f"[{design.FAINT}]{hint}[/{design.FAINT}]")
 
@@ -284,7 +286,9 @@ class ProviderPalette:
                 # Explicitly NOT verified: the provider never accepted this key,
                 # and recording it as verified is exactly the lie this rework
                 # exists to remove. It will be re-checked in the background.
-                save_key(pid, key, verified=False)
+                # Persist directly (no re-validation) — the verdict above
+                # already told us it failed.
+                persist_credential(pid, key, verified=False)
                 self.console.print(
                     f"[{design.WARN}]Saved unverified — Velune will re-check it "
                     f"automatically.[/{design.WARN}]"

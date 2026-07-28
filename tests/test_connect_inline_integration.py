@@ -61,12 +61,17 @@ def _steps(flow: InlineFlow) -> list[str]:
 def test_connect_runs_pick_then_key_then_verify_in_one_panel(flow, monkeypatch, tmp_path):
     """The user's whole ask, as one assertion: pick → key → verify, one surface."""
     from velune.cli import provider_ui
+    from velune.providers import credential_manager
 
+    # _connect now goes through add_credential (credential_manager.py) rather
+    # than calling validate_provider/save_key/mark_verified itself — patch
+    # its actual dependencies, not provider_ui's (which no longer imports
+    # save_key/mark_verified at all after the Phase 0 consolidation).
     saved: dict = {}
     monkeypatch.setattr(
-        provider_ui, "save_key", lambda pid, key, verified: saved.update(pid=pid, key=key)
+        credential_manager, "save_key", lambda pid, key, verified: saved.update(pid=pid, key=key)
     )
-    monkeypatch.setattr(provider_ui, "mark_verified", lambda pid, model_count=0: None)
+    monkeypatch.setattr(credential_manager, "mark_verified", lambda pid, model_count=0: None)
     monkeypatch.setattr(provider_ui.ProviderPalette, "_report_saved", lambda self, label: None)
 
     async def _fake_validate(pid, key):
@@ -74,7 +79,7 @@ def test_connect_runs_pick_then_key_then_verify_in_one_panel(flow, monkeypatch, 
             provider_id=pid, status=ValidationStatus.OK, message="ok", models=["m1"]
         )
 
-    monkeypatch.setattr(provider_ui, "validate_provider", _fake_validate)
+    monkeypatch.setattr(credential_manager, "validate_provider", _fake_validate)
 
     async def _no_discovery(self, pid):
         return None
@@ -136,9 +141,10 @@ def test_ctrl_c_at_the_provider_picker_abandons_the_whole_command(flow, monkeypa
     """
     from velune.cli import provider_ui
     from velune.cli.inline_flow import FlowCancelled
+    from velune.providers import credential_manager
 
     called: list[str] = []
-    monkeypatch.setattr(provider_ui, "save_key", lambda *a, **k: called.append("saved"))
+    monkeypatch.setattr(credential_manager, "save_key", lambda *a, **k: called.append("saved"))
 
     palette = provider_ui.ProviderPalette(console=_Console(), container=None)
 
@@ -158,9 +164,10 @@ def test_ctrl_c_at_the_provider_picker_abandons_the_whole_command(flow, monkeypa
 def test_ctrl_c_at_the_key_field_never_saves_a_partial_key(flow, monkeypatch):
     from velune.cli import provider_ui
     from velune.cli.inline_flow import FlowCancelled
+    from velune.providers import credential_manager
 
     saved: list = []
-    monkeypatch.setattr(provider_ui, "save_key", lambda *a, **k: saved.append(a))
+    monkeypatch.setattr(credential_manager, "save_key", lambda *a, **k: saved.append(a))
 
     palette = provider_ui.ProviderPalette(console=_Console(), container=None)
 

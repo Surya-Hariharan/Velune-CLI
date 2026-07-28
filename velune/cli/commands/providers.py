@@ -13,7 +13,15 @@ from rich.panel import Panel
 from rich.table import Table
 
 from velune.cli import design
+from velune.providers import catalog
+from velune.providers.credential_manager import add_credential_sync
 from velune.providers.crypto import encrypt_credentials
+from velune.providers.default_provider import (
+    find_config_path,
+    get_default_provider,
+    set_default_provider,
+    set_first_default,
+)
 from velune.providers.keystore import (
     credentials_file_path,
     delete_key,
@@ -24,7 +32,6 @@ from velune.providers.keystore import (
     import_providers_json,
     is_ollama_live,
     repair_keystore,
-    save_key,
 )
 from velune.providers.validation import (
     ValidationStatus,
@@ -40,162 +47,37 @@ provider_cmd = typer.Typer(
 console = Console()
 
 # ---------------------------------------------------------------------------
-# Provider metadata (label, key_url, env_var, local flag)
+# Provider metadata
+#
+# Sourced from velune.providers.catalog — the single place provider display
+# metadata is maintained (also used by the REPL's /providers and the
+# onboarding wizard). This module used to hand-maintain its own, separate
+# {label, env, local, url} table for the same providers; ``_meta_dict``
+# below is only a shape-adapter so the rest of this file (written against
+# that dict shape) doesn't need to change, not a second data source.
 # ---------------------------------------------------------------------------
 
-_PROVIDER_META: dict[str, dict] = {
-    "openai": {
-        "label": "OpenAI",
-        "env": "OPENAI_API_KEY",
-        "local": False,
-        "url": "https://platform.openai.com/api-keys",
-    },
-    "anthropic": {
-        "label": "Anthropic",
-        "env": "ANTHROPIC_API_KEY",
-        "local": False,
-        "url": "https://console.anthropic.com",
-    },
-    "google": {
-        "label": "Google Gemini",
-        "env": "GOOGLE_API_KEY",
-        "local": False,
-        "url": "https://aistudio.google.com/app/apikey",
-    },
-    "groq": {
-        "label": "Groq",
-        "env": "GROQ_API_KEY",
-        "local": False,
-        "url": "https://console.groq.com/keys",
-    },
-    "openrouter": {
-        "label": "OpenRouter",
-        "env": "OPENROUTER_API_KEY",
-        "local": False,
-        "url": "https://openrouter.ai/keys",
-    },
-    "deepseek": {
-        "label": "DeepSeek",
-        "env": "DEEPSEEK_API_KEY",
-        "local": False,
-        "url": "https://platform.deepseek.com/api_keys",
-    },
-    "mistral": {
-        "label": "Mistral AI",
-        "env": "MISTRAL_API_KEY",
-        "local": False,
-        "url": "https://console.mistral.ai/api-keys",
-    },
-    "cohere": {
-        "label": "Cohere",
-        "env": "COHERE_API_KEY",
-        "local": False,
-        "url": "https://dashboard.cohere.com/api-keys",
-    },
-    "nvidia": {
-        "label": "NVIDIA NIM",
-        "env": "NVIDIA_API_KEY",
-        "local": False,
-        "url": "https://build.nvidia.com/",
-    },
-    "together": {
-        "label": "Together.AI",
-        "env": "TOGETHER_API_KEY",
-        "local": False,
-        "url": "https://api.together.ai/settings/api-keys",
-    },
-    "fireworks": {
-        "label": "Fireworks.AI",
-        "env": "FIREWORKS_API_KEY",
-        "local": False,
-        "url": "https://fireworks.ai/account/api-keys",
-    },
-    "xai": {
-        "label": "xAI (Grok)",
-        "env": "XAI_API_KEY",
-        "local": False,
-        "url": "https://console.x.ai",
-    },
-    "huggingface": {
-        "label": "HuggingFace",
-        "env": "HF_TOKEN",
-        "local": False,
-        "url": "https://huggingface.co/settings/tokens",
-    },
-    "meta": {
-        "label": "Meta (Llama API)",
-        "env": "LLAMA_API_KEY",
-        "local": False,
-        "url": "https://llama.developer.meta.com",
-    },
-    "ollama": {"label": "Ollama (local)", "env": None, "local": True, "url": "https://ollama.com"},
-    "lmstudio": {
-        "label": "LM Studio (local)",
-        "env": None,
-        "local": True,
-        "url": "https://lmstudio.ai",
-    },
-}
 
-
-def _find_config_path() -> Path | None:
-    """Walk up from cwd looking for velune.toml (max 8 levels)."""
-    current = Path.cwd()
-    for _ in range(8):
-        candidate = current / "velune.toml"
-        if candidate.exists():
-            return candidate
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return None
-
-
-def _get_default_provider() -> str | None:
-    """Read providers.default_provider from velune.toml, or None if not found."""
-    path = _find_config_path()
-    if not path:
+def _meta_dict(pid: str) -> dict | None:
+    """Adapt a ``catalog.ProviderMeta`` to this module's ``{label, env, local,
+    url}`` shape."""
+    meta = catalog.get(pid)
+    if meta is None:
         return None
-    try:
-        import toml
-
-        return toml.load(path).get("providers", {}).get("default_provider")
-    except Exception:
-        return None
-
-
-def _set_default_provider_in_toml(provider_id: str) -> Path | None:
-    """Write providers.default_provider to velune.toml. Returns path on success."""
-    try:
-        import toml
-
-        path = _find_config_path() or (Path.cwd() / "velune.toml")
-        data = toml.load(path) if path.exists() else {}
-        data.setdefault("providers", {})["default_provider"] = provider_id
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            toml.dump(data, fh)
-        return path
-    except Exception:
-        return None
+    return {
+        "label": meta.display_name,
+        "env": meta.env_var,
+        "local": not meta.requires_key,
+        "url": meta.get_key_url,
+    }
 
 
-def _maybe_set_first_default(pid: str) -> bool:
-    """Set *pid* as the default provider iff no default is configured yet.
-
-    A brand-new user's first provider should "just work" without a separate
-    ``velune provider default`` step, mirroring how git/gh adopt the first
-    configured remote/account. Returns ``True`` if this call set the default.
-    Never overrides an existing choice.
-    """
-    if _get_default_provider():
-        return False
-    return _set_default_provider_in_toml(pid) is not None
+def _all_provider_ids() -> list[str]:
+    return sorted(p.id for p in catalog.list_providers_alphabetical())
 
 
 def _is_configured(pid: str) -> bool:
-    meta = _PROVIDER_META.get(pid, {})
+    meta = _meta_dict(pid) or {}
     if meta.get("local"):
         if pid == "ollama":
             return is_ollama_live(timeout=1.0)
@@ -218,7 +100,7 @@ def _is_configured(pid: str) -> bool:
 @provider_cmd.command("list")
 def list_providers() -> None:
     """List all providers and their configuration status."""
-    default_pid = _get_default_provider()
+    default_pid = get_default_provider()
 
     table = Table(
         title=f"[bold {design.ACCENT}]Configured Providers[/bold {design.ACCENT}]",
@@ -232,8 +114,8 @@ def list_providers() -> None:
     table.add_column("Status", min_width=16)
     table.add_column("Source", style=design.MUTED, width=5)
 
-    for pid in sorted(_PROVIDER_META.keys()):
-        meta = _PROVIDER_META[pid]
+    for pid in _all_provider_ids():
+        meta = _meta_dict(pid)
         configured = _is_configured(pid)
         is_default = pid == default_pid
         marker = f"[{design.OK}]★[/{design.OK}]" if is_default else ""
@@ -284,11 +166,13 @@ def add_provider(
     """Add or update a provider API key."""
     from rich.prompt import Prompt
 
+    from velune.providers.credential_manager import persist_credential
+
     pid = provider_id.lower().strip()
-    meta = _PROVIDER_META.get(pid)
+    meta = _meta_dict(pid)
 
     if not meta:
-        supported = ", ".join(sorted(_PROVIDER_META.keys()))
+        supported = ", ".join(_all_provider_ids())
         console.print(
             f"[{design.WARN}]Unknown provider '{pid}'.[/{design.WARN}]\n"
             f"[{design.MUTED}]Supported: {supported}[/{design.MUTED}]"
@@ -303,7 +187,7 @@ def add_provider(
             result = validate_provider_sync(pid, "")
         if result.ok:
             console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
-            if _maybe_set_first_default(pid):
+            if set_first_default(pid):
                 console.print(
                     f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
                 )
@@ -323,11 +207,11 @@ def add_provider(
         raise typer.Exit(1)
 
     if no_validate:
-        save_key(pid, api_key)
+        added = add_credential_sync(pid, api_key, skip_validation=True, set_as_first_default=True)
         console.print(
             f"[{design.WARN}]Key saved without validation (--no-validate was set).[/{design.WARN}]"
         )
-        if _maybe_set_first_default(pid):
+        if added.became_default:
             console.print(
                 f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
             )
@@ -336,16 +220,16 @@ def add_provider(
     with console.status(
         f"[{design.MUTED}]Validating {meta['label']} credentials...[/{design.MUTED}]"
     ):
-        result = validate_provider_sync(pid, api_key)
+        added = add_credential_sync(pid, api_key, set_as_first_default=True)
+    result = added.validation
 
-    if result.ok:
-        save_key(pid, api_key, verified=True)
+    if added.ok:
         console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
         if result.models:
             _show_models_preview(console, result.models[:8], len(result.models))
         if result.account_info:
             _show_account_info(console, result.account_info, pid)
-        if _maybe_set_first_default(pid):
+        if added.became_default:
             console.print(
                 f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
             )
@@ -355,9 +239,9 @@ def add_provider(
         if result.status == ValidationStatus.NETWORK_ERROR:
             save_q = typer.confirm("Save key anyway (network may be offline)?", default=True)
             if save_q:
-                save_key(pid, api_key)
+                became_default = persist_credential(pid, api_key, verified=False, set_as_first_default=True)
                 console.print(f"[{design.WARN}]Key saved without validation.[/{design.WARN}]")
-                if _maybe_set_first_default(pid):
+                if became_default:
                     console.print(
                         f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
                     )
@@ -401,7 +285,7 @@ def remove_provider(
 ) -> None:
     """Remove a stored provider API key."""
     pid = provider_id.lower().strip()
-    meta = _PROVIDER_META.get(pid)
+    meta = _meta_dict(pid)
 
     if meta and meta.get("local"):
         console.print(
@@ -440,7 +324,7 @@ def test_provider(
         return
 
     pid = provider_id.lower().strip()
-    meta = _PROVIDER_META.get(pid)
+    meta = _meta_dict(pid)
 
     if not meta:
         console.print(f"[{design.WARN}]Unknown provider '{pid}'.[/{design.WARN}]")
@@ -475,7 +359,9 @@ def _test_all() -> None:
     table.add_column("Message", style=design.MUTED)
 
     providers_to_test = [
-        (pid, meta) for pid, meta in _PROVIDER_META.items() if meta.get("local") or has_key(pid)
+        (pid, _meta_dict(pid))
+        for pid in _all_provider_ids()
+        if (_meta_dict(pid) or {}).get("local") or has_key(pid)
     ]
 
     if not providers_to_test:
@@ -520,7 +406,7 @@ def list_provider_models(
 ) -> None:
     """List models available from a provider."""
     pid = provider_id.lower().strip()
-    meta = _PROVIDER_META.get(pid)
+    meta = _meta_dict(pid)
 
     if not meta:
         console.print(f"[{design.WARN}]Unknown provider '{pid}'.[/{design.WARN}]")
@@ -575,7 +461,7 @@ def provider_status(
     if provider_id:
         pids = [provider_id.lower().strip()]
     else:
-        pids = [pid for pid, meta in _PROVIDER_META.items() if meta.get("local") or has_key(pid)]
+        pids = [pid for pid in _all_provider_ids() if (_meta_dict(pid) or {}).get("local") or has_key(pid)]
 
     if not pids:
         console.print(f"[{design.WARN}]No providers configured.[/{design.WARN}]")
@@ -592,7 +478,7 @@ def provider_status(
     table.add_column("Message", style=design.MUTED)
 
     for pid in sorted(pids):
-        meta = _PROVIDER_META.get(pid, {"label": pid, "local": False})
+        meta = _meta_dict(pid) or {"label": pid, "local": False}
         key = "" if meta.get("local") else (get_key(pid) or "")
 
         with console.status(f"  [{design.MUTED}]Checking {pid}...[/{design.MUTED}]"):
@@ -628,7 +514,7 @@ def api_status(
     if provider_id:
         pids = [provider_id.lower().strip()]
     else:
-        pids = [pid for pid, meta in _PROVIDER_META.items() if not meta.get("local")]
+        pids = [pid for pid in _all_provider_ids() if not (_meta_dict(pid) or {}).get("local")]
 
     for pid in sorted(pids):
         info = get_provider_status(pid)
@@ -688,10 +574,10 @@ def inspect_provider(
 ) -> None:
     """Show comprehensive details for a single provider."""
     pid = provider_id.lower().strip()
-    meta = _PROVIDER_META.get(pid)
+    meta = _meta_dict(pid)
 
     if not meta:
-        supported = ", ".join(sorted(_PROVIDER_META.keys()))
+        supported = ", ".join(_all_provider_ids())
         console.print(
             f"[{design.WARN}]Unknown provider '{pid}'.[/{design.WARN}]\n"
             f"[{design.MUTED}]Supported: {supported}[/{design.MUTED}]"
@@ -699,7 +585,7 @@ def inspect_provider(
         raise typer.Exit(1)
 
     info = get_provider_status(pid)
-    default_pid = _get_default_provider()
+    default_pid = get_default_provider()
     is_local = bool(meta.get("local"))
     key = "" if is_local else (get_key(pid) or "")
 
@@ -822,8 +708,8 @@ def provider_default(
 ) -> None:
     """Get or set the default AI provider."""
     if not provider_id:
-        current = _get_default_provider()
-        config_path = _find_config_path()
+        current = get_default_provider()
+        config_path = find_config_path()
 
         if current:
             console.print(f"[{design.OK}]★ Default provider:[/{design.OK}] [bold]{current}[/bold]")
@@ -837,10 +723,10 @@ def provider_default(
         return
 
     pid = provider_id.lower().strip()
-    meta = _PROVIDER_META.get(pid)
+    meta = _meta_dict(pid)
 
     if not meta:
-        supported = ", ".join(sorted(_PROVIDER_META.keys()))
+        supported = ", ".join(_all_provider_ids())
         console.print(
             f"[{design.WARN}]Unknown provider '{pid}'.[/{design.WARN}]\n"
             f"[{design.MUTED}]Supported: {supported}[/{design.MUTED}]"
@@ -854,7 +740,7 @@ def provider_default(
         )
         raise typer.Exit(1)
 
-    config_path = _set_default_provider_in_toml(pid)
+    config_path = set_default_provider(pid)
     if config_path:
         console.print(
             f"[{design.OK}]★ Default provider set to:[/{design.OK}] [bold]{pid}[/bold]\n"

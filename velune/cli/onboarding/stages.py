@@ -419,8 +419,7 @@ async def _offer_replace_existing(
 
 
 async def _configure_one_provider_key(controller: WizardController, pid: str) -> Any:
-    from velune.providers.keystore import save_key
-    from velune.providers.validation import validate_provider
+    from velune.providers.credential_manager import add_credential
 
     meta = catalog.get(pid)
     if meta is None:
@@ -443,23 +442,28 @@ async def _configure_one_provider_key(controller: WizardController, pid: str) ->
             return None  # skipped
 
         await controller.show_transient([[(f"fg:{design.MUTED}", "  Validating...")]], delay=0.2)
-        result = await validate_provider(pid, key)
+        # set_as_first_default=False: the wizard has never auto-adopted a
+        # provider as the workspace default from this stage — that only
+        # ever happened later, when the user picks and activates a model.
+        try:
+            added = await add_credential(pid, key, set_as_first_default=False)
+        except Exception:
+            added = None
 
-        if result.ok:
-            try:
-                save_key(pid, key, verified=True)
-            except Exception:
-                pass
+        if added is not None and added.ok:
+            result = added.validation
+            message = result.human_message() if result else "key accepted"
             await controller.show_transient(
-                [[(f"fg:{design.OK}", f"  ✓ Connected — {result.human_message()}")]],
+                [[(f"fg:{design.OK}", f"  ✓ Connected — {message}")]],
                 delay=0.4,
             )
             return pid
 
+        subtitle = added.validation.human_message() if added and added.validation else "Could not save this key."
         choice = await controller.run_widget(
             SelectWidget(
                 title="❌ Invalid API Key",
-                subtitle=result.human_message(),
+                subtitle=subtitle,
                 options=[
                     Option("retry", "Retry"),
                     Option("skip", "Skip"),

@@ -290,6 +290,36 @@ class ProviderRegistry:
             self._keyed_factory("velune.providers.adapters.meta", "MetaProvider", "meta"),
         )
 
+        self._assert_matches_catalog()
+
+    def _assert_matches_catalog(self) -> None:
+        """Guard against the registry's factory list and ``catalog.py`` drifting apart.
+
+        These two lists used to be independent (registry.py hardcoded its own
+        provider ids; catalog.py hardcoded a second, slightly different set —
+        e.g. ``llamacpp``/``openai-compat`` were only ever in this one). A
+        provider registered here but missing from the catalog would silently
+        not show up in ``/providers``/``velune provider list``; one only in
+        the catalog but not registered here would show up in the UI and then
+        fail with ``ProviderNotFoundError`` the moment it's actually used.
+        Raising here — at registry construction, i.e. at process startup —
+        turns that silent drift into an immediate, loud failure instead.
+        """
+        from velune.providers import catalog
+
+        registered = set(self._factories)
+        cataloged = {p.id for p in catalog.list_providers_alphabetical()}
+        if registered != cataloged:
+            only_registered = sorted(registered - cataloged)
+            only_cataloged = sorted(cataloged - registered)
+            raise RuntimeError(
+                "ProviderRegistry and providers/catalog.py have drifted apart: "
+                f"registered-but-not-cataloged={only_registered}, "
+                f"cataloged-but-not-registered={only_cataloged}. "
+                "Add the missing ProviderMeta entry (or factory registration) "
+                "so both stay one source of truth."
+            )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------

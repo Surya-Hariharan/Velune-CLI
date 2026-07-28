@@ -135,6 +135,21 @@ def test_interrupted_write(mock_config_dir, mock_keyring):
     assert get_key("anthropic") is None
 
 
+def test_save_disk_is_protected_by_a_cross_process_file_lock(mock_config_dir, mock_keyring):
+    """Two terminal sessions racing on ``/providers add`` used to have a real
+    lost-update window: nothing here took an OS-level lock around the
+    read-merge-write cycle, only an in-process ``threading.Lock`` that a
+    second Velune process can't see at all. ``_save_disk`` must go through
+    ``velune.core.filelock.locked`` now."""
+    from velune.core import filelock as filelock_module
+
+    with patch("velune.providers.keystore.locked", wraps=filelock_module.locked) as mock_locked:
+        save_key("openai", "sk-locked")
+
+    mock_locked.assert_called_once()
+    assert get_key("openai") == "sk-locked"
+
+
 def test_overwrite_existing_key(mock_config_dir, mock_keyring):
     save_key("gemini", "gemini-old")
     assert get_key("gemini") == "gemini-old"

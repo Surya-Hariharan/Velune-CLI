@@ -648,20 +648,23 @@ async def activate_model(repl: VeluneREPL, model: ModelDescriptor) -> None:
 
 
 def _persist_default_provider(repl: VeluneREPL, provider_id: str) -> None:
-    """Best-effort write of providers.default_provider into velune.toml."""
+    """Write providers.default_provider into velune.toml.
+
+    Routes through :mod:`velune.providers.default_provider` — the single
+    writer of this key, also used by ``velune provider add``/``velune
+    provider default`` (``cli/commands/providers.py``). The two used to write
+    the same TOML key independently, from different triggers, neither aware
+    the other existed.
+    """
     from pathlib import Path
 
-    try:
-        import toml
+    from velune.providers.default_provider import set_default_provider
 
+    try:
         workspace = Path(repl.container.get("runtime.workspace"))
-        config_path = repl.container.get("runtime.config_path") or (workspace / "velune.toml")
-        config_path = Path(config_path)
-        data = toml.load(config_path) if config_path.exists() else {}
-        data.setdefault("providers", {})["default_provider"] = provider_id
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as fh:
-            toml.dump(data, fh)
+        config_path = repl.container.get("runtime.config_path")
+        config_path = Path(config_path) if config_path else (workspace / "velune.toml")
+        set_default_provider(provider_id, config_path=config_path)
     except Exception as exc:
         _log.debug("Could not persist default provider: %s", exc)
 

@@ -110,6 +110,16 @@ _PROVIDERS: tuple[ProviderMeta, ...] = (
         env_var=PROVIDER_ENV_VARS.get("huggingface"),
     ),
     ProviderMeta(
+        id="llamacpp",
+        display_name="llama.cpp",
+        description="Run GGUF models directly via llama.cpp's own server — zero cloud dependency.",
+        requires_key=False,
+        free_tier=True,
+        key_label="",
+        get_key_url="https://github.com/ggml-org/llama.cpp",
+        env_var=None,
+    ),
+    ProviderMeta(
         id="lmstudio",
         display_name="LM Studio",
         description="GUI for local model management and inference.",
@@ -168,6 +178,16 @@ _PROVIDERS: tuple[ProviderMeta, ...] = (
         key_label="OpenAI API key",
         get_key_url="https://platform.openai.com/api-keys",
         env_var=PROVIDER_ENV_VARS.get("openai"),
+    ),
+    ProviderMeta(
+        id="openai-compat",
+        display_name="OpenAI-compatible server",
+        description="vLLM, LocalAI, text-generation-webui, or any self-hosted OpenAI-shaped API.",
+        requires_key=False,
+        free_tier=True,
+        key_label="",
+        get_key_url="",
+        env_var=None,
     ),
     ProviderMeta(
         id="openrouter",

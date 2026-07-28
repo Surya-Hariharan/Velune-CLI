@@ -16,15 +16,15 @@ from __future__ import annotations
 import toml
 
 from velune.cli import guidance
-from velune.cli.commands import providers as prov
+from velune.providers import default_provider
 
 
 def test_first_provider_becomes_default(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # No velune.toml yet → no default configured.
-    assert prov._get_default_provider() is None
+    assert default_provider.get_default_provider() is None
 
-    assert prov._maybe_set_first_default("openai") is True
+    assert default_provider.set_first_default("openai") is True
 
     data = toml.load(tmp_path / "velune.toml")
     assert data["providers"]["default_provider"] == "openai"
@@ -37,9 +37,21 @@ def test_existing_default_is_not_overridden(tmp_path, monkeypatch):
     )
 
     # A second provider must not steal the default.
-    assert prov._maybe_set_first_default("groq") is False
+    assert default_provider.set_first_default("groq") is False
     data = toml.load(tmp_path / "velune.toml")
     assert data["providers"]["default_provider"] == "anthropic"
+
+
+def test_commands_providers_module_uses_shared_default_provider(tmp_path, monkeypatch):
+    """`velune provider add`'s first-default behavior and `/model use`'s
+    default-provider persistence must be the same code path now, not two
+    independent writers of the same velune.toml key."""
+    from velune.cli.commands import providers as prov
+
+    monkeypatch.chdir(tmp_path)
+    assert prov.get_default_provider is default_provider.get_default_provider
+    assert prov.set_default_provider is default_provider.set_default_provider
+    assert prov.set_first_default is default_provider.set_first_default
 
 
 def test_provider_added_guidance_is_cli_native():

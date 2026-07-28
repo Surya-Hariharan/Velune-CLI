@@ -19,6 +19,7 @@ from typing import Any
 from platformdirs import user_config_dir
 
 from velune._compat import StrEnum
+from velune.core.filelock import locked
 from velune.providers.crypto import decrypt_credentials, encrypt_credentials
 
 logger = logging.getLogger("velune.providers.keystore")
@@ -178,54 +179,63 @@ class CredentialManager:
         from the merged result explicitly, which is what actually lets
         :meth:`delete_provider` persist a deletion instead of the disk read
         silently re-merging the just-deleted record back in.
+
+        The read-merge-write sequence below is wrapped in a cross-process
+        :func:`~velune.core.filelock.locked` guard: this class's own
+        ``_cache_lock`` only protects against races between threads in *this*
+        process, so two separate terminal sessions each doing
+        ``/providers add`` at the same moment could otherwise both read the
+        same disk state, merge their own change on top, and each write —
+        with the second write silently discarding the first one's update.
         """
         self._config_dir.mkdir(parents=True, exist_ok=True)
 
-        # Read the most recent disk state to merge updates instead of overwriting
-        disk_data = self._load_disk()
-        disk_data.update(providers)
-        for provider_id in removed or ():
-            disk_data.pop(provider_id, None)
+        with locked(self._credentials_file):
+            # Read the most recent disk state to merge updates instead of overwriting
+            disk_data = self._load_disk()
+            disk_data.update(providers)
+            for provider_id in removed or ():
+                disk_data.pop(provider_id, None)
 
-        data_wrapper = {"providers": disk_data}
-        json_str = json.dumps(data_wrapper, indent=2)
-        encrypted_data = encrypt_credentials(json_str)
+            data_wrapper = {"providers": disk_data}
+            json_str = json.dumps(data_wrapper, indent=2)
+            encrypted_data = encrypt_credentials(json_str)
 
-        # Atomic write sequence: Temp file -> fsync -> rename
-        temp_file = self._credentials_file.with_suffix(".tmp")
-        try:
-            temp_file.write_bytes(encrypted_data)
+            # Atomic write sequence: Temp file -> fsync -> rename
+            temp_file = self._credentials_file.with_suffix(".tmp")
+            try:
+                temp_file.write_bytes(encrypted_data)
 
-            # Flush and sync to disk
-            with open(temp_file, "r+b") as f:
-                f.flush()
-                os.fsync(f.fileno())
+                # Flush and sync to disk
+                with open(temp_file, "r+b") as f:
+                    f.flush()
+                    os.fsync(f.fileno())
 
-            # Create backup of known good state
-            backup_file = self._credentials_file.with_name("credentials.json.bak")
-            if self._credentials_file.exists():
-                shutil.copy2(self._credentials_file, backup_file)
+                # Create backup of known good state
+                backup_file = self._credentials_file.with_name("credentials.json.bak")
+                if self._credentials_file.exists():
+                    shutil.copy2(self._credentials_file, backup_file)
 
-            # Atomic replace
-            temp_file.replace(self._credentials_file)
+                # Atomic replace
+                temp_file.replace(self._credentials_file)
 
-            # Restrict the encrypted store (and its backup) to the current
-            # user only, so it isn't world-readable at the filesystem level
-            # on a shared machine.
-            if os.name != "nt":
-                self._credentials_file.chmod(0o600)
-                if backup_file.exists():
-                    backup_file.chmod(0o600)
-            else:
-                _restrict_to_current_user_windows(self._credentials_file)
-                if backup_file.exists():
-                    _restrict_to_current_user_windows(backup_file)
-        finally:
-            if temp_file.exists():
-                try:
-                    temp_file.unlink()
-                except Exception:
-                    pass
+                # Restrict the encrypted store (and its backup) to the current
+                # user only, so it isn't world-readable at the filesystem level
+                # on a shared machine.
+                if os.name != "nt":
+                    self._credentials_file.chmod(0o600)
+                    if backup_file.exists():
+                        backup_file.chmod(0o600)
+                else:
+                    _restrict_to_current_user_windows(self._credentials_file)
+                    if backup_file.exists():
+                        _restrict_to_current_user_windows(backup_file)
+            finally:
+                if temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except Exception:
+                        pass
 
     def get_provider(self, provider_id: str) -> dict[str, Any] | None:
         """Get the full record for a provider."""
