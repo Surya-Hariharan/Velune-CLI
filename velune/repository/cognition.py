@@ -23,6 +23,7 @@ from velune.repository.tracker import GitTracker
 
 if TYPE_CHECKING:
     from velune.repository.incremental_indexer import IncrementalIndexer, IndexDelta
+    from velune.repository.technology_detector import TechStack
 
 logger = logging.getLogger("velune.repository.cognition")
 
@@ -654,6 +655,26 @@ class RepositoryCognitionService:
         self._volatility_cache = (now, data)
         return data
 
+    def _log_tech_stack_claims(self, tech_stack: TechStack) -> None:
+        """Record this run's tech-stack claims to the confidence-calibration log.
+
+        Only called from ``_run_pipeline`` (a full index run), not from the
+        incremental-refresh path — that ticks every few seconds while the
+        tree is dirty, and logging the same claims on every tick would
+        bloat an append-only log for no analytical benefit. A full index
+        run is a natural, bounded cadence for this instead.
+        """
+        try:
+            from velune.repository.calibration import ConfidenceCalibrationLog
+
+            log = ConfidenceCalibrationLog(self.root_path / ".velune" / "confidence_calibration.jsonl")
+            for claim in tech_stack.language_claims:
+                log.record_claim(f"language:{claim.value}", claim, context="tech_stack.language")
+            for claim in tech_stack.framework_claims:
+                log.record_claim(f"framework:{claim.value}", claim, context="tech_stack.framework")
+        except Exception as exc:
+            logger.debug("Could not log tech-stack claims for calibration: %s", exc)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -698,6 +719,7 @@ class RepositoryCognitionService:
         # Detected once and threaded through both consumers below, rather than
         # each independently constructing its own TechnologyDetector pass.
         tech_stack = TechnologyDetector(self.root_path).detect()
+        self._log_tech_stack_claims(tech_stack)
         layers = self.analyzer.classify_architecture_layers(file_paths, tech_stack)
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
