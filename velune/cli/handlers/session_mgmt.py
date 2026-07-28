@@ -221,9 +221,7 @@ async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
         return
 
     if not sessions:
-        repl.console.print(
-            ui.notification("No sessions found for this workspace.", kind="info")
-        )
+        repl.console.print(ui.notification("No sessions found for this workspace.", kind="info"))
         return
 
     table = Table(

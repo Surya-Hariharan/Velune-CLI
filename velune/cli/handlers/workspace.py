@@ -297,9 +297,7 @@ async def _project_list(repl: VeluneREPL) -> None:
     workspaces = repl._workspace_registry.list()
     if not workspaces:
         repl.console.print(
-            ui.notification(
-                "No workspaces registered. Use /project add <path>.", kind="info"
-            )
+            ui.notification("No workspaces registered. Use /project add <path>.", kind="info")
         )
         return
     current = str(Path(repl.container.get("runtime.workspace")).resolve())

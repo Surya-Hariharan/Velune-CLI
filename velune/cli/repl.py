@@ -266,13 +266,12 @@ class VeluneREPL:
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.key_binding import KeyBindings
 
-        from velune.cli.prompt_recall import PromptRecallState
-
         from velune.cli import design
         from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
         from velune.cli.fullscreen import FullscreenREPLUI
         from velune.cli.inline_flow import InlineFlow
         from velune.cli.model_switcher import MODEL_SWITCHER_STYLES, ModelSwitcher
+        from velune.cli.prompt_recall import PromptRecallState
         from velune.cli.statusbar import STATUS_BAR_STYLES
         from velune.cli.validators import InlineSyntaxValidator
 

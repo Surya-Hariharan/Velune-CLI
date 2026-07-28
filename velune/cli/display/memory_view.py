@@ -102,7 +102,9 @@ class MemoryDisplayView:
         )
         table.add_row(
             "Embedding queue",
-            "[yellow]backlogged[/yellow]" if health.embedding_queue_depth else "[green]clear[/green]",
+            "[yellow]backlogged[/yellow]"
+            if health.embedding_queue_depth
+            else "[green]clear[/green]",
             str(health.embedding_queue_depth),
             "pending semantic-index writes",
         )

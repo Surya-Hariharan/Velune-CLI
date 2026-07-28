@@ -177,7 +177,7 @@ class RepositorySnapshotParser:
                 # Fail silently and let fallbacks handle it
                 symbols, edges = None, None
 
-        if symbols is None:
+        if symbols is None or edges is None:
             # Fallbacks
             if lang == RepositoryLanguage.PYTHON:
                 symbols, edges = self._parse_python_ast(file_path, code)
@@ -295,9 +295,7 @@ class RepositorySnapshotParser:
                     line_start=line_no,
                     line_end=line_no,
                     metadata=(
-                        {"dynamic": True, "resolution_confidence": confidence}
-                        if is_dynamic
-                        else {}
+                        {"dynamic": True, "resolution_confidence": confidence} if is_dynamic else {}
                     ),
                 )
             )
@@ -358,9 +356,7 @@ class RepositorySnapshotParser:
         except (json.JSONDecodeError, ValueError):
             return ""
 
-        kernel_lang = (
-            notebook.get("metadata", {}).get("kernelspec", {}).get("language", "python")
-        )
+        kernel_lang = notebook.get("metadata", {}).get("kernelspec", {}).get("language", "python")
         if kernel_lang and kernel_lang.lower() not in ("python", "python3"):
             return ""
 
@@ -370,7 +366,7 @@ class RepositorySnapshotParser:
 
         executed: list[tuple[int, str]] = []
         unexecuted: list[str] = []
-        for idx, cell in enumerate(cells):
+        for cell in cells:
             if not isinstance(cell, dict) or cell.get("cell_type") != "code":
                 continue
             source = cell.get("source", "")
@@ -417,8 +413,12 @@ class RepositorySnapshotParser:
                         current_class = name
                         superclasses_node = node.child_by_field_name("superclasses")
                         if superclasses_node is not None:
-                            bases_text = code[superclasses_node.start_byte : superclasses_node.end_byte]
-                            bases = [b.strip() for b in bases_text.strip("()").split(",") if b.strip()]
+                            bases_text = code[
+                                superclasses_node.start_byte : superclasses_node.end_byte
+                            ]
+                            bases = [
+                                b.strip() for b in bases_text.strip("()").split(",") if b.strip()
+                            ]
                             if bases:
                                 metadata["bases"] = bases
                 elif node_type == "function_definition":

@@ -298,7 +298,9 @@ class FullscreenREPLUI:
         self._status_state = status_state
         # `None`/non-positive falls back to the documented default rather than
         # producing a zero-or-negative Dimension.
-        self._max_content_width = max_content_width if max_content_width and max_content_width > 0 else _MAX_CONTENT_WIDTH
+        self._max_content_width = (
+            max_content_width if max_content_width and max_content_width > 0 else _MAX_CONTENT_WIDTH
+        )
         self._inline_flow = inline_flow
         self._on_status_render = on_status_render
         # Callable returning a fresh HomeState; rendered while the transcript

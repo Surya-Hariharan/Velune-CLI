@@ -169,7 +169,9 @@ class TokenCounter:
             base_count = len(encoding.encode(text, disallowed_special=()))
             return max(1, int(base_count * TokenCounter._CLAUDE_APPROXIMATION_MARGIN))
         except Exception as e:
-            logger.debug(f"tiktoken-based Claude approximation failed: {e}; falling back to heuristic")
+            logger.debug(
+                f"tiktoken-based Claude approximation failed: {e}; falling back to heuristic"
+            )
             return TokenCounter._count_heuristic(text)
 
     @staticmethod

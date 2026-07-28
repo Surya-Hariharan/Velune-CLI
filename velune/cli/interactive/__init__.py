@@ -11,7 +11,6 @@ host them inside persistent sidebar/header chrome instead.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-
 from pathlib import Path
 
 from velune.cli.interactive import host

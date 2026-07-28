@@ -281,7 +281,9 @@ class GoogleProvider(ModelProvider):
                 content=text,
                 model_id=request.model_id,
                 finish_reason=(
-                    "tool_calls" if tool_calls else (candidate.get("finishReason") or "STOP").lower()
+                    "tool_calls"
+                    if tool_calls
+                    else (candidate.get("finishReason") or "STOP").lower()
                 ),
                 tokens_used=usage.get("totalTokenCount", 0),
                 latency_ms=latency,

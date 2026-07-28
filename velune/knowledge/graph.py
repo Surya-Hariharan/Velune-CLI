@@ -377,7 +377,10 @@ class KnowledgeGraph:
         placeholders = ",".join("?" for _ in unique_ids)
         async with self._read() as conn:
             cursor = await conn.execute(
-                f"SELECT id FROM kg_nodes WHERE id IN ({placeholders})", unique_ids
+                # placeholders is a static run of "?" markers (one per id),
+                # not interpolated values; unique_ids is bound as query params.
+                f"SELECT id FROM kg_nodes WHERE id IN ({placeholders})",  # nosec B608
+                unique_ids,
             )
             rows = await cursor.fetchall()
         return {row["id"] for row in rows}

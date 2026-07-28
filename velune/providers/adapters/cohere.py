@@ -329,9 +329,7 @@ class CohereProvider(ModelProvider):
                                     else data.get("finish_reason", "COMPLETE").lower()
                                 ),
                                 metadata=(
-                                    {"tool_calls": pending_tool_calls}
-                                    if pending_tool_calls
-                                    else {}
+                                    {"tool_calls": pending_tool_calls} if pending_tool_calls else {}
                                 ),
                             )
                     except json.JSONDecodeError:

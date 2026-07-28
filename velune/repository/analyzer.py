@@ -332,9 +332,7 @@ class CodebaseAnalyzer:
                 return "services"
         return None
 
-    def _detect_project_types(
-        self, file_paths: list[str], tech: TechStack | None
-    ) -> set[str]:
+    def _detect_project_types(self, file_paths: list[str], tech: TechStack | None) -> set[str]:
         """Cheap tags used for layer-rule selection and summary display.
 
         "velune" is checked directly against the file list (an exact
@@ -347,7 +345,10 @@ class CodebaseAnalyzer:
         path_set = {p.replace("\\", "/") for p in file_paths}
         tags: set[str] = set()
 
-        if any(p == "velune/kernel/__init__.py" or p.endswith("/velune/kernel/__init__.py") for p in path_set):
+        if any(
+            p == "velune/kernel/__init__.py" or p.endswith("/velune/kernel/__init__.py")
+            for p in path_set
+        ):
             tags.add("velune")
 
         if tech is None:

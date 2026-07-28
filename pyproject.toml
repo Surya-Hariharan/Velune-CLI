@@ -57,7 +57,11 @@ dependencies = [
     "anthropic>=0.18.0",
     "httpx>=0.26.0",
     # mcp <1.28.1: CVE-2026-59950 — floor at the patched release.
-    "mcp>=1.28.1",
+    # mcp >=2.0.0: rewrote the low-level Server API (the decorator-based
+    # @server.list_tools()/@server.call_tool() registration velune/mcp/server.py
+    # depends on was removed in favor of constructor kwargs), so ceiling until
+    # that migration is done deliberately.
+    "mcp>=1.28.1,<2.0.0",
 
     # Memory metadata store (stdlib-backed; vector store is the [rag] extra)
     "aiosqlite>=0.19.0",

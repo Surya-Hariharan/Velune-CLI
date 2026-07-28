@@ -183,7 +183,10 @@ class RepositoryIndexer:
                     # point — reading it in full to then discard the parse
                     # would still pay the I/O cost this guard exists to avoid.
                     symbols: list[RepositorySymbol] = []
-                    file_metadata = {"opaque": True, "opaque_reason": "exceeds structural parse size limit"}
+                    file_metadata = {
+                        "opaque": True,
+                        "opaque_reason": "exceeds structural parse size limit",
+                    }
                     file_rec = RepositoryFile(
                         path=rel_path,
                         language=language,

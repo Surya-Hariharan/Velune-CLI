@@ -60,7 +60,9 @@ async def cmd_help(repl: VeluneREPL, args: str) -> None:
             table.add_row(name, f"[dim white]{aliases}[/dim white]", cmd.description)
         repl.console.print(table)
         repl.console.print()
-        repl.console.print(f"[dim]{len(matches)} match(es)  ·  /help with no args to see everything[/dim]")
+        repl.console.print(
+            f"[dim]{len(matches)} match(es)  ·  /help with no args to see everything[/dim]"
+        )
         return
 
     ordered = [c for c in CATEGORY_ORDER if c in grouped]

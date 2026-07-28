@@ -50,6 +50,7 @@ class TurnProviderError(Exception):
         self.original = original
         self.safe_to_retry_elsewhere = safe_to_retry_elsewhere
 
+
 # Human-readable verbs for tool cards: `● Write(velune/x.py)` instead of
 # `● write_file {"file_path": ...}`. Unknown (e.g. MCP) tools show raw names.
 _TOOL_VERBS: dict[str, str] = {

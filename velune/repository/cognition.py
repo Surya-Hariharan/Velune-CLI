@@ -692,7 +692,9 @@ class RepositoryCognitionService:
         try:
             from velune.repository.calibration import ConfidenceCalibrationLog
 
-            log = ConfidenceCalibrationLog(self.root_path / ".velune" / "confidence_calibration.jsonl")
+            log = ConfidenceCalibrationLog(
+                self.root_path / ".velune" / "confidence_calibration.jsonl"
+            )
             for claim in tech_stack.language_claims:
                 log.record_claim(f"language:{claim.value}", claim, context="tech_stack.language")
             for claim in tech_stack.framework_claims:

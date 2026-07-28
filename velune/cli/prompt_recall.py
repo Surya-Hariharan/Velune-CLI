@@ -35,7 +35,7 @@ class PromptRecallState:
         if not prompts:
             return None
         idx = self.index
-        new_idx = (idx - 1) if (recalling and idx > 0) else (len(prompts) - 1)
+        new_idx = (idx - 1) if (recalling and idx is not None and idx > 0) else (len(prompts) - 1)
         self.index = new_idx
         return prompts[new_idx]
 

@@ -271,9 +271,7 @@ def _info(repl: VeluneREPL, resource_id: str) -> None:
     caps = repl._resource_manager.capabilities(resource_id)
     if not caps:
         repl.console.print(
-            ui.notification(
-                f"No connector '{resource_id}' (unknown or disabled).", kind="warning"
-            )
+            ui.notification(f"No connector '{resource_id}' (unknown or disabled).", kind="warning")
         )
         return
 

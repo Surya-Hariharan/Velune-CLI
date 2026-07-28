@@ -156,7 +156,10 @@ async def cmd_theme(repl: VeluneREPL, args: str) -> None:
     sub = args.strip().lower()
 
     if sub in ("", "status"):
-        lines = [f"[cyan]{label}:[/cyan] [bold]{'on' if getter() else 'off'}[/bold]" for _, _, getter, _, label in options.values()]
+        lines = [
+            f"[cyan]{label}:[/cyan] [bold]{'on' if getter() else 'off'}[/bold]"
+            for _, _, getter, _, label in options.values()
+        ]
         repl.console.print(
             "\n".join(lines) + "\n[dim]Usage: /theme <colorblind|motion> [on|off][/dim]"
         )
@@ -239,8 +242,7 @@ async def cmd_crashreports(repl: VeluneREPL, args: str) -> None:
         else "No crash data will be written."
     )
     repl.console.print(
-        f"[cyan]Local crash reporting {state}.[/cyan] [dim]{detail} "
-        f"Saved to velune.toml.[/dim]"
+        f"[cyan]Local crash reporting {state}.[/cyan] [dim]{detail} Saved to velune.toml.[/dim]"
     )
 
 

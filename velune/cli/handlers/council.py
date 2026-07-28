@@ -85,7 +85,9 @@ async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
             )
         return
 
-    table = RichTable(border_style="dim", padding=(0, 1), title=f"Jobs: {kind_filter}" if kind_filter else None)
+    table = RichTable(
+        border_style="dim", padding=(0, 1), title=f"Jobs: {kind_filter}" if kind_filter else None
+    )
     table.add_column("ID", style="cyan", no_wrap=True)
     table.add_column("Kind", style="dim", width=9)
     table.add_column("Task", max_width=42)
