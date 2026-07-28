@@ -10,60 +10,24 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from velune.repository.technology_detector import TechStack
 
 # ---------------------------------------------------------------------------
 # Project-type detection
 # ---------------------------------------------------------------------------
-
-
-class ProjectTypeDetector:
-    """Detects the dominant tech stack from file paths and root markers."""
-
-    MARKERS: dict[str, list[str]] = {
-        "nextjs": ["next.config.js", "next.config.ts", "next.config.mjs"],
-        "react": [
-            "src/App.tsx",
-            "src/App.jsx",
-            "public/index.html",
-            "vite.config.ts",
-            "vite.config.js",
-        ],
-        "vue": ["vue.config.js", "nuxt.config.ts", "nuxt.config.js"],
-        "angular": ["angular.json", "src/app/app.module.ts"],
-        "svelte": ["svelte.config.js", "src/routes/+layout.svelte"],
-        "express": ["src/app.ts", "src/app.js", "server.ts", "server.js", "app.ts", "app.js"],
-        "fastapi": ["main.py", "app/main.py", "api/main.py"],
-        "flask": ["app.py", "wsgi.py", "application.py"],
-        "django": ["manage.py", "settings.py"],
-        "rails": ["Gemfile", "config/routes.rb"],
-        "laravel": ["artisan", "routes/api.php"],
-        "velune": ["velune/__init__.py", "velune/kernel/__init__.py"],
-    }
-
-    def detect(self, file_paths: list[str]) -> set[str]:
-        """Return a set of detected project types (may be multiple for fullstack apps)."""
-        path_set = {p.replace("\\", "/") for p in file_paths}
-        detected: set[str] = set()
-
-        for project_type, markers in self.MARKERS.items():
-            for marker in markers:
-                if any(p == marker or p.endswith("/" + marker) for p in path_set):
-                    detected.add(project_type)
-                    break
-
-        # Heuristic fallbacks via path patterns
-        if not detected:
-            has_py = any(p.endswith(".py") for p in path_set)
-            has_ts = any(p.endswith(".ts") or p.endswith(".tsx") for p in path_set)
-            has_js = any(p.endswith(".js") or p.endswith(".jsx") for p in path_set)
-            if has_py and (has_ts or has_js):
-                detected.add("fullstack_py_js")
-            elif has_py:
-                detected.add("python_generic")
-            elif has_ts or has_js:
-                detected.add("js_generic")
-
-        return detected
+#
+# This module used to carry its own independent project-type classifier
+# (a `MARKERS` filename table, keyed on the literal presence of e.g. a root
+# `main.py` implying FastAPI regardless of content) that duplicated — and
+# could disagree with — velune.repository.technology_detector.TechnologyDetector,
+# the content-based detector that is the actual source of truth elsewhere in
+# the pipeline. The only signal `CodebaseAnalyzer` genuinely needs that isn't
+# already answered by TechnologyDetector is "is this workspace Velune itself"
+# (which selects the internal layer hierarchy below) — that is now a direct,
+# inline check rather than a general-purpose classifier of its own.
 
 
 # ---------------------------------------------------------------------------
@@ -240,16 +204,21 @@ class CodebaseAnalyzer:
 
     def __init__(self, root_path: Path) -> None:
         self.root_path = root_path.resolve()
-        self._detector = ProjectTypeDetector()
         self._detected_types: set[str] = set()
 
-    def classify_architecture_layers(self, file_paths: list[str]) -> dict[str, list[str]]:
+    def classify_architecture_layers(
+        self, file_paths: list[str], tech: TechStack | None = None
+    ) -> dict[str, list[str]]:
         """Groups files into semantic architectural layers.
 
         Detects the project type first; uses Velune-specific layers for the
         Velune CLI itself, and generic semantic layers for any other codebase.
+
+        *tech* lets a caller that already ran ``TechnologyDetector`` (as
+        ``RepositoryCognitionService`` does) pass that result through instead
+        of paying for a second detection pass; if omitted, one is computed.
         """
-        self._detected_types = self._detector.detect(file_paths)
+        self._detected_types = self._detect_project_types(file_paths, tech)
         use_velune = "velune" in self._detected_types
 
         layer_rules = _VELUNE_LAYERS if use_velune else _GENERIC_LAYERS
@@ -270,6 +239,53 @@ class CodebaseAnalyzer:
                 layers["other"].append(norm)
 
         return layers
+
+    def _detect_project_types(
+        self, file_paths: list[str], tech: TechStack | None
+    ) -> set[str]:
+        """Cheap tags used for layer-rule selection and summary display.
+
+        "velune" is checked directly against the file list (an exact
+        structural fact, not a heuristic) since it is the only tag this
+        class branches on. Everything else is informational only and is
+        sourced from TechnologyDetector — the same canonical stack answer
+        `RepositoryCognitionService` uses elsewhere — rather than a second,
+        independent filename-marker pass that could disagree with it.
+        """
+        path_set = {p.replace("\\", "/") for p in file_paths}
+        tags: set[str] = set()
+
+        if any(p == "velune/kernel/__init__.py" or p.endswith("/velune/kernel/__init__.py") for p in path_set):
+            tags.add("velune")
+
+        if tech is None:
+            try:
+                from velune.repository.technology_detector import TechnologyDetector
+
+                tech = TechnologyDetector(self.root_path).detect()
+            except Exception:
+                tech = None
+
+        if tech is not None:
+            if tech.language and tech.language != "unknown":
+                tags.add(tech.language.lower())
+            if tech.framework:
+                tags.add(tech.framework.lower())
+            if tech.frontend:
+                tags.add(tech.frontend.lower())
+
+        if not tags or tags == {"velune"}:
+            has_py = any(p.endswith(".py") for p in path_set)
+            has_ts = any(p.endswith(".ts") or p.endswith(".tsx") for p in path_set)
+            has_js = any(p.endswith(".js") or p.endswith(".jsx") for p in path_set)
+            if has_py and (has_ts or has_js):
+                tags.add("fullstack_py_js")
+            elif has_py:
+                tags.add("python_generic")
+            elif has_ts or has_js:
+                tags.add("js_generic")
+
+        return tags
 
     def detect_dependency_violations(
         self, layers: dict[str, list[str]], import_edges: list[tuple]

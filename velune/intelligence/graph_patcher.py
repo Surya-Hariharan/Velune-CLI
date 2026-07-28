@@ -64,20 +64,19 @@ class KnowledgeGraphPatcher:
         if delta.is_empty:
             return result
 
-        # 1. Remove deleted-file nodes (CASCADE handles their edges)
-        if delta.to_remove:
-            removed = await self._graph.delete_nodes_by_files(delta.to_remove)
-            result.nodes_removed += removed
-            logger.debug("Patcher: removed nodes for %d deleted files", len(delta.to_remove))
+        # Files whose nodes must be removed before this patch commits: fully
+        # deleted files, plus updated files' stale nodes (purged ahead of the
+        # fresh upsert). Combined into one call so the whole delta — removal,
+        # node upsert, edge upsert — applies as a single transaction; see
+        # KnowledgeGraph.apply_patch for why that matters (a crash mid-patch
+        # must not leave deleted-but-not-reinserted nodes).
+        remove_files = list(delta.to_remove) + list(delta.to_update)
 
-        # 2. Process added + updated files
+        nodes_to_add: list[KnowledgeNode] = []
+        edges_to_add: list[KnowledgeEdge] = []
+
         to_process = delta.to_add + delta.to_update
         if to_process:
-            # For updates: purge stale nodes before upserting fresh ones
-            if delta.to_update:
-                removed = await self._graph.delete_nodes_by_files(delta.to_update)
-                result.nodes_removed += removed
-
             # Parse files concurrently (bounded by to_thread)
             parse_tasks = [
                 asyncio.create_task(
@@ -87,9 +86,6 @@ class KnowledgeGraphPatcher:
                 for rel_path in to_process
             ]
             parse_results = await asyncio.gather(*parse_tasks, return_exceptions=True)
-
-            nodes_to_add: list[KnowledgeNode] = []
-            edges_to_add: list[KnowledgeEdge] = []
 
             for rel_path, parsed in zip(to_process, parse_results, strict=False):
                 if isinstance(parsed, Exception):
@@ -105,8 +101,11 @@ class KnowledgeGraphPatcher:
                 edges_to_add.extend(file_edges)
                 result.files_patched += 1
 
-            await self._graph.upsert_nodes_bulk(nodes_to_add)
-            await self._graph.upsert_edges_bulk(edges_to_add)
+        if remove_files or nodes_to_add or edges_to_add:
+            removed = await self._graph.apply_patch(
+                remove_files=remove_files, nodes=nodes_to_add, edges=edges_to_add
+            )
+            result.nodes_removed += removed
             result.nodes_added += len(nodes_to_add)
             result.edges_added += len(edges_to_add)
 
@@ -130,33 +129,61 @@ class KnowledgeGraphPatcher:
         Returns None when the file does not exist (not an error; the caller
         should skip it without incrementing files_patched or errors).
         Runs synchronously — callers must wrap with ``asyncio.to_thread``.
+
+        Files over ``MAX_STRUCTURAL_PARSE_BYTES`` get a file node only (no
+        symbol nodes/edges) and are never read for structural parsing — the
+        same opaque-file guard applied at the repository-indexer layer,
+        needed here too since the KG patcher parses independently.
         """
         from velune.repository.parser import RepositorySnapshotParser
+        from velune.repository.schemas import MAX_STRUCTURAL_PARSE_BYTES, is_generated_content
 
         abs_path = self._workspace_root / rel_path
         if not abs_path.exists():
             return None
+
+        parser = RepositorySnapshotParser()
+        lang = parser._detect_language(abs_path)
+        size_bytes = abs_path.stat().st_size
+        file_nid = f"file:{rel_path}"
+
+        if size_bytes > MAX_STRUCTURAL_PARSE_BYTES:
+            return [
+                KnowledgeNode(
+                    id=file_nid,
+                    node_type=NodeType.FILE,
+                    label=rel_path,
+                    file_path=rel_path,
+                    metadata={"language": lang.value, "size_bytes": size_bytes, "opaque": True},
+                )
+            ], []
 
         try:
             content = abs_path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             return None
 
-        parser = RepositorySnapshotParser()
+        if is_generated_content(content):
+            return [
+                KnowledgeNode(
+                    id=file_nid,
+                    node_type=NodeType.FILE,
+                    label=rel_path,
+                    file_path=rel_path,
+                    metadata={"language": lang.value, "size_bytes": size_bytes, "generated": True},
+                )
+            ], []
+
         try:
             symbols, repo_edges = parser.parse(abs_path, content)
         except Exception as exc:
             logger.debug("Parser error on %s: %s", rel_path, exc)
             return [], []
 
-        lang = parser._detect_language(abs_path)
-        size_bytes = abs_path.stat().st_size
-
         nodes: list[KnowledgeNode] = []
         edges: list[KnowledgeEdge] = []
 
         # File node
-        file_nid = f"file:{rel_path}"
         nodes.append(
             KnowledgeNode(
                 id=file_nid,

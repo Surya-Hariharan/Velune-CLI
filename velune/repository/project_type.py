@@ -1,10 +1,24 @@
-"""Project type detector — classifies workspaces and builds context profiles."""
+"""Project type detector — classifies workspaces and builds context profiles.
+
+This is a thin presentation layer over :class:`~velune.repository.technology_detector
+.TechnologyDetector`, which is the single place in the codebase that reads
+manifests/dependency files to decide language + framework. It used to run its
+own independent, first-match-wins classification pass over the same files;
+that meant a repo could get two disagreeing answers depending on which code
+path asked. All this module does now is map a `TechStack` onto the
+`ProjectType` enum and the presentation fields (system prompt, display name,
+context hints) that are unique to it.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from velune.repository.technology_detector import TechStack
 
 
 class ProjectType(Enum):
@@ -117,11 +131,22 @@ _LANGUAGE_MAP: dict[ProjectType, str] = {
 
 
 class ProjectTypeDetector:
-    """Detects the project type of a workspace by inspecting root-level files."""
+    """Classifies a workspace's project type from its detected tech stack.
+
+    All manifest/dependency-file reading is delegated to
+    :class:`~velune.repository.technology_detector.TechnologyDetector` —
+    this class only maps that single, canonical stack answer onto the
+    ``ProjectType`` enum and the presentation fields unique to it (system
+    prompt addon, context hints, entry points, test/config file probes).
+    """
 
     def detect(self, workspace: Path) -> ProjectProfile:
+        from velune.repository.technology_detector import TechnologyDetector
+
         files = self._list_root_files(workspace)
-        project_type, frameworks = self._classify(workspace, files)
+        tech = TechnologyDetector(workspace).detect()
+        project_type = self._map_tech_stack(tech)
+        frameworks = self._collect_frameworks(tech)
         entry_points = self._find_entry_points(workspace, project_type)
         test_dirs = self._find_test_dirs(workspace)
         config_files = self._find_config_files(workspace, files)
@@ -147,96 +172,58 @@ class ProjectTypeDetector:
         except Exception:
             return set()
 
-    def _classify(self, workspace: Path, files: set[str]) -> tuple[ProjectType, list[str]]:
-        # ── Rust ──────────────────────────────────────────────────────
-        if "Cargo.toml" in files:
-            return ProjectType.RUST, ["cargo"]
+    def _map_tech_stack(self, tech: TechStack) -> ProjectType:
+        """Map a `TechStack` (language + framework) onto the `ProjectType` enum."""
+        lang = tech.language
+        fw = tech.framework
 
-        # ── Go ────────────────────────────────────────────────────────
-        if "go.mod" in files:
-            return ProjectType.GO, ["go modules"]
+        if lang == "Python":
+            if fw == "FastAPI":
+                return ProjectType.PYTHON_FASTAPI
+            if fw == "Django":
+                return ProjectType.PYTHON_DJANGO
+            if fw == "Flask":
+                return ProjectType.PYTHON_FLASK
+            if fw == "CLI":
+                return ProjectType.PYTHON_CLI
+            return ProjectType.PYTHON_GENERIC
 
-        # ── Flutter / Dart ────────────────────────────────────────────
-        if "pubspec.yaml" in files:
-            return ProjectType.FLUTTER, ["flutter", "dart"]
+        if lang in ("JavaScript", "TypeScript"):
+            if fw == "Next.js":
+                return ProjectType.NODE_NEXTJS
+            if tech.frontend == "React":
+                return ProjectType.NODE_REACT
+            if fw == "Express":
+                return ProjectType.NODE_EXPRESS
+            return ProjectType.NODE_GENERIC
 
-        # ── .NET ──────────────────────────────────────────────────────
-        if any(f.endswith(".csproj") or f.endswith(".sln") for f in files):
-            return ProjectType.DOTNET, ["dotnet"]
+        if lang == "Rust":
+            return ProjectType.RUST
+        if lang == "Go":
+            return ProjectType.GO
+        if lang == "Java":
+            return ProjectType.JAVA_SPRING if fw == "Spring" else ProjectType.JAVA_GENERIC
+        if lang == "C#":
+            return ProjectType.DOTNET
+        if lang == "Dart":
+            return ProjectType.FLUTTER
 
-        # ── Node / JavaScript / TypeScript ────────────────────────────
-        if "package.json" in files:
-            try:
-                import json
+        return ProjectType.UNKNOWN
 
-                pkg = json.loads((workspace / "package.json").read_text(encoding="utf-8"))
-                deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-                if "next" in deps:
-                    return ProjectType.NODE_NEXTJS, ["nextjs", "react"]
-                if "react" in deps or "react-dom" in deps:
-                    frameworks = ["react"]
-                    if "typescript" in deps or (workspace / "tsconfig.json").exists():
-                        frameworks.append("typescript")
-                    return ProjectType.NODE_REACT, frameworks
-                if "express" in deps:
-                    return ProjectType.NODE_EXPRESS, ["express"]
-            except Exception:
-                pass
-            return ProjectType.NODE_GENERIC, []
-
-        # ── Python ────────────────────────────────────────────────────
-        has_python = (
-            "pyproject.toml" in files
-            or "setup.py" in files
-            or "requirements.txt" in files
-            or any(f.endswith(".py") for f in files)
-        )
-        if has_python:
-            combined = self._read_requirement_sources(workspace)
-            if "fastapi" in combined:
-                frameworks = ["fastapi", "uvicorn"]
-                if "sqlalchemy" in combined:
-                    frameworks.append("sqlalchemy")
-                if "pydantic" in combined:
-                    frameworks.append("pydantic")
-                return ProjectType.PYTHON_FASTAPI, frameworks
-            if "django" in combined:
-                frameworks: list[str] = ["django"]
-                if "drf" in combined or "rest_framework" in combined:
-                    frameworks.append("drf")
-                return ProjectType.PYTHON_DJANGO, frameworks
-            if "flask" in combined:
-                return ProjectType.PYTHON_FLASK, ["flask"]
-            if "typer" in combined or "click" in combined or "argparse" in combined:
-                return ProjectType.PYTHON_CLI, ["cli"]
-            return ProjectType.PYTHON_GENERIC, []
-
-        # ── Java ──────────────────────────────────────────────────────
-        if "pom.xml" in files or "build.gradle" in files:
-            combined = ""
-            for fname in ("pom.xml", "build.gradle"):
-                fp = workspace / fname
-                if fp.exists():
-                    try:
-                        combined += fp.read_text(encoding="utf-8", errors="ignore").lower()
-                    except Exception:
-                        pass
-            if "spring" in combined:
-                return ProjectType.JAVA_SPRING, ["spring"]
-            return ProjectType.JAVA_GENERIC, []
-
-        return ProjectType.UNKNOWN, []
-
-    def _read_requirement_sources(self, workspace: Path) -> str:
-        parts: list[str] = []
-        for fname in ("requirements.txt", "requirements.in", "pyproject.toml", "setup.py"):
-            fp = workspace / fname
-            if fp.exists():
-                try:
-                    parts.append(fp.read_text(encoding="utf-8", errors="ignore").lower())
-                except Exception:
-                    pass
-        return " ".join(parts)
+    def _collect_frameworks(self, tech: TechStack) -> list[str]:
+        """Flatten the named + secondary TechStack fields into a display list."""
+        seen: list[str] = []
+        for value in (
+            tech.framework,
+            tech.frontend,
+            tech.database,
+            tech.auth,
+            tech.state_management,
+            *tech.secondary_frameworks,
+        ):
+            if value and value not in seen:
+                seen.append(value)
+        return seen
 
     def _find_entry_points(self, workspace: Path, pt: ProjectType) -> list[str]:
         candidates: dict[ProjectType, list[str]] = {

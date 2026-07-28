@@ -26,7 +26,8 @@ from pathlib import Path
 
 from velune.repository._native import scan_directory as _native_scan_directory
 from velune.repository._native import sha256_file as _native_sha256_file
-from velune.repository.index_state import IndexedFile, IndexState
+from velune.repository.index_state import IndexedFile, IndexState, index_state_lock_async
+from velune.repository.schemas import MAX_STRUCTURAL_PARSE_BYTES, is_generated_content
 
 logger = logging.getLogger("velune.repository.incremental_indexer")
 
@@ -174,43 +175,52 @@ class IncrementalIndexer:
 
         Files in ``delta.to_remove`` are dropped from the state.
         Files in ``delta.to_add`` and ``delta.to_update`` are hashed and parsed.
+
+        The whole load-mutate-save sequence is serialized against every other
+        writer of the same state file (``RepositoryIntelligenceEngine``'s
+        background loop, another ``apply_delta`` call, and a full
+        ``RepositoryCognitionService.index()`` run all write here) — without
+        it, two concurrent writers each load their own stale snapshot and
+        whichever saves last silently discards the other's updates entirely,
+        not just the conflicting entries.
         """
-        state = IndexState.load(self.state_path) or IndexState.empty(str(self.workspace_root))
+        async with index_state_lock_async(self.state_path):
+            state = IndexState.load(self.state_path) or IndexState.empty(str(self.workspace_root))
 
-        # Remove deleted files
-        for rel_path in delta.to_remove:
-            state.remove_file(rel_path)
-            logger.debug("Removed from index: %s", rel_path)
+            # Remove deleted files
+            for rel_path in delta.to_remove:
+                state.remove_file(rel_path)
+                logger.debug("Removed from index: %s", rel_path)
 
-        # Parse added and modified files
-        now = time.time()
-        _to_process = delta.to_add + delta.to_update
-        _total = len(_to_process)
-        for _idx, rel_path in enumerate(_to_process):
-            full_path = self.workspace_root / rel_path
-            try:
-                # One hop to a worker thread for the whole file: stat + read +
-                # SHA-256 + parse. Previously only the parse was off-loaded, so
-                # the read and the full hash of every changed file ran on the
-                # event loop and stalled the REPL in proportion to file size.
-                entry = await asyncio.to_thread(self._index_one, rel_path, full_path, now)
-            except FileNotFoundError:
-                continue
-            except Exception as exc:
-                logger.debug("Skipped %s during apply_delta: %s", rel_path, exc)
-            else:
-                state.update_file(entry)
-                logger.debug("Indexed: %s (%d symbols)", rel_path, entry.symbol_count)
-            finally:
-                if self.progress_callback is not None:
-                    self.progress_callback(_idx + 1, _total, rel_path)
+            # Parse added and modified files
+            now = time.time()
+            _to_process = delta.to_add + delta.to_update
+            _total = len(_to_process)
+            for _idx, rel_path in enumerate(_to_process):
+                full_path = self.workspace_root / rel_path
+                try:
+                    # One hop to a worker thread for the whole file: stat + read +
+                    # SHA-256 + parse. Previously only the parse was off-loaded, so
+                    # the read and the full hash of every changed file ran on the
+                    # event loop and stalled the REPL in proportion to file size.
+                    entry = await asyncio.to_thread(self._index_one, rel_path, full_path, now)
+                except FileNotFoundError:
+                    continue
+                except Exception as exc:
+                    logger.debug("Skipped %s during apply_delta: %s", rel_path, exc)
+                else:
+                    state.update_file(entry)
+                    logger.debug("Indexed: %s (%d symbols)", rel_path, entry.symbol_count)
+                finally:
+                    if self.progress_callback is not None:
+                        self.progress_callback(_idx + 1, _total, rel_path)
 
-        # Update metadata and persist
-        git_sha = await asyncio.to_thread(self._get_git_sha)
-        state.touch(git_sha)
-        state.workspace_root = str(self.workspace_root)
-        state.save(self.state_path)
-        return state
+            # Update metadata and persist
+            git_sha = await asyncio.to_thread(self._get_git_sha)
+            state.touch(git_sha)
+            state.workspace_root = str(self.workspace_root)
+            state.save(self.state_path)
+            return state
 
     # ------------------------------------------------------------------
     # Synchronous helpers (run in thread pool)
@@ -221,10 +231,46 @@ class IncrementalIndexer:
 
         Raises ``FileNotFoundError`` if the file vanished between delta
         computation and here — a normal race when the user is editing.
+
+        Files over ``MAX_STRUCTURAL_PARSE_BYTES`` are hashed (for staleness
+        tracking) but never read for structural parsing — the same opaque-
+        file guard ``RepositoryIndexer.index()`` applies on a full run, kept
+        consistent here so an incremental update can't reintroduce the one
+        oversized file dominating cost that the full-run guard prevents.
         """
         stat = full_path.stat()  # raises FileNotFoundError if it's gone
-        content = full_path.read_text(encoding="utf-8", errors="ignore")
         sha = self._hash_file(full_path)
+
+        if stat.st_size > MAX_STRUCTURAL_PARSE_BYTES:
+            from velune.repository.parser import RepositorySnapshotParser
+
+            language = RepositorySnapshotParser()._detect_language(full_path).value
+            return IndexedFile(
+                path=rel_path,
+                content_hash=sha,
+                language=language,
+                symbol_count=0,
+                indexed_at=now,
+                mtime=stat.st_mtime,
+                size=stat.st_size,
+            )
+
+        content = full_path.read_text(encoding="utf-8", errors="ignore")
+
+        if is_generated_content(content):
+            from velune.repository.parser import RepositorySnapshotParser
+
+            language = RepositorySnapshotParser()._detect_language(full_path).value
+            return IndexedFile(
+                path=rel_path,
+                content_hash=sha,
+                language=language,
+                symbol_count=0,
+                indexed_at=now,
+                mtime=stat.st_mtime,
+                size=stat.st_size,
+            )
+
         symbols, language = self._parse_file(full_path, content)
         return IndexedFile(
             path=rel_path,

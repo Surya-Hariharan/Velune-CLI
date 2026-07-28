@@ -10,10 +10,12 @@ from velune.repository._native import sha256_file as _sha256_file
 from velune.repository.parser import RepositorySnapshotParser
 from velune.repository.scanner import FilesystemScanner
 from velune.repository.schemas import (
+    MAX_STRUCTURAL_PARSE_BYTES,
     RepositoryFile,
     RepositoryLanguage,
     RepositorySnapshot,
     RepositorySymbol,
+    is_generated_content,
 )
 
 logger = logging.getLogger("velune.repository.indexer")
@@ -171,6 +173,35 @@ class RepositoryIndexer:
                     new_cache[rel_path] = cached_entry
                     continue
 
+                language = self.parser._detect_language(file_path)
+
+                if size_bytes > MAX_STRUCTURAL_PARSE_BYTES:
+                    # Opaque-file fallback: recorded (path, size, language,
+                    # hash) but never read for structural parsing, so one
+                    # oversized vendored/generated file can't dominate parse
+                    # time or symbol counts. Skipping the read here is the
+                    # point — reading it in full to then discard the parse
+                    # would still pay the I/O cost this guard exists to avoid.
+                    symbols: list[RepositorySymbol] = []
+                    file_metadata = {"opaque": True, "opaque_reason": "exceeds structural parse size limit"}
+                    file_rec = RepositoryFile(
+                        path=rel_path,
+                        language=language,
+                        size_bytes=size_bytes,
+                        sha256=sha,
+                        symbols=symbols,
+                        metadata=file_metadata,
+                    )
+                    files.append(file_rec)
+                    new_cache[rel_path] = {
+                        "sha256": sha,
+                        "language": language.value,
+                        "size_bytes": size_bytes,
+                        "symbols": [],
+                        "metadata": file_metadata,
+                    }
+                    continue
+
                 # Otherwise, parse file
                 code = file_path.read_text(encoding="utf-8", errors="ignore")
 
@@ -191,9 +222,17 @@ class RepositoryIndexer:
                     file_metadata["injection_risk"] = True
                     sanitized_paths.append(rel_path)
 
-                symbols, edges = self.parser.parse(file_path, code)
+                if is_generated_content(code):
+                    # Machine-generated file: skip structural parsing (its
+                    # symbols are noise, and it's meant to be regenerated
+                    # wholesale rather than hand-edited), but it's already
+                    # been read so there's no extra cost to still recording it.
+                    symbols = []
+                    file_metadata["opaque"] = True
+                    file_metadata["opaque_reason"] = "detected generated-file marker"
+                else:
+                    symbols, edges = self.parser.parse(file_path, code)
 
-                language = self.parser._detect_language(file_path)
                 file_rec = RepositoryFile(
                     path=rel_path,
                     language=language,

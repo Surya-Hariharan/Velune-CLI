@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from velune.repository.schemas import (
+    EXTENSION_LANGUAGE_MAP,
     RepositoryEdge,
     RepositoryLanguage,
     RepositorySymbol,
@@ -133,26 +134,17 @@ class RepositorySnapshotParser:
         return self.parse(file_path, code)
 
     def _detect_language(self, file_path: Path) -> RepositoryLanguage:
-        """Detect language from file path extension."""
+        """Detect language from file path extension.
+
+        Sourced from ``schemas.EXTENSION_LANGUAGE_MAP`` — the same table
+        ``FilesystemScanner`` uses to decide what to discover — so a file
+        the scanner walks always gets a real language tag here rather than
+        silently collapsing to UNKNOWN because this module's own mapping
+        hadn't caught up (previously true for e.g. ``.cs``, ``.php``, ``.rb``,
+        every one of which the scanner already discovered).
+        """
         suffix = file_path.suffix.lower()
-        mapping = {
-            ".py": RepositoryLanguage.PYTHON,
-            ".js": RepositoryLanguage.JAVASCRIPT,
-            ".jsx": RepositoryLanguage.JAVASCRIPT,
-            ".ts": RepositoryLanguage.TYPESCRIPT,
-            ".tsx": RepositoryLanguage.TYPESCRIPT,
-            ".go": RepositoryLanguage.GO,
-            ".rs": RepositoryLanguage.RUST,
-            ".java": RepositoryLanguage.JAVA,
-            ".cpp": RepositoryLanguage.CPP,
-            ".cc": RepositoryLanguage.CPP,
-            ".cxx": RepositoryLanguage.CPP,
-            ".hpp": RepositoryLanguage.CPP,
-            ".hh": RepositoryLanguage.CPP,
-            ".c": RepositoryLanguage.CPP,
-            ".h": RepositoryLanguage.CPP,
-        }
-        return mapping.get(suffix, RepositoryLanguage.UNKNOWN)
+        return EXTENSION_LANGUAGE_MAP.get(suffix, RepositoryLanguage.UNKNOWN)
 
     def _parse_tree_sitter(
         self, file_path: Path, code: str, lang: RepositoryLanguage

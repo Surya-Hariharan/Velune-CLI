@@ -2,14 +2,82 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger("velune.repository.index_state")
+
+# ---------------------------------------------------------------------------
+# Cross-writer mutual exclusion
+# ---------------------------------------------------------------------------
+#
+# Three call sites read-modify-write the same ``index_state.json``:
+# ``RepositoryIntelligenceEngine``'s background change-detection loop and
+# ``RepositoryCognitionService.run_incremental()`` both go through
+# ``IncrementalIndexer.apply_delta`` (async, on the event loop); a full
+# ``RepositoryCognitionService.index()`` run goes through
+# ``_persist_index_state`` (sync, may run in a worker thread via
+# ``asyncio.to_thread`` or directly with no event loop at all). Each of these
+# independently loads its own in-memory ``IndexState`` snapshot, mutates it,
+# and saves — so far apart in time that ``save()``'s own atomicity (see
+# ``IndexState.save``) doesn't help: whichever writer finishes last simply
+# overwrites the other's changes wholesale, a lost-update race, not a torn
+# read.
+#
+# A ``threading.Lock`` (rather than ``asyncio.Lock``) is used because the sync
+# and async call sites are not guaranteed to run on the same thread. The
+# async wrapper below polls a non-blocking acquire with an ``asyncio.sleep``
+# between attempts instead of a single blocking acquire, so a coroutine
+# waiting for the lock never blocks the event loop thread — a plain blocking
+# acquire from a coroutine could deadlock the whole loop if the lock is held
+# by another coroutine on that same thread that needs to run to release it.
+_state_locks: dict[str, threading.Lock] = {}
+_state_locks_guard = threading.Lock()
+
+
+def _get_state_lock(path: Path) -> threading.Lock:
+    """Return the process-wide lock guarding *path*, creating it on first use."""
+    key = str(path.resolve()) if path.exists() or path.parent.exists() else str(path)
+    with _state_locks_guard:
+        lock = _state_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _state_locks[key] = lock
+        return lock
+
+
+@contextlib.contextmanager
+def index_state_lock(path: Path):
+    """Blocking, synchronous critical-section guard for *path*'s state file."""
+    lock = _get_state_lock(path)
+    lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+@contextlib.asynccontextmanager
+async def index_state_lock_async(path: Path, poll_interval: float = 0.02):
+    """Async critical-section guard for *path*'s state file.
+
+    Never blocks the event loop thread: each acquire attempt is
+    non-blocking, with ``asyncio.sleep`` yielding control between attempts.
+    """
+    lock = _get_state_lock(path)
+    while not lock.acquire(blocking=False):
+        await asyncio.sleep(poll_interval)
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 @dataclass

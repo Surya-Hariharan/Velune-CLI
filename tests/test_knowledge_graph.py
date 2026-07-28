@@ -228,6 +228,49 @@ class TestKnowledgeGraphPersistence:
         stats = _run(graph.stats())
         assert stats.node_count == len(sample_nodes)
 
+    def test_apply_patch_removes_and_upserts_in_one_call(
+        self, graph: KnowledgeGraph, sample_nodes, sample_edges
+    ):
+        _run(graph.upsert_nodes_bulk(sample_nodes))
+        _run(graph.upsert_edges_bulk(sample_edges))
+
+        replacement = KnowledgeNode(
+            id="sym:main.py:run2",
+            node_type=NodeType.FUNCTION,
+            label="run2",
+            file_path="main.py",
+        )
+        removed = _run(
+            graph.apply_patch(remove_files=["main.py"], nodes=[replacement], edges=[])
+        )
+        assert removed == 2  # file:main.py + sym:main.py:run
+
+        assert _run(graph.get_node("sym:main.py:run")) is None
+        assert _run(graph.get_node("file:main.py")) is None
+        assert _run(graph.get_node("sym:main.py:run2")) is not None
+        # Untouched file's nodes survive.
+        assert _run(graph.get_node("file:utils.py")) is not None
+
+    def test_apply_patch_rolls_back_delete_on_upsert_failure(
+        self, graph: KnowledgeGraph, sample_nodes, sample_edges
+    ):
+        """A failure partway through must not leave a deleted-but-not-
+        reinserted state — the whole patch is one transaction, so a crash
+        (simulated here as a bad node) rolls back the delete too."""
+        _run(graph.upsert_nodes_bulk(sample_nodes))
+        _run(graph.upsert_edges_bulk(sample_edges))
+
+        bad_node = object()  # not a KnowledgeNode — will raise inside the upsert
+        with pytest.raises(Exception):
+            _run(
+                graph.apply_patch(remove_files=["main.py"], nodes=[bad_node], edges=[])  # type: ignore[list-item]
+            )
+
+        # The delete of main.py's nodes must have rolled back along with the
+        # failed upsert — main.py's original nodes are still present.
+        assert _run(graph.get_node("file:main.py")) is not None
+        assert _run(graph.get_node("sym:main.py:run")) is not None
+
     def test_node_metadata_roundtrip(self, graph: KnowledgeGraph):
         node = KnowledgeNode(
             id="m1",

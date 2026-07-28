@@ -576,10 +576,12 @@ class RepositoryCognitionService:
         frameworks = sorted(prev_frameworks | new_frameworks)
 
         # --- Cheap regardless of repo size — always re-run in full ---
-        layers = self.analyzer.classify_architecture_layers(all_paths)
+        # Detected once and threaded through both consumers below, rather than
+        # each independently constructing its own TechnologyDetector pass.
+        tech_stack = TechnologyDetector(self.root_path).detect()
+        layers = self.analyzer.classify_architecture_layers(all_paths, tech_stack)
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
-        tech_stack = TechnologyDetector(self.root_path).detect()
         arch_report = ArchitectureDetector(self.root_path, snapshot.files, tech_stack).detect()
 
         # --- Git metrics: volatility TTL-cached, rest stays live but cheap ---
@@ -692,8 +694,11 @@ class RepositoryCognitionService:
                 f.path.replace("/", "\\"), 0
             )
 
-        # Architecture analysis — adaptive to the actual project type
-        layers = self.analyzer.classify_architecture_layers(file_paths)
+        # Architecture analysis — adaptive to the actual project type.
+        # Detected once and threaded through both consumers below, rather than
+        # each independently constructing its own TechnologyDetector pass.
+        tech_stack = TechnologyDetector(self.root_path).detect()
+        layers = self.analyzer.classify_architecture_layers(file_paths, tech_stack)
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
 
@@ -741,10 +746,7 @@ class RepositoryCognitionService:
         except (OSError, UnicodeDecodeError, re.error) as exc:
             logger.warning("API mapping failed (non-fatal): %s", exc)
 
-        # Technology + Architecture detection
-        tech_detector = TechnologyDetector(self.root_path)
-        tech_stack = tech_detector.detect()
-
+        # Architecture pattern detection (tech_stack computed above)
         arch_detector = ArchitectureDetector(self.root_path, snapshot.files, tech_stack)
         arch_report = arch_detector.detect()
 
@@ -831,42 +833,49 @@ class RepositoryCognitionService:
         return state.last_commit_sha if state else None
 
     def _persist_index_state(self, inc: IncrementalIndexer, snapshot: RepositorySnapshot) -> None:
-        """Update IndexState on disk after a full index run."""
+        """Update IndexState on disk after a full index run.
+
+        Guarded by the same lock ``IncrementalIndexer.apply_delta`` uses on
+        this state file — this is a third independent writer (a full index
+        run, distinct from the incremental engine/REPL paths), and without a
+        shared lock it can race them the same way they can race each other.
+        """
         import time
 
-        from velune.repository.index_state import IndexedFile, IndexState
+        from velune.repository.index_state import IndexedFile, IndexState, index_state_lock
 
         try:
             git_sha = inc.git_sha()
-            state = IndexState.load(self._state_path) or IndexState.empty(str(self.root_path))
-            now = time.time()
+            with index_state_lock(self._state_path):
+                state = IndexState.load(self._state_path) or IndexState.empty(str(self.root_path))
+                now = time.time()
 
-            file_index: dict[str, IndexedFile] = {}
-            for f in snapshot.files:
-                # Record the mtime/size alongside the hash, so the next delta
-                # computation can skip this file with a stat() instead of
-                # re-reading and re-hashing it. Missing them here would leave
-                # every fully-indexed file without a fast signal.
-                try:
-                    st = (self.root_path / f.path).stat()
-                    mtime, size = st.st_mtime, st.st_size
-                except OSError:
-                    mtime, size = 0.0, 0
+                file_index: dict[str, IndexedFile] = {}
+                for f in snapshot.files:
+                    # Record the mtime/size alongside the hash, so the next delta
+                    # computation can skip this file with a stat() instead of
+                    # re-reading and re-hashing it. Missing them here would leave
+                    # every fully-indexed file without a fast signal.
+                    try:
+                        st = (self.root_path / f.path).stat()
+                        mtime, size = st.st_mtime, st.st_size
+                    except OSError:
+                        mtime, size = 0.0, 0
 
-                file_index[f.path] = IndexedFile(
-                    path=f.path,
-                    content_hash=f.sha256,
-                    language=f.language.value,
-                    symbol_count=len(f.symbols),
-                    indexed_at=now,
-                    mtime=mtime,
-                    size=size,
-                )
+                    file_index[f.path] = IndexedFile(
+                        path=f.path,
+                        content_hash=f.sha256,
+                        language=f.language.value,
+                        symbol_count=len(f.symbols),
+                        indexed_at=now,
+                        mtime=mtime,
+                        size=size,
+                    )
 
-            state.file_index = file_index
-            state.touch(git_sha)
-            state.workspace_root = str(self.root_path)
-            state.save(self._state_path)
+                state.file_index = file_index
+                state.touch(git_sha)
+                state.workspace_root = str(self.root_path)
+                state.save(self._state_path)
         except Exception as exc:
             logger.debug("Could not persist IndexState: %s", exc)
 

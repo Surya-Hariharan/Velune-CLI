@@ -185,6 +185,18 @@ class KnowledgeGraph:
         """Insert or update many nodes in a single transaction."""
         if not nodes:
             return
+        async with self._write() as conn:
+            await self._do_upsert_nodes_bulk(conn, nodes)
+
+    @staticmethod
+    async def _do_upsert_nodes_bulk(conn: aiosqlite.Connection, nodes: list[KnowledgeNode]) -> None:
+        """Core of ``upsert_nodes_bulk``, operating on an already-open connection.
+
+        Extracted so ``apply_patch`` can run this in the same transaction as
+        a delete + edge-upsert instead of each opening its own.
+        """
+        if not nodes:
+            return
         rows = [
             (
                 n.id,
@@ -198,23 +210,22 @@ class KnowledgeGraph:
             )
             for n in nodes
         ]
-        async with self._write() as conn:
-            await conn.executemany(
-                """
-                INSERT INTO kg_nodes (id, node_type, label, file_path, line_start, line_end,
-                                      metadata, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    node_type  = excluded.node_type,
-                    label      = excluded.label,
-                    file_path  = excluded.file_path,
-                    line_start = excluded.line_start,
-                    line_end   = excluded.line_end,
-                    metadata   = excluded.metadata,
-                    updated_at = excluded.updated_at
-                """,
-                rows,
-            )
+        await conn.executemany(
+            """
+            INSERT INTO kg_nodes (id, node_type, label, file_path, line_start, line_end,
+                                  metadata, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                node_type  = excluded.node_type,
+                label      = excluded.label,
+                file_path  = excluded.file_path,
+                line_start = excluded.line_start,
+                line_end   = excluded.line_end,
+                metadata   = excluded.metadata,
+                updated_at = excluded.updated_at
+            """,
+            rows,
+        )
 
     async def upsert_edge(self, edge: KnowledgeEdge) -> None:
         """Insert or update a directed edge."""
@@ -235,20 +246,31 @@ class KnowledgeGraph:
         """Insert or update many edges in a single transaction."""
         if not edges:
             return
+        async with self._write() as conn:
+            await self._do_upsert_edges_bulk(conn, edges)
+
+    @staticmethod
+    async def _do_upsert_edges_bulk(conn: aiosqlite.Connection, edges: list[KnowledgeEdge]) -> None:
+        """Core of ``upsert_edges_bulk``, operating on an already-open connection.
+
+        Extracted so ``apply_patch`` can run this in the same transaction as
+        a delete + node-upsert instead of each opening its own.
+        """
+        if not edges:
+            return
         rows = [
             (e.source, e.target, e.edge_type.value, e.weight, json.dumps(e.metadata)) for e in edges
         ]
-        async with self._write() as conn:
-            await conn.executemany(
-                """
-                INSERT INTO kg_edges (source, target, edge_type, weight, metadata)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(source, target, edge_type) DO UPDATE SET
-                    weight   = excluded.weight,
-                    metadata = excluded.metadata
-                """,
-                rows,
-            )
+        await conn.executemany(
+            """
+            INSERT INTO kg_edges (source, target, edge_type, weight, metadata)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(source, target, edge_type) DO UPDATE SET
+                weight   = excluded.weight,
+                metadata = excluded.metadata
+            """,
+            rows,
+        )
 
     async def set_meta(self, key: str, value: str) -> None:
         """Store a metadata key-value pair (e.g. root_path, built_at)."""
@@ -451,27 +473,64 @@ class KnowledgeGraph:
         if not file_paths:
             return 0
         async with self._write() as conn:
-            await conn.execute(
-                "CREATE TEMP TABLE IF NOT EXISTS temp_kg_delete_paths (path TEXT PRIMARY KEY)"
-            )
-            await conn.execute("DELETE FROM temp_kg_delete_paths")
-            await conn.executemany(
-                "INSERT OR IGNORE INTO temp_kg_delete_paths(path) VALUES (?)",
-                ((path,) for path in file_paths),
-            )
-            cursor = await conn.execute(
-                """
-                DELETE FROM kg_nodes
-                WHERE file_path IN (SELECT path FROM temp_kg_delete_paths)
-                """
-            )
-            await conn.execute(
-                """
-                DELETE FROM kg_nodes
-                WHERE id IN (SELECT 'file:' || path FROM temp_kg_delete_paths)
-                """
-            )
-            return cursor.rowcount
+            return await self._do_delete_nodes_by_files(conn, file_paths)
+
+    @staticmethod
+    async def _do_delete_nodes_by_files(conn: aiosqlite.Connection, file_paths: list[str]) -> int:
+        """Core of ``delete_nodes_by_files``, operating on an already-open connection.
+
+        Extracted so ``apply_patch`` can run this in the same transaction as
+        the node/edge upserts that follow it instead of each opening its own.
+        """
+        if not file_paths:
+            return 0
+        await conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS temp_kg_delete_paths (path TEXT PRIMARY KEY)"
+        )
+        await conn.execute("DELETE FROM temp_kg_delete_paths")
+        await conn.executemany(
+            "INSERT OR IGNORE INTO temp_kg_delete_paths(path) VALUES (?)",
+            ((path,) for path in file_paths),
+        )
+        cursor = await conn.execute(
+            """
+            DELETE FROM kg_nodes
+            WHERE file_path IN (SELECT path FROM temp_kg_delete_paths)
+            """
+        )
+        await conn.execute(
+            """
+            DELETE FROM kg_nodes
+            WHERE id IN (SELECT 'file:' || path FROM temp_kg_delete_paths)
+            """
+        )
+        return cursor.rowcount
+
+    async def apply_patch(
+        self,
+        *,
+        remove_files: list[str] | None = None,
+        nodes: list[KnowledgeNode] | None = None,
+        edges: list[KnowledgeEdge] | None = None,
+    ) -> int:
+        """Delete-by-file, then upsert nodes, then upsert edges — as one transaction.
+
+        This is what ``KnowledgeGraphPatcher.patch()`` uses instead of calling
+        ``delete_nodes_by_files`` / ``upsert_nodes_bulk`` / ``upsert_edges_bulk``
+        separately: each of those opens and commits its own transaction, so a
+        crash between them previously left deleted-but-not-reinserted nodes
+        until the next successful delta (a known soft-consistency gap — see
+        ``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §4.3/§8). Sharing one
+        connection/transaction here means the whole patch commits together or
+        rolls back together, via the existing ``_write()`` rollback-on-exception.
+
+        Returns the number of nodes removed by *remove_files*.
+        """
+        async with self._write() as conn:
+            removed = await self._do_delete_nodes_by_files(conn, remove_files or [])
+            await self._do_upsert_nodes_bulk(conn, nodes or [])
+            await self._do_upsert_edges_bulk(conn, edges or [])
+            return removed
 
 
 # ------------------------------------------------------------------

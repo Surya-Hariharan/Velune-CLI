@@ -115,6 +115,28 @@ _PACKAGE_MAP: dict[str, tuple[str, str]] = {
     "nx": ("Nx", "build"),
 }
 
+# Python dependency-file keyword → (human label, category). Matched as a
+# substring against the combined lowercased text of requirements.txt/.in,
+# setup.py, and pyproject.toml — the same signal project_type.py used to
+# read independently; centralizing it here means there is exactly one
+# place in the codebase that decides "what Python framework is this".
+# Category: framework | database | secondary. First framework match in
+# list order wins (mirrors the old priority: FastAPI > Django > Flask).
+_PYTHON_FRAMEWORK_MARKERS: list[tuple[str, str, str]] = [
+    ("fastapi", "FastAPI", "framework"),
+    ("django", "Django", "framework"),
+    ("flask", "Flask", "framework"),
+    ("starlette", "Starlette", "framework"),
+    ("litestar", "Litestar", "framework"),
+    ("tornado", "Tornado", "framework"),
+    ("aiohttp", "aiohttp", "framework"),
+    ("sqlalchemy", "SQLAlchemy", "database"),
+    ("tortoise", "Tortoise ORM", "database"),
+    ("djangorestframework", "Django REST Framework", "secondary"),
+    ("rest_framework", "Django REST Framework", "secondary"),
+    ("pydantic", "Pydantic", "secondary"),
+]
+
 
 @dataclass
 class TechStack:
@@ -135,6 +157,9 @@ class TechStack:
     testing: list[str] = field(default_factory=list)
     ui_libraries: list[str] = field(default_factory=list)
     build_tools: list[str] = field(default_factory=list)
+    # Auxiliary hints that don't have a named scalar field of their own
+    # (e.g. Pydantic/DRF alongside a primary framework already claimed).
+    secondary_frameworks: list[str] = field(default_factory=list)
 
     # Extras
     framework_version: str | None = None  # "54.0.0"
@@ -190,6 +215,7 @@ class TechStack:
             "testing": self.testing,
             "ui_libraries": self.ui_libraries,
             "build_tools": self.build_tools,
+            "secondary_frameworks": self.secondary_frameworks,
             "is_monorepo": self.is_monorepo,
             "has_typescript": self.has_typescript,
             "expo_sdk_version": self.expo_sdk_version,
@@ -213,6 +239,9 @@ class TechnologyDetector:
         self._from_python_manifests(stack)
         self._from_cargo_toml(stack)
         self._from_go_mod(stack)
+        self._from_pubspec_yaml(stack)
+        self._from_dotnet_project(stack)
+        self._from_java_manifests(stack)
 
         return stack
 
@@ -315,49 +344,59 @@ class TechnologyDetector:
             stack.language = "TypeScript"
 
     def _from_python_manifests(self, stack: TechStack) -> None:
-        """requirements.txt / pyproject.toml → Python project."""
-        if not (
-            (self.root / "requirements.txt").exists()
-            or (self.root / "pyproject.toml").exists()
-            or (self.root / "setup.py").exists()
-        ):
+        """requirements.txt / pyproject.toml / setup.py → Python project + framework.
+
+        Framework detection reads the combined lowercased text of every
+        Python dependency source, not just pyproject.toml — a project
+        declaring its stack only in requirements.txt (no pyproject.toml)
+        previously fell through TechnologyDetector with a bare
+        ``language="Python"`` and no framework at all, even though the same
+        signal was available. This is a substring scan (matches project
+        naming/comments too), which is deliberately cruder than a real
+        dependency-list parse in exchange for working uniformly across
+        requirements.txt, requirements.in, setup.py, and pyproject.toml.
+        """
+        manifest_names = ("requirements.txt", "requirements.in", "pyproject.toml", "setup.py")
+        manifest_paths = [self.root / name for name in manifest_names]
+        has_manifest = any(p.exists() for p in manifest_paths)
+        if not has_manifest:
+            # No manifest at all (a bare script directory) still deserves a
+            # "Python" tag from a root-level .py file — the prior
+            # project_type.py classifier used this as a fallback signal;
+            # losing it would silently regress every manifest-less Python
+            # repo to UNKNOWN.
+            try:
+                has_root_py = any(self.root.glob("*.py"))
+            except OSError:
+                has_root_py = False
+            if has_root_py and stack.language == "unknown":
+                stack.language = "Python"
             return
 
         if stack.language == "unknown":
             stack.language = "Python"
 
-        # Try pyproject.toml deps
-        pyproject = self.root / "pyproject.toml"
-        if pyproject.exists():
-            try:
-                import tomllib  # Python 3.11+
-            except ImportError:
+        parts: list[str] = []
+        for fp in manifest_paths:
+            if fp.exists():
                 try:
-                    import tomli as tomllib  # type: ignore[no-redef]
-                except ImportError:
-                    tomllib = None  # type: ignore[assignment]
-            if tomllib:
-                try:
-                    with open(pyproject, "rb") as f:
-                        data = tomllib.load(f)
-                    deps_raw = data.get("project", {}).get("dependencies", []) or data.get(
-                        "tool", {}
-                    ).get("poetry", {}).get("dependencies", {})
-                    if isinstance(deps_raw, dict):
-                        deps_raw = list(deps_raw.keys())
-                    for dep in deps_raw:
-                        dep_name = dep.split("[")[0].split(">=")[0].split("==")[0].strip().lower()
-                        entry = _PACKAGE_MAP.get(dep_name)
-                        if entry:
-                            label, category = entry
-                            if category == "framework" and not stack.framework:
-                                stack.framework = label
-                            elif category == "database" and not stack.database:
-                                stack.database = label
-                            elif category == "testing" and label not in stack.testing:
-                                stack.testing.append(label)
-                except Exception:
+                    parts.append(fp.read_text(encoding="utf-8", errors="ignore").lower())
+                except OSError:
                     pass
+        combined = " ".join(parts)
+
+        for keyword, label, category in _PYTHON_FRAMEWORK_MARKERS:
+            if keyword not in combined:
+                continue
+            if category == "framework" and not stack.framework:
+                stack.framework = label
+            elif category == "database" and not stack.database:
+                stack.database = label
+            elif category == "secondary" and label not in stack.secondary_frameworks:
+                stack.secondary_frameworks.append(label)
+
+        if not stack.framework and any(kw in combined for kw in ("typer", "click", "argparse")):
+            stack.framework = "CLI"
 
     def _from_cargo_toml(self, stack: TechStack) -> None:
         cargo = self.root / "Cargo.toml"
@@ -368,3 +407,49 @@ class TechnologyDetector:
         gomod = self.root / "go.mod"
         if gomod.exists() and stack.language == "unknown":
             stack.language = "Go"
+
+    def _from_pubspec_yaml(self, stack: TechStack) -> None:
+        """pubspec.yaml → Flutter/Dart project."""
+        if (self.root / "pubspec.yaml").exists():
+            if stack.language == "unknown":
+                stack.language = "Dart"
+            if not stack.framework:
+                stack.framework = "Flutter"
+
+    def _from_dotnet_project(self, stack: TechStack) -> None:
+        """*.csproj / *.sln at root → .NET project."""
+        try:
+            has_dotnet = any(self.root.glob("*.csproj")) or any(self.root.glob("*.sln"))
+        except OSError:
+            has_dotnet = False
+        if has_dotnet:
+            if stack.language == "unknown":
+                stack.language = "C#"
+            if not stack.framework:
+                stack.framework = ".NET"
+
+    def _from_java_manifests(self, stack: TechStack) -> None:
+        """pom.xml / build.gradle → Java project, Spring only if content confirms it.
+
+        Filename presence alone is not treated as proof of Spring — that is
+        exactly the "a filename is not a framework" failure mode (see
+        analyzer.py's former root-``main.py``-implies-FastAPI bug): content
+        must corroborate before the more specific label is claimed.
+        """
+        manifest_paths = [self.root / "pom.xml", self.root / "build.gradle"]
+        if not any(p.exists() for p in manifest_paths):
+            return
+
+        if stack.language == "unknown":
+            stack.language = "Java"
+
+        combined = ""
+        for fp in manifest_paths:
+            if fp.exists():
+                try:
+                    combined += fp.read_text(encoding="utf-8", errors="ignore").lower()
+                except OSError:
+                    pass
+
+        if "spring" in combined and not stack.framework:
+            stack.framework = "Spring"

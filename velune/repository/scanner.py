@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from velune.repository.schemas import EXTENSION_LANGUAGE_MAP
+
 logger = logging.getLogger("velune.repository.scanner")
 
 # -------------------------------------------------------------------------
@@ -48,6 +50,16 @@ _HARDCODED_PATTERNS: list[str] = [
     "node_modules/",
     ".npm/",
     ".yarn/",
+    # Vendored/third-party dependency code copied into the repo — not
+    # first-party, and exactly the kind of directory a size/content guard
+    # alone doesn't reliably catch since it can contain many small files as
+    # readily as one huge one (baseline §6.4/§8, Recommendation 2). Treated
+    # the same as node_modules: excluded from discovery entirely, not merely
+    # marked opaque.
+    "vendor/",
+    "vendored/",
+    "third_party/",
+    "thirdparty/",
     # JS/TS build outputs
     ".next/",
     ".nuxt/",
@@ -102,70 +114,11 @@ _HARDCODED_PATTERNS: list[str] = [
 ]
 
 # Source code extensions Velune indexes for symbol/route extraction.
-# Kept here as the canonical list; incremental_indexer imports this.
-CODE_EXTENSIONS: frozenset[str] = frozenset(
-    {
-        # Core languages
-        ".py",
-        ".js",
-        ".ts",
-        ".jsx",
-        ".tsx",
-        ".go",
-        ".rs",
-        ".java",
-        ".c",
-        ".cpp",
-        ".h",
-        ".cs",
-        ".php",
-        ".rb",
-        ".swift",
-        ".kt",
-        # Frontend frameworks
-        ".vue",
-        ".svelte",
-        # Templates / markup
-        ".html",
-        ".htm",
-        ".jinja",
-        ".jinja2",
-        ".j2",
-        # Query languages
-        ".sql",
-        ".graphql",
-        ".gql",
-        # Schema / config files that are code
-        ".prisma",
-        ".proto",
-        # Mobile
-        ".dart",
-        ".m",  # Objective-C
-        ".mm",  # Objective-C++
-        # Other compiled languages
-        ".scala",
-        ".clj",
-        ".cljs",
-        ".ex",
-        ".exs",
-        ".erl",
-        ".hs",
-        ".ml",
-        ".fs",
-        ".fsi",
-        ".fsx",
-        ".lua",
-        ".r",
-        ".R",
-        ".jl",
-        # Shell scripts (often contain important wiring logic)
-        ".sh",
-        ".bash",
-        ".zsh",
-        ".fish",
-        ".ps1",
-    }
-)
+# Derived from schemas.EXTENSION_LANGUAGE_MAP — the single source of truth
+# shared with RepositorySnapshotParser.language detection, so discovery and
+# classification can never silently disagree about what an extension is.
+# Kept here as the canonical *name* (incremental_indexer imports this).
+CODE_EXTENSIONS: frozenset[str] = frozenset(EXTENSION_LANGUAGE_MAP.keys())
 
 
 def unsafe_index_root_reason(root: Path) -> str | None:
