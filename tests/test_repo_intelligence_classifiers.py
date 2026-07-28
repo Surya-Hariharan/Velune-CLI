@@ -105,16 +105,27 @@ def test_legacy_php_style_language_tagged_but_no_symbols(tmp_path):
     assert all(len(f.symbols) == 0 for f in php_files)
 
 
-# ── notebook_ml: still-open gap — .ipynb is not discovered at all ─────────
+# ── notebook_ml: .ipynb is now discovered and structurally parsed ─────────
+# (previously invisible — baseline §6.3 — fixed by adding .ipynb to
+# EXTENSION_LANGUAGE_MAP and RepositorySnapshotParser._extract_notebook_source).
 
 
-def test_notebook_ml_still_invisible_to_discovery(tmp_path):
+def test_notebook_ml_now_discovered_and_parsed(tmp_path):
     root = materialize("notebook_ml", tmp_path)
     discovered = FilesystemScanner(root).scan_code_files()
     discovered_names = {p.name for p in discovered}
     assert "helpers.py" in discovered_names
-    # Characterizes the still-open gap: notebooks are invisible to discovery.
-    assert not any(name.endswith(".ipynb") for name in discovered_names)
+    assert "train.ipynb" in discovered_names
+    assert "explore.ipynb" in discovered_names
+
+    svc = RepositoryCognitionService(root)
+    snapshot = svc.index(force=True)
+    notebook_files = [f for f in snapshot.files if f.path.endswith(".ipynb")]
+    assert len(notebook_files) == 2
+    assert all(f.language == RepositoryLanguage.PYTHON for f in notebook_files)
+    # The fixture's notebook has two executed code cells (pandas import/read,
+    # and a train() function) — both should be extracted as symbols/edges.
+    assert any(len(f.symbols) > 0 for f in notebook_files)
 
 
 # ── ml_pipeline: the oversized vendored file is now opaque, not dominant ───

@@ -95,6 +95,12 @@ class RepositoryLanguage(StrEnum):
 EXTENSION_LANGUAGE_MAP: dict[str, RepositoryLanguage] = {
     # Core languages
     ".py": RepositoryLanguage.PYTHON,
+    # Jupyter notebooks — the kernel is Python in the overwhelming majority
+    # of cases and RepositorySnapshotParser reconstructs synthetic Python
+    # source from the notebook's code cells before parsing; a non-Python
+    # kernel degrades to zero symbols rather than a wrong parse (see
+    # RepositorySnapshotParser._extract_notebook_source).
+    ".ipynb": RepositoryLanguage.PYTHON,
     ".js": RepositoryLanguage.JAVASCRIPT,
     ".jsx": RepositoryLanguage.JAVASCRIPT,
     ".ts": RepositoryLanguage.TYPESCRIPT,

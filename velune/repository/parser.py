@@ -19,6 +19,7 @@ real-time-scan startup costs.
 """
 
 import ast
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -106,6 +107,11 @@ class RepositorySnapshotParser:
         self, file_path: Path, code: str
     ) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
         """Parses source code from file_path, leveraging tree-sitter or fallbacks."""
+        if file_path.suffix.lower() == ".ipynb":
+            code = self._extract_notebook_source(code)
+            if not code:
+                return [], []
+
         lang = self._detect_language(file_path)
 
         # Try tree-sitter if available (loaded lazily on first parse)
@@ -145,6 +151,57 @@ class RepositorySnapshotParser:
         """
         suffix = file_path.suffix.lower()
         return EXTENSION_LANGUAGE_MAP.get(suffix, RepositoryLanguage.UNKNOWN)
+
+    def _extract_notebook_source(self, raw_json: str) -> str:
+        """Reconstruct synthetic Python source from a Jupyter notebook's code cells.
+
+        Cells are concatenated in **execution-count order**, not cell
+        position — the logical order the author actually ran, which is what
+        the notebook's real symbol dependencies follow (a helper defined in
+        a later cell but run first is meaningful; document order is not).
+        Cells never executed (``execution_count`` is ``None``, e.g. after a
+        "restart and clear outputs" before commit) are appended afterward in
+        their original position order, since there's no run-order signal for
+        them at all.
+
+        A non-Python kernel or malformed/non-notebook JSON degrades to an
+        empty string (zero symbols), never a raised exception — parsing a
+        notebook is inherently best-effort, and this mirrors every other
+        degraded-parse path in this module.
+        """
+        try:
+            notebook = json.loads(raw_json)
+        except (json.JSONDecodeError, ValueError):
+            return ""
+
+        kernel_lang = (
+            notebook.get("metadata", {}).get("kernelspec", {}).get("language", "python")
+        )
+        if kernel_lang and kernel_lang.lower() not in ("python", "python3"):
+            return ""
+
+        cells = notebook.get("cells", [])
+        if not isinstance(cells, list):
+            return ""
+
+        executed: list[tuple[int, str]] = []
+        unexecuted: list[str] = []
+        for idx, cell in enumerate(cells):
+            if not isinstance(cell, dict) or cell.get("cell_type") != "code":
+                continue
+            source = cell.get("source", "")
+            text = "".join(source) if isinstance(source, list) else str(source)
+            if not text.strip():
+                continue
+            exec_count = cell.get("execution_count")
+            if isinstance(exec_count, int):
+                executed.append((exec_count, text))
+            else:
+                unexecuted.append(text)
+
+        executed.sort(key=lambda pair: pair[0])
+        blocks = [text for _, text in executed] + unexecuted
+        return "\n\n".join(blocks)
 
     def _parse_tree_sitter(
         self, file_path: Path, code: str, lang: RepositoryLanguage
