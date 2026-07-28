@@ -172,10 +172,13 @@ def test_monorepo_content_footprint_rescues_nested_manifest(tmp_path):
     )
 
 
-# ── dynamic_imports: layer bucketing works; the import graph is still blind ─
+# ── dynamic_imports: layer bucketing works, AND the import graph now sees ──
+# the dynamic loader→plugin relationship (previously a total blind spot —
+# baseline §6.7 — fixed by RepositorySnapshotParser._extract_dynamic_imports
+# + RepositoryGrapher._add_dynamic_prefix_edges).
 
 
-def test_dynamic_imports_layer_bucketing_and_graph_blind_spot(tmp_path):
+def test_dynamic_imports_layer_bucketing_and_resolved_edges(tmp_path):
     root = materialize("dynamic_imports", tmp_path)
     svc = RepositoryCognitionService(root)
     snapshot = svc.index(force=True)
@@ -185,10 +188,22 @@ def test_dynamic_imports_layer_bucketing_and_graph_blind_spot(tmp_path):
     assert any("plugin_a" in p for p in plugin_files)
     assert any("plugin_b" in p for p in plugin_files)
 
-    # Still-open gap: importlib.import_module(f"plugins.{name}") produces no
-    # static edge from loader.py to either plugin (baseline §6.7).
+    # importlib.import_module(f"plugins.{name}") has a literal prefix
+    # ("plugins") the grapher can expand to every real file under it — a
+    # confidence-scored imports_dynamic edge, not a fabricated certain one.
     loader_edges = [e for e in snapshot.edges if "loader.py" in e.source]
-    assert not any("plugin_a" in e.target or "plugin_b" in e.target for e in loader_edges)
+    dynamic_targets = {e.target for e in loader_edges if e.edge_type == "imports_dynamic"}
+    assert any("plugin_a" in t for t in dynamic_targets)
+    assert any("plugin_b" in t for t in dynamic_targets)
+    assert all(e.weight < 1.0 for e in loader_edges if e.edge_type == "imports_dynamic")
+
+    # app.js's require(modPath) has no literal information at all — correctly
+    # produces no edge (a wrong guess is worse than an honest absence), but
+    # the file's dynamic-loading behavior is still recorded as a symbol.
+    app_js = next(f for f in snapshot.files if f.path.endswith("app.js"))
+    assert any(
+        s.metadata.get("dynamic") and s.name == "<dynamic import>" for s in app_js.symbols
+    )
 
 
 # ── mixed_lang_polyglot: still-open gap — tech_stack.language is a single ──

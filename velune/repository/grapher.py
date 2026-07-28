@@ -142,6 +142,23 @@ class RepositoryGrapher:
 
             import_name = sym.name
 
+            if sym.metadata.get("dynamic"):
+                # A dynamic-loading call site (importlib.import_module(...),
+                # require(var)) parser.py flagged as confidence-scored
+                # rather than a certain target — see
+                # RepositorySnapshotParser._extract_dynamic_imports. Expand
+                # a literal prefix to every real file under it instead of
+                # requiring an exact match, since the concrete target is
+                # only known at runtime; a symbol with no prefix at all
+                # (import_name == "<dynamic import>") has nothing to expand.
+                if not import_name or import_name == "<dynamic import>":
+                    continue
+                confidence = float(sym.metadata.get("resolution_confidence", 0.5))
+                self._add_dynamic_prefix_edges(
+                    source_file, import_name, confidence, file_by_mod, file_by_stem
+                )
+                continue
+
             matched_file: str | None = None
 
             if import_name.startswith("."):
@@ -162,6 +179,50 @@ class RepositoryGrapher:
 
             if matched_file and source_file != matched_file:
                 self.graph.add_edge(source_file, matched_file, edge_type="imports", weight=1.0)
+
+    def _add_dynamic_prefix_edges(
+        self,
+        source_file: str,
+        prefix: str,
+        confidence: float,
+        file_by_mod: dict[str, str],
+        file_by_stem: dict[str, str],
+    ) -> None:
+        """Add a lower-confidence ``imports_dynamic`` edge to every real file
+        whose dotted module name or path stem starts with *prefix*.
+
+        Tries dotted-module matching first (Python: ``plugins`` matches
+        ``plugins.plugin_a``), then path-stem matching (JS: ``plugins``
+        matches ``plugins/plugin_a``) — a dynamic call site's prefix could
+        plausibly be either depending on source language, and both are
+        cheap to check against maps already built for the static case.
+        """
+        prefix_mod = prefix.replace("/", ".").strip(".")
+        already_added: set[str] = set()
+
+        for mod_name, path in file_by_mod.items():
+            if mod_name == prefix_mod or mod_name.startswith(prefix_mod + "."):
+                # Multiple dotted-module keys legitimately point at the same
+                # file (a package's __init__.py is registered both under its
+                # own stem and under its parent directory's shortcut name) —
+                # add at most one edge per distinct target file.
+                if source_file != path and path not in already_added:
+                    self.graph.add_edge(
+                        source_file, path, edge_type="imports_dynamic", weight=confidence
+                    )
+                    already_added.add(path)
+
+        if already_added:
+            return
+
+        prefix_stem = prefix.strip("/")
+        for stem, path in file_by_stem.items():
+            if stem == prefix_stem or stem.startswith(prefix_stem + "/"):
+                if source_file != path and path not in already_added:
+                    self.graph.add_edge(
+                        source_file, path, edge_type="imports_dynamic", weight=confidence
+                    )
+                    already_added.add(path)
 
     def _resolve_relative_path(self, source_file: str, import_path: str) -> str:
         """Resolve a relative import (starting with . or ..) to a workspace-relative stem.

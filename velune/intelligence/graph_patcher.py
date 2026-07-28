@@ -248,6 +248,12 @@ class KnowledgeGraphPatcher:
 def _repo_edge_to_kg_type(raw: str) -> EdgeType | None:
     mapping: dict[str, EdgeType | None] = {
         "imports": EdgeType.IMPORTS,
+        # A confidence-scored dynamic-import edge (see
+        # RepositorySnapshotParser._extract_dynamic_imports) — the KG schema
+        # has no separate dynamic-edge type yet, so this reuses IMPORTS
+        # rather than silently dropping the edge; repo_edge.weight already
+        # carries the lower confidence through to KnowledgeEdge.weight.
+        "imports_dynamic": EdgeType.IMPORTS,
         "contains": EdgeType.CONTAINS,
         "inherits": EdgeType.INHERITS,
         "defines": EdgeType.DEFINES,

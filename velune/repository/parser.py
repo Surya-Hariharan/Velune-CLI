@@ -113,20 +113,37 @@ class RepositorySnapshotParser:
                 return [], []
 
         lang = self._detect_language(file_path)
+        symbols: list[RepositorySymbol] | None = None
+        edges: list[RepositoryEdge] | None = None
 
         # Try tree-sitter if available (loaded lazily on first parse)
         if self._ensure_loaded() and lang.value in self.languages:
             try:
-                return self._parse_tree_sitter(file_path, code, lang)
+                symbols, edges = self._parse_tree_sitter(file_path, code, lang)
             except Exception:
                 # Fail silently and let fallbacks handle it
-                pass
+                symbols, edges = None, None
 
-        # Fallbacks
-        if lang == RepositoryLanguage.PYTHON:
-            return self._parse_python_ast(file_path, code)
+        if symbols is None:
+            # Fallbacks
+            if lang == RepositoryLanguage.PYTHON:
+                symbols, edges = self._parse_python_ast(file_path, code)
+            else:
+                symbols, edges = self._parse_regex(file_path, code, lang)
 
-        return self._parse_regex(file_path, code, lang)
+        # Dynamic-import detection is a regex-over-raw-text pass independent
+        # of which backend produced the symbols above (tree-sitter's own
+        # walker, like the AST/regex fallbacks, only ever recognized static
+        # import statements — a call expression like
+        # importlib.import_module(...) or require(...) was invisible to all
+        # three, not just the fallback path). Running it here once, after
+        # whichever backend ran, covers all of them uniformly.
+        dyn_symbols, dyn_edges = self._extract_dynamic_imports(file_path, code, lang)
+        if dyn_symbols:
+            symbols = symbols + dyn_symbols
+            edges = edges + dyn_edges
+
+        return symbols, edges
 
     def parse_file(
         self, file_path: Path, code: str
@@ -151,6 +168,120 @@ class RepositorySnapshotParser:
         """
         suffix = file_path.suffix.lower()
         return EXTENSION_LANGUAGE_MAP.get(suffix, RepositoryLanguage.UNKNOWN)
+
+    # Dynamic-loading call shapes this can recognize, per language. This is
+    # a regex-over-raw-text pass (see ``parse``) rather than an AST/tree-
+    # sitter node match — deliberately, since it needs to run uniformly
+    # after whichever backend produced the main symbol set.
+    _DYNAMIC_IMPORT_CALL_PATTERNS: dict[RepositoryLanguage, str] = {
+        RepositoryLanguage.PYTHON: (
+            r"(?:importlib\.import_module|importlib\.__import__|__import__)\s*\(\s*([^)]*?)\s*\)"
+        ),
+        RepositoryLanguage.JAVASCRIPT: r"\brequire\s*\(\s*([^)]*?)\s*\)",
+        RepositoryLanguage.TYPESCRIPT: r"\brequire\s*\(\s*([^)]*?)\s*\)",
+    }
+
+    def _extract_dynamic_imports(
+        self, file_path: Path, code: str, lang: RepositoryLanguage
+    ) -> tuple[list[RepositorySymbol], list[RepositoryEdge]]:
+        """Detect dynamic-loading call sites (``importlib.import_module``,
+        ``require(var)``) that every AST/tree-sitter/regex backend above
+        anchors past, since they all only ever recognized static import
+        *statements*, never these call *expressions* (baseline §6.7/§8:
+        "Static-only import resolution with no dynamic-import awareness at
+        all... a huge share of 'AI agent broke something it never saw'
+        incidents come from" exactly this).
+
+        Confidence-scored rather than silently dropped or fabricated as a
+        certain edge:
+
+        - A fully literal argument (``import_module("plugins.foo")``) is
+          just as resolvable as a static import — full confidence, and the
+          grapher treats it identically to one.
+        - An f-string/template literal with a literal prefix before the
+          first interpolation (``f"plugins.{name}"``) keeps that prefix as
+          a lower-confidence target: the grapher expands it to every real
+          file whose module/path starts with it, rather than one guessed
+          file.
+        - A fully dynamic argument (a bare variable, no literal information
+          at all) can't name any target — recorded as a symbol only (this
+          file dynamically loads *something* here), no edge, since a wrong
+          edge is worse than an honestly absent one.
+        """
+        pattern = self._DYNAMIC_IMPORT_CALL_PATTERNS.get(lang)
+        if pattern is None:
+            return [], []
+
+        symbols: list[RepositorySymbol] = []
+        edges: list[RepositoryEdge] = []
+        file_path_str = str(file_path)
+
+        for match in re.finditer(pattern, code):
+            arg = match.group(1).strip()
+            line_no = code[: match.start()].count("\n") + 1
+            target, confidence, is_dynamic = self._classify_dynamic_import_arg(arg)
+
+            if target is None:
+                symbols.append(
+                    RepositorySymbol(
+                        name="<dynamic import>",
+                        kind=RepositorySymbolKind.IMPORT,
+                        file_path=file_path_str,
+                        line_start=line_no,
+                        line_end=line_no,
+                        metadata={"dynamic": True, "resolution_confidence": confidence},
+                    )
+                )
+                continue
+
+            symbols.append(
+                RepositorySymbol(
+                    name=target,
+                    kind=RepositorySymbolKind.IMPORT,
+                    file_path=file_path_str,
+                    line_start=line_no,
+                    line_end=line_no,
+                    metadata=(
+                        {"dynamic": True, "resolution_confidence": confidence}
+                        if is_dynamic
+                        else {}
+                    ),
+                )
+            )
+            edges.append(
+                RepositoryEdge(
+                    source=file_path_str,
+                    target=target,
+                    edge_type="imports_dynamic" if is_dynamic else "imports",
+                    weight=confidence,
+                )
+            )
+
+        return symbols, edges
+
+    @staticmethod
+    def _classify_dynamic_import_arg(arg: str) -> tuple[str | None, float, bool]:
+        """Classify a dynamic-import call's raw argument text.
+
+        Returns ``(target, confidence, is_dynamic)``:
+
+        - A plain string literal → ``(literal_value, 1.0, False)`` — this
+          is just as resolvable as any static import.
+        - An f-string/template literal with a literal prefix before its
+          first interpolation → ``(prefix, 0.5, True)``.
+        - Anything else (bare identifier, expression, f-string with no
+          literal prefix at all) → ``(None, 0.2, True)``.
+        """
+        m = re.fullmatch(r"['\"]([^'\"]*)['\"]", arg)
+        if m:
+            return m.group(1), 1.0, False
+
+        m = re.match(r"f?[\"']([^\"'{]*)\{", arg) or re.match(r"`([^`$]*)\$\{", arg)
+        if m:
+            prefix = m.group(1).rstrip("./")
+            return (prefix or None), 0.5, True
+
+        return None, 0.2, True
 
     def _extract_notebook_source(self, raw_json: str) -> str:
         """Reconstruct synthetic Python source from a Jupyter notebook's code cells.
