@@ -122,6 +122,17 @@ class IndexDelta:
     to_add: list[str] = field(default_factory=list)  # new files not in stored state
     to_update: list[str] = field(default_factory=list)  # files whose hash changed
     to_remove: list[str] = field(default_factory=list)  # files deleted from disk
+    # (old_path, new_path) pairs where a to_remove path's stored content
+    # hash exactly matches a to_add path's computed hash — very likely the
+    # same file moved, not a coincidental delete+add. Purely additive/
+    # informational: the paths involved still appear in to_add/to_remove
+    # above (so anything that only reads those, e.g. KnowledgeGraphPatcher,
+    # is unaffected), but apply_delta uses this to skip re-reading and
+    # re-parsing content it already knows hasn't changed. See baseline
+    # §3.3/§4.2: "Renames are not detected as renames... anything keyed by
+    # the old path ... goes stale until the next successful patch cycle
+    # recreates it under the new path."
+    renames: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
@@ -187,6 +198,18 @@ class IncrementalIndexer:
         async with index_state_lock_async(self.state_path):
             state = IndexState.load(self.state_path) or IndexState.empty(str(self.workspace_root))
 
+            # Capture rename sources' old entries before the removal loop
+            # below pops them, so the fast path in the parse loop can reuse
+            # their already-known content_hash/language/symbol_count instead
+            # of re-reading and re-parsing content that provably hasn't
+            # changed (that's how the rename was detected in the first
+            # place — see IncrementalIndexer._detect_renames).
+            rename_source: dict[str, IndexedFile] = {}
+            for old_path, new_path in delta.renames:
+                old_entry = state.file_index.get(old_path)
+                if old_entry is not None:
+                    rename_source[new_path] = old_entry
+
             # Remove deleted files
             for rel_path in delta.to_remove:
                 state.remove_file(rel_path)
@@ -198,12 +221,18 @@ class IncrementalIndexer:
             _total = len(_to_process)
             for _idx, rel_path in enumerate(_to_process):
                 full_path = self.workspace_root / rel_path
+                old_entry = rename_source.get(rel_path)
                 try:
-                    # One hop to a worker thread for the whole file: stat + read +
-                    # SHA-256 + parse. Previously only the parse was off-loaded, so
-                    # the read and the full hash of every changed file ran on the
-                    # event loop and stalled the REPL in proportion to file size.
-                    entry = await asyncio.to_thread(self._index_one, rel_path, full_path, now)
+                    if old_entry is not None:
+                        entry = await asyncio.to_thread(
+                            self._reindex_renamed, rel_path, full_path, old_entry, now
+                        )
+                    else:
+                        # One hop to a worker thread for the whole file: stat + read +
+                        # SHA-256 + parse. Previously only the parse was off-loaded, so
+                        # the read and the full hash of every changed file ran on the
+                        # event loop and stalled the REPL in proportion to file size.
+                        entry = await asyncio.to_thread(self._index_one, rel_path, full_path, now)
                 except FileNotFoundError:
                     continue
                 except Exception as exc:
@@ -277,6 +306,27 @@ class IncrementalIndexer:
             content_hash=sha,
             language=language,
             symbol_count=len(symbols),
+            indexed_at=now,
+            mtime=stat.st_mtime,
+            size=stat.st_size,
+        )
+
+    def _reindex_renamed(
+        self, rel_path: str, full_path: Path, old_entry: IndexedFile, now: float
+    ) -> IndexedFile:
+        """Build a renamed file's entry from its old one, without re-reading content.
+
+        Only reached when ``_detect_renames`` has already confirmed the
+        content hash is unchanged, so there is nothing new to read, hash,
+        or parse — only the path/mtime/size need refreshing to reflect the
+        move.
+        """
+        stat = full_path.stat()  # raises FileNotFoundError if it's gone
+        return IndexedFile(
+            path=rel_path,
+            content_hash=old_entry.content_hash,
+            language=old_entry.language,
+            symbol_count=old_entry.symbol_count,
             indexed_at=now,
             mtime=stat.st_mtime,
             size=stat.st_size,
@@ -361,6 +411,7 @@ class IncrementalIndexer:
 
         to_add: list[str] = []
         to_update: list[str] = []
+        add_hashes: dict[str, str] = {}  # to_add's rel_path -> content hash
 
         for rel_path, abs_path in current.items():
             stored_entry = stored.get(rel_path)
@@ -385,12 +436,50 @@ class IncrementalIndexer:
 
             if stored_entry is None:
                 to_add.append(rel_path)
+                add_hashes[rel_path] = sha
             elif stored_entry.content_hash != sha:
                 to_update.append(rel_path)
 
         to_remove = [p for p in stored if p not in current]
+        renames = self._detect_renames(to_remove, add_hashes, stored)
 
-        return IndexDelta(to_add=to_add, to_update=to_update, to_remove=to_remove)
+        return IndexDelta(to_add=to_add, to_update=to_update, to_remove=to_remove, renames=renames)
+
+    @staticmethod
+    def _detect_renames(
+        to_remove: list[str], add_hashes: dict[str, str], stored: dict[str, IndexedFile]
+    ) -> list[tuple[str, str]]:
+        """Pair up removed/added paths whose content hash matches exactly.
+
+        A deliberately conservative heuristic: exact content-hash equality,
+        not a similarity score, and each candidate claimed at most once
+        (sorted order, first-unclaimed-match) rather than trying to
+        disambiguate duplicate-content ties cleverly. An unmatched pair
+        simply falls through as an ordinary delete + add — the prior,
+        already-correct behavior — so there is no failure mode where
+        guessing wrong makes things worse than not guessing at all.
+        """
+        if not to_remove or not add_hashes:
+            return []
+
+        renames: list[tuple[str, str]] = []
+        claimed_adds: set[str] = set()
+        sorted_adds = sorted(add_hashes)
+
+        for old_path in sorted(to_remove):
+            old_entry = stored.get(old_path)
+            old_hash = old_entry.content_hash if old_entry else None
+            if not old_hash:
+                continue
+            for new_path in sorted_adds:
+                if new_path in claimed_adds:
+                    continue
+                if add_hashes[new_path] == old_hash:
+                    renames.append((old_path, new_path))
+                    claimed_adds.add(new_path)
+                    break
+
+        return renames
 
     def _fallback_scan(self) -> list[Path]:
         """Minimal walk used when FilesystemScanner is unavailable.
