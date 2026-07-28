@@ -12,7 +12,10 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from velune.repository.schemas import RepositorySymbolKind
+
 if TYPE_CHECKING:
+    from velune.repository.schemas import RepositorySymbol
     from velune.repository.technology_detector import TechStack
 
 # ---------------------------------------------------------------------------
@@ -198,6 +201,24 @@ _VELUNE_HIERARCHY: dict[str, int] = {
     "other": 10,
 }
 
+# ---------------------------------------------------------------------------
+# Structural-shape fingerprints — a fallback for files folder-name matching
+# can't place. docs/REPOSITORY_INTELLIGENCE_BASELINE.md §6.6/§8: a fixed
+# folder-name vocabulary produces zero features (and an "Unknown"
+# architecture) for single-letter, abbreviated, or non-English directory
+# names — the `poorly_named` benchmark repo saw every file fall into
+# "other" purely because its heuristics never got past the path string.
+# These patterns instead read the *content* shape (already captured into
+# RepositorySymbol.metadata by the parser: decorators, base classes,
+# constructor parameter types), independent of what the file or its
+# directory happens to be named. A structural match is accepted on its
+# own — requiring the name to *also* agree would just reintroduce the
+# "root main.py implies FastAPI" failure mode this replaces (see
+# analyzer.py's former MARKERS table, removed for the same reason).
+_API_DECORATOR_PATTERN = re.compile(r"\.(get|post|put|delete|patch|route)$", re.IGNORECASE)
+_ORM_BASE_PATTERN = re.compile(r"(model|base)$", re.IGNORECASE)
+_DI_PARAM_SUFFIX_PATTERN = re.compile(r"(Service|Repository|Client|Manager|Gateway)$")
+
 
 class CodebaseAnalyzer:
     """Analyzes the repository's architectural layered structure and checks for design violations."""
@@ -207,7 +228,10 @@ class CodebaseAnalyzer:
         self._detected_types: set[str] = set()
 
     def classify_architecture_layers(
-        self, file_paths: list[str], tech: TechStack | None = None
+        self,
+        file_paths: list[str],
+        tech: TechStack | None = None,
+        symbols: list[RepositorySymbol] | None = None,
     ) -> dict[str, list[str]]:
         """Groups files into semantic architectural layers.
 
@@ -217,6 +241,12 @@ class CodebaseAnalyzer:
         *tech* lets a caller that already ran ``TechnologyDetector`` (as
         ``RepositoryCognitionService`` does) pass that result through instead
         of paying for a second detection pass; if omitted, one is computed.
+
+        *symbols*, when given, is used to rescue files the folder-name pass
+        below couldn't place ("other") via structural-shape fingerprints
+        (decorator-based routing, ORM-style base classes, DI constructors)
+        instead of leaving them uncategorized — see
+        ``_reclassify_by_structural_shape``.
         """
         self._detected_types = self._detect_project_types(file_paths, tech)
         use_velune = "velune" in self._detected_types
@@ -238,7 +268,69 @@ class CodebaseAnalyzer:
             if not classified:
                 layers["other"].append(norm)
 
+        if not use_velune and symbols:
+            self._reclassify_by_structural_shape(layers, symbols)
+
         return layers
+
+    def _reclassify_by_structural_shape(
+        self, layers: dict[str, list[str]], symbols: list[RepositorySymbol]
+    ) -> None:
+        """Move "other"-bucketed files into api/data/services when their
+        symbols' structural shape matches, even though their path didn't."""
+        if not any(name in layers for name in ("api", "data", "services")):
+            return  # generic layer set not in play (shouldn't happen when not use_velune)
+
+        by_file: dict[str, list[RepositorySymbol]] = {}
+        for sym in symbols:
+            # RepositorySymbol.file_path is the absolute path the parser was
+            # given; layers (and the file_paths this method receives) are
+            # workspace-relative — normalize before correlating the two, or
+            # every lookup below misses.
+            rel = self._to_rel_path(sym.file_path)
+            by_file.setdefault(rel, []).append(sym)
+
+        still_other: list[str] = []
+        for path in layers["other"]:
+            target = CodebaseAnalyzer._structural_layer_for(by_file.get(path, []))
+            if target is not None and target in layers:
+                layers[target].append(path)
+            else:
+                still_other.append(path)
+        layers["other"] = still_other
+
+    def _to_rel_path(self, file_path: str) -> str:
+        """Normalize an absolute or already-relative path to workspace-relative, forward-slashed."""
+        norm = file_path.replace("\\", "/")
+        try:
+            root_norm = str(self.root_path).replace("\\", "/")
+            if norm.startswith(root_norm + "/"):
+                return norm[len(root_norm) + 1 :]
+        except OSError:
+            pass
+        return norm
+
+    @staticmethod
+    def _structural_layer_for(file_symbols: list[RepositorySymbol]) -> str | None:
+        """The layer a file's symbols imply structurally, or None if no
+        fingerprint matches. Checked in order: routing evidence is the
+        strongest/most specific signal, then ORM model shape, then DI
+        constructors — a file matching an earlier check is not re-checked
+        against later ones."""
+        for sym in file_symbols:
+            decorators = sym.metadata.get("decorators") or []
+            if any(_API_DECORATOR_PATTERN.search(d) for d in decorators):
+                return "api"
+        for sym in file_symbols:
+            if sym.kind == RepositorySymbolKind.CLASS:
+                bases = sym.metadata.get("bases") or []
+                if any(_ORM_BASE_PATTERN.search(b) for b in bases):
+                    return "data"
+        for sym in file_symbols:
+            param_types = sym.metadata.get("param_types") or []
+            if any(_DI_PARAM_SUFFIX_PATTERN.search(t) for t in param_types):
+                return "services"
+        return None
 
     def _detect_project_types(
         self, file_paths: list[str], tech: TechStack | None

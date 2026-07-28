@@ -580,7 +580,7 @@ class RepositoryCognitionService:
         # Detected once and threaded through both consumers below, rather than
         # each independently constructing its own TechnologyDetector pass.
         tech_stack = TechnologyDetector(self.root_path).detect()
-        layers = self.analyzer.classify_architecture_layers(all_paths, tech_stack)
+        layers = self.analyzer.classify_architecture_layers(all_paths, tech_stack, snapshot.symbols)
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
         arch_report = ArchitectureDetector(self.root_path, snapshot.files, tech_stack).detect()
@@ -720,7 +720,9 @@ class RepositoryCognitionService:
         # each independently constructing its own TechnologyDetector pass.
         tech_stack = TechnologyDetector(self.root_path).detect()
         self._log_tech_stack_claims(tech_stack)
-        layers = self.analyzer.classify_architecture_layers(file_paths, tech_stack)
+        layers = self.analyzer.classify_architecture_layers(
+            file_paths, tech_stack, snapshot.symbols
+        )
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
 

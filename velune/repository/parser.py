@@ -32,6 +32,59 @@ from velune.repository.schemas import (
     RepositorySymbolKind,
 )
 
+
+def _leading_decorator_texts(code: str, def_line_idx: int) -> list[str]:
+    """Collect consecutive ``@decorator`` lines immediately above a def/class line.
+
+    Text-based rather than tree-node-based: tree-sitter's Python grammar
+    wraps a decorated definition in a separate ``decorated_definition``
+    node, and depending on its exact sibling structure here isn't worth it
+    when this module already falls back to raw-text regex extraction
+    elsewhere inside the tree-sitter walk (e.g. import-statement handling).
+    ``def_line_idx`` is 0-indexed (tree-sitter's ``node.start_point[0]``).
+    """
+    lines = code.splitlines()
+    decorators: list[str] = []
+    i = def_line_idx - 1
+    while i >= 0:
+        stripped = lines[i].strip()
+        if not stripped.startswith("@"):
+            break
+        decorators.append(stripped[1:].split("(")[0].strip())
+        i -= 1
+    decorators.reverse()
+    return decorators
+
+
+def _dotted_names(nodes: list[ast.expr]) -> list[str]:
+    """Extract dotted names from AST decorator/base-class expression lists.
+
+    Handles ``@app.get(...)`` (a ``Call`` wrapping an ``Attribute``),
+    ``@staticmethod`` (a bare ``Name``), and ``class Foo(pkg.Base)`` (an
+    ``Attribute``) uniformly, returning e.g. ``"app.get"``/``"staticmethod"``/
+    ``"pkg.Base"``. Anything else (a subscript, a lambda, ...) is skipped
+    rather than guessed at.
+
+    Feeds ``RepositorySymbol.metadata["decorators"/"bases"]`` — the
+    structural evidence ``CodebaseAnalyzer``'s shape-based layer fallback
+    (decorator-based routing, ORM model shape) reads instead of relying
+    solely on folder-name conventions. See
+    docs/REPOSITORY_INTELLIGENCE_BASELINE.md §8/Recommendation on framework
+    shape fingerprinting.
+    """
+    names: list[str] = []
+    for node in nodes:
+        target = node.func if isinstance(node, ast.Call) else node
+        parts: list[str] = []
+        while isinstance(target, ast.Attribute):
+            parts.append(target.attr)
+            target = target.value
+        if isinstance(target, ast.Name):
+            parts.append(target.id)
+            names.append(".".join(reversed(parts)))
+    return names
+
+
 # Tree-sitter ships compiled C extensions (.pyd/.so). Importing them at module
 # load time forces Windows to load several DLLs synchronously — each triggering
 # a Defender real-time scan — adding seconds to *every* startup, even when no
@@ -352,6 +405,7 @@ class RepositorySnapshotParser:
             name = ""
             kind = RepositorySymbolKind.UNKNOWN
             current_class = parent_class
+            metadata: dict[str, Any] = {}
 
             # Python types
             if lang == RepositoryLanguage.PYTHON:
@@ -361,6 +415,12 @@ class RepositorySnapshotParser:
                         name = code[name_node.start_byte : name_node.end_byte]
                         kind = RepositorySymbolKind.CLASS
                         current_class = name
+                        superclasses_node = node.child_by_field_name("superclasses")
+                        if superclasses_node is not None:
+                            bases_text = code[superclasses_node.start_byte : superclasses_node.end_byte]
+                            bases = [b.strip() for b in bases_text.strip("()").split(",") if b.strip()]
+                            if bases:
+                                metadata["bases"] = bases
                 elif node_type == "function_definition":
                     name_node = node.child_by_field_name("name")
                     if name_node:
@@ -370,6 +430,17 @@ class RepositorySnapshotParser:
                             if parent_class
                             else RepositorySymbolKind.FUNCTION
                         )
+                        decorators = _leading_decorator_texts(code, node.start_point[0])
+                        if decorators:
+                            metadata["decorators"] = decorators
+                        if name == "__init__":
+                            params_node = node.child_by_field_name("parameters")
+                            if params_node is not None:
+                                params_text = code[params_node.start_byte : params_node.end_byte]
+                                param_types = re.findall(r":\s*([\w.]+)", params_text)
+                                param_types = [t for t in param_types if t != "self"]
+                                if param_types:
+                                    metadata["param_types"] = param_types
                 elif node_type in ("import_statement", "import_from_statement"):
                     text = code[node.start_byte : node.end_byte]
                     for match in re.finditer(r"(?:import|from)\s+([\w.]+)", text):
@@ -504,6 +575,7 @@ class RepositorySnapshotParser:
                         line_start=node.start_point[0] + 1,
                         line_end=node.end_point[0] + 1,
                         parent=parent_class,
+                        metadata=metadata,
                     )
                 )
 
@@ -533,6 +605,7 @@ class RepositorySnapshotParser:
 
             def visit_ClassDef(self, node: ast.ClassDef) -> None:
                 doc = ast.get_docstring(node)
+                bases = _dotted_names(node.bases)
                 symbols.append(
                     RepositorySymbol(
                         name=node.name,
@@ -541,6 +614,7 @@ class RepositorySnapshotParser:
                         line_start=getattr(node, "lineno", 1),
                         line_end=getattr(node, "end_lineno", getattr(node, "lineno", 1)),
                         docstring=doc,
+                        metadata={"bases": bases} if bases else {},
                     )
                 )
                 self.class_stack.append(node.name)
@@ -594,6 +668,23 @@ class RepositorySnapshotParser:
                     if self.class_stack
                     else RepositorySymbolKind.FUNCTION
                 )
+                decorators = _dotted_names(node.decorator_list)
+                metadata: dict[str, Any] = {}
+                if decorators:
+                    metadata["decorators"] = decorators
+                if node.name == "__init__":
+                    # Constructor parameter type annotations — the
+                    # dependency-injection shape signal (a class whose
+                    # __init__ takes typed collaborators like `SomeService`)
+                    # independent of the class's own name/folder location.
+                    param_types = [
+                        n
+                        for arg in node.args.args
+                        if arg.arg != "self" and arg.annotation is not None
+                        for n in _dotted_names([arg.annotation])
+                    ]
+                    if param_types:
+                        metadata["param_types"] = param_types
                 symbols.append(
                     RepositorySymbol(
                         name=node.name,
@@ -603,6 +694,7 @@ class RepositorySnapshotParser:
                         line_end=getattr(node, "end_lineno", node.lineno),
                         docstring=doc,
                         parent=self.class_stack[-1] if self.class_stack else None,
+                        metadata=metadata,
                     )
                 )
                 self.generic_visit(node)
