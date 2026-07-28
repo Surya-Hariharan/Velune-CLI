@@ -206,18 +206,31 @@ def test_dynamic_imports_layer_bucketing_and_resolved_edges(tmp_path):
     )
 
 
-# ── mixed_lang_polyglot: still-open gap — tech_stack.language is a single ──
-# scalar, so the Rust half of the repo is invisible to it.
+# ── mixed_lang_polyglot: the Rust half is no longer invisible ─────────────
+# (previously a total blind spot — baseline §6.8 — fixed by TechStack.
+# language_claims: the scalar `language` field is left alone for backward
+# compatibility, but the Rust signal now survives as a ranked claim instead
+# of being silently discarded once Python's manifest wins the scalar slot).
 
 
-def test_mixed_lang_polyglot_single_language_collapse(tmp_path):
+def test_mixed_lang_polyglot_rust_survives_as_a_claim(tmp_path):
     root = materialize("mixed_lang_polyglot", tmp_path)
     tech = TechnologyDetector(root).detect()
+
+    # Scalar resolution order is unchanged (first-detected-wins) — still
+    # Python, since _from_python_manifests runs before _from_cargo_toml.
     assert tech.language == "Python"
-    # Characterizes the still-open gap: a Rust file/Cargo.toml at root
-    # produces no trace in tech_stack once Python has already claimed
-    # `language` — see todo: make tech_stack fields multi-valued.
-    assert "rust" not in tech.to_dict().values()
+
+    # But Rust is no longer invisible: it survives as a ranked claim, and
+    # Cargo.toml's presence is in fact a stronger, less ambiguous signal
+    # than a dependency-less pyproject.toml — exactly the information the
+    # scalar field alone could never represent.
+    claim_values = {c.value for c in tech.language_claims}
+    assert claim_values == {"Python", "Rust"}
+    rust_claim = next(c for c in tech.language_claims if c.value == "Rust")
+    python_claim = next(c for c in tech.language_claims if c.value == "Python")
+    assert rust_claim.confidence > python_claim.confidence
+    assert "Cargo.toml present" in rust_claim.source_signals
 
 
 def test_mixed_lang_polyglot_architecture_detector_handles_missing_pattern(tmp_path):

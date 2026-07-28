@@ -240,6 +240,77 @@ def is_generated_content(text: str) -> bool:
     return any(marker in excerpt for marker in GENERATED_FILE_MARKERS)
 
 
+class Claim(BaseModel):
+    """A confidence-scored assertion about the repository, backed by one or
+    more named signals.
+
+    This is the answer to a structural weakness named throughout
+    docs/REPOSITORY_INTELLIGENCE_BASELINE.md (§8, Recommendations 4-5):
+    classifiers previously returned a bare label with no way to say how
+    sure they were, so "we're confident this is unknown" and "we didn't
+    recognize the naming convention" were indistinguishable — and a
+    scalar field (``tech_stack.language``) could only ever hold one
+    answer, silently discarding evidence for a second language in a
+    monorepo/polyglot repo (baseline §6.5/§6.8).
+
+    ``confidence`` is a bounded [0, 1] value produced by summing weighted
+    contributions from independent signals (see ``ClaimAccumulator``) —
+    not a calibrated probability. Treat it as "how much evidence backs
+    this," comparable *within* one accumulation, not as a cross-detector
+    universal scale.
+    """
+
+    value: str
+    confidence: float = 1.0
+    source_signals: list[str] = Field(default_factory=list)
+
+
+class ClaimAccumulator:
+    """Builds a ranked list of :class:`Claim` from independent signal contributions.
+
+    Usage::
+
+        acc = ClaimAccumulator()
+        acc.add("Python", 0.6, "requirements.txt present")
+        acc.add("Python", 0.3, "pyproject.toml present")  # agreement raises confidence
+        acc.add("TypeScript", 0.7, "tsconfig.json present")
+        acc.claims()  # -> [Claim(value="Python", confidence=0.9, ...), Claim(value="TypeScript", ...)]
+
+    Confidence is a simple bounded sum, not log-odds/Bayesian fusion — the
+    baseline explicitly calls that out as the harder-to-calibrate approach
+    (v1 vs v2 discussion) and this codebase has no labeled ground truth yet
+    to calibrate it against (see the confidence-calibration log). A
+    transparent, auditable sum is preferred until that data exists.
+    """
+
+    def __init__(self) -> None:
+        self._weights: dict[str, float] = {}
+        self._signals: dict[str, list[str]] = {}
+
+    def add(self, value: str | None, weight: float, signal: str) -> None:
+        """Record one signal's contribution toward *value*. No-op if *value* is falsy."""
+        if not value:
+            return
+        self._weights[value] = min(1.0, self._weights.get(value, 0.0) + weight)
+        self._signals.setdefault(value, []).append(signal)
+
+    def claims(self) -> list[Claim]:
+        """All claims, highest-confidence first."""
+        return sorted(
+            (
+                Claim(value=v, confidence=w, source_signals=list(self._signals[v]))
+                for v, w in self._weights.items()
+            ),
+            key=lambda c: c.confidence,
+            reverse=True,
+        )
+
+    def best(self) -> str | None:
+        """The single highest-confidence value, or None if nothing was recorded."""
+        claims = self.claims()
+        return claims[0].value if claims else None
+
+
 class RepositoryFile(BaseModel):
     path: str
     language: RepositoryLanguage

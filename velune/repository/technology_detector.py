@@ -12,6 +12,8 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from velune.repository.schemas import Claim, ClaimAccumulator
+
 logger = logging.getLogger("velune.repository.technology_detector")
 
 # Dependency name → (human label, category)
@@ -172,6 +174,18 @@ class TechStack:
     all_deps: list[str] = field(default_factory=list)
     all_dev_deps: list[str] = field(default_factory=list)
 
+    # Confidence-scored, multi-valued views of `language`/`framework` —
+    # additive alongside the scalar fields above, not a replacement, so
+    # existing `tech.language == "Python"`-style callers are unaffected.
+    # `language`/`framework` are still set to the single highest-confidence
+    # claim for that reason, but a monorepo/polyglot repo's *other*
+    # languages/frameworks no longer vanish once one wins the scalar slot
+    # (baseline §6.5/§6.8/Recommendation 5: "make tech_stack.language/
+    # .framework genuinely multi-valued... rather than a single overwritten
+    # scalar"). Ranked highest-confidence first.
+    language_claims: list[Claim] = field(default_factory=list)
+    framework_claims: list[Claim] = field(default_factory=list)
+
     def as_summary_lines(self) -> list[str]:
         """Human-readable summary lines for display."""
         lines: list[str] = []
@@ -219,6 +233,8 @@ class TechStack:
             "is_monorepo": self.is_monorepo,
             "has_typescript": self.has_typescript,
             "expo_sdk_version": self.expo_sdk_version,
+            "language_claims": [c.model_dump() for c in self.language_claims],
+            "framework_claims": [c.model_dump() for c in self.framework_claims],
         }
 
 
@@ -227,10 +243,18 @@ class TechnologyDetector:
 
     def __init__(self, root_path: Path) -> None:
         self.root = root_path.resolve()
+        # Fresh per detect() call — accumulate every _from_* method's
+        # language/framework evidence here, in parallel with the scalar
+        # fields those methods still set directly for backward
+        # compatibility. See TechStack.language_claims/framework_claims.
+        self._lang_acc = ClaimAccumulator()
+        self._fw_acc = ClaimAccumulator()
 
     def detect(self) -> TechStack:
         """Read manifests and return a TechStack."""
         stack = TechStack()
+        self._lang_acc = ClaimAccumulator()
+        self._fw_acc = ClaimAccumulator()
 
         # Try each manifest type
         self._from_package_json(stack)
@@ -242,6 +266,9 @@ class TechnologyDetector:
         self._from_pubspec_yaml(stack)
         self._from_dotnet_project(stack)
         self._from_java_manifests(stack)
+
+        stack.language_claims = self._lang_acc.claims()
+        stack.framework_claims = self._fw_acc.claims()
 
         return stack
 
@@ -272,6 +299,7 @@ class TechnologyDetector:
         # Default language for package.json projects
         if stack.language == "unknown":
             stack.language = "JavaScript"
+        self._lang_acc.add("JavaScript", 0.5, "package.json present")
 
         # Workspaces → monorepo
         if "workspaces" in pkg or (self.root / "pnpm-workspace.yaml").exists():
@@ -295,6 +323,10 @@ class TechnologyDetector:
             label, category = entry
             version = dep_version.lstrip("^~>=<").split(" ")[0]
 
+            if category == "framework":
+                # An explicit named dependency is strong, direct evidence —
+                # weighted higher than mere manifest-file presence.
+                self._fw_acc.add(label, 0.7, f"{dep_name} in package.json deps")
             if category == "frontend" and not stack.frontend:
                 stack.frontend = label
             elif category == "framework" and not stack.framework:
@@ -332,6 +364,8 @@ class TechnologyDetector:
             if sdk:
                 stack.expo_sdk_version = sdk
             # Confirm Expo if app.json has "expo" key
+            if expo_cfg:
+                self._fw_acc.add("Expo", 0.8, "app.json has expo config")
             if expo_cfg and not stack.framework:
                 stack.framework = "Expo"
         except Exception:
@@ -342,6 +376,7 @@ class TechnologyDetector:
         if (self.root / "tsconfig.json").exists() or (self.root / "tsconfig.base.json").exists():
             stack.has_typescript = True
             stack.language = "TypeScript"
+            self._lang_acc.add("TypeScript", 0.6, "tsconfig.json present")
 
     def _from_python_manifests(self, stack: TechStack) -> None:
         """requirements.txt / pyproject.toml / setup.py → Python project + framework.
@@ -369,12 +404,15 @@ class TechnologyDetector:
                 has_root_py = any(self.root.glob("*.py"))
             except OSError:
                 has_root_py = False
-            if has_root_py and stack.language == "unknown":
-                stack.language = "Python"
+            if has_root_py:
+                if stack.language == "unknown":
+                    stack.language = "Python"
+                self._lang_acc.add("Python", 0.3, "root-level .py file, no manifest")
             return
 
         if stack.language == "unknown":
             stack.language = "Python"
+        self._lang_acc.add("Python", 0.5, "Python manifest file present")
 
         parts: list[str] = []
         for fp in manifest_paths:
@@ -388,29 +426,39 @@ class TechnologyDetector:
         for keyword, label, category in _PYTHON_FRAMEWORK_MARKERS:
             if keyword not in combined:
                 continue
-            if category == "framework" and not stack.framework:
-                stack.framework = label
+            if category == "framework":
+                self._fw_acc.add(label, 0.7, f"{keyword!r} found in Python deps")
+                if not stack.framework:
+                    stack.framework = label
             elif category == "database" and not stack.database:
                 stack.database = label
             elif category == "secondary" and label not in stack.secondary_frameworks:
                 stack.secondary_frameworks.append(label)
 
-        if not stack.framework and any(kw in combined for kw in ("typer", "click", "argparse")):
-            stack.framework = "CLI"
+        if any(kw in combined for kw in ("typer", "click", "argparse")):
+            self._fw_acc.add("CLI", 0.5, "typer/click/argparse found in Python deps")
+            if not stack.framework:
+                stack.framework = "CLI"
 
     def _from_cargo_toml(self, stack: TechStack) -> None:
         cargo = self.root / "Cargo.toml"
-        if cargo.exists() and stack.language == "unknown":
-            stack.language = "Rust"
+        if cargo.exists():
+            self._lang_acc.add("Rust", 0.75, "Cargo.toml present")
+            if stack.language == "unknown":
+                stack.language = "Rust"
 
     def _from_go_mod(self, stack: TechStack) -> None:
         gomod = self.root / "go.mod"
-        if gomod.exists() and stack.language == "unknown":
-            stack.language = "Go"
+        if gomod.exists():
+            self._lang_acc.add("Go", 0.75, "go.mod present")
+            if stack.language == "unknown":
+                stack.language = "Go"
 
     def _from_pubspec_yaml(self, stack: TechStack) -> None:
         """pubspec.yaml → Flutter/Dart project."""
         if (self.root / "pubspec.yaml").exists():
+            self._lang_acc.add("Dart", 0.75, "pubspec.yaml present")
+            self._fw_acc.add("Flutter", 0.75, "pubspec.yaml present")
             if stack.language == "unknown":
                 stack.language = "Dart"
             if not stack.framework:
@@ -423,6 +471,8 @@ class TechnologyDetector:
         except OSError:
             has_dotnet = False
         if has_dotnet:
+            self._lang_acc.add("C#", 0.75, "*.csproj/*.sln present")
+            self._fw_acc.add(".NET", 0.75, "*.csproj/*.sln present")
             if stack.language == "unknown":
                 stack.language = "C#"
             if not stack.framework:
@@ -440,6 +490,7 @@ class TechnologyDetector:
         if not any(p.exists() for p in manifest_paths):
             return
 
+        self._lang_acc.add("Java", 0.75, "pom.xml/build.gradle present")
         if stack.language == "unknown":
             stack.language = "Java"
 
@@ -451,5 +502,7 @@ class TechnologyDetector:
                 except OSError:
                     pass
 
-        if "spring" in combined and not stack.framework:
-            stack.framework = "Spring"
+        if "spring" in combined:
+            self._fw_acc.add("Spring", 0.7, "'spring' found in pom.xml/build.gradle")
+            if not stack.framework:
+                stack.framework = "Spring"
