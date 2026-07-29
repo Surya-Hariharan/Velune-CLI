@@ -182,6 +182,25 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
 
         runtime.container.register_instance("runtime.auto_accept", yes)
 
+        if yes and not json_mode:
+            # --yes removes the per-call human approval gate (tool_chat.py's
+            # `_make_approver`), which is the primary defense against a
+            # model-issued command doing something unwanted. Without it, the
+            # only remaining boundary is SubprocessSandbox's executable
+            # allowlist + defense-in-depth string checks (execution/sandbox.py)
+            # unless docker_sandbox is on — worth a one-time, visible warning
+            # rather than a silent gap.
+            execution_cfg = getattr(runtime.config, "execution", None)
+            if not bool(getattr(execution_cfg, "docker_sandbox", False)):
+                from rich.console import Console as _Console
+
+                _Console().print(
+                    "[yellow]⚠ --yes runs commands unattended, on the host, "
+                    "without container isolation.[/yellow] "
+                    "[dim]Enable `execution.docker_sandbox` in velune.toml for "
+                    "container-isolated command execution.[/dim]"
+                )
+
         ctx.obj = CLIContext(
             workspace=workspace,
             config_path=config_path,

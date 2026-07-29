@@ -592,7 +592,9 @@ class RepositoryCognitionService:
         # Detected once and threaded through both consumers below, rather than
         # each independently constructing its own TechnologyDetector pass.
         tech_stack = TechnologyDetector(self.root_path).detect()
-        layers = self.analyzer.classify_architecture_layers(all_paths, tech_stack, snapshot.symbols)
+        layers = self.analyzer.classify_architecture_layers(
+            self._paths_for_layer_classification(all_paths), tech_stack, snapshot.symbols
+        )
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)
         arch_report = ArchitectureDetector(self.root_path, snapshot.files, tech_stack).detect()
@@ -706,6 +708,38 @@ class RepositoryCognitionService:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _paths_for_layer_classification(self, code_paths: list[str]) -> list[str]:
+        """*code_paths* plus infra/CI files, for ``classify_architecture_layers`` only.
+
+        ``CodebaseAnalyzer``'s "infra" layer bucket matches path fragments
+        like ``/terraform/``, ``/k8s/``, ``.github/workflows/``, and the
+        literal name ``Dockerfile`` — but ``code_paths`` (from
+        ``snapshot.files``) is scanned via ``scan_code_files()``, which is
+        filtered to ``CODE_EXTENSIONS``. YAML/HCL files and extension-less
+        ``Dockerfile``s never carry a recognised code extension, so that
+        bucket could never see a match. This only widens the input to the
+        classifier — the grapher and API mapper still get the original
+        code-only paths, which is correct for them.
+        """
+        from velune.repository.scanner import FilesystemScanner
+
+        try:
+            scanner = FilesystemScanner(self.root_path)
+            infra_files = scanner.scan([".yml", ".yaml", ".tf", ".tfvars"])
+            dockerfiles = [
+                p
+                for p in self.root_path.rglob("Dockerfile*")
+                if p.is_file() and not scanner.is_ignored(p)
+            ]
+            extra_paths = [
+                str(p.relative_to(self.root_path)).replace("\\", "/")
+                for p in (*infra_files, *dockerfiles)
+            ]
+        except Exception as exc:
+            logger.debug("Infra-file scan for layer classification failed (non-fatal): %s", exc)
+            return code_paths
+        return list(dict.fromkeys(code_paths + extra_paths))
+
     def _run_pipeline(self, snapshot: RepositorySnapshot) -> RepositorySnapshot:
         """Run grapher, git metrics, architecture analysis, and API mapping on *snapshot*."""
         # Reset grapher for this run (it is stateful and must be rebuilt each call)
@@ -748,7 +782,7 @@ class RepositoryCognitionService:
         tech_stack = TechnologyDetector(self.root_path).detect()
         self._log_tech_stack_claims(tech_stack)
         layers = self.analyzer.classify_architecture_layers(
-            file_paths, tech_stack, snapshot.symbols
+            self._paths_for_layer_classification(file_paths), tech_stack, snapshot.symbols
         )
         analyzer_edges = [(e.source, e.target) for e in edges]
         violations = self.analyzer.detect_dependency_violations(layers, analyzer_edges)

@@ -17,7 +17,7 @@ logger = logging.getLogger("velune.providers.health_monitor")
 class ProviderHealthMonitor:
     """Continuously polls registered providers and maintains real-time capability manifests."""
 
-    def __init__(self, registry: ProviderRegistry) -> None:
+    def __init__(self, registry: ProviderRegistry, poll_interval: float = 300.0) -> None:
         self._registry = registry
         self._manifests: dict[str, CapabilityManifest] = {}
         self._latency_windows: dict[str, deque[int]] = defaultdict(lambda: deque(maxlen=5))
@@ -25,9 +25,30 @@ class ProviderHealthMonitor:
             lambda: deque(maxlen=3)
         )
         self._polling_task: asyncio.Task | None = None
-        self._poll_interval = 30.0  # seconds
+        # 5 minutes by default: this polls every *configured* provider,
+        # including cloud ones, over the network for the life of the
+        # process — a 30s interval (the original value) meant continuous
+        # background API traffic against providers like Anthropic/OpenAI
+        # purely for a health table nothing consumed. /doctor and
+        # ProviderRouter's health filtering don't need second-level freshness.
+        self._poll_interval = poll_interval
         self._health_check_timeout = 2.0  # seconds
         self._running = False
+
+    async def initialize(self) -> None:
+        """LifecycleCoordinator startup hook — delegates to :meth:`start`.
+
+        Matches the ``hasattr(comp, "initialize")`` convention
+        ``LifecycleCoordinator.startup()`` already uses for other DI-managed
+        subsystems (see ``ThreeBrainCoordinator.initialize``), so registering
+        this monitor with a ``lifecycle_key`` is enough to start it — no
+        separate manual ``.start()`` call site is needed.
+        """
+        await self.start()
+
+    async def shutdown(self) -> None:
+        """LifecycleCoordinator shutdown hook — delegates to :meth:`stop`."""
+        await self.stop()
 
     async def start(self) -> None:
         """Start the background polling task."""
@@ -37,7 +58,9 @@ class ProviderHealthMonitor:
 
         self._running = True
         self._polling_task = asyncio.create_task(self._polling_loop())
-        logger.info("ProviderHealthMonitor started")
+        logger.info(
+            "ProviderHealthMonitor started (polling every %.0fs)", self._poll_interval
+        )
 
     async def stop(self) -> None:
         """Stop the background polling task."""

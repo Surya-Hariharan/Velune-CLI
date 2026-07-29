@@ -22,9 +22,10 @@ def _create_provider_health_monitor(env: RuntimeEnvironment):
     from velune.providers.health_monitor import ProviderHealthMonitor
 
     registry = env.container.get("runtime.provider_registry")
-    monitor = ProviderHealthMonitor(registry)
-    # Don't auto-start; let the application start it when needed
-    return monitor
+    # lifecycle_key below gives this a LifecycleCoordinator-managed
+    # initialize()/shutdown() — that's what actually starts and stops the
+    # background poller; constructing it here does not.
+    return ProviderHealthMonitor(registry, poll_interval=300.0)
 
 
 def _create_provider_router(env: RuntimeEnvironment):
@@ -50,7 +51,13 @@ PROVIDER_MODULES = [
         name="provider_health_monitor",
         factory=_create_provider_health_monitor,
         container_key="runtime.provider_health_monitor",
-        lifecycle_key=None,  # Optional module
+        # Registers ProviderHealthMonitor.initialize()/shutdown() with the
+        # LifecycleCoordinator so the background poller actually starts and
+        # stops cleanly — previously it was constructed but never started
+        # (see health_monitor.py), so /doctor's health table and
+        # ProviderRouter's health-based filtering always read an empty
+        # manifest map.
+        lifecycle_key="provider_health_monitor",
         dependencies=["runtime.provider_registry"],
         tier=0,
     ),

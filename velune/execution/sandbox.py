@@ -221,8 +221,33 @@ class SubprocessSandbox:
             if char in cmd:
                 return False
 
-        # Block network access or base64 decoding utilities
-        blocked_utils = ["curl", "wget", "iwr", "invoke-webrequest", "base64", "frombase64"]
+        # Block network access or base64 decoding utilities.
+        #
+        # This cannot catch a general-purpose interpreter's *runtime* network
+        # calls (e.g. `python script.py` where script.py opens a socket) —
+        # that would require OS-level network isolation (docker_sandbox),
+        # not string matching on the invocation line. This list only closes
+        # the direct-invocation vectors, which matter most when the human
+        # approval gate in tool_chat.py is bypassed via --yes/auto-accept.
+        blocked_utils = [
+            "curl",
+            "wget",
+            "iwr",
+            "invoke-webrequest",
+            "irm",
+            "invoke-restmethod",
+            "base64",
+            "frombase64",
+            "certutil",  # Windows LOLBin: `certutil -urlcache -f <url>`
+            "bitsadmin",  # Windows LOLBin: BITS-based background download
+            "nc ",
+            "ncat",
+            "netcat",
+            "telnet",
+            "ssh ",
+            "scp ",
+            "rsync",
+        ]
         for util in blocked_utils:
             if util in cmd_lower:
                 return False

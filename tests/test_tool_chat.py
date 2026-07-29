@@ -334,3 +334,77 @@ async def test_approver_honors_session_grants(tmp_path):
     repl._tool_session_grants.add("write_file")
     approver = _make_approver(repl, _ui(repl))
     assert await approver("write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE})
+
+
+# ── Low-confidence gate ──────────────────────────────────────────────────────
+#
+# A mutating call that would otherwise skip the human check entirely (--yes,
+# a session "always allow" grant) must not do so when the turn's intent
+# classification was low-confidence. Non-interactive test stdin means the
+# forced prompt fails closed (denied) — that IS the assertion: the shortcut
+# was bypassed, not silently honored.
+
+
+async def test_approver_low_confidence_forces_prompt_despite_auto_accept(tmp_path):
+    from velune.execution import diff_preview
+
+    repl = _fake_repl(tmp_path, registry=_reg())
+    diff_preview.configure(auto_accept=True)
+    try:
+        approver = _make_approver(repl, _ui(repl), intent_confidence=0.1)
+        allowed = await approver(
+            "write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE}
+        )
+    finally:
+        diff_preview.configure(auto_accept=False)
+
+    assert allowed is False  # forced prompt, no interactive stdin -> denied
+
+
+async def test_approver_low_confidence_forces_prompt_despite_session_grant(tmp_path):
+    repl = _fake_repl(tmp_path, registry=_reg())
+    repl._tool_session_grants.add("write_file")
+    approver = _make_approver(repl, _ui(repl), intent_confidence=0.1)
+
+    allowed = await approver("write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE})
+
+    assert allowed is False
+
+
+async def test_approver_high_confidence_still_honors_auto_accept(tmp_path):
+    from velune.execution import diff_preview
+
+    repl = _fake_repl(tmp_path, registry=_reg())
+    diff_preview.configure(auto_accept=True)
+    try:
+        approver = _make_approver(repl, _ui(repl), intent_confidence=0.9)
+        allowed = await approver(
+            "write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE}
+        )
+    finally:
+        diff_preview.configure(auto_accept=False)
+
+    assert allowed is True
+
+
+async def test_approver_no_confidence_signal_still_honors_auto_accept(tmp_path):
+    """intent_confidence=None (e.g. the /retry one-turn path) disables the gate."""
+    from velune.execution import diff_preview
+
+    repl = _fake_repl(tmp_path, registry=_reg())
+    diff_preview.configure(auto_accept=True)
+    try:
+        approver = _make_approver(repl, _ui(repl))  # no intent_confidence passed
+        allowed = await approver(
+            "write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE}
+        )
+    finally:
+        diff_preview.configure(auto_accept=False)
+
+    assert allowed is True
+
+
+async def test_approver_low_confidence_does_not_gate_readonly_calls(tmp_path):
+    repl = _fake_repl(tmp_path, registry=_reg())
+    approver = _make_approver(repl, _ui(repl), intent_confidence=0.0)
+    assert await approver("peek", {}, {ToolPermission.FILESYSTEM_READ})

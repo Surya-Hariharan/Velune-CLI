@@ -82,6 +82,13 @@ class ContextAssemblyReport:
     sections_present: list[ContextSection] = field(default_factory=list)
     sections_trimmed: dict[ContextSection, int] = field(default_factory=dict)
     chunks_dropped: int = 0
+    # RETRIEVED_CONTEXT chunks collapsed because another source (hybrid
+    # retrieval, the memory fan-out, ...) already surfaced identical content
+    # this turn — see ContextAssembler._deduplicate_retrieved_context. Not
+    # included in chunks_dropped (which counts budget-driven trimming);
+    # tracked separately so a trace/observability consumer can tell "the
+    # budget squeezed this out" apart from "this was a redundant copy."
+    duplicates_dropped: int = 0
     budget_exceeded: bool = False
 
     def to_dict(self) -> dict:
@@ -93,6 +100,7 @@ class ContextAssemblyReport:
             "sections_present": [s.name for s in self.sections_present],
             "sections_trimmed": {s.name: tokens for s, tokens in self.sections_trimmed.items()},
             "chunks_dropped": self.chunks_dropped,
+            "duplicates_dropped": self.duplicates_dropped,
             "budget_exceeded": self.budget_exceeded,
         }
 
@@ -104,6 +112,8 @@ class ContextAssemblyReport:
             f"  Tokens: {self.total_tokens_assembled}/{self.total_tokens_requested}",
             f"  Sections: {len(self.sections_present)} present",
         ]
+        if self.duplicates_dropped:
+            lines.append(f"  Duplicates collapsed: {self.duplicates_dropped}")
         if self.sections_trimmed:
             lines.append(f"  Trimmed: {self.sections_trimmed}")
         if self.budget_exceeded:

@@ -111,7 +111,18 @@ class SymbolSearch(BaseTool):
         symbol_name: str,
         directory: str = ".",
     ) -> list[dict]:
-        """Search for symbols."""
+        """Search for symbols.
+
+        Tries the repository knowledge graph first — a cached, already-built
+        index — so this doesn't re-parse the entire tree from scratch on
+        every call. Falls back to a full scan (previously the only path,
+        and still Python-only) when the graph is empty or unavailable, e.g.
+        during Tier-1 warm-up or in an unindexed workspace.
+        """
+        graph_hits = await self._search_via_graph(symbol_name)
+        if graph_hits is not None:
+            return graph_hits
+
         from velune.repository.parser import RepositorySnapshotParser
         from velune.repository.scanner import FilesystemScanner
 
@@ -146,6 +157,41 @@ class SymbolSearch(BaseTool):
                     )
 
         return results
+
+    async def _search_via_graph(self, symbol_name: str) -> list[dict] | None:
+        """Exact-label lookup against the knowledge graph, or ``None`` to fall back.
+
+        Returns ``None`` only when the graph subsystem itself isn't
+        available (not yet registered, or the query errors) — the same
+        registered-vs-not distinction ``SemanticCodeSearch`` already uses for
+        its retrieval fallback. A successful query that simply finds no match
+        returns ``[]``, not a fallback to the full scan: consulting the
+        graph and finding nothing is a real (and fast) answer, not a
+        cold-start signal.
+        """
+        try:
+            from velune.kernel.registry import get_container
+
+            container = get_container()
+            if not container.has("runtime.knowledge_query"):
+                return None
+            query = container.get("runtime.knowledge_query")
+            if query is None:
+                return None
+            candidates = await query.find_by_label(symbol_name)
+        except Exception:
+            return None
+
+        return [
+            {
+                "name": node.label,
+                "kind": str(node.node_type),
+                "file": node.file_path,
+                "line": node.line_start,
+            }
+            for node in candidates
+            if node.label == symbol_name and str(node.node_type) != "file"
+        ]
 
     def get_schema(self) -> dict:
         return {

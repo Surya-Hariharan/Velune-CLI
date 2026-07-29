@@ -77,6 +77,7 @@ class ContextAssembler:
         kept_sections_chunks: dict[ContextSection, list[ContextChunk]] = {}
         total_tokens = 0
         sections_trimmed: dict[ContextSection, int] = {}
+        duplicates_dropped = 0
 
         for section in sorted(ContextSection):
             if section not in sections_dict:
@@ -87,6 +88,12 @@ class ContextAssembler:
 
             # Apply section-specific trimming logic
             if section == ContextSection.RETRIEVED_CONTEXT:
+                # Independent concurrent retrieval sources (hybrid file/code
+                # search, the memory fan-out) can and do return the exact
+                # same content — dedupe before budget trimming so a repeated
+                # copy never displaces genuinely distinct context.
+                section_chunks, deduped = self._deduplicate_retrieved_context(section_chunks)
+                duplicates_dropped += deduped
                 processed_chunks, tokens_trimmed = self._trim_retrieved_context(
                     section_chunks, budget.retrieval_allocation, model
                 )
@@ -144,11 +151,39 @@ class ContextAssembler:
             sections_present=list(assembled_sections.keys()),
             sections_trimmed=sections_trimmed,
             chunks_dropped=len(chunks)
-            - sum(len(kept_sections_chunks.get(s, [])) for s in ContextSection),
+            - sum(len(kept_sections_chunks.get(s, [])) for s in ContextSection)
+            - duplicates_dropped,
+            duplicates_dropped=duplicates_dropped,
             budget_exceeded=budget_exceeded,
         )
 
         return final_context, report
+
+    def _deduplicate_retrieved_context(
+        self, chunks: list[ContextChunk]
+    ) -> tuple[list[ContextChunk], int]:
+        """Collapse RETRIEVED_CONTEXT chunks with identical content.
+
+        Independent retrieval sources are run concurrently (see
+        ``velune/cli/handlers/prompt_context.py``'s ``asyncio.gather`` of
+        hybrid retrieval + the memory-lifecycle fan-out) and can surface the
+        exact same file/turn content twice with no cross-check. Keeps the
+        highest-trust copy of each duplicate (ties broken by priority), and
+        preserves first-seen order among the survivors.
+        """
+        best_by_key: dict[str, ContextChunk] = {}
+        order: list[str] = []
+        for chunk in chunks:
+            key = " ".join(chunk.content.split())  # whitespace-normalized
+            existing = best_by_key.get(key)
+            if existing is None:
+                best_by_key[key] = chunk
+                order.append(key)
+            elif (chunk.trust_score, chunk.priority) > (existing.trust_score, existing.priority):
+                best_by_key[key] = chunk
+
+        deduped = [best_by_key[key] for key in order]
+        return deduped, len(chunks) - len(deduped)
 
     def _trim_retrieved_context(
         self,

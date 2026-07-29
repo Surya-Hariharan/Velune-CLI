@@ -1371,7 +1371,9 @@ class VeluneREPL:
         tried_provider_ids = {provider.provider_id}
         while True:
             try:
-                loop_result = await run_tool_chat(self, model, provider, request)
+                loop_result = await run_tool_chat(
+                    self, model, provider, request, intent_confidence=intent_confidence
+                )
                 if loop_result is not None:
                     if loop_result.stop_reason == "interrupted":
                         self.console.print()

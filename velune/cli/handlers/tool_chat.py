@@ -209,6 +209,7 @@ async def run_tool_chat(
     model: ModelDescriptor,
     provider: Any,
     request: InferenceRequest,
+    intent_confidence: float | None = None,
 ) -> ToolLoopResult | None:
     """Run the chat turn through the tool loop; None means "use legacy path".
 
@@ -216,6 +217,12 @@ async def run_tool_chat(
     400 from servers without tool support) is remembered for the session and
     the caller silently falls back. Errors after tools have already executed
     are surfaced — silently rerunning the prompt could repeat side effects.
+
+    *intent_confidence*, when given, lets the approver force a human check on
+    a mutating call even when auto-accept/session-grants would otherwise skip
+    it — see ``_make_approver``. ``None`` (the default, used by callers like
+    ``/retry`` that don't have this turn's classification) disables that gate
+    entirely rather than guessing.
     """
     from velune._compat import uncancel_task
     from velune.core.errors.provider import (
@@ -250,7 +257,7 @@ async def run_tool_chat(
         provider,
         registry,
         mcp_registry=repl._mcp_registry,
-        approver=_make_approver(repl, ui),
+        approver=_make_approver(repl, ui, intent_confidence=intent_confidence),
         ctx=ctx,
         max_turns=max_turns,
         on_event=ui.on_event,
@@ -338,7 +345,16 @@ def _auto_accept_enabled(repl: VeluneREPL) -> bool:
         return False
 
 
-def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI):
+# Below one full keyword-signal hit (see IntentClassifier._score: hits/3,
+# capped at 1.0) — not the same as the 0.5 "no signal at all, default to
+# QUESTION" fallback in classify_with_confidence, which is a deliberate
+# default rather than a sign of an ambiguous request.
+_LOW_CONFIDENCE_THRESHOLD = 0.34
+
+
+def _make_approver(
+    repl: VeluneREPL, ui: _ToolActivityUI, intent_confidence: float | None = None
+):
     from velune.orchestration.tool_loop import READONLY_PERMISSIONS
     from velune.tools.safety import ApprovalMode, classify_command
 
@@ -350,6 +366,22 @@ def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI):
         if repl._approval_mode is ApprovalMode.BLOCK:
             ui.note(f"[red]✗[/red] {name} denied (approval mode: block)")
             return False
+        # IntentClassifier's confidence is the one signal in the input
+        # pipeline that says "this request may have been misread" — nothing
+        # previously acted on it. Gating every low-confidence turn would
+        # misfire often (the heuristic isn't tuned as an ambiguity detector),
+        # so this only forces a human check on the one case that actually
+        # matters: a mutating call that reached here — read-only calls
+        # already returned above — and was about to skip approval entirely
+        # via --yes, a session "always allow" grant, or safe-mode auto-run.
+        if intent_confidence is not None and intent_confidence < _LOW_CONFIDENCE_THRESHOLD:
+            return await _prompt_approval(
+                repl,
+                ui,
+                name,
+                arguments,
+                reason="This request looked ambiguous — confirming before it runs.",
+            )
         # --yes / auto-accept. This was previously honoured only by the diff
         # preview and confirm_destructive, so `velune --yes` still stopped to
         # ask for approval on every single tool call.
@@ -370,14 +402,26 @@ def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI):
 
 
 async def _prompt_approval(
-    repl: VeluneREPL, ui: _ToolActivityUI, name: str, arguments: dict[str, Any]
+    repl: VeluneREPL,
+    ui: _ToolActivityUI,
+    name: str,
+    arguments: dict[str, Any],
+    reason: str | None = None,
 ) -> bool:
-    """Interactive y/n/a prompt. Fails closed when no interactive stdin."""
+    """Interactive y/n/a prompt. Fails closed when no interactive stdin.
+
+    *reason*, when given, is shown above the approval panel — used by the
+    low-confidence gate in ``_make_approver`` to explain *why* a call that
+    would normally have skipped the prompt (via --yes or a session grant)
+    is being asked about anyway.
+    """
     import json
 
     from rich.panel import Panel
 
     ui.pause_status()
+    if reason:
+        repl.console.print(f"[yellow]⚠[/yellow] [dim]{reason}[/dim]")
     diff = ui.compute_mutation_diff(name, arguments) if name in _FILE_MUTATORS else None
     if diff is not None:
         # File mutations get the actual diff, not raw JSON.
@@ -475,6 +519,8 @@ class _ToolActivityUI:
 
     def __init__(self, repl: VeluneREPL) -> None:
         self._console = repl.console
+        self._container = repl.container
+        self._run_id = getattr(repl, "_session_id", "")
         # When a fullscreen UI owns the terminal, `Live`/`console.status()`
         # render nothing visible at all (force_interactive=False suppresses
         # their redraw output) — route streaming/status through the
@@ -533,6 +579,40 @@ class _ToolActivityUI:
 
     # ── Tool cards ───────────────────────────────────────────────────
 
+    def _emit_trace(self, event_type: str, call_id: str, data: dict[str, Any]) -> None:
+        """Best-effort, fire-and-forget bus emission for observability.
+
+        Council/sandbox runs already emit step-level events; a normal chat
+        turn's native tool loop did not — ``velune trace`` could only ever
+        show one truncated ``turn.completed`` per turn, with no visibility
+        into which tools ran. Mirrors the fire-and-forget pattern
+        ``execution/sandbox.py``'s ``emit_rejection`` already uses: ``on_event``
+        is a synchronous callback, so this schedules the emit as a tracked
+        background task rather than blocking the tool loop on it.
+        """
+        try:
+            bus = self._container.get("runtime.bus")
+        except Exception:
+            return
+        if bus is None:
+            return
+        try:
+            from velune.events import Event
+
+            event = Event(
+                event_type=event_type,
+                source="tool_chat",
+                correlation_id=call_id or None,
+                data=data,
+            )
+            loop = asyncio.get_running_loop()
+        except Exception:
+            return
+
+        from velune.core.task_registry import track
+
+        track(loop.create_task(bus.emit(event), name=f"trace_emit_{event_type}"))
+
     def _on_tool_start(self, data: dict[str, Any]) -> None:
         self.any_tool_ran = True
         name = str(data.get("name") or "")
@@ -540,6 +620,11 @@ class _ToolActivityUI:
         arguments = data.get("arguments")
         verb, target = _describe_call(name, arguments, self._workspace)
         self._targets[call_id] = target
+        self._emit_trace(
+            "tool.started",
+            call_id,
+            {"run_id": self._run_id, "name": name, "target": target},
+        )
         if name in _FILE_MUTATORS:
             diff = self.compute_mutation_diff(name, arguments)
             if diff is not None:
@@ -557,6 +642,19 @@ class _ToolActivityUI:
         diff = self._pending_diffs.pop(call_id, None)
         target = self._targets.pop(call_id, "")
         summary = _summarize_result(name, data, diff, target)
+        result_preview = str(data.get("result") or "")[:200]
+        self._emit_trace(
+            "tool.completed",
+            call_id,
+            {
+                "run_id": self._run_id,
+                "name": name,
+                "target": target,
+                "error": error,
+                "duration_ms": data.get("duration_ms", 0),
+                "result_preview": result_preview,
+            },
+        )
         shown_key = (name, str(diff.path)) if diff is not None else None
         already_shown = shown_key in self._diff_shown if shown_key else False
         if shown_key and already_shown:
@@ -591,6 +689,7 @@ class _ToolActivityUI:
         call_id = str(data.get("id") or "")
         self._pending_diffs.pop(call_id, None)
         self._targets.pop(call_id, None)
+        self._emit_trace("tool.denied", call_id, {"run_id": self._run_id, "name": name})
         verb = _TOOL_VERBS.get(name, name)
         if self._fullscreen_ui is not None:
             self._fullscreen_ui.append_fragment_lines(

@@ -133,6 +133,13 @@ class MemoryLifecycleManager:
     vitality-based filtering, and health metrics.
     """
 
+    # Floor between background low-vitality prunes triggered by repository
+    # file-change events (see ``_on_stale_files_detected``). The prune isn't
+    # scoped to the specific paths that changed — SemanticMemory has no
+    # path-indexed store — so re-running it on every single file edit during
+    # an active editing session would be pure overhead for the same result.
+    _PRUNE_MIN_INTERVAL_SECONDS = 600.0
+
     def __init__(
         self,
         working_tier: Any,
@@ -185,6 +192,8 @@ class MemoryLifecycleManager:
         # Sessions with a compaction task in flight; guards against the user and
         # assistant record_turn calls both starting one for the same session.
         self._compactions_in_flight: set[str] = set()
+        # Last time a stale-file-triggered prune ran (see _on_stale_files_detected).
+        self._last_prune_at = 0.0
 
     def _three_brain(self) -> Any:
         """Return the shared ThreeBrainCoordinator, building one lazily if needed."""
@@ -290,6 +299,44 @@ class MemoryLifecycleManager:
         await self._check_and_trigger_compaction(session_id)
 
         return turn_id
+
+    def _on_stale_files_detected(self) -> None:
+        """React to ``ThreeBrainCoordinator`` reporting files changed since the last query.
+
+        Previously nothing ever called ``clear_stale()``, so the coordinator's
+        stale-file counter only ever grew, and ``SemanticMemory.prune_low_vitality``
+        had zero callers anywhere — decayed semantic memory accumulated forever
+        with no invalidation path. There's no path-indexed store to prune only
+        the entries about the changed files specifically, so this schedules a
+        throttled, best-effort background prune of globally low-trust entries
+        and then resets the counter, matching the usage
+        ``ThreeBrainCoordinator`` itself documents.
+        """
+        now = time.time()
+        if now - self._last_prune_at >= self._PRUNE_MIN_INTERVAL_SECONDS:
+            self._last_prune_at = now
+            try:
+                from velune.core.task_registry import track
+
+                loop = asyncio.get_running_loop()
+                track(loop.create_task(self._prune_stale_memory(), name="stale_memory_prune"))
+            except Exception as exc:
+                logger.debug("Could not schedule stale-memory prune: %s", exc)
+        self._three_brain().clear_stale()
+
+    async def _prune_stale_memory(self) -> None:
+        """Background task: delete low-vitality semantic memory entries."""
+        if not self.semantic_memory:
+            return
+        try:
+            pruned = await self.semantic_memory.prune_low_vitality()
+            if pruned:
+                logger.info(
+                    "Pruned %d low-vitality semantic memory entries after repository changes",
+                    pruned,
+                )
+        except Exception as exc:
+            logger.debug("Stale-memory prune failed (non-fatal): %s", exc)
 
     async def _check_and_trigger_compaction(self, session_id: str) -> None:
         """Check if compaction should be triggered and schedule it as background task.
@@ -476,6 +523,9 @@ class MemoryLifecycleManager:
         except Exception as exc:
             logger.debug("ThreeBrainCoordinator query failed: %s", exc)
             brain_result = None
+
+        if brain_result is not None and brain_result.stale_file_count > 0:
+            self._on_stale_files_detected()
 
         if brain_result is not None:
             # Working memory (current session, fastest)
