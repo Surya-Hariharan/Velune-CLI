@@ -6,7 +6,7 @@
 does not compete with those domains for ownership — it defines the common
 shape (provenance, confidence, time, extraction, projection) that every
 store already inside those domains either already follows or should grow
-into. Written ahead of `05-context-intelligence.md` in the roadmap because it is
+into. Written ahead of `06-context-intelligence.md` in the roadmap because it is
 foundational plumbing those higher layers will consume, not because it
 depends on them. This is a design document; no code changes accompany it.*
 
