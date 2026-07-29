@@ -85,7 +85,7 @@ class FileLock:
             with contextlib.suppress(Exception):
                 fh.close()
 
-    def __enter__(self) -> "FileLock":
+    def __enter__(self) -> FileLock:
         self.acquire()
         return self
 

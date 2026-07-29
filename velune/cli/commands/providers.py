@@ -116,6 +116,8 @@ def list_providers() -> None:
 
     for pid in _all_provider_ids():
         meta = _meta_dict(pid)
+        if meta is None:
+            continue
         configured = _is_configured(pid)
         is_default = pid == default_pid
         marker = f"[{design.OK}]★[/{design.OK}]" if is_default else ""
@@ -239,7 +241,9 @@ def add_provider(
         if result.status == ValidationStatus.NETWORK_ERROR:
             save_q = typer.confirm("Save key anyway (network may be offline)?", default=True)
             if save_q:
-                became_default = persist_credential(pid, api_key, verified=False, set_as_first_default=True)
+                became_default = persist_credential(
+                    pid, api_key, verified=False, set_as_first_default=True
+                )
                 console.print(f"[{design.WARN}]Key saved without validation.[/{design.WARN}]")
                 if became_default:
                     console.print(
@@ -359,9 +363,9 @@ def _test_all() -> None:
     table.add_column("Message", style=design.MUTED)
 
     providers_to_test = [
-        (pid, _meta_dict(pid))
+        (pid, meta)
         for pid in _all_provider_ids()
-        if (_meta_dict(pid) or {}).get("local") or has_key(pid)
+        if (meta := _meta_dict(pid)) is not None and (meta.get("local") or has_key(pid))
     ]
 
     if not providers_to_test:
@@ -461,7 +465,11 @@ def provider_status(
     if provider_id:
         pids = [provider_id.lower().strip()]
     else:
-        pids = [pid for pid in _all_provider_ids() if (_meta_dict(pid) or {}).get("local") or has_key(pid)]
+        pids = [
+            pid
+            for pid in _all_provider_ids()
+            if (_meta_dict(pid) or {}).get("local") or has_key(pid)
+        ]
 
     if not pids:
         console.print(f"[{design.WARN}]No providers configured.[/{design.WARN}]")

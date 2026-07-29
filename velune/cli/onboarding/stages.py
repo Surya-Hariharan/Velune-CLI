@@ -459,7 +459,11 @@ async def _configure_one_provider_key(controller: WizardController, pid: str) ->
             )
             return pid
 
-        subtitle = added.validation.human_message() if added and added.validation else "Could not save this key."
+        subtitle = (
+            added.validation.human_message()
+            if added and added.validation
+            else "Could not save this key."
+        )
         choice = await controller.run_widget(
             SelectWidget(
                 title="❌ Invalid API Key",

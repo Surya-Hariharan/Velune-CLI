@@ -32,7 +32,11 @@ from velune.cli.interactive import (
     text_input,
 )
 from velune.providers import catalog
-from velune.providers.credential_manager import CredentialAddResult, add_credential, persist_credential
+from velune.providers.credential_manager import (
+    CredentialAddResult,
+    add_credential,
+    persist_credential,
+)
 from velune.providers.discovery.scanner import ModelDiscoveryScanner
 from velune.providers.keystore import (
     KeyState,
@@ -253,7 +257,9 @@ class ProviderPalette:
                     if r.validation and r.validation.models
                     else "Verified — key accepted"
                 ),
-                fail=lambda r: r.validation.human_message() if r.validation else "Verification failed",
+                fail=lambda r: (
+                    r.validation.human_message() if r.validation else "Verification failed"
+                ),
                 is_ok=lambda r: r.ok,
             )
 

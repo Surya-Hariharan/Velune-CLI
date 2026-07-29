@@ -26,6 +26,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
+from velune.kernel.entrypoint import run_async
 from velune.providers import catalog
 from velune.providers.default_provider import set_first_default
 from velune.providers.keystore import mark_verified, save_key
@@ -213,4 +214,6 @@ def add_credential_sync(
         return loop.run_until_complete(coro)
     except RuntimeError:
         # No event loop in this thread at all (typical Typer/CLI entry point).
-        return asyncio.run(coro)
+        # Bridge into async via the kernel's single blocking-entry helper
+        # rather than a second direct call here — see its docstring.
+        return run_async(coro)

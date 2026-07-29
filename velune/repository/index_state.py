@@ -80,6 +80,28 @@ async def index_state_lock_async(path: Path, poll_interval: float = 0.02):
         lock.release()
 
 
+def _replace_with_retry(tmp: Path, path: Path, attempts: int = 5, delay: float = 0.05) -> None:
+    """``os.replace`` with a short bounded retry on a transient ``PermissionError``.
+
+    Windows can briefly deny a rename over a file that another process (an
+    antivirus real-time scanner, a search indexer) has open for reading right
+    after it was written — nothing in this codebase holds it open, and
+    ``index_state_lock``/``index_state_lock_async`` already serialize same-
+    process writers, so this is purely an external, transient hold. Retrying
+    a handful of times a few milliseconds apart is the standard mitigation
+    (the same pattern used by e.g. ``tempfile`` and several atomic-write
+    libraries on Windows) rather than treating it as a real save failure.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 @dataclass
 class IndexedFile:
     """Per-file metadata stored between indexing sessions."""
@@ -152,8 +174,11 @@ class IndexState:
             "file_index": {k: asdict(v) for k, v in self.file_index.items()},
         }
         # A distinct temp name per writer: two concurrent saves must not land on
-        # the same scratch file and interleave their bytes.
-        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        # the same scratch file and interleave their bytes. Threaded callers
+        # share a PID, so the thread id is included too — index_state_lock
+        # already serializes same-process writers, but this keeps the name
+        # actually unique per writer rather than merely per process.
+        tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
         try:
             # No indent= — this is a machine-read cache, and pretty-printing a
             # 10k-file index rewrites multiple megabytes on every save.
@@ -161,7 +186,7 @@ class IndexState:
                 json.dump(data, f)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, path)
+            _replace_with_retry(tmp, path)
         except Exception as exc:
             logger.warning("Could not save index state to %s: %s", path, exc)
             try:
