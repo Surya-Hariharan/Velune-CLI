@@ -1,6 +1,6 @@
 """velune/providers/credential_manager.py — the single add-credential entry
 point that replaced three independently hand-rolled validate/save sequences
-(REPL palette, Typer CLI, onboarding wizard). See PROVIDER_MANAGEMENT_V2.md
+(REPL palette, Typer CLI, onboarding wizard). See 01-provider-management-v2.md
 Phase 0.
 """
 

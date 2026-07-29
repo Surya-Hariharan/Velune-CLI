@@ -256,7 +256,7 @@ class GitTracker:
     ) -> list[tuple[str, str, int]]:
         """Files that repeatedly change together — often a better module
         boundary signal than folder structure (docs/
-        REPOSITORY_INTELLIGENCE_BASELINE.md's Repository Evolution
+        repository-intelligence-baseline.md's Repository Evolution
         discussion: "co-change clusters... often reveal true module
         boundaries better than folder structure does").
 

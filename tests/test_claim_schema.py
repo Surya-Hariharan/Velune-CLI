@@ -1,7 +1,7 @@
 """Unit tests for the confidence-scored claim schema (Claim/ClaimAccumulator)
 and its wiring into TechnologyDetector.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §8 (Weakness 1): "Classification
+``docs/repository-intelligence-baseline.md`` §8 (Weakness 1): "Classification
 failures are indistinguishable from absence of the thing being classified...
 There is no confidence score or 'detection inconclusive' signal anywhere in
 this pipeline." Recommendation 4/5: replace binary present/absent

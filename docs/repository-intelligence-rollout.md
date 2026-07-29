@@ -1,7 +1,7 @@
 # Repository Intelligence: Rollout Record and Policy
 
 **Status:** Living document — records what shipped, what's deliberately deferred, and the policy for anything still to come.
-**Companions:** `docs/REPOSITORY_INTELLIGENCE_BASELINE.md` (the v1 audit this work closes findings against), `REPOSITORY_INTELLIGENCE_V2_ARCHITECTURE.md` (the architecture direction this work draws from).
+**Companions:** `docs/repository-intelligence-baseline.md` (the v1 audit this work closes findings against), `REPOSITORY_INTELLIGENCE_V2_ARCHITECTURE.md` (the architecture direction this work draws from).
 
 ---
 

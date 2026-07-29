@@ -1,6 +1,6 @@
 # Provider Management v2 — Principal Engineer Design Review
 
-*An adversarial review of [PROVIDER_MANAGEMENT_V2.md](PROVIDER_MANAGEMENT_V2.md),
+*An adversarial review of [01-provider-management-v2.md](01-provider-management-v2.md),
 written to find weaknesses before implementation starts, not to bless the
 design. Scope: production readiness for thousands of developers across
 Windows/macOS/Linux, enterprise, offline, and cloud-native environments.

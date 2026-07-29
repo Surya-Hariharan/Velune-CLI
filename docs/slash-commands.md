@@ -165,7 +165,7 @@ Inspecting and connecting Model Context Protocol servers.
 
 > `/mcp` has no `add` subcommand — new servers are declared in `.mcp.json`
 > (or `velune.toml [mcp.servers]`) and picked up by `/mcp connect` or the
-> periodic file-watch hot-reload. See [MCP.md](MCP.md).
+> periodic file-watch hot-reload. See [mcp.md](mcp.md).
 
 ---
 
@@ -297,7 +297,7 @@ Two extension points, no core code changes required:
 2. **Declarative plugins** — a `plugin.json` manifest plus a `commands/`
    directory ships one or more slash commands (and optionally skills,
    hooks, and MCP servers) as a unit. See
-   [ARCHITECTURE.md § Hooks and plugins](ARCHITECTURE.md#9-hooks-and-plugins).
+   [architecture.md § Hooks and plugins](architecture.md#9-hooks-and-plugins).
 
 Both are loaded into the same `SlashCommandRegistry` used by built-ins, so
 they get tab-completion, palette search, and `/help` listing for free.

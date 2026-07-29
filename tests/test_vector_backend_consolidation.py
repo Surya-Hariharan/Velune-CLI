@@ -5,7 +5,7 @@ outside its own file ever called ``upsert_points``/``search_similarity``/
 ``delete_points``/``delete_by_payload``, only its lazy ``.client`` property
 (handed to HybridRetriever for code/repository vector search). The real
 conversational-memory vector store remains ``SemanticMemory`` (LanceDB),
-unaffected — see docs/ARCHITECTURE.md §5 for the full reasoning.
+unaffected — see docs/architecture.md §5 for the full reasoning.
 """
 
 from __future__ import annotations

@@ -29,7 +29,7 @@ from velune.repository.tracker import GitTracker
 logger = logging.getLogger("velune.intelligence.graph_patcher")
 
 # Churn-weighted confidence decay for FILE nodes (docs/
-# REPOSITORY_INTELLIGENCE_BASELINE.md's Repository Evolution discussion:
+# repository-intelligence-baseline.md's Repository Evolution discussion:
 # "churn-weighted decay applied to confidence for capability claims
 # resting on recently-rewritten code"). _CHURN_DECAY_SCALE is the commit
 # count (within the volatility window) at which confidence has halved;

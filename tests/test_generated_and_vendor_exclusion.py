@@ -1,6 +1,6 @@
 """Regression tests for vendor-directory and generated-file-marker exclusion.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` Recommendation 2: recognize
+``docs/repository-intelligence-baseline.md`` Recommendation 2: recognize
 ``vendor/``, ``third_party/``, and generated-code markers as a discovery-time
 exclusion class, consistent with the existing ``node_modules``/``dist``
 treatment. Two distinct mechanisms implement this:

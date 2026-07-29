@@ -605,7 +605,7 @@ class KnowledgeGraph:
         separately: each of those opens and commits its own transaction, so a
         crash between them previously left deleted-but-not-reinserted nodes
         until the next successful delta (a known soft-consistency gap — see
-        ``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §4.3/§8). Sharing one
+        ``docs/repository-intelligence-baseline.md`` §4.3/§8). Sharing one
         connection/transaction here means the whole patch commits together or
         rolls back together, via the existing ``_write()`` rollback-on-exception.
 

@@ -1,6 +1,6 @@
 """Confidence-calibration log for classifier claims.
 
-docs/REPOSITORY_INTELLIGENCE_BASELINE.md's v1-vs-v2 discussion (referenced
+docs/repository-intelligence-baseline.md's v1-vs-v2 discussion (referenced
 in this repo's architecture review) singles out log-odds/Bayesian evidence
 fusion as more principled than a flat weighted sum, but harder to
 calibrate — and flags that this codebase has no labeled ground truth to

@@ -1,6 +1,6 @@
 """Tests for structural-shape fingerprinting in CodebaseAnalyzer.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §6.6/§8: a fixed folder-name
+``docs/repository-intelligence-baseline.md`` §6.6/§8: a fixed folder-name
 vocabulary (``_GENERIC_LAYERS``) produces zero features — and an "Unknown"
 architecture pattern — for single-letter, abbreviated, or non-English
 directory names. The ``poorly_named`` benchmark repo saw all 4 files fall

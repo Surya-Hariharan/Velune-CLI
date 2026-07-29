@@ -1,6 +1,6 @@
 """Tests for the Claude-family token count approximation.
 
-docs/REPOSITORY_INTELLIGENCE_BASELINE.md §8/Recommendation 6: "Token
+docs/repository-intelligence-baseline.md §8/Recommendation 6: "Token
 counting for Claude is not Claude's tokenizer. TokenCounter routes both
 ModelFamily.GPT and ModelFamily.CLAUDE through OpenAI's tiktoken... A
 heuristic under-count could let assembled context silently exceed a local

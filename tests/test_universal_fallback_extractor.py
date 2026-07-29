@@ -1,6 +1,6 @@
 """Unit tests for the universal low-confidence fallback symbol extractor.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §8 (Weakness 2): "No generic/
+``docs/repository-intelligence-baseline.md`` §8 (Weakness 2): "No generic/
 fallback path for unsupported languages or frameworks. Every extraction
 step ... is a closed enumeration; anything outside it contributes zero
 information." Confirmed live in §6.2 (PHP: "All 3 PHP files get 0 symbols").

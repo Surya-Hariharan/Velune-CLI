@@ -1,6 +1,6 @@
 """Regression coverage for the six previously-untested classification modules.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §8 flagged api_mapper.py,
+``docs/repository-intelligence-baseline.md`` §8 flagged api_mapper.py,
 architecture_detector.py, technology_detector.py, project_type.py,
 config_intelligence.py, and analyzer.py's classification logic as having
 *no dedicated test files*, despite being the modules responsible for nearly

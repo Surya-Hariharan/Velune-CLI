@@ -4,9 +4,9 @@
 control flow through every subsystem.*
 
 Written for engineers working on the codebase, not end users — see the
-[README](../README.md) for usage and the [Usage Guide](USAGE_GUIDE.md) for
+[README](../README.md) for usage and the [Usage Guide](usage-guide.md) for
 day-to-day workflows. For the *why* behind the DI kernel and module
-boundaries specifically, see [docs/DEVELOPMENT.md](DEVELOPMENT.md).
+boundaries specifically, see [docs/development.md](development.md).
 
 Velune CLI is a single Python process (no client/server split by default). It
 starts instantly and does no expensive work — indexing, model discovery,
@@ -67,7 +67,7 @@ actually invoked does its module get imported.
 Everything below the Typer dispatch layer runs on a small dependency-injection
 kernel in `velune/kernel/` (`ServiceContainer`, `RuntimeEnvironment`,
 `SubsystemModule`, `RuntimeBootstrapper` — see
-[DEVELOPMENT.md § The bootstrap / DI layer](DEVELOPMENT.md#1-the-bootstrap--di-layer)
+[development.md § The bootstrap / DI layer](development.md#1-the-bootstrap--di-layer)
 for the contributor-facing view). Every `SubsystemModule` declares a `tier`:
 
 - **Tier 0** — cheap, synchronous. Kernel, providers, models, observability.
@@ -146,7 +146,7 @@ Slash commands are a real registry, not a big `if/elif` chain:
   up, honors a `"confirm"` permission tag (prompts before running
   destructive commands), and calls `cmd.handler(args)`.
 
-See [Slash Commands](SLASH_COMMANDS.md) for the full command reference.
+See [Slash Commands](slash-commands.md) for the full command reference.
 
 ### Tab completion
 
@@ -411,7 +411,7 @@ Command approval itself (read vs. write vs. destructive) is classified by
 
 ## 8. MCP (Model Context Protocol)
 
-Velune CLI is both an MCP client and an MCP server. See [MCP.md](MCP.md) for the
+Velune CLI is both an MCP client and an MCP server. See [mcp.md](mcp.md) for the
 full integration guide — transports, trust gating, `.mcp.json` loading, and
 the `/mcp` command surface.
 

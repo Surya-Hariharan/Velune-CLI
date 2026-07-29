@@ -1,6 +1,6 @@
 """Unit tests for Jupyter notebook parsing (RepositorySnapshotParser).
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §6.3: ``.ipynb`` was absent from
+``docs/repository-intelligence-baseline.md`` §6.3: ``.ipynb`` was absent from
 the discovery allowlist entirely, so every downstream feature (symbols,
 import graph, blast radius) operated as if notebooks didn't exist — the
 sharpest single finding for ML-workflow repos. Fixed by adding ``.ipynb`` to

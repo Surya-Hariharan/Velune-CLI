@@ -2,8 +2,8 @@
 
 *Practical guidance for getting good results out of Velune CLI day-to-day.*
 
-For what each command does, see [Slash Commands](SLASH_COMMANDS.md); for how
-the system works internally, see [Architecture](ARCHITECTURE.md). Back to
+For what each command does, see [Slash Commands](slash-commands.md); for how
+the system works internally, see [Architecture](architecture.md). Back to
 [README](../README.md).
 
 ---
@@ -54,7 +54,7 @@ lower tier than they deserve (see below).
 Once you've indexed, most of the work happens off the prompt path: a
 background engine watches the filesystem and keeps the index current
 incrementally, without re-scanning the whole repo on every turn. See
-[ARCHITECTURE.md § Repository cognition, intelligence & the Knowledge Graph](ARCHITECTURE.md#6-repository-cognition-intelligence--the-knowledge-graph)
+[architecture.md § Repository cognition, intelligence & the Knowledge Graph](architecture.md#6-repository-cognition-intelligence--the-knowledge-graph)
 for how that works internally.
 
 ---
@@ -154,7 +154,7 @@ for the workspace, not just the current turn) and prompts for confirmation
 
 > What decides *which* sources feed a given answer — and how much of each —
 > is intent-aware retrieval, not a fixed mix. See
-> [ARCHITECTURE.md § Memory system](ARCHITECTURE.md#5-memory-system)
+> [architecture.md § Memory system](architecture.md#5-memory-system)
 > for the full mechanics (BM25 + vector + graph fusion, cross-encoder
 > reranking, per-intent weighting).
 
@@ -194,7 +194,7 @@ how much you want to share:
    "run a linter after every file write" or "block commits to `main`" —
    policy enforcement rather than new functionality.
 
-See [ARCHITECTURE.md § Hooks and plugins](ARCHITECTURE.md#9-hooks-and-plugins)
+See [architecture.md § Hooks and plugins](architecture.md#9-hooks-and-plugins)
 for the file formats.
 
 ---
@@ -204,7 +204,7 @@ for the file formats.
 - **MCP** — to use Velune CLI's tools from Claude Desktop, VS Code, or another
   MCP-capable editor, run `velune mcp serve`. To pull tools *into* Velune CLI
   from an external MCP server, declare it in `.mcp.json` and use `/mcp
-  connect <name>`. See [MCP.md](MCP.md) for trust gating and transport
+  connect <name>`. See [mcp.md](mcp.md) for trust gating and transport
   details — outbound connections are trust-gated per workspace, so a repo
   you haven't explicitly trusted won't silently load its `.mcp.json`.
 - **Resource connectors** — for Velune CLI to query a database or container
@@ -237,7 +237,7 @@ safely can). Common specific checks:
 - `velune pipeline trace "<query>"` — trace a query through the retrieval
   pipeline (lexical/vector/graph hit counts, timings, fusion) — the CLI
   entry point into what
-  [ARCHITECTURE.md § Memory system](ARCHITECTURE.md#5-memory-system) describes.
+  [architecture.md § Memory system](architecture.md#5-memory-system) describes.
 
 Both `velune status` and `velune logs` exist specifically so you can prove
 (to yourself or someone else) that indexing or a tool call really happened,

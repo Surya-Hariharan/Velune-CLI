@@ -1,6 +1,6 @@
 """Regression tests for rename detection in the incremental indexer.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §3.3/§4.2: "Renames are not
+``docs/repository-intelligence-baseline.md`` §3.3/§4.2: "Renames are not
 detected as renames — they compute as a to_remove + to_add pair, meaning
 anything keyed by the old path (symbol IDs, staleness trackers) goes stale
 until the next successful patch cycle recreates it under the new path."

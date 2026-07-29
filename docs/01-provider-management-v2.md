@@ -5,7 +5,7 @@ path from `/provider add anthropic` to a first streamed token, its weaknesses,
 and a proposed v2 architecture with a phased migration plan.*
 
 This is a design document, not an implementation — no code changes accompany
-it. See [ARCHITECTURE.md § 3](ARCHITECTURE.md#3-providers) for the one-paragraph
+it. See [architecture.md § 3](architecture.md#3-providers) for the one-paragraph
 summary this document supersedes in depth.
 
 ---
@@ -367,7 +367,7 @@ subsystem. Complexity ratings are relative to each other, not absolute.
 | Purpose | Continuous, actually-running background signal of each provider's live availability and latency — fixing weakness #7 (possibly-orphaned monitor) by making "started" a first-class, verified bootstrap step rather than an optional call site nobody confirmed. |
 | Inputs | Registered providers with a key (or reachable local endpoint). |
 | Outputs | `ProviderManifest{status, p50/p95 latency, consecutive_failures}` per provider, published on the event bus. |
-| Workflow | Same 30s polling loop concept as v1's `ProviderHealthMonitor`, but its `.start()` is called from the same tiered bootstrap path documented in `ARCHITECTURE.md` (Tier 1 background warm-up), with a startup-time assertion/log line proving it actually started — so "is this running" is answerable by grepping a log line instead of reading five files. |
+| Workflow | Same 30s polling loop concept as v1's `ProviderHealthMonitor`, but its `.start()` is called from the same tiered bootstrap path documented in `architecture.md` (Tier 1 background warm-up), with a startup-time assertion/log line proving it actually started — so "is this running" is answerable by grepping a log line instead of reading five files. |
 | Failure Modes | A provider polling check itself times out (2s) → counted toward `consecutive_failures`, feeding Circuit Breaker; monitor task itself crashing is caught and restarted rather than silently dying. |
 | Performance | Unchanged 30s interval, 2s per-check timeout, rolling 5-sample latency window — this cadence was already reasonable in v1. |
 | Security | Read-only health probes; never sends real user prompts. |

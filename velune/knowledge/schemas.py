@@ -25,7 +25,7 @@ class NodeType(StrEnum):
     # A fused, higher-order intent claim ("this cluster implements HTTP
     # request validation") — distinct from the structural node types above,
     # which describe *what calls what*, not *what the system does*. See
-    # docs/REPOSITORY_INTELLIGENCE_BASELINE.md's discussion of a semantic
+    # docs/repository-intelligence-baseline.md's discussion of a semantic
     # layer above the structural graph.
     CAPABILITY = "capability"
     # A statically-identified execution entrypoint (CLI command, HTTP route

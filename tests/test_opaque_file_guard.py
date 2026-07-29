@@ -1,6 +1,6 @@
 """Regression tests for the oversized-file (opaque) parse guard.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §6.4 found that a single
+``docs/repository-intelligence-baseline.md`` §6.4 found that a single
 800KB/60,000-line vendored file sitting in an unrecognized directory
 produced 20,013 of 20,015 total symbols and pushed a ~30ms index to 4.3s —
 the sharpest scalability finding in the benchmark, since no size guard

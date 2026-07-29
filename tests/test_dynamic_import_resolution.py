@@ -1,6 +1,6 @@
 """Unit tests for dynamic-import detection and resolution.
 
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` §6.7/§8: "Static-only import
+``docs/repository-intelligence-baseline.md`` §6.7/§8: "Static-only import
 resolution with no dynamic-import awareness at all... Plugin systems,
 dependency-injection containers, and lazy-loaded route registries are
 common precisely in larger, more mature codebases — and precisely those

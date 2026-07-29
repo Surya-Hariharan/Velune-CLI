@@ -1,7 +1,7 @@
 """Tests for git-history evolution signal wiring: co-change clustering,
 churn-weighted confidence decay, and rename-lineage metadata.
 
-docs/REPOSITORY_INTELLIGENCE_BASELINE.md's Repository Evolution discussion:
+docs/repository-intelligence-baseline.md's Repository Evolution discussion:
 "co-change clusters... often reveal true module boundaries better than
 folder structure does"; "churn-weighted decay applied to confidence for
 capability claims resting on recently-rewritten code."

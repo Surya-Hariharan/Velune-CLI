@@ -51,7 +51,7 @@ small dependency-injection kernel in `velune/kernel/`:
   (Typer/config only — used by `velune --version`, `velune config show`) or
   `"full"` (constructs the entire Tier-1 stack). This is the mechanism
   behind Velune CLI's near-zero-cost startup for simple commands — see
-  [ARCHITECTURE.md § Process shape](ARCHITECTURE.md#1-process-shape).
+  [architecture.md § Process shape](architecture.md#1-process-shape).
 
 **Practical implication for contributors:** if you add a new subsystem,
 give it a `module.py` with a factory function and register it with the
@@ -60,7 +60,7 @@ used. Code that reaches for a service should go through `get_container()` /
 `inject()`, not import and construct the class directly — otherwise you get
 a second, unwired instance (see the `BoundedCouncilOrchestrator` /
 `velune/cognition/agents/*` dead-code trap in
-[ARCHITECTURE.md § Known rough edges](ARCHITECTURE.md#known-rough-edges-for-contributors),
+[architecture.md § Known rough edges](architecture.md#known-rough-edges-for-contributors),
 which is exactly this mistake).
 
 ---
@@ -218,7 +218,7 @@ three registries over inventing a fourth loading mechanism.
   two vector stores (Qdrant for retrieval, LanceDB for memory lifecycle).
   Confirm which one the code path you're debugging actually reads from
   before assuming a shared cause.
-  See [ARCHITECTURE.md § Memory system](ARCHITECTURE.md#5-memory-system).
+  See [architecture.md § Memory system](architecture.md#5-memory-system).
 - **"A council task got escalated to a higher tier and I don't know why"**
   — check the repository's import graph fan-in for whatever file was
   mentioned; `TierClassifier.classify()` (`cognition/council/tiers.py`)
@@ -246,9 +246,9 @@ three registries over inventing a fourth loading mechanism.
 
 | Question | Doc |
 | --- | --- |
-| What does the system look like end-to-end? | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| What can I type in the REPL? | [SLASH_COMMANDS.md](SLASH_COMMANDS.md) |
-| How do I use this well as an end user? | [USAGE_GUIDE.md](USAGE_GUIDE.md) |
-| How does MCP client/server/trust work? | [MCP.md](MCP.md) |
+| What does the system look like end-to-end? | [architecture.md](architecture.md) |
+| What can I type in the REPL? | [slash-commands.md](slash-commands.md) |
+| How do I use this well as an end user? | [usage-guide.md](usage-guide.md) |
+| How does MCP client/server/trust work? | [mcp.md](mcp.md) |
 | How do I add a provider / command / council agent, step by step? | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | What's the threat model and trust boundary? | [SECURITY.md](../SECURITY.md) |

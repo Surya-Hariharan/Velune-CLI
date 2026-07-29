@@ -1,7 +1,7 @@
 """Synthetic repository corpus for Repository Intelligence regression tests.
 
 These eight repo shapes mirror the baseline benchmark corpus described in
-``docs/REPOSITORY_INTELLIGENCE_BASELINE.md`` (Appendix A): well-structured,
+``docs/repository-intelligence-baseline.md`` (Appendix A): well-structured,
 legacy PHP, notebook-first ML, a training pipeline with a vendored file,
 a JS/Python monorepo with nested-only manifests, terse/single-letter naming,
 dynamic-import-based plugin loading, and a Rust+Python polyglot repo.

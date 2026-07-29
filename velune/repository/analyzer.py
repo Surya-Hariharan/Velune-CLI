@@ -203,7 +203,7 @@ _VELUNE_HIERARCHY: dict[str, int] = {
 
 # ---------------------------------------------------------------------------
 # Structural-shape fingerprints — a fallback for files folder-name matching
-# can't place. docs/REPOSITORY_INTELLIGENCE_BASELINE.md §6.6/§8: a fixed
+# can't place. docs/repository-intelligence-baseline.md §6.6/§8: a fixed
 # folder-name vocabulary produces zero features (and an "Unknown"
 # architecture) for single-letter, abbreviated, or non-English directory
 # names — the `poorly_named` benchmark repo saw every file fall into
