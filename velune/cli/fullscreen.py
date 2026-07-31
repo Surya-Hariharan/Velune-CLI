@@ -61,22 +61,13 @@ _MAX_TRANSCRIPT_LINES = 4000
 _PROMPT_MAX_LINES = 5
 _MARKDOWN_STREAM_THROTTLE_S = 0.08
 
-# The REPL's content column never renders wider than this, however wide the
-# real terminal window is — resizing/maximizing the window (or zooming the
-# terminal's font out) just grows the side gutters, it never reflows the
-# conversation, borders, or banner. Purely cosmetic ceiling: it does not (and
-# cannot) stop the terminal emulator's own font-size zoom, which never
-# reaches this process as input.
-#
-# 100 columns was picked as a prose-readability measure — it's close to the
-# ~66-90 character line length typography guides recommend for comfortable
-# reading, wide enough for most `git diff`/table output to avoid wrapping,
-# and narrow enough to leave visible gutters on a maximized 1080p terminal.
-# It is a default, not a hard limit: override it with `display.content_max_width`
-# in velune.toml (or `VELUNE_DISPLAY__CONTENT_MAX_WIDTH`) — see
+# By default the REPL's content column fills the entire terminal width — no
+# cap. Set `display.content_max_width` in velune.toml (or
+# `VELUNE_DISPLAY__CONTENT_MAX_WIDTH`) to a column count to letterbox the
+# conversation/borders/banner into a narrower reading column instead, leaving
+# the rest of a wide terminal as empty side gutters. See
 # `FullscreenREPLUI.__init__`'s `max_content_width` param, which is what
-# actually threads a configured value through to `_width()` below.
-_MAX_CONTENT_WIDTH = 100
+# threads a configured value through to `_width()` below.
 
 # Braille spinner frames for the "thinking" indicator — advances every tick so
 # the wait feels alive, coloured with the brand accent.
@@ -296,10 +287,11 @@ class FullscreenREPLUI:
         max_content_width: int | None = None,
     ) -> None:
         self._status_state = status_state
-        # `None`/non-positive falls back to the documented default rather than
-        # producing a zero-or-negative Dimension.
+        # `None` (the default) means "no cap" — content fills the full
+        # terminal width. Non-positive configured values are treated the
+        # same way rather than producing a zero-or-negative Dimension.
         self._max_content_width = (
-            max_content_width if max_content_width and max_content_width > 0 else _MAX_CONTENT_WIDTH
+            max_content_width if max_content_width and max_content_width > 0 else None
         )
         self._inline_flow = inline_flow
         self._on_status_render = on_status_render
@@ -574,22 +566,25 @@ class FullscreenREPLUI:
                         always_hide_cursor=True,
                     ),
                 ],
-                # Never wider than `self._max_content_width` — `_width()` mirrors
-                # this cap so border-drawing and the home screen match what
-                # actually gets allocated on screen.
-                width=Dimension(max=self._max_content_width, preferred=self._max_content_width),
+                # `self._max_content_width` is `None` by default, so `content`
+                # has no explicit width and simply fills whatever the parent
+                # `VSplit` gives it — the whole terminal width. When a cap
+                # *is* configured, this pins `content` to it and `align=LEFT`
+                # below sends the leftover width into a trailing gutter
+                # instead of the chrome, letterboxing it against the left
+                # edge. `_width()` mirrors this same cap so border-drawing
+                # and the home screen match what actually gets allocated.
+                width=(
+                    Dimension(max=self._max_content_width, preferred=self._max_content_width)
+                    if self._max_content_width is not None
+                    else None
+                ),
             ),
             floats=_build_floats(command_palette, model_switcher, inline_flow),
         )
 
-        # `align=CENTER` makes VSplit auto-insert flexible zero-preferred-width
-        # gutters on both sides of `content` — since `content`'s own width is
-        # capped above, a terminal wider than `_MAX_CONTENT_WIDTH` grows those
-        # gutters instead of the conversation/prompt/status chrome. A narrower
-        # terminal just shrinks `content` below its preferred width as usual;
-        # this is a ceiling, not a fixed size that could break on a small window.
         root_style = f"bg:{design.BACKGROUND}" if design.color_enabled() else ""
-        root = VSplit([content], align=HorizontalAlign.CENTER, style=root_style)
+        root = VSplit([content], align=HorizontalAlign.LEFT, style=root_style)
 
         self._app = Application(
             layout=Layout(root, focused_element=self.buffer),
@@ -1156,9 +1151,12 @@ class FullscreenREPLUI:
             # Mirrors the `self._max_content_width` cap on the layout's content
             # column (`__init__`, the `content = FloatContainer(...)` / `root
             # = VSplit(...)` pair) — this is what the border, home screen,
-            # and markdown rendering actually get allocated, not the raw
-            # terminal width once the terminal is wider than the cap.
-            return min(self._max_content_width, max(20, self._app.output.get_size().columns))
+            # and markdown rendering actually get allocated. `None` means no
+            # cap: the full terminal width, same as what `content` fills.
+            columns = max(20, self._app.output.get_size().columns)
+            if self._max_content_width is None:
+                return columns
+            return min(self._max_content_width, columns)
         except Exception:
             return 80
 

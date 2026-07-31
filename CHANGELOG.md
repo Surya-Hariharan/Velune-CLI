@@ -8,8 +8,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **`velune doctor` reports terminal zoom-lock feasibility.** Investigated
+  whether Velune could lock the host terminal's font-zoom shortcuts
+  (`Ctrl +/-/0`, `Ctrl+scroll`, `Cmd +/-/0`) for the session across Windows
+  Terminal, the legacy Windows Console Host (PowerShell/CMD), macOS
+  Terminal.app, iTerm2, GNOME Terminal, Konsole, Alacritty, kitty, and the
+  VS Code integrated terminal. None expose a session-scoped API for this —
+  zoom is always resolved inside the emulator's own input layer before any
+  byte reaches the child process — so no lock is implemented. `velune
+  doctor` now detects the hosting terminal and surfaces this as a documented
+  "warn," not a silent no-op; full per-terminal findings in
+  [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md).
+
 ### Changed
 
+- **Home screen banner renamed "VELUNE" → "VELUNE CLI"**, and the REPL's
+  content column now fills the full terminal width by default instead of
+  letterboxing into a fixed 100-column reading pane (still available via
+  `display.content_max_width` in `velune.toml` for anyone who preferred it).
 - **Renamed five slash commands whose names didn't say what they do.**
   `/login` → `/connect` (it pastes an API key into a provider, not a
   username/password sign-in), `/councilmodel` → `/roles`, `/optimus` →

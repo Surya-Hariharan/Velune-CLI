@@ -1,6 +1,6 @@
 """Home surface for the fullscreen REPL — gradient wordmark + runtime summary.
 
-The empty transcript shows a bold VELUNE wordmark painted with the brand
+The empty transcript shows a bold VELUNE CLI wordmark painted with the brand
 gradient (violet → blue → teal), a tagline + version, a compact block of live
 runtime facts (model, repository, memory, MCP, providers), and a one-line hint.
 On narrow terminals the block wordmark is swapped for a compact lockup so the
@@ -42,15 +42,16 @@ HOME_STYLES: dict[str, str] = {
 }
 
 # --- Wordmark ---------------------------------------------------------------
-# "VELUNE" in the ANSI-Shadow figlet style. All glyphs are single display-width
-# (full-block + box-drawing), so character count equals rendered columns.
+# "VELUNE CLI" in the ANSI-Shadow figlet style. All glyphs are single
+# display-width (full-block + box-drawing), so character count equals
+# rendered columns.
 _WORDMARK_ROWS: tuple[str, ...] = (
-    "██╗   ██╗███████╗██╗     ██╗   ██╗███╗   ██╗███████╗",
-    "██║   ██║██╔════╝██║     ██║   ██║████╗  ██║██╔════╝",
-    "██║   ██║█████╗  ██║     ██║   ██║██╔██╗ ██║█████╗  ",
-    "╚██╗ ██╔╝██╔══╝  ██║     ██║   ██║██║╚██╗██║██╔══╝  ",
-    " ╚████╔╝ ███████╗███████╗╚██████╔╝██║ ╚████║███████╗",
-    "  ╚═══╝  ╚══════╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝",
+    "██╗   ██╗███████╗██╗     ██╗   ██╗███╗   ██╗███████╗   ██████╗██╗     ██╗",
+    "██║   ██║██╔════╝██║     ██║   ██║████╗  ██║██╔════╝  ██╔════╝██║     ██║",
+    "██║   ██║█████╗  ██║     ██║   ██║██╔██╗ ██║█████╗    ██║     ██║     ██║",
+    "╚██╗ ██╔╝██╔══╝  ██║     ██║   ██║██║╚██╗██║██╔══╝    ██║     ██║     ██║",
+    " ╚████╔╝ ███████╗███████╗╚██████╔╝██║ ╚████║███████╗  ╚██████╗███████╗██║",
+    "  ╚═══╝  ╚══════╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═════╝╚══════╝╚═╝",
 )
 _WORDMARK_WIDTH = max(len(r) for r in _WORDMARK_ROWS)
 
@@ -242,7 +243,7 @@ def render_home(state: HomeState, width: int) -> FormattedText:
         # Compact lockup: gradient diamond + wordmark text on one line.
         segs = [
             ("class:home.dot", f"{design.ICON_DIAMOND} "),
-            ("class:home.brand", "VELUNE"),
+            ("class:home.brand", "VELUNE CLI"),
         ]
         if state.version:
             segs.append(("class:home.version", f"  v{state.version}"))

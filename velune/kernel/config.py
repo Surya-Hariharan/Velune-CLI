@@ -173,12 +173,11 @@ class DisplayConfig(BaseModel):
     """Terminal UI layout options for the fullscreen REPL."""
 
     # Caps how wide the REPL's content column (conversation, borders, banner)
-    # ever renders, regardless of actual terminal width — see the comment on
-    # `_MAX_CONTENT_WIDTH` in velune/cli/fullscreen.py for why 100 is the
-    # default. A wider terminal just grows empty side gutters instead of
-    # reflowing content; set this higher to use the full window width, or
-    # lower for a narrower reading column.
-    content_max_width: int = Field(default=100, ge=20)
+    # ever renders, regardless of actual terminal width. Default is `None` —
+    # content fills the full terminal width. Set this to a column count
+    # (e.g. 100) to letterbox the content into a narrower reading column
+    # instead, with the terminal's extra width left as empty side gutters.
+    content_max_width: int | None = Field(default=None, ge=20)
     # Swaps the OK/WARN/DANGER severity colors for a colorblind-safe
     # (Okabe-Ito) alternate palette — see `set_colorblind_mode()` in
     # velune/cli/design.py. Toggle live with `/theme colorblind`.

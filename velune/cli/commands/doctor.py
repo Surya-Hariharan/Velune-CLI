@@ -193,6 +193,7 @@ def check(
         _check_session_cost,
         _check_memory_health,
         _check_council_roles,
+        _check_terminal_zoom_lock,
     ]
 
     results = []
@@ -973,6 +974,26 @@ def _check_council_roles() -> dict:
         }
 
 
+def _check_terminal_zoom_lock() -> dict:
+    """Report whether this session's terminal emulator can be asked to stop
+    handling its own font-zoom shortcuts (Ctrl +/-/0, Ctrl+scroll, ...).
+
+    Always a "warn," never a "fail" — this isn't a misconfiguration of the
+    user's environment, it's an inherent limitation of every terminal
+    emulator investigated (see docs/terminal-zoom-lock.md): zoom shortcuts
+    are consumed by the emulator's own input layer before any byte reaches
+    this process over the PTY, so there is nothing here to fix or retry.
+    """
+    from velune.cli.terminal_env import detect_terminal
+
+    info = detect_terminal()
+    return {
+        "name": "Terminal Zoom Lock",
+        "status": "ok" if info.zoom_lock_supported else "warn",
+        "message": f"Detected: {info.name}. {info.reason}",
+    }
+
+
 def _render_results(results: list) -> None:
     from rich.panel import Panel
     from rich.text import Text
@@ -1006,9 +1027,10 @@ def _render_results(results: list) -> None:
         "Available VRAM": "Performance",
         "Empirical Model Benchmarks": "Performance",
         "Session Cost Tracking": "Performance",
+        "Terminal Zoom Lock": "Terminal",
     }
 
-    categories = ["Providers", "Storage", "Security", "Performance", "Council"]
+    categories = ["Providers", "Storage", "Security", "Performance", "Council", "Terminal"]
     grouped: dict[str, list] = {cat: [] for cat in categories}
     for r in results:
         cat = categories_map.get(r["name"], "Performance")

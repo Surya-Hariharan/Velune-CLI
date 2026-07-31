@@ -1,13 +1,10 @@
-"""The REPL's content column has a fixed ceiling — it must not stretch to
-fill an arbitrarily wide terminal.
+"""The REPL's content column fills the full terminal width by default.
 
-A terminal emulator's own font-size zoom (Ctrl+scroll / Ctrl+Plus-Minus) never
-reaches this process as input, so it can't be intercepted or blocked here —
-this only fixes the *layout*: past `_MAX_CONTENT_WIDTH` (fullscreen.py), a
-wider window just grows blank gutters on both sides instead of stretching the
-conversation pane, borders, or banner. A narrower window still shrinks the
-content normally (this is a ceiling, not a fixed size that could break a
-small window).
+`max_content_width` is opt-in: passing `None` (the default) must never
+letterbox the layout — the conversation pane, borders, and banner should
+stretch to whatever width the terminal actually is, on both wide and narrow
+terminals. Passing an explicit cap restores the old letterboxed behavior,
+pinned to the left edge with the leftover width sent to a trailing gutter.
 
 Drives a real `Application` against a real `Vt100_Output` over `StringIO`,
 mirroring `test_overlay_collapse.py`'s harness, and asserts on the rendered
@@ -28,14 +25,14 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.output.vt100 import Vt100_Output
 
 from velune.cli.command_palette import PALETTE_STYLES, CommandPalette
-from velune.cli.fullscreen import _MAX_CONTENT_WIDTH, FullscreenREPLUI
+from velune.cli.fullscreen import FullscreenREPLUI
 from velune.cli.inline_flow import InlineFlow
 from velune.cli.statusbar import StatusBarState
 
 _SETTLE = 0.25
 
 
-def _build_ui(inp, columns: int) -> FullscreenREPLUI:
+def _build_ui(inp, columns: int, *, max_content_width: int | None = None) -> FullscreenREPLUI:
     output = Vt100_Output(io.StringIO(), lambda: Size(rows=45, columns=columns))
     flow = InlineFlow()
     palette = CommandPalette([], suppressed=flow.is_active)
@@ -54,24 +51,16 @@ def _build_ui(inp, columns: int) -> FullscreenREPLUI:
         inline_flow=flow,
         output=output,
         input=inp,
+        max_content_width=max_content_width,
     )
 
 
-def _run_and_measure(columns: int) -> tuple[int, int]:
-    """(left gutter, border width) of the top prompt border on a real screen.
-
-    Checking the border's *length alone* isn't enough to prove the container
-    itself was capped — `_render_prompt_top_border` builds a string sized off
-    `_width()`, so a regression that drops the layout-level cap but leaves
-    `_width()` clamped would still produce a short string, just left-aligned
-    inside a still-full-width Window (a blank strip on the right, not
-    centered gutters on both sides). The left-gutter offset is what actually
-    distinguishes "letterboxed" from "short string, wrong side padded."
-    """
+def _run_and_measure(columns: int, *, max_content_width: int | None = None) -> tuple[int, int]:
+    """(left gutter, border width) of the top prompt border on a real screen."""
 
     async def _main():
         with create_pipe_input() as inp:
-            ui = _build_ui(inp, columns)
+            ui = _build_ui(inp, columns, max_content_width=max_content_width)
             ui._running = True
             task = asyncio.ensure_future(ui.run())
             await asyncio.sleep(_SETTLE)
@@ -93,18 +82,14 @@ def _run_and_measure(columns: int) -> tuple[int, int]:
 
 
 @pytest.mark.timeout(30)
-def test_content_column_is_centered_and_capped_on_a_wide_terminal():
+def test_content_column_fills_a_wide_terminal_by_default():
     columns = 220
     left, width = _run_and_measure(columns)
 
-    assert width == _MAX_CONTENT_WIDTH, (
+    assert left == 0, "with no configured cap, a wide terminal should have no left gutter"
+    assert width == columns, (
         f"a {columns}-column terminal rendered the border at {width} cells, "
-        f"expected it capped at {_MAX_CONTENT_WIDTH}"
-    )
-    expected_gutter = (columns - _MAX_CONTENT_WIDTH) // 2
-    assert left == pytest.approx(expected_gutter, abs=2), (
-        f"border started at column {left}, expected it centered with a "
-        f"~{expected_gutter}-column gutter — it isn't letterboxed"
+        "expected it to fill the whole width by default"
     )
 
 
@@ -113,8 +98,23 @@ def test_content_column_still_fills_a_narrow_terminal():
     columns = 60
     left, width = _run_and_measure(columns)
 
-    assert left == 0, "a terminal narrower than the cap should have no left gutter"
+    assert left == 0, "a narrow terminal should have no left gutter"
     assert width == columns, (
-        f"a {columns}-column terminal (narrower than the {_MAX_CONTENT_WIDTH}-cell "
-        f"cap) rendered the border at {width} cells instead of filling the window"
+        f"a {columns}-column terminal rendered the border at {width} cells "
+        "instead of filling the window"
+    )
+
+
+@pytest.mark.timeout(30)
+def test_configured_cap_still_letterboxes_a_wide_terminal():
+    columns, cap = 220, 100
+    left, width = _run_and_measure(columns, max_content_width=cap)
+
+    assert width == cap, (
+        f"a {columns}-column terminal with content_max_width={cap} rendered the "
+        f"border at {width} cells, expected it capped at {cap}"
+    )
+    assert left == 0, (
+        "an explicitly configured cap is pinned to the left edge (not centered) "
+        f"— expected no left gutter, got {left}"
     )

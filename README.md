@@ -443,6 +443,7 @@ unmodified under WSL2 if preferred.
 | [docs/usage-guide.md](docs/usage-guide.md) | How to use Velune CLI effectively — tiers, memory, extensions, troubleshooting |
 | [docs/mcp.md](docs/mcp.md) | MCP server + client integration guide, transports, trust gating |
 | [docs/development.md](docs/development.md) | DI kernel, module boundaries, CI pipeline, extension-point design, debugging |
+| [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md) | Why terminal font-zoom can't be locked for a session, per emulator investigated |
 
 ---
 

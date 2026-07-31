@@ -98,8 +98,8 @@ def _sample_commands() -> list[SlashCommand]:
 
 def test_no_palette_means_one_float_unchanged():
     ui = _make_ui(command_palette=None)
-    # The root is a width-capping VSplit (see `_MAX_CONTENT_WIDTH` in
-    # fullscreen.py) wrapping the actual FloatContainer as its one child.
+    # The root is a VSplit (optionally width-capping, see `content_max_width`
+    # in fullscreen.py) wrapping the actual FloatContainer as its one child.
     content = ui._app.layout.container.children[0]
     assert len(content.floats) == 1
 
