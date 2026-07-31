@@ -38,6 +38,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **`pip install velune-cli` now also registers a `velune-cli` command.**
+  Root-caused a Windows report of "neither `velune` nor `velune-cli` is
+  recognized" after a clean install. A from-scratch build → wheel inspection
+  → clean-venv install → execution cycle confirmed the `velune` console
+  script, its generated launcher, and PyPI publish state were all already
+  correct — that half of the report was the well-known (and already
+  README-documented) case of the interpreter's `Scripts`/`bin` directory not
+  being on `PATH`. `velune-cli`, however, was a real gap: `[project.scripts]`
+  only ever defined `velune`, so the name matching the PyPI distribution
+  itself — the name users most naturally guess — was never a valid command
+  regardless of `PATH`. Added it as a second `[project.scripts]` entry
+  pointing at the same `velune.main:main`. Also removed the repo's
+  `MANIFEST.in`: it is inert under the Hatchling build backend (sdist
+  inclusion is controlled entirely by `[tool.hatch.build.targets.sdist]` in
+  `pyproject.toml`) and had drifted to reference a `docs/CHANGELOG.md` path
+  that no longer exists.
 - **CHANGELOG/CI documentation drift.** The `[0.6.0]` entry below describes
   an Architecture Lint job, a 70%-minimum unit-test coverage gate, and a
   dedicated startup-performance-regression job as part of CI. None of the

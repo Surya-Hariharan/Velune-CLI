@@ -139,6 +139,10 @@ dev = [
 
 [project.scripts]
 velune = "velune.main:main"
+# Alias matching the PyPI distribution name ("velune-cli"), since users
+# naturally guess `pip install X` → command `X` and the primary `velune`
+# short name isn't discoverable from the package name alone.
+velune-cli = "velune.main:main"
 
 [project.urls]
 Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
