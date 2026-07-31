@@ -20,9 +20,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   byte reaches the child process — so no lock is implemented. `velune
   doctor` now detects the hosting terminal and surfaces this as a documented
   "warn," not a silent no-op; full per-terminal findings in
-  [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md).
+  [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md). Extended to cover
+  WezTerm (Lua-configured `key_bindings`, resolved by its own `winit` event
+  loop — same structural dead end, same verdict).
 
 ### Changed
+
+- **The status bar and Rich console output inside the fullscreen REPL are now
+  fully responsive to the terminal's actual column count, instead of looking
+  best only at whatever width a developer happened to be testing at.**
+  Re-investigated a report that the UI "looks optimized at 90% zoom but not
+  100%": terminal zoom is not something a terminal app can observe or control
+  at all (see [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md)) — a
+  text-mode app only ever sees a COLUMNS×LINES grid, so a narrower zoom level
+  is indistinguishable from a narrower terminal window. Auditing every
+  rendering surface in `velune/cli/fullscreen.py` found the home screen,
+  composer, and prompt borders already fully width-driven, but two real
+  responsiveness bugs: (1) `render_status_bar` concatenated every active
+  segment (model, mode, context bar, git branch, MCP, background jobs,
+  alerts, invalid keys, provider health, latency, throughput) with zero width
+  awareness, so prompt_toolkit's non-wrapping status window would hard-clip
+  the tail mid-segment whenever too many indicators were active for the
+  available width — now it drops lower-priority segments in the documented
+  priority order (never mid-word) and mathematically cannot exceed the given
+  width, even in pathological cases; (2) the Rich `Console` feeding all
+  panel/table/markdown output synced its `.size` by assignment on every
+  write, which — because Rich's own `.size` *setter* permanently disables its
+  live terminal auto-detection — pinned the console to whatever width was
+  current as of the *previous* print, one print behind any resize, for the
+  rest of the session. Replaced with `_LiveSizedConsole`, which overrides
+  `.size` as a property that always re-reads the app's current width/height,
+  matching the pattern already used by `_render_home`/`_render_status`. New
+  coverage in `tests/test_statusbar_responsive_width.py` (status bar behavior
+  from 40 to 200 columns) and `tests/test_fullscreen_ui.py` (console
+  live-width tracking, including a test that fails against the old
+  write-time-sync implementation).
 
 - **Home screen banner renamed "VELUNE" → "VELUNE CLI"**, and the REPL's
   content column now fills the full terminal width by default instead of

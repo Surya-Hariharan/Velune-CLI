@@ -210,3 +210,52 @@ def test_streaming_falls_back_to_flat_text_on_markdown_render_failure(monkeypatc
 
     all_text = "\n".join(line.text for line in ui._lines)
     assert "plain text that should still show up" in all_text
+
+
+# ── Live console width (no pin/staleness on resize) ─────────────────────────
+
+
+def test_console_size_tracks_app_width_with_no_explicit_assignment():
+    from prompt_toolkit.data_structures import Size
+
+    ui = _make_ui()
+    ui._app.output.get_size = lambda: Size(rows=40, columns=100)
+    assert ui.console.size.width == 100
+
+    ui._app.output.get_size = lambda: Size(rows=40, columns=60)
+    assert ui.console.size.width == 60, (
+        "Console.size must re-read the app's live width on every access, "
+        "not return a value cached from a previous read"
+    )
+
+
+def test_console_size_does_not_pin_after_a_print(capsys):
+    """Regression guard: a previous version synced `console.size = (...)`
+    inside the sink's `write()`, which — because Rich's own size *setter*
+    permanently disables its live terminal auto-detection — pinned the
+    console to whatever width was current as of the *last* print, one print
+    behind any resize. `_LiveSizedConsole` must keep tracking the live width
+    through and after any number of prints."""
+    from prompt_toolkit.data_structures import Size
+
+    ui = _make_ui()
+    ui._app.output.get_size = lambda: Size(rows=40, columns=100)
+    ui.console.print("first line at 100 columns")
+    assert ui.console.size.width == 100
+
+    ui._app.output.get_size = lambda: Size(rows=40, columns=45)
+    assert ui.console.size.width == 45, "width must update immediately, not after another print"
+
+    ui.console.print("second line at 45 columns")
+    assert ui.console.size.width == 45
+
+
+def test_console_size_assignment_is_a_no_op_and_stays_live():
+    """Even if something still assigns to `.size` directly (defensive: the
+    setter is intentionally a no-op), live tracking must not break."""
+    from prompt_toolkit.data_structures import Size
+
+    ui = _make_ui()
+    ui._app.output.get_size = lambda: Size(rows=40, columns=100)
+    ui.console.size = (9999, 9999)  # must not stick
+    assert ui.console.size.width == 100

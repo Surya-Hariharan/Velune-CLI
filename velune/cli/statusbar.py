@@ -85,30 +85,96 @@ def _context_bar(pct: float) -> str:
     return "█" * filled + "░" * (10 - filled)
 
 
-def render_status_bar(state: StatusBarState) -> FormattedText:
-    parts: list[tuple[str, str]] = []
+# No caller-supplied width (e.g. the existing unit tests, which never render
+# this against a real terminal) means "don't truncate" — every segment fits
+# comfortably within this many columns in practice.
+_NO_LIMIT = 10_000
 
-    # Exit hint takes precedence over everything when active
-    if state.exit_hint:
-        parts.append(("class:bottom-toolbar.hint", " Ctrl+C again to exit"))
-        parts.append(_SEP)
 
-    # Provider + model — primary information
-    if state.model_id:
-        if state.provider_id:
-            parts.append(("class:bottom-toolbar.key", f" {state.provider_id}·"))
-            parts.append(("class:bottom-toolbar.model", state.model_id))
+def _clip(text: str, width: int) -> str:
+    if width <= 1 or len(text) <= width:
+        return text
+    return text[: width - 1].rstrip() + design.ICON_ELLIPSIS
+
+
+def _group_width(group: list[tuple[str, str]]) -> int:
+    return sum(len(t) for _s, t in group)
+
+
+def _clamp_parts(parts: list[tuple[str, str]], limit: int) -> list[tuple[str, str]]:
+    """Hard safety net: truncate *parts* so their combined text never exceeds
+    *limit*, cutting (with an ellipsis) inside whichever fragment overflows.
+
+    The core segments below reserve room for each other heuristically (model
+    text is clipped against an estimate of what mode/context will cost), which
+    covers every realistic terminal width. This exists only to make the
+    "never exceeds `limit`" guarantee unconditional — including pathological
+    widths wide enough for barely a few characters, where the heuristic
+    reservation can still be off by a few columns.
+    """
+    if limit <= 0:
+        return []
+    out: list[tuple[str, str]] = []
+    used = 0
+    for style, text in parts:
+        if used >= limit:
+            break
+        room = limit - used
+        if len(text) <= room:
+            out.append((style, text))
+            used += len(text)
         else:
-            parts.append(("class:bottom-toolbar.model", f" {state.model_id}"))
+            out.append((style, _clip(text, room)))
+            used = limit
+            break
+    return out
+
+
+def render_status_bar(state: StatusBarState, width: int | None = None) -> FormattedText:
+    """Render the status bar, dropping lower-priority segments (never
+    mid-word-clipping a segment) once *width* runs out.
+
+    A terminal at a narrower effective column count (smaller font / higher
+    "zoom", or just a smaller window) has less room for this line than a
+    wider one — the previous version concatenated every active segment with
+    no width awareness at all, so prompt_toolkit's own non-wrapping
+    ``height=1`` window would hard-clip the tail mid-segment on any
+    combination of active indicators that didn't fit. Segments are grouped
+    with their leading separator and added in the priority order documented
+    in the module docstring; once a group would overflow *width* it (and
+    only it) is skipped — a later, shorter group can still fit and is still
+    tried, so the bar shows as much as it has room for rather than stopping
+    at the first miss.
+    """
+    limit = width if width and width > 0 else _NO_LIMIT
+
+    # --- Core: exit hint, model/provider, mode, context bar -------------------
+    # Always shown — these are the primary orientation signals, not optional
+    # indicators, so instead of dropping them under extreme width pressure the
+    # model id itself is clipped to fit (see the `model_room` guard below).
+    core: list[tuple[str, str]] = []
+    if state.exit_hint:
+        core.append(("class:bottom-toolbar.hint", " Ctrl+C again to exit"))
+        core.append(_SEP)
+
+    if state.model_id:
+        prefix = f" {state.provider_id}·" if state.provider_id else " "
+        # Reserve room for the prefix and everything queued after the model
+        # (mode + context bar, generously estimated) so a long model id
+        # clips instead of forcing those off the end of a narrow terminal.
+        model_room = max(6, limit - len(prefix) - 28)
+        model_text = _clip(state.model_id, model_room)
+        if state.provider_id:
+            core.append(("class:bottom-toolbar.key", prefix))
+            core.append(("class:bottom-toolbar.model", model_text))
+        else:
+            core.append(("class:bottom-toolbar.model", f" {model_text}"))
     else:
-        parts.append(("class:bottom-toolbar.model", " no model"))
+        core.append(("class:bottom-toolbar.model", " no model"))
 
-    parts.append(_SEP)
-
-    # Mode — always shown (NORMAL is the common case but still orientation)
-    parts.append(("class:bottom-toolbar.mode", state.mode_label))
-
-    parts.append(_SEP)
+    core.append(_SEP)
+    core.append(("class:bottom-toolbar.mode", state.mode_label))
+    core.append(_SEP)
 
     # Context usage with visual bar. Thresholds come from design.py so the
     # status bar, prompt badge, and /context command all agree.
@@ -128,60 +194,61 @@ def render_status_bar(state: StatusBarState) -> FormattedText:
         )
     else:
         ctx_label = f"ctx {pct:.0f}%"
-    parts.append((ctx_style, f"{ctx_bar} {ctx_label}"))
+    core.append((ctx_style, f"{ctx_bar} {ctx_label}"))
 
-    # Git branch — only inside a repository
+    if _group_width(core) > limit:
+        core = _clamp_parts(core, limit)
+
+    parts = list(core)
+    used = _group_width(core)
+
+    # --- Optional segments, priority order (highest first) --------------------
+    optional_groups: list[list[tuple[str, str]]] = []
+
     if state.git_branch and state.git_branch not in ("non-git", "unknown"):
-        parts.append(_SEP)
-        parts.append(("class:bottom-toolbar.project", state.git_branch))
+        optional_groups.append([_SEP, ("class:bottom-toolbar.project", state.git_branch)])
 
-    # MCP — only when servers are configured; degraded counts get warn color
     if state.mcp_total > 0:
-        parts.append(_SEP)
         mcp_style = (
             "class:bottom-toolbar.ok"
             if state.mcp_connected == state.mcp_total
             else "class:bottom-toolbar.warn"
         )
-        parts.append((mcp_style, f"mcp {state.mcp_connected}/{state.mcp_total}"))
+        optional_groups.append([_SEP, (mcp_style, f"mcp {state.mcp_connected}/{state.mcp_total}")])
 
-    # Background jobs — only when running
     if state.bg_job_count > 0:
-        parts.append(_SEP)
-        parts.append(("class:bottom-toolbar.warn", f"bg:{state.bg_job_count}"))
+        optional_groups.append([_SEP, ("class:bottom-toolbar.warn", f"bg:{state.bg_job_count}")])
 
-    # Unread alerts — only when present
     if state.alert_count > 0:
-        parts.append(_SEP)
-        parts.append(("class:bottom-toolbar.warn", f"alerts:{state.alert_count}"))
+        optional_groups.append([_SEP, ("class:bottom-toolbar.warn", f"alerts:{state.alert_count}")])
 
-    # Rejected API keys — only when the provider has actually refused one.
-    # Named, because "1 key invalid" leaves the user hunting for which.
     if state.invalid_keys:
-        parts.append(_SEP)
         names = ", ".join(state.invalid_keys)
-        parts.append(("class:bottom-toolbar.danger", f"{names} key invalid — /connect"))
+        optional_groups.append(
+            [_SEP, ("class:bottom-toolbar.danger", f"{names} key invalid — /connect")]
+        )
 
-    # Provider health — only when there is an issue ("ok" is silent)
     if state.provider_health == "degraded":
-        parts.append(_SEP)
-        parts.append(("class:bottom-toolbar.warn", "provider degraded"))
+        optional_groups.append([_SEP, ("class:bottom-toolbar.warn", "provider degraded")])
     elif state.provider_health == "down":
-        parts.append(_SEP)
-        parts.append(("class:bottom-toolbar.danger", "provider down"))
+        optional_groups.append([_SEP, ("class:bottom-toolbar.danger", "provider down")])
 
-    # Latency — only after the first response of this session
     if state.last_latency_ms is not None:
-        parts.append(_SEP)
         if state.last_latency_ms >= 1000:
             latency = f"{state.last_latency_ms / 1000:.1f}s"
         else:
             latency = f"{state.last_latency_ms:.0f}ms"
-        parts.append(("class:bottom-toolbar.speed", latency))
+        optional_groups.append([_SEP, ("class:bottom-toolbar.speed", latency)])
 
-    # Throughput — only when streaming and non-zero
     if state.last_tokens_per_sec is not None and state.last_tokens_per_sec > 0:
-        parts.append(_SEP)
-        parts.append(("class:bottom-toolbar", f"{state.last_tokens_per_sec:.0f}t/s"))
+        optional_groups.append(
+            [_SEP, ("class:bottom-toolbar", f"{state.last_tokens_per_sec:.0f}t/s")]
+        )
+
+    for group in optional_groups:
+        group_len = _group_width(group)
+        if used + group_len <= limit:
+            parts.extend(group)
+            used += group_len
 
     return FormattedText(parts)

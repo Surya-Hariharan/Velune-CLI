@@ -148,6 +148,21 @@ def detect_terminal(
             + " Only editing the user's persistent alacritty.toml can change "
             "them.",
         )
+    if "WEZTERM_EXECUTABLE" in e or "WEZTERM_PANE" in e:
+        return TerminalInfo(
+            "WezTerm",
+            _NOT_SUPPORTED,
+            "IncreaseFontSize/DecreaseFontSize/ResetFontSize (default "
+            "Ctrl+Shift +/-/0) are Lua-configured key_bindings resolved by "
+            "WezTerm's own winit event loop — " + _NO_SESSION_API + " WezTerm "
+            "does let a foreground program send an OSC 1337 SetUserVar "
+            "escape sequence that a user's wezterm.lua can react to via "
+            "wezterm.on('user-var-changed', ...), but that still requires "
+            "the user to have pre-written persistent Lua config to actually "
+            "disable the binding, and nothing about it reverts automatically "
+            "on a crash or `kill -9` — same reliability bar kitty's "
+            "remote-control route failed, and the same verdict applies.",
+        )
 
     if plat == "win32":
         # Neither Windows Terminal nor a recognizable TERM_PROGRAM: this is

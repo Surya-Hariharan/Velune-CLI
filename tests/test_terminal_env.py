@@ -68,6 +68,19 @@ def test_alacritty_detected_via_socket():
     assert info.zoom_lock_supported is False
 
 
+def test_wezterm_detected_via_executable_env_var():
+    info = detect_terminal(env={"WEZTERM_EXECUTABLE": "/usr/bin/wezterm"}, platform="linux")
+    assert info.name == "WezTerm"
+    assert info.zoom_lock_supported is False
+    assert info.reason
+
+
+def test_wezterm_detected_via_pane_env_var():
+    info = detect_terminal(env={"WEZTERM_PANE": "0"}, platform="darwin")
+    assert info.name == "WezTerm"
+    assert info.zoom_lock_supported is False
+
+
 def test_windows_console_host_powershell():
     info = detect_terminal(env={"PSModulePath": "C:\\x"}, platform="win32")
     assert info.name == "Windows Console Host (PowerShell)"

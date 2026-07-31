@@ -27,7 +27,7 @@ from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProce
 from prompt_toolkit.mouse_events import MouseEventType
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
-from rich.console import Console
+from rich.console import Console, ConsoleDimensions
 
 from velune.cli import design
 from velune.cli.clipboard import copy_to_clipboard, extract_last_code_block
@@ -118,15 +118,6 @@ class _ConsoleSink:
     def write(self, data: str) -> int:
         if not data:
             return 0
-        # Best-effort width sync: Rich's Console doesn't know about this
-        # app's own terminal-size polling, so a stale console.size would
-        # pre-wrap panels/tables to the wrong width before we ever see them.
-        # This can only correct the *next* print (Rich buffers segments
-        # before flushing to file.write), not the one currently in flight.
-        try:
-            self._ui.console.size = (self._ui._width(), self._ui._height())
-        except Exception:
-            pass
         data = _OSC_RE.sub("", data)
         data = _strip_non_sgr_csi(data)
         self._pending += data.replace("\r", "")
@@ -139,6 +130,45 @@ class _ConsoleSink:
         if self._pending:
             self._ui.append_console_line(self._pending.rstrip())
             self._pending = ""
+
+
+class _LiveSizedConsole(Console):
+    """A Rich ``Console`` whose ``.size`` always reflects this app's *current*
+    width/height instead of a cached snapshot.
+
+    Rich's own ``Console.size`` getter only auto-detects from the real
+    terminal (``os.get_terminal_size()``) as long as nothing has ever
+    assigned to ``.size`` — the instant anything does (even once), Rich
+    switches to returning that fixed value forever, since its setter just
+    pins ``self._width``/``self._height`` and the getter's fast path returns
+    them directly without re-checking the terminal. A previous version of
+    this class synced ``console.size = (...)`` on every write to work around
+    staleness, but that assignment is itself what disables live detection,
+    and syncing happens after Rich has already wrapped the content that
+    triggered the write — so it only ever corrected the *next* print, not
+    the one in flight, and did so via the very mechanism that broke live
+    detection.  Overriding the property instead means every render call
+    (panels, tables, markdown, plain prints) picks up
+    :meth:`FullscreenREPLUI._width`/``_height`` fresh, with no lag and no
+    pinning — the same live-width pattern already used by ``_render_home``
+    and ``_render_status``.
+    """
+
+    def __init__(self, ui: FullscreenREPLUI, **kwargs: Any) -> None:
+        self._sync_ui = ui
+        super().__init__(**kwargs)
+
+    @property
+    def size(self) -> ConsoleDimensions:
+        return ConsoleDimensions(self._sync_ui._width(), self._sync_ui._height())
+
+    @size.setter
+    def size(self, new_size: tuple[int, int]) -> None:
+        # Rich's own __init__ assigns to `.size` when constructed with
+        # explicit width=/height= kwargs — accepted as a no-op since this
+        # class is never constructed that way (see `FullscreenREPLUI.__init__`)
+        # and live detection must stay in control either way.
+        pass
 
 
 class ToolCardHandle:
@@ -449,7 +479,8 @@ class FullscreenREPLUI:
         if inline_flow is not None:
             inline_flow.bind(self.buffer, self.invalidate)
 
-        self.console = Console(
+        self.console = _LiveSizedConsole(
+            self,
             file=_ConsoleSink(self),
             force_terminal=True,
             color_system="truecolor",
@@ -1144,7 +1175,7 @@ class FullscreenREPLUI:
     def _render_status(self) -> AnyFormattedText:
         if self._on_status_render is not None:
             self._on_status_render()
-        return render_status_bar(self._status_state)
+        return render_status_bar(self._status_state, self._width())
 
     def _render_prompt_top_border(self) -> AnyFormattedText:
         width = self._width()
