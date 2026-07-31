@@ -352,9 +352,7 @@ def _auto_accept_enabled(repl: VeluneREPL) -> bool:
 _LOW_CONFIDENCE_THRESHOLD = 0.34
 
 
-def _make_approver(
-    repl: VeluneREPL, ui: _ToolActivityUI, intent_confidence: float | None = None
-):
+def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI, intent_confidence: float | None = None):
     from velune.orchestration.tool_loop import READONLY_PERMISSIONS
     from velune.tools.safety import ApprovalMode, classify_command
 

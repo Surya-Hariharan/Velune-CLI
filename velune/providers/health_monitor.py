@@ -58,9 +58,7 @@ class ProviderHealthMonitor:
 
         self._running = True
         self._polling_task = asyncio.create_task(self._polling_loop())
-        logger.info(
-            "ProviderHealthMonitor started (polling every %.0fs)", self._poll_interval
-        )
+        logger.info("ProviderHealthMonitor started (polling every %.0fs)", self._poll_interval)
 
     async def stop(self) -> None:
         """Stop the background polling task."""

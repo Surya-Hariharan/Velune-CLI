@@ -120,7 +120,8 @@ def detect_terminal(
             _NOT_SUPPORTED,
             "Ctrl +/-/0 are GTK accelerator actions ('zoom-in'/'zoom-out'/"
             "'zoom-normal') wired at the GtkApplication level, consumed before "
-            "the VTE terminal widget ever sees the keypress — " + _NO_SESSION_API
+            "the VTE terminal widget ever sees the keypress — "
+            + _NO_SESSION_API
             + " Only a persistent gsettings/dconf keybinding override can "
             "change them.",
         )
