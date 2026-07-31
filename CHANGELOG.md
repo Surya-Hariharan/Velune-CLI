@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-07-31
+
 ### Added
 
 - **`velune doctor` reports terminal zoom-lock feasibility.** Investigated
