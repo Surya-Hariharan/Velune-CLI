@@ -97,6 +97,50 @@ async def test_end_episodic_session_is_noop_without_active_session():
 
 
 # ---------------------------------------------------------------------------
+# on_warm_complete — retries the episodic session start once Tier-1's
+# background warm-up finishes, closing the race where `run()`'s own
+# synchronous `_start_episodic_session()` call fires before
+# `runtime.episodic_session_memory` exists in the container (it's a Tier-1
+# module, bootstrapped in a detached background task — see
+# `entrypoint.py::_warm_and_finalize`). Left unfixed, every turn for the
+# rest of the process falls back to a session id with no row in `sessions`,
+# and `EpisodicMemory.record_turn()` fails its foreign key on every write.
+# ---------------------------------------------------------------------------
+
+
+async def test_on_warm_complete_retries_when_first_attempt_never_started():
+    episodic = MagicMock()
+    episodic.start_session = AsyncMock(return_value="ses-123")
+    repl = _make_repl()
+    repl._episodic_session_id = None  # the synchronous startup attempt failed
+    repl.container.get.side_effect = lambda key: {
+        "runtime.episodic_session_memory": episodic,
+        "runtime.workspace": "/ws",
+    }.get(key)
+
+    await repl.on_warm_complete()
+
+    episodic.start_session.assert_awaited_once()
+    assert repl._episodic_session_id == "ses-123"
+
+
+async def test_on_warm_complete_does_not_restart_an_already_active_session():
+    episodic = MagicMock()
+    episodic.start_session = AsyncMock(return_value="ses-should-not-be-used")
+    repl = _make_repl()
+    repl._episodic_session_id = "ses-1"  # the synchronous startup already succeeded
+    repl.container.get.side_effect = lambda key: {
+        "runtime.episodic_session_memory": episodic,
+        "runtime.workspace": "/ws",
+    }.get(key)
+
+    await repl.on_warm_complete()
+
+    episodic.start_session.assert_not_awaited()
+    assert repl._episodic_session_id == "ses-1"
+
+
+# ---------------------------------------------------------------------------
 # _record_turn_async — fire-and-forget MemoryLifecycleManager.record_turn()
 # ---------------------------------------------------------------------------
 

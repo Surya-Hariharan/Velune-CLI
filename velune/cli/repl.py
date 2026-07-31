@@ -365,9 +365,14 @@ class VeluneREPL:
             return False
 
         max_content_width = None
+        composer_min_lines = None
+        composer_max_lines = None
         try:
             config = self.container.get_optional("runtime.config")
-            max_content_width = getattr(getattr(config, "display", None), "content_max_width", None)
+            display = getattr(config, "display", None)
+            max_content_width = getattr(display, "content_max_width", None)
+            composer_min_lines = getattr(display, "composer_min_lines", None)
+            composer_max_lines = getattr(display, "composer_max_lines", None)
         except Exception:
             pass
 
@@ -385,6 +390,8 @@ class VeluneREPL:
             inline_flow=flow,
             home_provider=self._home_state,
             max_content_width=max_content_width,
+            composer_min_lines=composer_min_lines,
+            composer_max_lines=composer_max_lines,
         )
 
     async def _reverify_stale_keys(self) -> None:
@@ -1199,6 +1206,24 @@ class VeluneREPL:
             )
         except Exception as exc:
             _log.debug("Could not start episodic session: %s", exc)
+
+    async def on_warm_complete(self) -> None:
+        """Called by `entrypoint.py` once Tier-1 background warm-up finishes.
+
+        `_start_episodic_session()` above already runs once, synchronously,
+        near the top of `run()` — but on a fresh launch that happens before
+        Tier-1 (which owns `runtime.episodic_session_memory`) has
+        necessarily finished bootstrapping in the background, so
+        `container.get(...)` raises and the first attempt is swallowed at
+        DEBUG level. Every turn recorded afterwards then falls back to a
+        session id with no matching row in `sessions`, and
+        `EpisodicMemory.record_turn()` fails its `turns.session_id` foreign
+        key on every single write for the rest of the process. Retrying here
+        — now that Tier-1 is actually up — closes that window instead of
+        leaving episodic persistence permanently broken for the session.
+        """
+        if self._episodic_session_id is None:
+            await self._start_episodic_session()
 
     async def _end_episodic_session(self) -> None:
         if not self._episodic_session_id:

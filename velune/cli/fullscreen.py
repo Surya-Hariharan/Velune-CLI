@@ -18,13 +18,13 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, FormattedText, to_formatted_text
 from prompt_toolkit.history import History
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import FloatContainer, Layout
 from prompt_toolkit.layout.containers import Float, HorizontalAlign, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProcessor
+from prompt_toolkit.mouse_events import MouseEventType
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
 from rich.console import Console
@@ -58,7 +58,20 @@ def _strip_non_sgr_csi(text: str) -> str:
 
 
 _MAX_TRANSCRIPT_LINES = 4000
-_PROMPT_MAX_LINES = 5
+# Baseline/idle composer height and the ceiling it grows to before freezing
+# — see `FullscreenREPLUI._prompt_window_height`. Overridable via
+# `display.composer_min_lines` / `display.composer_max_lines` in
+# velune.toml (threaded through as the `composer_min_lines`/
+# `composer_max_lines` constructor args below).
+_PROMPT_MIN_LINES_DEFAULT = 3
+_PROMPT_MAX_LINES_DEFAULT = 8
+# Prefix width consumed by `_prompt_line_prefix` on every visual line
+# ("│ " border + either "❯ " or two spaces of padding) — subtracted from
+# the content width when estimating how many visual rows the buffer's text
+# will wrap to. An estimate, not a re-implementation of prompt_toolkit's
+# real wrapping, so it deliberately ignores wide/combining characters, same
+# rigor level as the border-width math in `_render_prompt_top_border`.
+_PROMPT_LINE_PREFIX_WIDTH = 4
 _MARKDOWN_STREAM_THROTTLE_S = 0.08
 
 # By default the REPL's content column fills the entire terminal width — no
@@ -264,6 +277,41 @@ def _build_floats(
     return floats
 
 
+class _ScrollableConversationWindow(Window):
+    """The conversation `Window`, with mouse-wheel ticks routed through
+    explicit callbacks instead of prompt_toolkit's default scroll handler.
+
+    `Window._mouse_handler`'s default SCROLL_UP/SCROLL_DOWN behavior mutates
+    `self.vertical_scroll` directly, which fights `_scroll_anchor` — the
+    application-level bookkeeping that also drives PageUp/PageDown/Ctrl+Home
+    (see `FullscreenREPLUI._sync_conversation_scroll`). Overriding
+    `_mouse_handler` here — the same hook `Window` itself uses internally —
+    keeps every scroll input path (keyboard and wheel alike) going through
+    one piece of state instead of two that can disagree.
+
+    Mouse events only ever reach a `Window` whose screen region the pointer
+    is actually over (`mouse_handlers.set_mouse_handler_for_range` in
+    prompt_toolkit's container rendering, keyed by each window's own
+    write-position box), so wheel ticks here are already naturally isolated
+    from the separate composer `Window` below it — no shared/global key
+    binding is involved.
+    """
+
+    def __init__(self, *args: Any, on_scroll_up: Any, on_scroll_down: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._on_scroll_up = on_scroll_up
+        self._on_scroll_down = on_scroll_down
+
+    def _mouse_handler(self, mouse_event: Any) -> Any:
+        if mouse_event.event_type == MouseEventType.SCROLL_UP:
+            self._on_scroll_up()
+            return None
+        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+            self._on_scroll_down()
+            return None
+        return super()._mouse_handler(mouse_event)
+
+
 class FullscreenREPLUI:
     """Owns the alternate-screen UI, prompt buffer, status line, and transcript."""
 
@@ -285,6 +333,8 @@ class FullscreenREPLUI:
         input: Any | None = None,
         output: Any | None = None,
         max_content_width: int | None = None,
+        composer_min_lines: int | None = None,
+        composer_max_lines: int | None = None,
     ) -> None:
         self._status_state = status_state
         # `None` (the default) means "no cap" — content fills the full
@@ -293,6 +343,28 @@ class FullscreenREPLUI:
         self._max_content_width = (
             max_content_width if max_content_width and max_content_width > 0 else None
         )
+        # Composer height bounds — see `_prompt_window_height`. Defensively
+        # clamped rather than validated at the config layer (mirrors how
+        # `max_content_width` above is handled): a misconfigured max below
+        # min just widens to match min instead of producing an inverted
+        # range no `Dimension` could satisfy.
+        self._prompt_min_lines = (
+            composer_min_lines
+            if composer_min_lines and composer_min_lines > 0
+            else _PROMPT_MIN_LINES_DEFAULT
+        )
+        self._prompt_max_lines = max(
+            self._prompt_min_lines,
+            composer_max_lines
+            if composer_max_lines and composer_max_lines > 0
+            else _PROMPT_MAX_LINES_DEFAULT,
+        )
+        # Set once content reaches `_prompt_max_lines`; keeps the composer's
+        # outer height pinned at the max for the rest of the current draft
+        # even if the user then deletes text back down, so the box never
+        # jumps around mid-edit. Clears when the buffer goes empty (message
+        # sent, or manually cleared) — see `_prompt_window_height`.
+        self._prompt_frozen_at_max = False
         self._inline_flow = inline_flow
         self._on_status_render = on_status_render
         # Callable returning a fresh HomeState; rendered while the transcript
@@ -489,14 +561,17 @@ class FullscreenREPLUI:
         def _(event) -> None:
             self.scroll_page_down()
 
-        @kb.add(Keys.ScrollUp, eager=True)
-        def _(event) -> None:
-            self.scroll_up(3)
-
-        @kb.add(Keys.ScrollDown, eager=True)
-        def _(event) -> None:
-            self.scroll_down(3)
-
+        # Mouse-wheel scrolling is *not* bound here as a global key: real
+        # wheel ticks arrive as positional mouse events (SGR mouse mode on
+        # most terminals, `win32-input-mode`/console mouse events here on
+        # Windows) and prompt_toolkit already routes those to whichever
+        # `Window` the pointer is actually over — the composer below scrolls
+        # itself via its own `BufferControl`, and the conversation window's
+        # wheel handling is wired directly on `_ScrollableConversationWindow`
+        # (see its class docstring) so it shares `_scroll_anchor` bookkeeping
+        # with PageUp/PageDown instead of fighting it. A global eager
+        # binding here would re-couple the two panes and break that
+        # per-region isolation.
         @kb.add("c-home", eager=True)
         def _(event) -> None:
             self.scroll_to_top()
@@ -517,12 +592,52 @@ class FullscreenREPLUI:
 
         # Named (not built anonymously in the HSplit list below) so scroll
         # methods can nudge `.vertical_scroll` directly — see
-        # `_sync_conversation_scroll`.
-        self._conversation_window = Window(
+        # `_sync_conversation_scroll`. `on_scroll_up`/`on_scroll_down` route
+        # mouse-wheel ticks over this pane through the same `_scroll_anchor`
+        # path as PageUp/PageDown — see `_ScrollableConversationWindow`.
+        self._conversation_window = _ScrollableConversationWindow(
             FormattedTextControl(self._render_conversation),
             style="class:conversation",
             wrap_lines=True,
             always_hide_cursor=True,
+            on_scroll_up=lambda: self.scroll_up(3),
+            on_scroll_down=lambda: self.scroll_down(3),
+        )
+
+        # Named for the same reason as `_conversation_window` — tests read
+        # `render_info.window_height` off of it directly to assert the
+        # grow/freeze contract in `_prompt_window_height`.
+        self._prompt_window = Window(
+            BufferControl(
+                buffer=self.buffer,
+                input_processors=[
+                    # The API-key step types into this same box, so masking
+                    # has to be a property of the box rather than of a
+                    # separate password field.
+                    ConditionalProcessor(
+                        PasswordProcessor(),
+                        Condition(inline_flow.is_masked)
+                        if inline_flow
+                        else Condition(lambda: False),
+                    )
+                ],
+            ),
+            height=self._prompt_window_height,
+            # Without this, `HSplit`'s own layout algorithm — not this
+            # class's height logic — is what actually determines the
+            # rendered height: after satisfying every child's *preferred*
+            # size, it round-robins any terminal rows still left over up to
+            # each child's *max* (`HSplit._divide_heights`, prompt_toolkit's
+            # `containers.py`), and it doesn't stop at "preferred" just
+            # because we computed one carefully. `dont_extend_height` makes
+            # `Window.preferred_height()` report `max == preferred`, so that
+            # redistribution has nothing left to hand this window — the
+            # conversation pane above absorbs all of it instead, which is
+            # what "fixed composer, elastic transcript" requires.
+            dont_extend_height=True,
+            wrap_lines=True,
+            style="class:prompt",
+            get_line_prefix=self._prompt_line_prefix,
         )
 
         content = FloatContainer(
@@ -540,26 +655,7 @@ class FullscreenREPLUI:
                         height=1,
                         always_hide_cursor=True,
                     ),
-                    Window(
-                        BufferControl(
-                            buffer=self.buffer,
-                            input_processors=[
-                                # The API-key step types into this same box, so
-                                # masking has to be a property of the box rather
-                                # than of a separate password field.
-                                ConditionalProcessor(
-                                    PasswordProcessor(),
-                                    Condition(inline_flow.is_masked)
-                                    if inline_flow
-                                    else Condition(lambda: False),
-                                )
-                            ],
-                        ),
-                        height=Dimension(min=1, max=_PROMPT_MAX_LINES, preferred=1),
-                        wrap_lines=True,
-                        style="class:prompt",
-                        get_line_prefix=self._prompt_line_prefix,
-                    ),
+                    self._prompt_window,
                     Window(
                         FormattedTextControl(self._render_prompt_bottom_border),
                         height=1,
@@ -1076,6 +1172,58 @@ class FullscreenREPLUI:
                 ]
             )
         return FormattedText([("class:prompt.border", "╰" + "─" * max(1, width - 2) + "╯")])
+
+    def _prompt_content_lines(self) -> int:
+        """Estimate how many visual rows the buffer's current text wraps to.
+
+        Cheap on purpose: a single pass over `text.split("\n")` with integer
+        division, no lexer/processor pass and no wide-character awareness —
+        same rigor level as the border-width math elsewhere in this class.
+        It only has to be right around the `_prompt_min_lines`/
+        `_prompt_max_lines` boundary; sub-pixel accuracy at 5,000 lines
+        doesn't change the answer (still "past max, freeze").
+        """
+        text = self.buffer.text
+        if not text:
+            return 1
+        avail = max(1, self._width() - _PROMPT_LINE_PREFIX_WIDTH)
+        total = 0
+        for raw_line in text.split("\n"):
+            total += max(1, -(-len(raw_line) // avail))  # ceil(len / avail)
+        return max(1, total)
+
+    def _prompt_window_height(self) -> Dimension:
+        """Content-driven composer height: idle at `_prompt_min_lines`,
+        grows with typed/pasted content, and permanently freezes at
+        `_prompt_max_lines` for the rest of the current draft once reached
+        — see `_prompt_frozen_at_max`'s docstring in `__init__`. Beyond the
+        max, overflow content stays in the buffer and scrolls inside the
+        fixed viewport via prompt_toolkit's own cursor-follow scrolling
+        (`BufferControl`'s default behavior); the outer `Dimension` returned
+        here never changes shape once frozen, which is what keeps every
+        other row in the layout (conversation, status bar, borders) from
+        shifting while a long prompt is being edited.
+
+        Invoked fresh on every render pass (`Window.preferred_height` calls
+        `to_dimension(self.height)`, and `self.height` is this bound method)
+        — so a huge paste only ever costs one `_prompt_content_lines()` call
+        before `_prompt_frozen_at_max` short-circuits every render after.
+        """
+        if not self.buffer.text:
+            self._prompt_frozen_at_max = False
+            preferred = self._prompt_min_lines
+        elif self._prompt_frozen_at_max:
+            preferred = self._prompt_max_lines
+        else:
+            lines = self._prompt_content_lines()
+            if lines >= self._prompt_max_lines:
+                self._prompt_frozen_at_max = True
+                preferred = self._prompt_max_lines
+            else:
+                preferred = max(self._prompt_min_lines, lines)
+        return Dimension(
+            min=self._prompt_min_lines, max=self._prompt_max_lines, preferred=preferred
+        )
 
     def _prompt_line_prefix(self, line_number: int, wrap_count: int) -> AnyFormattedText:
         # First visual line gets the prompt glyph; wrapped/continuation

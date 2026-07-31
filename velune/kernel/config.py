@@ -186,6 +186,15 @@ class DisplayConfig(BaseModel):
     # animating them — see `set_reduced_motion()` in velune/cli/design.py.
     # Toggle live with `/theme motion`, or set VELUNE_REDUCED_MOTION=1.
     reduced_motion: bool = False
+    # Idle/baseline height of the prompt composer, in terminal rows. The
+    # composer never renders shorter than this, even when empty.
+    composer_min_lines: int = Field(default=3, ge=1)
+    # Hard ceiling the composer grows to as multiline input is typed or
+    # pasted. Once content reaches this height the composer's outer
+    # dimensions freeze for the rest of that draft — see
+    # `FullscreenREPLUI._prompt_window_height` — and further content scrolls
+    # inside the fixed viewport instead of growing it further.
+    composer_max_lines: int = Field(default=8, ge=1)
 
 
 class TelemetryConfig(BaseModel):

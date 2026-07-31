@@ -38,6 +38,50 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **The prompt composer no longer grows and shrinks unpredictably as you
+  type — it now has a fixed idle height (3 rows) that grows with multiline
+  content up to a hard ceiling (8 rows) and then freezes there for the rest
+  of that draft**, instead of resizing every keystroke. The composer
+  previously used a static `Dimension(preferred=1)`, but `HSplit`'s own
+  layout algorithm hands any terminal rows left over after satisfying every
+  child's *preferred* size up to each child's *max* — so in any terminal
+  with a few spare rows it rendered pinned near its max regardless of
+  content, and shrank again the moment the conversation pane above it grew
+  enough to reclaim that space. That combination is what read as the box
+  "zooming" in and out. Fixed with a content-driven height callback
+  (`FullscreenREPLUI._prompt_window_height`) plus `dont_extend_height=True`,
+  which stops `HSplit` from redistributing leftover rows to the composer at
+  all — the conversation pane above absorbs all of it instead. Both bounds
+  are configurable via `display.composer_min_lines`/`composer_max_lines` in
+  `velune.toml`. Also gave the conversation pane its own mouse-wheel
+  handling (`_ScrollableConversationWindow`) so wheel scroll over either
+  pane routes through one consistent scroll path instead of fighting
+  keyboard-driven scrolling. New coverage in `tests/test_composer_height.py`
+  renders a real `Application` and reads `render_info.window_height` off the
+  live layout rather than just unit-testing the height formula, specifically
+  to catch this class of regression again.
+  Separately: this does **not** touch the host terminal emulator's own
+  font-zoom shortcuts (`Ctrl +/-/0`, `Ctrl+scroll`) — those are resolved by
+  the terminal before any byte reaches Velune and were already confirmed
+  unlockable from in-app code (see the "`velune doctor` reports terminal
+  zoom-lock feasibility" entry above). If the composer above is what was
+  growing/shrinking, this fixes it; if the terminal's own font size was
+  changing, that's a terminal-emulator setting, not a Velune bug.
+- **First-turn episodic-memory writes silently failed on a fresh launch.**
+  `VeluneREPL._start_episodic_session()` runs once, synchronously, near the
+  top of `run()` — before Tier-1 background warm-up (which owns
+  `runtime.episodic_session_memory`) necessarily finishes, so the very first
+  attempt could raise and get swallowed at DEBUG level, leaving
+  `_episodic_session_id` pointing at a session row that was never inserted.
+  Every turn recorded afterwards then failed `EpisodicMemory.record_turn()`'s
+  `turns.session_id` foreign key. `entrypoint.py` was already calling
+  `repl.on_warm_complete()` once Tier-1 finished, but the method didn't
+  exist, so the call itself raised and did nothing. Implemented
+  `on_warm_complete()` to retry `_start_episodic_session()` once Tier-1 is
+  actually up, and made `EpisodicMemory.record_turn()` return `""` (not a
+  phantom turn id) when the insert fails, so
+  `MemoryLifecycleManager.record_turn()` doesn't enqueue embedding work for
+  a row that doesn't exist.
 - **`pip install velune-cli` now also registers a `velune-cli` command.**
   Root-caused a Windows report of "neither `velune` nor `velune-cli` is
   recognized" after a clean install. A from-scratch build → wheel inspection

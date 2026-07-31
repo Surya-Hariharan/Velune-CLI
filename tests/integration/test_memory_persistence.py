@@ -183,3 +183,26 @@ async def test_compaction_does_not_trigger_with_few_turns(tmp_path):
         assert working_turns[0].metadata.get("type") != "compaction_summary"
     finally:
         await pool.shutdown()
+
+
+async def test_record_turn_against_a_session_that_was_never_started_does_not_raise(tmp_path):
+    """Regression guard: on a fresh `velune` launch, the REPL's synchronous
+    `_start_episodic_session()` can race Tier-1's background bootstrap (see
+    `VeluneREPL.on_warm_complete`) and fall back to a session id with no row
+    in `sessions`. `EpisodicMemory.record_turn()`'s INSERT then fails its
+    `turns.session_id` foreign key — this must be caught and logged, not
+    raised, and it must not hand back a turn id for a write that never
+    happened (the old behavior queued that fake id for embedding, which
+    could then never succeed either — see `MemoryLifecycleManager.record_turn`'s
+    `if self.semantic_memory and turn_id:` guard)."""
+    manager, pool = await _make_manager(tmp_path / "cognitive.db")
+    try:
+        turn_id = await manager.record_turn(
+            session_id="never-started", role="user", content="hello"
+        )
+        assert turn_id == "", "a failed write must not report a fake turn id"
+
+        turns = await manager.episodic_memory.get_session_history("never-started")
+        assert turns == []
+    finally:
+        await pool.shutdown()

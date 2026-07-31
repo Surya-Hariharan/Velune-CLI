@@ -124,7 +124,7 @@ async def _async_main(runtime: Any, *, plain: bool = False) -> None:
             except Exception as exc:
                 _logger.warning("Tier-1 lifecycle startup incomplete: %s", exc)
         try:
-            repl.on_warm_complete()
+            await repl.on_warm_complete()
         except Exception as exc:
             _logger.debug("REPL warm-complete hook failed: %s", exc)
 

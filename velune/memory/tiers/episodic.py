@@ -436,6 +436,13 @@ class EpisodicMemory:
                 )
         except Exception as exc:
             logger.error("Failed to record episodic turn: %s", exc)
+            # Nothing was actually persisted under `turn_id` — callers (see
+            # `MemoryLifecycleManager.record_turn`) key off truthiness of the
+            # return value to decide whether to enqueue embedding/indexing
+            # work for it, so handing back the id anyway would queue those
+            # up for a turn that doesn't exist in `turns`, producing
+            # embedding-pipeline retries that can never succeed.
+            return ""
         return turn_id
 
     # ── Read operations ──────────────────────────────────────────────────────
