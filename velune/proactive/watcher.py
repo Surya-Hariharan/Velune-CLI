@@ -15,6 +15,11 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("velune.proactive.watcher")
 
+# Providers that work with no API key at all (self-hosted / local
+# endpoints) — the periodic health check's "unconfigured, so don't nag"
+# skip in `_run_periodic_checks` doesn't apply to these.
+_KEYLESS_PROVIDERS = frozenset({"ollama", "lmstudio", "llamacpp", "openai-compat"})
+
 
 class ProactiveWatcher:
     """Watches bus events and periodic health signals; populates :class:`AlertStore`.
@@ -42,6 +47,11 @@ class ProactiveWatcher:
         self._subscriptions: list[Subscription] = []
         self._periodic_task: asyncio.Task | None = None
         self._running = False
+        # Provider ids already alerted as unavailable by `_run_periodic_checks`,
+        # so a still-down provider is reported once (not re-queued on every
+        # tick) until it either recovers or its manifest disappears — see that
+        # method's docstring.
+        self._alerted_unavailable: set[str] = set()
         # Instance override of the class default, scaled by hardware tier at
         # construction (see kernel/entrypoint.py) — a weak machine shouldn't
         # run this at the same cadence as a workstation.
@@ -146,6 +156,29 @@ class ProactiveWatcher:
                 _log.error("Periodic check error: %s", exc)
 
     async def _run_periodic_checks(self) -> None:
+        """Alert once per provider that goes unavailable, not once per tick.
+
+        `ProviderRegistry` registers a lazy factory for every provider type
+        it knows about — including ones the user never added a key for — so
+        `health_monitor.get_all_manifests()` reports ``UNAVAILABLE`` for
+        those right alongside a genuinely broken configured provider; an
+        unconfigured cloud provider failing its health check is expected,
+        not actionable. And since nothing upstream currently publishes a
+        `provider.health_changed` bus event (`_on_provider_health` above is
+        otherwise unreachable), this was the *only* path that ever alerted
+        on provider health — re-adding an alert for every still-down
+        provider on every tick, forever, with no way for it to ever clear.
+        On a fresh install with only one or two providers configured, that
+        floods the next keypress (`poll_and_render_alerts` drains on every
+        prompt submit) with a wall of "Provider X unavailable" panels for
+        providers the user never intended to use.
+
+        Fixed by only alerting for providers that are actually configured
+        (a stored API key, or a keyless local endpoint like Ollama/LM
+        Studio), and only on the transition into ``UNAVAILABLE`` — tracked
+        in `_alerted_unavailable` — clearing once the provider recovers so a
+        later, genuinely new outage still alerts again.
+        """
         if self._health_monitor is None:
             return
         try:
@@ -155,15 +188,24 @@ class ProactiveWatcher:
 
         try:
             from velune.core.types.provider import ProviderHealth
+            from velune.providers.keystore import has_key
 
+            still_unavailable: set[str] = set()
             for pid, manifest in manifests.items():
-                if manifest.health == ProviderHealth.UNAVAILABLE:
-                    self._add(
-                        AlertSeverity.WARN,
-                        f"Provider {pid} unavailable",
-                        "Run /doctor to diagnose.",
-                        "periodic_health_check",
-                    )
+                if manifest.health != ProviderHealth.UNAVAILABLE:
+                    continue
+                if pid not in _KEYLESS_PROVIDERS and not has_key(pid):
+                    continue  # never configured — not the user's concern
+                still_unavailable.add(pid)
+                if pid in self._alerted_unavailable:
+                    continue  # already reported; wait for recovery or shutdown
+                self._add(
+                    AlertSeverity.WARN,
+                    f"Provider {pid} unavailable",
+                    "Run /doctor to diagnose.",
+                    "periodic_health_check",
+                )
+            self._alerted_unavailable = still_unavailable
         except Exception as exc:
             _log.debug("Periodic health check skipped: %s", exc)
 

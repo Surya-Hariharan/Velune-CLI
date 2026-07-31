@@ -38,6 +38,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **Typing any command (e.g. `/models`) could suddenly dump a wall of
+  "Provider X unavailable" panels — one per cloud provider you never even
+  configured, repeating forever.** `ProviderRegistry` registers a lazy
+  factory for every provider type it knows about, including ones with no
+  stored API key, so `ProviderHealthMonitor`'s periodic poll reports
+  `UNAVAILABLE` for those right alongside a genuinely broken *configured*
+  provider — failing health for a provider you never set up isn't
+  actionable. `ProactiveWatcher._run_periodic_checks` then alerted on every
+  such still-unavailable provider on every 15s tick, unconditionally,
+  forever (nothing publishes the `provider.health_changed` bus event its
+  sibling handler expects, so this periodic path was the *only* thing ever
+  generating these alerts). Since alerts only get drained and rendered on
+  the next prompt submit (`poll_and_render_alerts`, called before dispatch
+  regardless of what you type), a backlog accumulated over however many
+  15s ticks passed since your last keypress would land all at once,
+  looking like the output of whatever command you happened to type.
+  Fixed: only alert for providers that are actually configured (a stored
+  key, or a keyless local endpoint like Ollama/LM Studio), and only on the
+  transition into `UNAVAILABLE` — tracked per-provider so a still-down
+  provider is reported once, not re-queued every tick, while a fresh
+  outage after recovery still alerts again. New coverage in
+  `tests/test_proactive_watcher_health_alerts.py`.
 - **The prompt composer no longer grows and shrinks unpredictably as you
   type — it now has a fixed idle height (3 rows) that grows with multiline
   content up to a hard ceiling (8 rows) and then freezes there for the rest
