@@ -515,6 +515,17 @@ class ConfigService:
         resolved = self._resolve_config_path()
         return ConfigLoader(resolved).load_with_env_overrides()
 
+    def effective_config_path(self) -> Path | None:
+        """The velune.toml these settings were actually read from, if any.
+
+        Resolution can fall through to ``ConfigLoader``'s upward walk (and then
+        to ``~/.velune/velune.toml``), so the file supplying a value may live
+        well outside the workspace. Surfacing it — e.g. in ``velune config
+        show`` — is the only way a user can tell *which* file won when a stray
+        parent-directory config is quietly providing their defaults.
+        """
+        return ConfigLoader(self._resolve_config_path()).config_path
+
     def _resolve_config_path(self) -> Path | None:
         if self.config_path:
             return self.config_path

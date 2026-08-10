@@ -35,6 +35,10 @@ def ask_command(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
+    # Treat whitespace-only input as empty: it would otherwise sail through the
+    # full council/provider setup and only fail much later, having spent the
+    # user's time (and possibly tokens) on a prompt with no content.
+    prompt = prompt.strip() if prompt else prompt
     if not prompt:
         if cli_context.json_mode:
             import json
@@ -42,7 +46,7 @@ def ask_command(
             print(json.dumps({"error": "Prompt argument is required in JSON mode"}))
             raise typer.Exit(code=1)
         # Prompt user interactively if no prompt argument is given
-        prompt = typer.prompt("What would you like to ask Velune?")
+        prompt = typer.prompt("What would you like to ask Velune?").strip()
         if not prompt:
             console.print("[yellow]Empty query. Exiting.[/yellow]")
             return

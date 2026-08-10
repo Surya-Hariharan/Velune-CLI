@@ -35,6 +35,35 @@ def _health_badge(health: str) -> str:
     }.get(health or "", "[dim]?[/dim]")
 
 
+def _record_health(record: Any) -> str:
+    """Health string for *record*, preferring a live validation result.
+
+    Shared by the results table and the "next steps" recommendation so the
+    suggested default model can never contradict the health badge shown for
+    that same model in the table directly above it.
+    """
+    validated = record.metadata.get("validated")
+    if validated is None:
+        return getattr(record, "health", "unknown") or "unknown"
+    return "healthy" if validated else "offline"
+
+
+def _recommended_model(records: list[Any]) -> Any | None:
+    """First model worth suggesting as a default: healthy, else unverified.
+
+    Never returns a model known to be offline unless nothing else exists —
+    recommending `models use <x>` for an unreachable model walks the user
+    straight into a dead end.
+    """
+    if not records:
+        return None
+    for wanted in ("healthy", "degraded", "unknown"):
+        for record in records:
+            if _record_health(record) == wanted:
+                return record
+    return None
+
+
 def _short_location(location: str | None, max_len: int = 28) -> str:
     if not location:
         return "[dim]—[/dim]"
@@ -123,13 +152,7 @@ def models_scan(
     table.add_column("Location", style="dim", max_width=28)
 
     for record in records:
-        validated = record.metadata.get("validated")
-        if validated is None:
-            health_src = getattr(record, "health", "unknown")
-        elif validated:
-            health_src = "healthy"
-        else:
-            health_src = "offline"
+        health_src = _record_health(record)
 
         table.add_row(
             record.provider_id,
@@ -153,7 +176,20 @@ def models_scan(
     if records:
         from velune.cli import guidance, ui
 
-        steps = guidance.steps_for("models_scanned", model=records[0].model_id)
+        pick = _recommended_model(records)
+        if pick is None:
+            # Every discovered model is currently unreachable — suggesting one
+            # would just fail. Point at the actual blocker instead.
+            console.print(
+                ui.next_steps(
+                    "Models discovered, none reachable",
+                    f"{total} model(s) found, but none are currently responding.",
+                    guidance.steps_for("models_scanned_none_healthy") or [],
+                )
+            )
+            return
+
+        steps = guidance.steps_for("models_scanned", model=pick.model_id)
         if steps:
             console.print(
                 ui.next_steps(

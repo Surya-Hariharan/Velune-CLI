@@ -70,6 +70,31 @@ def _install_crash_hook() -> None:
     sys.excepthook = _hook
 
 
+def _force_utf8_stdio() -> None:
+    """Ensure stdout/stderr can carry the UI's non-ASCII characters.
+
+    On Windows, ``sys.stdout.encoding`` defaults to the active ANSI code page
+    (typically cp1252). Velune's output is full of box-drawing glyphs, arrows,
+    and em-dashes; under cp1252 an em-dash silently encodes to byte 0x97
+    instead of UTF-8, which renders as a replacement character in any UTF-8
+    terminal — the ``velune --help`` output showed "a project <?> config"
+    for exactly this reason.
+
+    ``reconfigure`` is a no-op where the encoding is already UTF-8, and is
+    wrapped defensively because stdout may be replaced by a stream that does
+    not support it (pytest capture, some embedding hosts).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError, AttributeError):
+            # Non-reconfigurable stream — leave it exactly as it was.
+            pass
+
+
 def main() -> None:
     """Console-script entry point.
 
@@ -77,6 +102,7 @@ def main() -> None:
     importing ``velune.cli`` or any subsystem, then delegates everything else
     to the lazily-built Typer application.
     """
+    _force_utf8_stdio()
     _install_crash_hook()
     argv = sys.argv[1:]
     if argv and argv[0] in ("--version", "-V") and "--help" not in argv:

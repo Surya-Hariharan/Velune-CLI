@@ -370,21 +370,24 @@ def health_overview(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full diagnostic"),
 ) -> None:
     """Check real-time health of all configured providers."""
-    from velune.cli.commands.providers import _PROVIDER_META
-    from velune.providers.keystore import has_key
+    from velune.providers import catalog
+    from velune.providers.keystore import get_key, has_key
     from velune.providers.validation import validate_provider_sync
 
     console.print()
     console.print(f"[bold {design.ACCENT}]Provider Health[/bold {design.ACCENT}]")
     console.print()
 
+    # Sourced from velune.providers.catalog — the single provider-metadata
+    # source (this used to import a hand-maintained `_PROVIDER_META` dict from
+    # cli.commands.providers, which was removed in the catalog consolidation
+    # and left this command crashing with an ImportError on every run).
     to_check = []
-    for pid, meta in _PROVIDER_META.items():
-        if meta.get("local"):
+    for meta in catalog.list_providers_alphabetical():
+        pid = meta.id
+        if not meta.requires_key:
             to_check.append((pid, meta, ""))
         elif has_key(pid):
-            from velune.providers.keystore import get_key
-
             to_check.append((pid, meta, get_key(pid) or ""))
 
     if not to_check:
@@ -403,6 +406,7 @@ def health_overview(
     healthy = 0
     degraded = 0
     unavailable = 0
+    unchecked = 0
 
     for pid, _meta, key in to_check:
         with console.status(f"  [{design.MUTED}]Checking {pid}...[/{design.MUTED}]"):
@@ -424,6 +428,12 @@ def health_overview(
                 degraded += 1
                 status_str = f"[{design.WARN}]Network Error[/{design.WARN}]"
                 detail = "Cannot reach provider"
+            elif result.status == ValidationStatus.NOT_SUPPORTED:
+                # "We can't check this", not "this is broken" — don't count it
+                # toward unavailable or it reads as a failure the user must fix.
+                unchecked += 1
+                status_str = f"[{design.MUTED}]Not Checkable[/{design.MUTED}]"
+                detail = "No credential check for this provider"
             else:
                 unavailable += 1
                 status_str = f"[red]{result.status.value.replace('_', ' ').title()}[/red]"
@@ -438,14 +448,16 @@ def health_overview(
     console.print(table)
 
     # Summary footer
-    total = healthy + degraded + unavailable
-    console.print()
-    console.print(
+    total = healthy + degraded + unavailable + unchecked
+    summary = (
         f"  [{design.OK}]{healthy} healthy[/{design.OK}]  "
         f"[{design.WARN}]{degraded} degraded[/{design.WARN}]  "
         f"[red]{unavailable} unavailable[/red]  "
-        f"[{design.MUTED}]({total} total)[/{design.MUTED}]"
     )
+    if unchecked:
+        summary += f"[{design.MUTED}]{unchecked} not checkable[/{design.MUTED}]  "
+    console.print()
+    console.print(f"{summary}[{design.MUTED}]({total} total)[/{design.MUTED}]")
 
     if unavailable > 0:
         console.print(

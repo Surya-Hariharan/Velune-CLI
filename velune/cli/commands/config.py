@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -193,8 +194,12 @@ def config_show(ctx: typer.Context) -> None:
                         "name": config.project.name,
                         "version": config.project.version,
                     },
+                    # Key must match the real config attribute path so the value
+                    # shown here is directly usable with `config get`/`config set`
+                    # (this previously emitted "default", which `config get`
+                    # rejected as an unknown key).
                     "providers": {
-                        "default": config.providers.default_provider,
+                        "default_provider": config.providers.default_provider,
                     },
                     "workspace": {
                         "index_on_init": config.workspace.index_on_init,
@@ -209,16 +214,31 @@ def config_show(ctx: typer.Context) -> None:
             )
         )
     else:
+        # Name the file these values came from. Resolution can walk *up* from
+        # the workspace (and then to ~/.velune/velune.toml), so a stray
+        # velune.toml in a parent or home directory silently supplies the
+        # defaults for every project beneath it — without this line there is no
+        # way to tell which file won.
+        resolved: Path | None = cli_context.config_path
+        if resolved is None:
+            try:
+                resolved = cli_context.container.get(
+                    "runtime.config_service"
+                ).effective_config_path()
+            except Exception:
+                resolved = None
+        source = str(resolved) if resolved else "no velune.toml found — built-in defaults"
         console.print(
             Panel.fit(
                 f"project.name = {config.project.name}\n"
                 f"project.version = {config.project.version}\n"
-                f"providers.default = {config.providers.default_provider}\n"
+                f"providers.default_provider = {config.providers.default_provider}\n"
                 f"workspace.index_on_init = {config.workspace.index_on_init}\n"
                 f"workspace.watch_files = {config.workspace.watch_files}\n"
                 f"workspace.git_aware = {config.workspace.git_aware}\n"
                 f"telemetry.enabled = {config.telemetry.enabled}\n"
-                f"telemetry.log_level = {config.telemetry.log_level}",
+                f"telemetry.log_level = {config.telemetry.log_level}\n"
+                f"\n[dim]source: {source}[/dim]",
                 title="Configuration",
             )
         )

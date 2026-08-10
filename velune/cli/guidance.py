@@ -38,6 +38,13 @@ _GUIDANCE: dict[str, list[Step]] = {
         ("Benchmark for the best fit", "velune models benchmark", "empirical scoring"),
         ("Start working", "velune chat", None),
     ],
+    # Models exist in the catalog but every one of them failed its health
+    # check, so "models use <x>" would only lead to a failed request.
+    "models_scanned_none_healthy": [
+        ("Start your local model server", "ollama serve", "if using Ollama"),
+        ("Check why providers are unreachable", "velune doctor check", None),
+        ("Re-scan once a provider is up", "velune models scan", None),
+    ],
     "models_listed_multi": [
         ("Set a default model", "velune models use {model}", None),
         ("Compare them empirically", "velune models benchmark", None),

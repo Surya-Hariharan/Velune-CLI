@@ -161,40 +161,48 @@ async def _run_command_async(
             )
         )
     else:
+        # Static chrome goes through Text.from_markup (Text.assemble never parses
+        # markup, so these tags used to print verbatim). Model-generated values
+        # (state.output / state.error / validation_issues) are appended as plain
+        # text instead — routing them through markup would let a stray "[...]"
+        # in model output be parsed as a style tag and mangle or break the panel.
         if success:
+            body = Text.from_markup(
+                "[bold green]STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"
+                f"Run ID: [bold white]{state.run_id}[/bold white]\n"
+                f"Plan Steps: [bold white]{plan_steps}[/bold white] steps processed\n"
+                f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"
+                f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"
+                "[bold green]Synthesized Output:[/bold green]\n"
+            )
+            body.append(state.output or "Execution completed successfully.")
             console.print(
-                Panel(
-                    Text.assemble(
-                        ("[bold green]STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"),
-                        (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
-                        (f"Plan Steps: [bold white]{plan_steps}[/bold white] steps processed\n"),
-                        (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
-                        (f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"),
-                        ("[bold green]Synthesized Output:[/bold green]\n"),
-                        (state.output or "Execution completed successfully."),
-                    ),
-                    border_style="green",
-                    title="[bold green]Success Report[/bold green]",
-                )
+                Panel(body, border_style="green", title="[bold green]Success Report[/bold green]")
             )
             _print_run_next_steps(success=True, run_id=str(state.run_id))
         else:
+            issues = ", ".join(state.validation_issues) if state.validation_issues else "None"
+            body = Text.from_markup(
+                "[bold red]AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"
+                f"Run ID: [bold white]{state.run_id}[/bold white]\n"
+            )
+            body.append("Failure Reason: ")
+            body.append(state.error or "Validation/Execution mismatch", style="bold red")
+            body.append_text(
+                Text.from_markup(
+                    f"\nRetry Attempts: [bold white]{attempts_count}[/bold white]\nValidation Issues: "
+                )
+            )
+            body.append(issues, style="bold yellow")
+            body.append_text(
+                Text.from_markup(
+                    "\n\n[yellow]State checkpointer stashed checkpoints, and Git workspace "
+                    "states have been preserved/rolled back.[/yellow]"
+                )
+            )
             console.print(
                 Panel(
-                    Text.assemble(
-                        ("[bold red]AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"),
-                        (f"Run ID: [bold white]{state.run_id}[/bold white]\n"),
-                        (
-                            f"Failure Reason: [bold red]{state.error or 'Validation/Execution mismatch'}[/bold red]\n"
-                        ),
-                        (f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"),
-                        (
-                            f"Validation Issues: [bold yellow]{', '.join(state.validation_issues) if state.validation_issues else 'None'}[/bold yellow]\n\n"
-                        ),
-                        (
-                            "[yellow]State checkpointer stashed checkpoints, and Git workspace states have been preserved/rolled back.[/yellow]"
-                        ),
-                    ),
+                    body,
                     border_style="red",
                     title="[bold red]Rollback Execution Report[/bold red]",
                 )

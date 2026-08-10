@@ -27,6 +27,10 @@ class ValidationStatus(StrEnum):
     MALFORMED_KEY = "malformed_key"
     PERMISSION_DENIED = "permission_denied"
     UNKNOWN_ERROR = "unknown_error"
+    #: No credential validator exists for this provider (e.g. a self-hosted
+    #: OpenAI-compatible endpoint). This is "can't check", not "check failed" —
+    #: reporting it as UNKNOWN_ERROR made healthy local providers look broken.
+    NOT_SUPPORTED = "not_supported"
 
 
 @dataclass
@@ -727,8 +731,11 @@ async def validate_provider(provider_id: str, api_key: str = "") -> ValidationRe
     if validator is None:
         return ValidationResult(
             provider_id=provider_id,
-            status=ValidationStatus.UNKNOWN_ERROR,
-            message=f"No validator implemented for provider '{provider_id}'.",
+            status=ValidationStatus.NOT_SUPPORTED,
+            message=(
+                f"No credential check available for '{provider_id}' — "
+                "configure its endpoint and Velune will use it directly."
+            ),
         )
     try:
         return await asyncio.wait_for(validator(api_key), timeout=15.0)
@@ -741,16 +748,32 @@ async def validate_provider(provider_id: str, api_key: str = "") -> ValidationRe
 
 
 def validate_provider_sync(provider_id: str, api_key: str = "") -> ValidationResult:
-    """Synchronous wrapper around :func:`validate_provider` for non-async contexts."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
+    """Synchronous wrapper around :func:`validate_provider` for non-async contexts.
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, validate_provider(provider_id, api_key))
-                return future.result(timeout=20.0)
-        return loop.run_until_complete(validate_provider(provider_id, api_key))
+    Mirrors ``credential_manager.add_credential_sync``'s bridging strategy.
+    Note this must **not** use ``asyncio.get_event_loop()``: since Python 3.12
+    that raises ``RuntimeError`` in a thread with no current loop (rather than
+    creating one), which is exactly the situation at a Typer/CLI entry point —
+    the resulting error was being swallowed by the ``except`` below and
+    reported to users as a bogus "Validation error: There is no current event
+    loop" for every provider.
+    """
+    try:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop running in this thread — the typical Typer/CLI entry
+            # point. Bridge through the kernel's single blocking-entry helper.
+            from velune.kernel.entrypoint import run_async
+
+            return run_async(validate_provider(provider_id, api_key))
+        # Called from inside a running loop: hand the work to a worker thread
+        # that owns its own loop rather than blocking or re-entering this one.
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, validate_provider(provider_id, api_key))
+            return future.result(timeout=20.0)
     except Exception as e:
         return ValidationResult(
             provider_id=provider_id,

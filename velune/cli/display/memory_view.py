@@ -19,40 +19,35 @@ class MemoryDisplayView:
         self.console = console
 
     def render_memory_architecture(self, stats: dict[str, Any]) -> None:
-        """Render a magnificent visual map of the memory tiers and active index statistics."""
+        """Render a visual map of the memory tiers and active index statistics.
+
+        Built with ``Text.from_markup`` rather than ``Text.assemble``: assemble
+        treats each argument as a literal ``(text, style)`` pair and does **not**
+        parse markup, so the console-markup tags below used to be printed
+        verbatim (``[bold magenta]VELUNE CORE...``) instead of being styled.
+
+        This is the static architecture map (what tiers exist by design); the
+        live per-tier numbers come from :meth:`render_memory_health`, which
+        only lists the tiers it can actually measure.
+        """
+        body = (
+            "[bold magenta]VELUNE CORE HIERARCHICAL MEMORY MAP[/bold magenta]\n"
+            f"[dim]Active Workspace:[/dim] [italic cyan]{stats.get('workspace', 'current')}"
+            "[/italic cyan]\n\n"
+            "[bold yellow]Tier 1: Working Memory[/bold yellow]  ──► In-memory state, "
+            f"fast lookups (TTL: {stats.get('working_memory_ttl', 3600)}s)\n"
+            "[bold green]Tier 2: Episodic SQLite[/bold green] ──► Task runs, step "
+            f"histories (Retention: {stats.get('episodic_retention_days', 30)} days)\n"
+            "[bold blue]Tier 3: Semantic LanceDB[/bold blue]  ──► Vector code snippet "
+            f"indices (Similarity Threshold: {stats.get('semantic_threshold', 0.85)})\n"
+            "[bold cyan]Tier 4: Graphiti Graph[/bold cyan]   ──► Entity relationships & "
+            f"AST Dependency Graph (Graphiti Enabled: {stats.get('graph_enabled', True)})\n"
+            "[bold red]Tier 5: Archive Storage[/bold red]  ──► Long-term zstd-compressed "
+            "cold files"
+        )
         self.console.print(
             Panel(
-                Text.assemble(
-                    ("[bold magenta]VELUNE CORE HIERARCHICAL MEMORY MAP[/bold magenta]\n"),
-                    (
-                        "[dim]Active Workspace:[/dim] [italic cyan]"
-                        + str(stats.get("workspace", "current"))
-                        + "[/italic cyan]\n\n"
-                    ),
-                    (
-                        "[bold yellow]Tier 1: Working Memory[/bold yellow]  ──► In-memory state, fast lookups (TTL: "
-                        + str(stats.get("working_memory_ttl", 3600))
-                        + "s)\n"
-                    ),
-                    (
-                        "[bold green]Tier 2: Episodic SQLite[/bold green] ──► Task runs, step histories (Retention: "
-                        + str(stats.get("episodic_retention_days", 30))
-                        + " days)\n"
-                    ),
-                    (
-                        "[bold blue]Tier 3: Semantic LanceDB[/bold blue]  ──► Vector code snippet indices (Similarity Threshold: "
-                        + str(stats.get("semantic_threshold", 0.85))
-                        + ")\n"
-                    ),
-                    (
-                        "[bold cyan]Tier 4: Graphiti Graph[/bold cyan]   ──► Entity relationships & AST Dependency Graph (Graphiti Enabled: "
-                        + str(stats.get("graph_enabled", True))
-                        + ")\n"
-                    ),
-                    (
-                        "[bold red]Tier 5: Archive Storage[/bold red]  ──► Long-term zstd-compressed cold files"
-                    ),
-                ),
+                Text.from_markup(body),
                 title="[bold white]Memory Architecture Map[/bold white]",
                 border_style="magenta",
                 box=ROUNDED,

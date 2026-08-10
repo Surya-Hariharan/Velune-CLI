@@ -260,15 +260,18 @@ async def _workspace_status_async(
             )
         )
     else:
+        # Text.from_markup, not Text.assemble: assemble treats each argument as
+        # a literal (text, style) pair and never parses markup, so these tags
+        # were previously printed verbatim as "[bold]Workspace root:[/bold] ...".
         console.print(
             Panel(
-                Text.assemble(
-                    (f"[bold]Workspace root:[/bold] {path}\n"),
-                    (f"[bold]Velune cache:[/bold] {velune_dir}\n"),
-                    (f"[bold]Indexed files count:[/bold] {num_files}\n"),
-                    (f"[bold]Indexed symbols count:[/bold] {num_symbols}\n"),
-                    (f"[bold]Git branch:[/bold] [magenta]{git_branch}[/magenta]\n"),
-                    ("[bold]Status:[/bold] [bold green]Active & Fully Primed[/bold green]"),
+                Text.from_markup(
+                    f"[bold]Workspace root:[/bold] {path}\n"
+                    f"[bold]Velune cache:[/bold] {velune_dir}\n"
+                    f"[bold]Indexed files count:[/bold] {num_files}\n"
+                    f"[bold]Indexed symbols count:[/bold] {num_symbols}\n"
+                    f"[bold]Git branch:[/bold] [magenta]{git_branch}[/magenta]\n"
+                    "[bold]Status:[/bold] [bold green]Active & Fully Primed[/bold green]"
                 ),
                 border_style="cyan",
                 box=ROUNDED,
