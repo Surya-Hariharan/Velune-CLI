@@ -8,6 +8,65 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Model palette (`/model`, `/models`).** Typing `/model` or `/models` now
+  opens a keyboard-driven picker in the same floating rectangle the command
+  palette uses — arrow keys to highlight, Enter to switch (routed through the
+  existing `/model use <id>` path, so persistence/recents/default-provider
+  behave exactly as a hand-typed switch). Cyan-blue theming distinguishes it
+  from the indigo command palette sharing that space. An empty or unreachable
+  model catalog shows setup guidance instead of submitting a prompt or
+  printing an error panel.
+
+### Fixed
+
+- **`velune health` crashed with a raw `ImportError` traceback** on every
+  invocation — it imported a provider-metadata symbol removed in the
+  provider-catalog consolidation. Repointed at `velune.providers.catalog`.
+- **`provider status` / `provider test` / `provider inspect` / `provider api`
+  always failed** with an internal "no current event loop" message instead of
+  a real credential verdict — `asyncio.get_event_loop()` raises in a thread
+  with no running loop on Python 3.12+, which is the normal CLI entry point.
+  Fixed to match the working pattern already used by credential add/update.
+- **Rich markup rendered as literal text** (`[bold magenta]...[/bold magenta]`)
+  in `memory stats`'s architecture map and `project status` — both built
+  styled text with `Text.assemble()`, which does not parse markup tags.
+- **`config show` displayed a key `config get` rejected** (`providers.default`
+  vs. the real `providers.default_provider`), and gave no indication of which
+  `velune.toml` on disk a value actually came from when config resolution
+  walks up past the workspace.
+- **`models scan` could recommend a model it had just marked unhealthy** as
+  the suggested default. The recommendation now prefers a healthy model and
+  falls back to guidance pointing at the actual blocker when none are
+  reachable.
+- **`/models` with an empty catalog printed a red "No models available" error
+  panel** and could be submitted as a prompt. It now opens the model palette
+  (which explains the empty state and how to fix it) and no longer submits.
+- Mojibake (`�`) in place of an em-dash in `--help` output on Windows, caused
+  by `sys.stdout` defaulting to the active ANSI code page instead of UTF-8.
+
+### Security
+
+- Bumped `cryptography` 49.0.0 → 50.0.0 (GHSA/Dependabot alert #8: PKCS#7
+  Bleichenbacher oracle in a transitive dependency path; Velune does not use
+  the affected API directly).
+- Bumped `h2` 4.3.0 → 4.4.1 (Dependabot alert #9: duplicate `Host` header
+  request-smuggling primitive in a transitive dependency of the optional
+  `[rag]` extra; Velune does not use HTTP/2 directly).
+- Master passphrase file (`master.passphrase`) is now encrypted at rest
+  (Windows DPAPI, or AES-GCM with a machine-derived key elsewhere) instead of
+  stored in clear text, with automatic one-time migration of any existing
+  plaintext file. Addresses a CodeQL clear-text-storage finding.
+
+### Changed
+
+- `pyproject.toml` license metadata migrated to PEP 639 (`license =
+  "Apache-2.0"` + `license-files`), replacing the legacy `{file = "LICENSE"}`
+  form that duplicated the full license text into package metadata.
+- README expanded with an explicit Apache-2.0 statement and a trademark/
+  branding clarification.
+
 ## [0.9.7] - 2026-07-31
 
 ### Added
