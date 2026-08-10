@@ -21,6 +21,15 @@ updates:
     ignore:
       - dependency-name: "python"
       - dependency-name: "pip"
+      # mcp 2.0.0 rewrote the low-level Server API (decorator-based
+      # @server.list_tools()/@server.call_tool() registration
+      # velune/mcp/server.py depends on was removed in favor of constructor
+      # kwargs) — see the mcp constraint comment in pyproject.toml. That
+      # migration is deliberately deferred, so stop proposing the major
+      # bump every cycle (PR #17); minor/patch bumps within <2.0.0 are
+      # still welcome.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
