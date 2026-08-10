@@ -35,6 +35,16 @@ _PBKDF2_ITERATIONS = 390_000
 _SALT_LEN = 16
 _NONCE_LEN = 12
 
+#: Format markers prefixed to the persisted passphrase file so reads can tell
+#: encrypted-at-rest content apart from a pre-existing plaintext file left by
+#: an older Velune version (which gets migrated in place, see
+#: :func:`_stored_passphrase`).
+_PASSPHRASE_MAGIC_DPAPI = b"VLNP1D"
+_PASSPHRASE_MAGIC_AESGCM = b"VLNP1A"
+
+#: CryptProtectData/CryptUnprotectData flag suppressing any OS UI prompt.
+_DPAPI_CRYPTPROTECT_UI_FORBIDDEN = 0x1
+
 #: Optional env var holding a user secret used to derive the master key when no
 #: OS keyring is available (headless servers, Docker, CI). Vastly stronger than
 #: the machine-derived fallback and portable across machines.
@@ -85,31 +95,180 @@ def _get_fallback_key() -> bytes:
 def _passphrase_file_path() -> Path:
     """Where a passphrase entered at the first-run prompt is persisted.
 
-    Only the passphrase's *hash-derived* consumption differs from the env var
-    — the passphrase text itself is stored here so the user is asked exactly
-    once rather than every process start. File permissions (0600 / a
-    current-user-only Windows ACL) are the security boundary, same tier as
-    the credentials file itself — strictly better than the machine-derived
-    fallback this replaces, though not as strong as a real OS keyring.
+    The passphrase is written encrypted-at-rest (see :func:`_protect_passphrase`)
+    so the user is asked exactly once rather than every process start, without
+    ever putting the plaintext secret on disk. File permissions (0600 / a
+    current-user-only Windows ACL) are applied on top as defense in depth, same
+    tier as the credentials file itself.
     """
     return Path(user_config_dir("Velune")) / "master.passphrase"
 
 
-def _stored_passphrase() -> str | None:
-    """Passphrase persisted by a previous first-run prompt, if any."""
+def _windll():  # noqa: ANN202 - deliberately untyped; ctypes.windll only exists on win32
+    """``ctypes.windll`` fetched via getattr so this module still type-checks on non-Windows CI."""
+    import ctypes
+
+    return getattr(ctypes, "windll", None)
+
+
+def _dpapi_encrypt(plaintext: bytes) -> bytes | None:
+    """Encrypt *plaintext* with Windows DPAPI, scoped to the current user.
+
+    DPAPI derives and manages its own key from the user's Windows login
+    credentials — nothing keeps it beside the ciphertext, and only the same
+    user on the same machine can decrypt it. Returns None (never raises) if
+    DPAPI is unavailable, so the caller can fall back to AES-GCM.
+    """
     try:
-        text = _passphrase_file_path().read_text(encoding="utf-8").strip()
-        return text or None
-    except OSError:
+        import ctypes
+        import ctypes.wintypes as wintypes
+
+        windll = _windll()
+        if windll is None:
+            return None
+
+        class _DataBlob(ctypes.Structure):
+            _fields_ = (("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char)))
+
+        buf = ctypes.create_string_buffer(plaintext, len(plaintext))
+        blob_in = _DataBlob(len(plaintext), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+        blob_out = _DataBlob()
+        ok = windll.crypt32.CryptProtectData(
+            ctypes.byref(blob_in),
+            None,
+            None,
+            None,
+            None,
+            _DPAPI_CRYPTPROTECT_UI_FORBIDDEN,
+            ctypes.byref(blob_out),
+        )
+        if not ok:
+            return None
+        try:
+            return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        finally:
+            windll.kernel32.LocalFree(blob_out.pbData)
+    except Exception as e:
+        logger.debug("DPAPI encrypt unavailable (non-fatal): %s", e)
         return None
 
 
+def _dpapi_decrypt(blob: bytes) -> bytes | None:
+    """Reverse of :func:`_dpapi_encrypt`. Returns None on any failure."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wintypes
+
+        windll = _windll()
+        if windll is None:
+            return None
+
+        class _DataBlob(ctypes.Structure):
+            _fields_ = (("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char)))
+
+        buf = ctypes.create_string_buffer(blob, len(blob))
+        blob_in = _DataBlob(len(blob), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+        blob_out = _DataBlob()
+        ok = windll.crypt32.CryptUnprotectData(
+            ctypes.byref(blob_in),
+            None,
+            None,
+            None,
+            None,
+            _DPAPI_CRYPTPROTECT_UI_FORBIDDEN,
+            ctypes.byref(blob_out),
+        )
+        if not ok:
+            return None
+        try:
+            return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        finally:
+            windll.kernel32.LocalFree(blob_out.pbData)
+    except Exception as e:
+        logger.debug("DPAPI decrypt failed (non-fatal): %s", e)
+        return None
+
+
+def _protect_passphrase(passphrase: str) -> bytes:
+    """Encrypt *passphrase* for at-rest storage; never returns plaintext.
+
+    Prefers Windows DPAPI (OS-managed key tied to the current user account).
+    Everywhere else — and if DPAPI is unavailable — falls back to AES-GCM
+    keyed by the same machine-derived key used as the master-key fallback
+    (:func:`_get_fallback_key`), which is *not* persisted anywhere, let alone
+    beside the ciphertext.
+    """
+    data = passphrase.encode("utf-8")
+    if os.name == "nt":
+        dpapi_blob = _dpapi_encrypt(data)
+        if dpapi_blob is not None:
+            return _PASSPHRASE_MAGIC_DPAPI + dpapi_blob
+
+    nonce = os.urandom(_NONCE_LEN)
+    ciphertext = AESGCM(_get_fallback_key()).encrypt(nonce, data, None)
+    return _PASSPHRASE_MAGIC_AESGCM + nonce + ciphertext
+
+
+def _unprotect_passphrase(raw: bytes) -> str | None:
+    """Decrypt bytes produced by :func:`_protect_passphrase`.
+
+    Returns None (never raises) on a corrupt or unrecognized blob so callers
+    treat it the same as "no passphrase stored" rather than crashing.
+    """
+    if raw.startswith(_PASSPHRASE_MAGIC_DPAPI):
+        plaintext = _dpapi_decrypt(raw[len(_PASSPHRASE_MAGIC_DPAPI) :])
+        return plaintext.decode("utf-8") if plaintext is not None else None
+
+    if raw.startswith(_PASSPHRASE_MAGIC_AESGCM):
+        payload = raw[len(_PASSPHRASE_MAGIC_AESGCM) :]
+        if len(payload) < _NONCE_LEN:
+            return None
+        nonce, ciphertext = payload[:_NONCE_LEN], payload[_NONCE_LEN:]
+        try:
+            return AESGCM(_get_fallback_key()).decrypt(nonce, ciphertext, None).decode("utf-8")
+        except InvalidTag:
+            return None
+
+    return None
+
+
+def _stored_passphrase() -> str | None:
+    """Passphrase persisted by a previous first-run prompt, if any.
+
+    Transparently migrates a legacy plaintext ``master.passphrase`` file (as
+    written by Velune versions predating encrypted-at-rest storage) by
+    re-persisting it through :func:`_persist_passphrase`, which overwrites the
+    file with an encrypted blob — the plaintext never remains on disk once
+    this returns.
+    """
+    try:
+        raw = _passphrase_file_path().read_bytes()
+    except OSError:
+        return None
+    if not raw:
+        return None
+
+    if raw.startswith(_PASSPHRASE_MAGIC_DPAPI) or raw.startswith(_PASSPHRASE_MAGIC_AESGCM):
+        return _unprotect_passphrase(raw)
+
+    # Legacy plaintext file from before this file was encrypted at rest.
+    try:
+        legacy = raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return None
+    if not legacy:
+        return None
+    logger.info("Migrating legacy plaintext master-passphrase file to encrypted storage.")
+    _persist_passphrase(legacy)
+    return legacy
+
+
 def _persist_passphrase(passphrase: str) -> None:
-    """Save *passphrase* so future processes don't re-prompt for it."""
+    """Save *passphrase*, encrypted at rest, so future processes don't re-prompt."""
     path = _passphrase_file_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(passphrase, encoding="utf-8")
+        path.write_bytes(_protect_passphrase(passphrase))
         if os.name == "nt":
             _restrict_passphrase_file_windows(path)
         else:
