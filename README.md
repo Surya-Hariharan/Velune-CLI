@@ -499,7 +499,21 @@ Report security issues via
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Velune CLI is licensed under the [Apache License 2.0](LICENSE).
 
 Copyright 2026 Surya HA
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this project except in compliance with the License. You may obtain a
+copy of the License at <http://www.apache.org/licenses/LICENSE-2.0>, or in the
+[LICENSE](LICENSE) file in this repository. Unless required by applicable
+law or agreed to in writing, software distributed under the License is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.
+
+The Apache-2.0 license applies to the source code. It does not by itself
+grant rights to the "Velune" project name, wordmark, or logo — Section 6
+("Trademarks") of the [LICENSE](LICENSE) reserves those. This is a
+name/branding reservation for the project, not a claim of registered
+trademark status.
 </content>
