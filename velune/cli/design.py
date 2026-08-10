@@ -28,6 +28,13 @@ import sys
 ACCENT = "#818cf8"  # electric indigo (wordmark, primary brand, prompt prefix)
 ACCENT_SOFT = "#5b63d6"  # dimmer indigo (secondary elements, arrows)
 
+# Secondary accent: cyan-blue. Used where a surface must read as a *sibling* of
+# an indigo one rather than the same thing — the model palette sits in exactly
+# the geometry the command palette just vacated, so a distinct hue is what tells
+# you the list under your cursor changed meaning (commands → models).
+CYAN = "#38bdf8"  # bright cyan-blue (frame title, query, active hue)
+CYAN_SOFT = "#0ea5e9"  # deeper cyan-blue (selected row, secondary text)
+
 # The brand wordmark is painted as a horizontal gradient across these three
 # stops (violet → blue → teal). `gradient_hex(t)` interpolates between them for
 # any t in [0, 1]; other surfaces can reuse it for progress fills, meters, etc.

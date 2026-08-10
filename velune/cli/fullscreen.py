@@ -247,6 +247,7 @@ def _build_floats(
     command_palette: Any | None,
     model_switcher: Any | None = None,
     inline_flow: Any | None = None,
+    model_palette: Any | None = None,
 ) -> list[Float]:
     """The CompletionsMenu float (model-id/@@symbol completion), plus the
     command palette's float when one is supplied.
@@ -271,6 +272,22 @@ def _build_floats(
                 height=18,
                 allow_cover_cursor=True,
                 z_index=20,
+            )
+        )
+    if model_palette is not None:
+        # Same rectangle as the command palette, for the same reason the inline
+        # flow uses it: typing "/model" should read as the palette staying put
+        # and switching from commands to models. The command palette suppresses
+        # itself while this one is active, so the two never render stacked.
+        floats.append(
+            Float(
+                content=model_palette.container(),
+                left=2,
+                right=2,
+                top=1,
+                height=18,
+                allow_cover_cursor=True,
+                z_index=21,
             )
         )
     if inline_flow is not None:
@@ -357,6 +374,7 @@ class FullscreenREPLUI:
         on_interrupt: Any,
         on_status_render: Any | None = None,
         command_palette: Any | None = None,
+        model_palette: Any | None = None,
         model_switcher: Any | None = None,
         inline_flow: Any | None = None,
         home_provider: Any | None = None,
@@ -707,7 +725,9 @@ class FullscreenREPLUI:
                     else None
                 ),
             ),
-            floats=_build_floats(command_palette, model_switcher, inline_flow),
+            floats=_build_floats(
+                command_palette, model_switcher, inline_flow, model_palette=model_palette
+            ),
         )
 
         root_style = f"bg:{design.BACKGROUND}" if design.color_enabled() else ""

@@ -27,6 +27,37 @@ def _sel(style: str, selected: bool) -> str:
     return f"{_SEL_BG}{style}" if selected else style
 
 
+def _print_no_models_guidance(repl: VeluneREPL, *, has_registered_models: bool) -> None:
+    """Explain an empty model catalog as a setup step, not a failure.
+
+    Having no models configured yet is the expected state on a fresh install —
+    rendering it through ``render_error`` painted a red "Error: No models
+    available" panel, which reads as something having gone wrong. The wording
+    is shared with the ``/model`` palette (:func:`empty_state_guidance`) so the
+    two surfaces cannot drift apart.
+    """
+    from rich.panel import Panel
+
+    from velune.cli.model_palette import empty_state_guidance
+
+    headline, detail, remedies = empty_state_guidance(has_registered_models)
+    body = [f"[{design.MUTED}]{detail}[/{design.MUTED}]", ""]
+    body.extend(
+        f"  [{design.WHITE}]{label}[/{design.WHITE}]\n"
+        f"    [{design.ACCENT_SOFT}]{command}[/{design.ACCENT_SOFT}]"
+        for label, command in remedies
+    )
+    repl.console.print(
+        Panel(
+            "\n".join(body),
+            title=f"[bold {design.ACCENT}]{headline}[/bold {design.ACCENT}]",
+            title_align="left",
+            border_style=design.FAINT,
+            padding=(1, 2),
+        )
+    )
+
+
 async def cmd_model(repl: VeluneREPL, args: str) -> None:
     parts = args.strip().split(None, 1)
     sub = parts[0].lower() if parts else ""
@@ -72,10 +103,7 @@ async def cmd_model(repl: VeluneREPL, args: str) -> None:
 
     models = model_registry.list_all()
     if not models:
-        from velune.cli.rendering.error_panel import render_error
-        from velune.core.errors.catalog import NoModelsAvailableError
-
-        repl.console.print(render_error(NoModelsAvailableError()))
+        _print_no_models_guidance(repl, has_registered_models=False)
         return
 
     selected = await _show_model_picker(repl, models)
@@ -579,10 +607,7 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
     from velune.cli import ui
 
     if not all_models:
-        from velune.cli.rendering.error_panel import render_error
-        from velune.core.errors.catalog import NoModelsAvailableError
-
-        repl.console.print(render_error(NoModelsAvailableError()))
+        _print_no_models_guidance(repl, has_registered_models=False)
         return
 
     table = Table(

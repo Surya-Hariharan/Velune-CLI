@@ -51,6 +51,7 @@ class VeluneREPL:
         )
         self._completer = None
         self._command_palette = None
+        self._model_palette = None
         self._model_switcher = None
         self.session_tokens: int = 0
         self.session_cost: float = 0.0
@@ -270,6 +271,7 @@ class VeluneREPL:
         from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
         from velune.cli.fullscreen import FullscreenREPLUI
         from velune.cli.inline_flow import InlineFlow
+        from velune.cli.model_palette import MODEL_PALETTE_STYLES, ModelPalette
         from velune.cli.model_switcher import MODEL_SWITCHER_STYLES, ModelSwitcher
         from velune.cli.prompt_recall import PromptRecallState
         from velune.cli.statusbar import STATUS_BAR_STYLES
@@ -279,6 +281,7 @@ class VeluneREPL:
             "prompt.arrow": f"{design.ACCENT_SOFT} bold",
             **STATUS_BAR_STYLES,
             **PALETTE_STYLES,
+            **MODEL_PALETTE_STYLES,
             **MODEL_SWITCHER_STYLES,
         }
 
@@ -290,20 +293,32 @@ class VeluneREPL:
         flow = InlineFlow()
         self._inline_flow = flow
 
+        # Typing "/model" hands the palette's own rectangle over to the model
+        # picker. Built first so the command palette can suppress itself the
+        # moment this one takes over — otherwise both match the buffer text
+        # ("/model" is a valid command-palette query too) and would render
+        # stacked in the same float.
+        model_palette = ModelPalette(self.container, suppressed=flow.is_active)
+        self._model_palette = model_palette
+
         palette = CommandPalette(
             self._registry.all_unique(),
             recency_source=completer.recent_commands,
             favorites=FavoritesStore(),
-            suppressed=flow.is_active,
+            suppressed=lambda: flow.is_active() or model_palette.is_active(),
         )
         self._command_palette = palette
 
         model_switcher = ModelSwitcher(
-            self, suppressed=lambda: flow.is_active() or palette.is_active()
+            self,
+            suppressed=lambda: flow.is_active() or palette.is_active() or model_palette.is_active(),
         )
         self._model_switcher = model_switcher
 
         kb = KeyBindings()
+        # Registered before the command palette so that if both were ever
+        # active at once, the model picker's eager arrow bindings win.
+        model_palette.add_bindings(kb)
         palette.add_bindings(kb)
         model_switcher.add_bindings(kb)
         flow.add_bindings(kb)
@@ -386,6 +401,7 @@ class VeluneREPL:
             on_interrupt=_interrupt,
             on_status_render=self._refresh_status_state,
             command_palette=palette,
+            model_palette=model_palette,
             model_switcher=model_switcher,
             inline_flow=flow,
             home_provider=self._home_state,
