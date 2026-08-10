@@ -6,9 +6,6 @@ those have their own dedicated discoverers.
 
 The ``DockerDiscovery`` class returns ``ModelDescriptor`` objects and is wired into
 the central ``ModelDiscoveryScanner`` alongside the other backends.
-
-The legacy ``discover_docker_endpoints()`` function is kept for backward compatibility
-but is no longer used by the scanner.
 """
 
 from __future__ import annotations
@@ -116,38 +113,3 @@ class DockerDiscovery:
                         seen.add(m.model_id)
                         models.append(m)
         return models
-
-
-# ---------------------------------------------------------------------------
-# Legacy function kept for backward compatibility
-# ---------------------------------------------------------------------------
-
-
-async def discover_docker_endpoints() -> list[dict]:
-    """[Deprecated] Return dicts for each reachable OpenAI-compatible port."""
-    from velune.core.types.provider import ProviderHealth  # type: ignore[attr-defined]
-
-    ports = [8000, 8080, 11434, 1234]
-    results: list[dict] = []
-
-    async def _check(port: int) -> dict | None:
-        url = f"http://localhost:{port}/v1/models"
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if "data" in data and isinstance(data["data"], list):
-                        return {
-                            "port": port,
-                            "url": f"http://localhost:{port}/v1",
-                            "status": ProviderHealth.HEALTHY,
-                            "model_count": len(data["data"]),
-                        }
-        except Exception:
-            pass
-        return None
-
-    checks = await asyncio.gather(*[_check(p) for p in ports])
-    results = [r for r in checks if r is not None]
-    return results
