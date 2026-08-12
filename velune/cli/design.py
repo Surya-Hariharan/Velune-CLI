@@ -1,15 +1,21 @@
 """Central design tokens for the Velune CLI.
 
-Monochrome palette — grayscale text and structure on a near-black background,
-with a single restrained accent (soft steel-blue) reserved for the logo,
-prompt, and active/selected state. Semantic colors (ok/warn/danger) stay
-desaturated so they read as "muted amber" or "muted rust" rather than neon,
-while remaining functionally distinct for legibility.
+Every colour constant below is a *role* ("the accent", "the panel background"),
+and every one of them is supplied by the active :class:`~velune.cli.themes.Theme`.
+The module-level names are the stable contract the rest of the CLI imports;
+:func:`apply_theme` repoints them at a different theme's values.
 
-Palette:
-- Grayscale neutrals (body text, separators, panels)
-- One accent hue, used sparingly (logo, prompt prefix, active states)
-- Desaturated semantic colors (success / warning / danger)
+Reading the tokens
+------------------
+Call sites must read these as module attributes (``design.ACCENT``), never as
+``from velune.cli.design import ACCENT`` — a from-import copies the value at
+import time and would freeze on whichever theme happened to be active then.
+The same rule already governed ``OK``/``WARN``/``DANGER`` under colourblind
+mode; theming simply widens it to the whole palette.
+
+Style *dicts* built from these tokens have the same hazard one level up, which
+is why the palette/status-bar modules expose ``*_styles()`` builder functions
+rather than module-level dicts — see ``velune.cli.command_palette``.
 
 Nothing here probes the terminal at import time; :func:`color_enabled` is
 evaluated lazily so the palette degrades gracefully under ``NO_COLOR`` and on
@@ -21,60 +27,63 @@ from __future__ import annotations
 import os
 import sys
 
-# --- Brand palette: vibrant indigo accent + cool gradient --------------------
-# One vivid hue drives the whole theme — the logo wordmark, prompt glyph,
-# headings, and active/selected state — set against grayscale neutrals so the
-# accent reads as energetic without turning the UI into noise.
-ACCENT = "#818cf8"  # electric indigo (wordmark, primary brand, prompt prefix)
-ACCENT_SOFT = "#5b63d6"  # dimmer indigo (secondary elements, arrows)
+from velune.cli import themes
 
-# Secondary accent: cyan-blue. Used where a surface must read as a *sibling* of
-# an indigo one rather than the same thing — the model palette sits in exactly
-# the geometry the command palette just vacated, so a distinct hue is what tells
-# you the list under your cursor changed meaning (commands → models).
-CYAN = "#38bdf8"  # bright cyan-blue (frame title, query, active hue)
-CYAN_SOFT = "#0ea5e9"  # deeper cyan-blue (selected row, secondary text)
+#: The theme currently painting the UI. Swap it with :func:`apply_theme`.
+_active_theme: themes.Theme = themes.default_theme()
+
+# --- Brand palette ----------------------------------------------------------
+# One vivid hue drives the whole theme — the logo wordmark, prompt glyph,
+# headings, and active/selected state — set against neutrals so the accent
+# reads as energetic without turning the UI into noise.
+ACCENT = _active_theme.primary  # wordmark, primary brand, prompt prefix
+ACCENT_SOFT = _active_theme.secondary  # secondary elements, arrows
+
+# Companion accent, a distinct hue from ACCENT. Used where a surface must read
+# as a *sibling* of an ACCENT one rather than the same thing — the model
+# palette sits in exactly the geometry the command palette just vacated, so a
+# distinct hue is what tells you the list under your cursor changed meaning
+# (commands → models). Named CYAN for historical reasons; under a non-default
+# theme it is whatever companion hue that theme defines.
+CYAN = _active_theme.accent
+CYAN_SOFT = _active_theme.accent_soft
 
 # The brand wordmark is painted as a horizontal gradient across these three
-# stops (violet → blue → teal). `gradient_hex(t)` interpolates between them for
-# any t in [0, 1]; other surfaces can reuse it for progress fills, meters, etc.
-GRAD_START = "#a78bfa"  # violet
-GRAD_MID = "#60a5fa"  # blue
-GRAD_END = "#2dd4bf"  # teal
+# stops. `gradient_hex(t)` interpolates between them for any t in [0, 1];
+# other surfaces can reuse it for progress fills, meters, etc.
+GRAD_START, GRAD_MID, GRAD_END = _active_theme.gradient
 
-# Reuses of the single accent — kept as separate names because other modules
-# reference them by role, not because they carry a distinct hue. They point at
-# the accent tokens (not hardcoded copies) so a recolor here propagates.
+# Reuses of the accent — kept as separate names because other modules
+# reference them by role, not because they carry a distinct hue.
 PRIMARY_GREEN = ACCENT_SOFT  # (emphasis, highlights)
-GREEN = "#7a9b82"  # = OK (accents, active states, success)
+GREEN = _active_theme.success  # = OK (accents, active states, success)
 
 HIGHLIGHT = ACCENT  # (modes, indicators)
 ENERGY = ACCENT_SOFT  # (active processes)
 
 # Info & feedback — desaturated, accent-tinted gray rather than a new hue.
-INFO = "#96a8ae"  # muted steel-gray for informational text
-SUBTLE = "#7a7a78"  # muted gray for subtle elements
+INFO = _active_theme.info  # informational text
+SUBTLE = _active_theme.muted  # subtle elements
 
 # Semantic state colors (shared by status bar, badges, diffs). Desaturated so
-# they sit quietly in the monochrome theme while staying legible.
-OK = "#7a9b82"  # muted sage — success
-WARN = "#b3966e"  # muted amber — warning
-DANGER = "#b3706e"  # muted brick red — danger
+# they sit quietly against the theme's background while staying legible.
+OK = _active_theme.success
+WARN = _active_theme.warning
+DANGER = _active_theme.error
 
 # Neutrals.
-BACKGROUND = "#0a0a0a"  # fullscreen REPL background
-WHITE = "#e8e8e6"  # primary body text (soft off-white, not pure #fff)
-SECONDARY = "#a3a3a1"  # neutral secondary text
-MUTED = "#7a7a78"  # secondary/dim text
-FAINT = "#4a4a48"  # frame glyphs, separators
-SURFACE = "#131311"  # panel background
-LIGHT_BG = "#1e1e1c"  # slightly lighter panels
+BACKGROUND = _active_theme.background  # fullscreen REPL background
+WHITE = _active_theme.foreground  # primary body text (soft off-white)
+SECONDARY = _active_theme.foreground_dim  # neutral secondary text
+MUTED = _active_theme.muted  # secondary/dim text
+FAINT = _active_theme.border  # frame glyphs, separators
+SURFACE = _active_theme.panel  # panel background
+LIGHT_BG = _active_theme.selection  # selected rows, slightly lighter panels
 
 # --- Semantic role aliases -------------------------------------------------
-# NOTE: "PINK" is a legacy name from the previous brand palette — it now
-# points at the single monochrome accent, not an actual pink hue. Left
-# unrenamed to avoid a mass rename across every importer for a recolor-only
-# pass; rename if this theme becomes permanent.
+# NOTE: "PINK" is a legacy name from a previous brand palette — it now points
+# at the theme accent, not an actual pink hue. Left unrenamed to avoid a mass
+# rename across every importer.
 PINK = ACCENT
 SUCCESS = OK
 ERROR = DANGER
@@ -82,6 +91,72 @@ ACCENT_TEXT = ACCENT
 CONTROL = ACCENT  # orchestration/control
 PRIVACY = PRIMARY_GREEN  # local-first, secure
 SPEED = HIGHLIGHT  # performance, energy
+
+
+def apply_theme(theme: themes.Theme) -> None:
+    """Repoint every colour token at *theme*.
+
+    Mutates the module globals in place rather than returning a new palette,
+    because ~40 modules already reference these by attribute — the same
+    mechanism ``set_colorblind_mode`` has always used, widened to the full
+    token set. Anything rendered after this call picks up the new colours.
+
+    Colourblind mode is reapplied last: it is an accessibility modifier that
+    outranks the theme's own severity trio, so switching themes while it is on
+    must not quietly restore theme colours the user turned off.
+    """
+    global _active_theme
+    global ACCENT, ACCENT_SOFT, CYAN, CYAN_SOFT
+    global GRAD_START, GRAD_MID, GRAD_END
+    global PRIMARY_GREEN, GREEN, HIGHLIGHT, ENERGY, INFO, SUBTLE
+    global OK, WARN, DANGER
+    global BACKGROUND, WHITE, SECONDARY, MUTED, FAINT, SURFACE, LIGHT_BG
+    global PINK, SUCCESS, ERROR, ACCENT_TEXT, CONTROL, PRIVACY, SPEED
+
+    _active_theme = theme
+
+    ACCENT = theme.primary
+    ACCENT_SOFT = theme.secondary
+    CYAN = theme.accent
+    CYAN_SOFT = theme.accent_soft
+    GRAD_START, GRAD_MID, GRAD_END = theme.gradient
+
+    PRIMARY_GREEN = ACCENT_SOFT
+    GREEN = theme.success
+    HIGHLIGHT = ACCENT
+    ENERGY = ACCENT_SOFT
+    INFO = theme.info
+    SUBTLE = theme.muted
+
+    OK, WARN, DANGER = theme.success, theme.warning, theme.error
+
+    BACKGROUND = theme.background
+    WHITE = theme.foreground
+    SECONDARY = theme.foreground_dim
+    MUTED = theme.muted
+    FAINT = theme.border
+    SURFACE = theme.panel
+    LIGHT_BG = theme.selection
+
+    PINK = ACCENT
+    ACCENT_TEXT = ACCENT
+    CONTROL = ACCENT
+    PRIVACY = PRIMARY_GREEN
+    SPEED = HIGHLIGHT
+
+    # Re-derives SUCCESS/ERROR and honours an active colourblind override.
+    set_colorblind_mode(_colorblind_mode)
+
+
+def active_theme() -> themes.Theme:
+    """The theme currently painting the UI."""
+    return _active_theme
+
+
+def active_theme_id() -> str:
+    """Id of the theme currently painting the UI."""
+    return _active_theme.id
+
 
 # --- Colorblind-safe alternate severity palette -----------------------------
 # Okabe-Ito palette (https://jfly.uni-koeln.de/color/) — chosen because its
@@ -95,7 +170,6 @@ SPEED = HIGHLIGHT  # performance, energy
 # `design.OK` etc. (attribute access on the module, not a `from ... import`
 # copy), so the swap takes effect immediately for anything rendered after the
 # call — no cache to invalidate.
-_DEFAULT_SEVERITY = {"OK": OK, "WARN": WARN, "DANGER": DANGER}
 _COLORBLIND_SEVERITY = {
     "OK": "#009e73",  # bluish green
     "WARN": "#e69f00",  # orange
@@ -107,11 +181,26 @@ _colorblind_mode = False
 
 def set_colorblind_mode(enabled: bool) -> None:
     """Switch OK/WARN/DANGER (and their SUCCESS/ERROR aliases) between the
-    default palette and the colorblind-safe alternate above."""
+    active theme's severity trio and the colorblind-safe alternate above.
+
+    "Off" restores the trio from :func:`active_theme`, not from a snapshot
+    taken at import — otherwise toggling colourblind mode off after a theme
+    change would silently reinstate the *previous* theme's severity colours.
+    """
     global _colorblind_mode, OK, WARN, DANGER, SUCCESS, ERROR
     _colorblind_mode = bool(enabled)
-    palette = _COLORBLIND_SEVERITY if _colorblind_mode else _DEFAULT_SEVERITY
-    OK, WARN, DANGER = palette["OK"], palette["WARN"], palette["DANGER"]
+    if _colorblind_mode:
+        OK, WARN, DANGER = (
+            _COLORBLIND_SEVERITY["OK"],
+            _COLORBLIND_SEVERITY["WARN"],
+            _COLORBLIND_SEVERITY["DANGER"],
+        )
+    else:
+        OK, WARN, DANGER = (
+            _active_theme.success,
+            _active_theme.warning,
+            _active_theme.error,
+        )
     SUCCESS, ERROR = OK, DANGER
 
 

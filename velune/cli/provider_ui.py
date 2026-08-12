@@ -1,5 +1,16 @@
-"""Interactive provider management for the Velune REPL — the /providers and
-/connect commands.
+"""The Velune REPL's provider connection flow — the ``/connect`` command.
+
+This module used to back ``/providers`` as well, hosting a management menu
+(manage / test / discover / remove / status) on top of the same connect flow.
+``/providers`` was removed as a REPL command because it duplicated
+``/connect``'s purpose, and those management screens went with it. The
+capabilities themselves were *not* dropped: ``velune provider list|test|
+remove|models|status`` in ``cli/commands/providers.py`` drives the identical
+subsystem calls (``verifier.reverify``, ``keystore.delete_key``,
+``ModelDiscoveryScanner``) from the non-REPL CLI.
+
+What remains here is exactly one path: pick a provider, enter a key, verify it,
+persist it, and discover its models.
 
 Every screen here is built from the shared widget kit in
 ``velune.cli.interactive`` (``single_select`` / ``text_input`` / ``confirm`` /
@@ -26,7 +37,6 @@ from velune.cli.interactive import (
     BACK,
     CANCEL,
     Option,
-    confirm,
     run_with_status,
     single_select,
     text_input,
@@ -40,15 +50,10 @@ from velune.providers.credential_manager import (
 from velune.providers.discovery.scanner import ModelDiscoveryScanner
 from velune.providers.keystore import (
     KeyState,
-    delete_key,
-    get_key,
     is_ollama_live,
     verification_state,
 )
-from velune.providers.validation import (
-    ValidationStatus,
-    validate_provider,
-)
+from velune.providers.validation import ValidationStatus
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -145,7 +150,7 @@ def _validate_key_shape(raw: str) -> str | None:
 
 
 class ProviderPalette:
-    """Interactive provider management, hosted inside the running REPL."""
+    """The ``/connect`` provider connection flow, hosted inside the running REPL."""
 
     def __init__(self, console: Console, container) -> None:
         self.console = console
@@ -155,55 +160,15 @@ class ProviderPalette:
     # Entry point
     # ------------------------------------------------------------------
 
-    async def run(self, args: str = "") -> None:
-        parts = args.strip().split(None, 1)
-        sub = parts[0].lower() if parts else ""
-        rest = parts[1].strip().lower() if len(parts) > 1 else ""
+    async def run(self, provider_id: str = "") -> None:
+        """Connect a provider.
 
-        if sub == "add":
-            await (self._connect(rest) if rest else self._flow_add())
-        elif sub == "manage":
-            await (self._detail(rest) if rest else self._flow_manage())
-        elif sub in ("discover", "refresh"):
-            await self._discover_all()
-        elif sub == "test":
-            await (self._test(rest) if rest else self._flow_test())
-        elif sub == "status":
-            self._show_status_table()
-        elif sub == "remove":
-            if rest:
-                await self._remove(rest)
-            else:
-                self.console.print(f"[{design.WARN}]Usage: /providers remove <id>[/{design.WARN}]")
-        else:
-            await self._main_menu()
-
-    async def _main_menu(self) -> None:
-        choice = await single_select(
-            "Providers",
-            [
-                Option("add", "Add Provider", "Connect a cloud provider with an API key"),
-                Option("manage", "Manage Providers", "View, update, or remove a provider"),
-                Option("test", "Test Connection", "Re-verify a configured provider"),
-                Option("discover", "Discover Models", "Re-fetch models from every provider"),
-                Option("status", "Provider Status", "Status table for every provider"),
-            ],
-            subtitle="Manage cloud AI provider connections",
-            palette=True,
-            frame_title="Providers",
-        )
-        if choice in (BACK, CANCEL):
-            return
-        if choice == "add":
-            await self._flow_add()
-        elif choice == "manage":
-            await self._flow_manage()
-        elif choice == "test":
-            await self._flow_test()
-        elif choice == "discover":
-            await self._discover_all()
-        elif choice == "status":
-            self._show_status_table()
+        With *provider_id* the picker is skipped and key entry starts straight
+        away; without it the user picks from the catalog first. There are no
+        other modes — this is the whole surface.
+        """
+        pid = provider_id.strip().lower()
+        await (self._connect(pid) if pid else self._flow_add())
 
     # ------------------------------------------------------------------
     # Add / connect
@@ -317,190 +282,8 @@ class ProviderPalette:
         )
 
     # ------------------------------------------------------------------
-    # Manage / detail / remove
-    # ------------------------------------------------------------------
-
-    async def _flow_manage(self) -> None:
-        while True:
-            rows = [_row(p.id) for p in catalog.list_providers_alphabetical()]
-            pid = await single_select(
-                "Manage Providers",
-                rows,
-                subtitle="Select a provider to view or change",
-                filterable=True,
-                palette=True,
-                frame_title="Manage providers",
-            )
-            if pid in (BACK, CANCEL):
-                return
-            await self._detail(str(pid))
-
-    async def _detail(self, pid: str) -> None:
-        meta = catalog.get(pid)
-        if meta is None:
-            self.console.print(f"[{design.WARN}]Unknown provider: {pid}[/{design.WARN}]")
-            return
-
-        if _is_local(pid):
-            options = [
-                Option("test", "Test Connection", "Check the local server is reachable"),
-                Option("refresh", "Refresh Models", "Re-fetch this server's model list"),
-            ]
-        elif verification_state(pid) is KeyState.MISSING:
-            options = [Option("add", "Connect", "Add an API key to enable this provider")]
-        else:
-            options = [
-                Option("test", "Test Connection", "Re-verify the stored key now"),
-                Option("update", "Replace API Key", "Enter a new key for this provider"),
-                Option("refresh", "Refresh Models", "Re-fetch the model catalogue"),
-                Option("remove", "Remove API Key", "Delete the key and disconnect"),
-            ]
-
-        action = await single_select(
-            meta.display_name,
-            options,
-            subtitle=self._detail_subtitle(pid),
-            palette=True,
-            frame_title=meta.display_name,
-        )
-        if action in (BACK, CANCEL):
-            return
-        if action in ("add", "update"):
-            await self._connect(pid)
-        elif action == "test":
-            await self._test(pid)
-        elif action == "refresh":
-            await self._discover_one(pid)
-        elif action == "remove":
-            await self._remove(pid)
-
-    def _detail_subtitle(self, pid: str) -> str:
-        if _is_local(pid):
-            return f"local  ·  {_local_status(pid)}"
-        state = verification_state(pid)
-        badge = _STATE_BADGE[state][0] or "not configured"
-        try:
-            mr = self.container.get("runtime.model_registry")
-            count = len(mr.get_by_provider(pid))
-        except Exception:
-            count = 0
-        return f"{badge}  ·  {count} cached model(s)" if count else badge
-
-    async def _remove(self, pid: str) -> None:
-        meta = catalog.get(pid)
-        label = meta.display_name if meta else pid
-
-        ok = await confirm(
-            f"Remove the {label} API key?",
-            hint=f"This disconnects all {label} models from Velune.",
-            default=False,
-        )
-        if ok is not True:
-            self.console.print(f"[{design.MUTED}]Cancelled — key kept.[/{design.MUTED}]")
-            return
-
-        delete_key(pid)
-        self.console.print(f"[{design.OK}]{label} disconnected.[/{design.OK}]")
-
-        evicted = 0
-        try:
-            mr = self.container.get("runtime.model_registry")
-            for m in list(mr.get_by_provider(pid)):
-                if mr.remove(m.model_id, pid):
-                    evicted += 1
-        except Exception:
-            pass
-        if evicted:
-            self.console.print(
-                f"[{design.MUTED}]Removed {evicted} cached model(s).[/{design.MUTED}]"
-            )
-
-    # ------------------------------------------------------------------
-    # Test
-    # ------------------------------------------------------------------
-
-    async def _flow_test(self) -> None:
-        configured = [
-            p.id
-            for p in catalog.list_cloud_providers_alphabetical()
-            if verification_state(p.id) is not KeyState.MISSING
-        ]
-        if not configured:
-            self.console.print(
-                f"[{design.WARN}]No providers configured yet. "
-                f"Run [bold]/connect[/bold] to connect one.[/{design.WARN}]"
-            )
-            return
-
-        options = [Option("__all__", "Test all", "Re-verify every configured provider")]
-        options += [_row(pid) for pid in configured]
-
-        pid = await single_select(
-            "Test Connection",
-            options,
-            filterable=True,
-            palette=True,
-            frame_title="Test connection",
-        )
-        if pid in (BACK, CANCEL):
-            return
-
-        if pid == "__all__":
-            for one in configured:
-                await self._test(one)
-        else:
-            await self._test(str(pid))
-
-    async def _test(self, pid: str) -> None:
-        """Live round-trip against a provider, persisting the verdict."""
-        meta = catalog.get(pid)
-        if meta is None:
-            self.console.print(f"[{design.WARN}]Unknown provider: {pid}[/{design.WARN}]")
-            return
-        label = meta.display_name
-
-        if meta.requires_key and not get_key(pid):
-            self.console.print(f"[{design.WARN}]{label} — no API key configured.[/{design.WARN}]")
-            return
-
-        if meta.requires_key:
-            # Route through the verifier so the stored state is updated by the
-            # same rules the background sweep uses — in particular, a network
-            # error must not mark the key invalid.
-            from velune.providers.verifier import reverify
-
-            work = reverify(pid)
-        else:
-            work = validate_provider(pid, "")
-
-        await run_with_status(
-            work,
-            pending=f"Testing {label}…",
-            ok=lambda r: (
-                f"{label} — connected ({len(r.models)} model(s))"
-                if r.models
-                else f"{label} — connected"
-            ),
-            fail=lambda r: f"{label} — {r.human_message()}",
-            is_ok=lambda r: r.ok,
-        )
-
-    # ------------------------------------------------------------------
     # Model discovery
     # ------------------------------------------------------------------
-
-    async def _discover_all(self) -> None:
-        async def _scan():
-            return await ModelDiscoveryScanner().scan_all()
-
-        models = await run_with_status(
-            _scan(),
-            pending="Scanning connected providers for models…",
-            ok=lambda ms: f"Registered {len(ms)} model(s)",
-            fail="No models discovered",
-            is_ok=lambda ms: bool(ms),
-        )
-        self._register(models)
 
     async def _discover_one(self, pid: str) -> None:
         meta = catalog.get(pid)
@@ -524,49 +307,21 @@ class ProviderPalette:
         self._register(models)
 
     def _register(self, models) -> None:
+        """Register discovered models *and* persist the catalog to disk.
+
+        The persist step is what makes a freshly connected provider survive a
+        restart. Without it the models existed only in this process: the key
+        was saved correctly, but the next launch loaded a cache with no models
+        for the provider and reported it as unconnected — the bug this
+        reads as "my API key was lost".
+        """
         if not models:
             return
         try:
             mr = self.container.get("runtime.model_registry")
             for m in models:
                 mr.register(m)
+            if not mr.persist():
+                _log.debug("Model registry has no disk cache; discovery is session-only.")
         except Exception as exc:
             _log.debug("Could not register discovered models: %s", exc)
-
-    # ------------------------------------------------------------------
-    # Status table
-    # ------------------------------------------------------------------
-
-    def _show_status_table(self) -> None:
-        from rich.table import Table
-
-        table = Table(border_style=design.FAINT, padding=(0, 1))
-        table.add_column("Provider", style=design.WHITE, min_width=14)
-        table.add_column("Type", style=design.MUTED, width=6)
-        table.add_column("Status", min_width=12)
-        table.add_column("Env Var", style=design.FAINT)
-
-        for meta in catalog.list_providers_alphabetical():
-            if meta.requires_key:
-                state = verification_state(meta.id)
-                text, color = _STATE_BADGE[state]
-                text = text or "not configured"
-                kind = "cloud"
-            else:
-                status = _local_status(meta.id)
-                text = status
-                color = design.OK if status == "running" else design.MUTED
-                kind = "local"
-
-            table.add_row(
-                meta.display_name,
-                kind,
-                f"[{color}]{text}[/{color}]",
-                meta.env_var or "—",
-            )
-
-        self.console.print(table)
-        self.console.print(
-            f"[{design.MUTED}]Stale keys are re-checked automatically. "
-            f"[bold]/connect[/bold] to connect a provider.[/{design.MUTED}]"
-        )

@@ -197,6 +197,25 @@ class DisplayConfig(BaseModel):
     composer_max_lines: int = Field(default=8, ge=1)
 
 
+class ThemeConfig(BaseModel):
+    """The active colour theme.
+
+    Deliberately its own section rather than a key under ``[display]``: a
+    theme is a whole palette, while ``[display]`` holds independent
+    accessibility and layout modifiers (colourblind mode, reduced motion,
+    composer height) that must keep applying *on top of* whichever theme is
+    active. Collapsing them into one section invites the assumption that
+    changing a theme resets them.
+
+    ``active`` names a theme id from ``velune.cli.themes.THEMES``. An unknown
+    id falls back to the default theme at load time and is reported by
+    ``velune doctor`` — it is never rewritten in the config, since silently
+    correcting a value the user typed destroys the evidence of the typo.
+    """
+
+    active: str = "velune"
+
+
 class TelemetryConfig(BaseModel):
     """Observability options."""
 
@@ -285,6 +304,7 @@ class VeluneConfig(BaseSettings):
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
+    theme: ThemeConfig = Field(default_factory=ThemeConfig)
 
     # ---------------------------------------------------------------------------
     # Startup validation
@@ -417,6 +437,7 @@ def _hardcoded_defaults() -> dict:
         cognition=CognitionConfig(),
         resources=ResourcesConfig(),
         display=DisplayConfig(),
+        theme=ThemeConfig(),
     )
     return instance.model_dump()
 

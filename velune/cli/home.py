@@ -24,22 +24,31 @@ _MARGIN = "   "  # 3-space left gutter for the whole surface
 _DOT = "●"
 _DOT_OFF = "○"
 
-HOME_STYLES: dict[str, str] = {
-    "home.brand": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-    "home.tagline": f"bg:{design.BACKGROUND} {design.SECONDARY}",
-    "home.version": f"bg:{design.BACKGROUND} {design.FAINT}",
-    "home.model": f"bg:{design.BACKGROUND} {design.WHITE}",
-    "home.meta": f"bg:{design.BACKGROUND} {design.MUTED}",
-    "home.path": f"bg:{design.BACKGROUND} {design.SECONDARY}",
-    "home.dot": f"bg:{design.BACKGROUND} {design.ACCENT}",
-    "home.dot.off": f"bg:{design.BACKGROUND} {design.FAINT}",
-    "home.value": f"bg:{design.BACKGROUND} {design.SECONDARY}",
-    "home.label": f"bg:{design.BACKGROUND} {design.FAINT}",
-    "home.ok": f"bg:{design.BACKGROUND} {design.OK}",
-    "home.warn": f"bg:{design.BACKGROUND} {design.WARN}",
-    "home.hint": f"bg:{design.BACKGROUND} {design.FAINT} italic",
-    "home.hint.key": f"bg:{design.BACKGROUND} {design.ACCENT_SOFT}",
-}
+
+def home_styles() -> dict[str, str]:
+    """Home-surface style rules for the *currently active* theme.
+
+    A function rather than a module-level dict so a theme change is picked up
+    — see ``design.apply_theme`` for why frozen dicts broke live switching.
+    """
+    bg = design.BACKGROUND
+    return {
+        "home.brand": f"bg:{bg} {design.ACCENT} bold",
+        "home.tagline": f"bg:{bg} {design.SECONDARY}",
+        "home.version": f"bg:{bg} {design.FAINT}",
+        "home.model": f"bg:{bg} {design.WHITE}",
+        "home.meta": f"bg:{bg} {design.MUTED}",
+        "home.path": f"bg:{bg} {design.SECONDARY}",
+        "home.dot": f"bg:{bg} {design.ACCENT}",
+        "home.dot.off": f"bg:{bg} {design.FAINT}",
+        "home.value": f"bg:{bg} {design.SECONDARY}",
+        "home.label": f"bg:{bg} {design.FAINT}",
+        "home.ok": f"bg:{bg} {design.OK}",
+        "home.warn": f"bg:{bg} {design.WARN}",
+        "home.hint": f"bg:{bg} {design.FAINT} italic",
+        "home.hint.key": f"bg:{bg} {design.ACCENT_SOFT}",
+    }
+
 
 # --- Wordmark ---------------------------------------------------------------
 # "VELUNE CLI" in the ANSI-Shadow figlet style. All glyphs are single

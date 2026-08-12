@@ -63,6 +63,16 @@ _SUBCOMMANDS = frozenset(
 _VISIBLE_ROWS = 9
 
 
+def _provider_display_name(provider_id: str) -> str:
+    """Canonical provider display name from the catalog — the single source of
+    truth also used by ``/providers``, ``/connect``, and the ``/model`` full
+    picker, not an ad hoc mapping local to this palette."""
+    from velune.providers import catalog
+
+    meta = catalog.get(provider_id)
+    return meta.display_name if meta is not None else provider_id
+
+
 @dataclass(frozen=True, slots=True)
 class ModelMatch:
     model: Any
@@ -132,7 +142,7 @@ def empty_state_guidance(has_registered_models: bool) -> tuple[str, str, list[tu
             "Known models are not responding.",
             [
                 ("Start your local server", "ollama serve"),
-                ("Check a provider key", "/providers"),
+                ("Check a provider key", "/connect"),
                 ("Re-scan once it is up", "/model discover"),
             ],
         )
@@ -328,7 +338,9 @@ class ModelPalette:
             if len(name) > 30:
                 name = name[:29].rstrip() + "…"
             lines.append((style, f" {marker} {name:<31}"))
-            lines.append(("class:model-palette.muted", f"{model.provider_id}\n"))
+            lines.append(
+                ("class:model-palette.muted", f"{_provider_display_name(model.provider_id)}\n")
+            )
 
         end = start + len(visible)
         if start > 0 or end < count:
@@ -360,7 +372,10 @@ class ModelPalette:
         context_length = getattr(model, "context_length", 0) or 0
         lines: list[tuple[str, str]] = [
             ("class:model-palette.title", f"  {model.model_id}\n"),
-            ("class:model-palette.muted", f"  {model.provider_id} · {tag}\n\n"),
+            (
+                "class:model-palette.muted",
+                f"  {_provider_display_name(model.provider_id)} · {tag}\n\n",
+            ),
             ("class:model-palette.label", "  CONTEXT\n"),
             ("class:model-palette.code", f"  {context_length:,} tokens\n\n"),
         ]
@@ -420,9 +435,21 @@ class ModelPalette:
         def _select(event) -> None:
             model = self._selected()
             if model is None:
-                # Nothing to pick (empty catalog): swallow Enter rather than
-                # submitting a bare "/model", which would dump a second,
-                # redundant listing under a palette already explaining this.
+                if not self._models_source():
+                    # Nothing to pick at all (empty catalog): swallow Enter
+                    # rather than submitting a bare "/model", which would dump
+                    # a second, redundant listing under a palette already
+                    # explaining this.
+                    return
+                # Models exist; the typed text just doesn't match any of them
+                # as a filter. That's most likely not a filter at all but the
+                # start of the user's real message — e.g.
+                # "/model Explain how authentication works". Let the raw text
+                # fall through to the normal command path: cmd_model() opens
+                # the full picker and hands the leftover text back to the
+                # prompt once a model is chosen (or unchanged, on Esc).
+                self._dismissed_text = None
+                event.current_buffer.validate_and_handle()
                 return
             # Route through the ordinary command path so persistence, recents,
             # and the default-provider write all happen exactly as they do for
@@ -475,20 +502,26 @@ class ModelPalette:
         )
 
 
-#: Mirrors PALETTE_STYLES role-for-role, swapping indigo for cyan-blue so the
-#: two palettes are visually siblings rather than the same surface.
-MODEL_PALETTE_STYLES: dict[str, str] = {
-    "model-palette.frame": f"bg:{design.SURFACE} fg:{design.FAINT}",
-    "model-palette.frame-title": f"bg:{design.SURFACE} fg:{design.CYAN} bold",
-    "model-palette.border": f"bg:{design.SURFACE} fg:{design.FAINT}",
-    "model-palette.title": f"bg:{design.SURFACE} fg:{design.WHITE} bold",
-    "model-palette.label": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
-    "model-palette.query": f"bg:{design.SURFACE} fg:{design.CYAN} bold",
-    "model-palette.group": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
-    "model-palette.model": f"bg:{design.SURFACE} fg:{design.WHITE}",
-    "model-palette.selected": f"bg:{design.LIGHT_BG} fg:{design.CYAN} bold",
-    "model-palette.text": f"bg:{design.SURFACE} fg:{design.WHITE}",
-    "model-palette.code": f"bg:{design.SURFACE} fg:{design.CYAN_SOFT}",
-    "model-palette.muted": f"bg:{design.SURFACE} fg:{design.FAINT}",
-    "model-palette.warning": f"bg:{design.SURFACE} fg:{design.WARN}",
-}
+def model_palette_styles() -> dict[str, str]:
+    """Model-palette style rules for the *currently active* theme.
+
+    Mirrors ``command_palette.palette_styles()`` role-for-role, swapping the
+    primary accent for the theme's companion accent so the two palettes read
+    as siblings rather than the same surface. A function rather than a dict
+    for the reason documented there: a dict freezes the startup theme.
+    """
+    return {
+        "model-palette.frame": f"bg:{design.SURFACE} fg:{design.FAINT}",
+        "model-palette.frame-title": f"bg:{design.SURFACE} fg:{design.CYAN} bold",
+        "model-palette.border": f"bg:{design.SURFACE} fg:{design.FAINT}",
+        "model-palette.title": f"bg:{design.SURFACE} fg:{design.WHITE} bold",
+        "model-palette.label": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
+        "model-palette.query": f"bg:{design.SURFACE} fg:{design.CYAN} bold",
+        "model-palette.group": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
+        "model-palette.model": f"bg:{design.SURFACE} fg:{design.WHITE}",
+        "model-palette.selected": f"bg:{design.LIGHT_BG} fg:{design.CYAN} bold",
+        "model-palette.text": f"bg:{design.SURFACE} fg:{design.WHITE}",
+        "model-palette.code": f"bg:{design.SURFACE} fg:{design.CYAN_SOFT}",
+        "model-palette.muted": f"bg:{design.SURFACE} fg:{design.FAINT}",
+        "model-palette.warning": f"bg:{design.SURFACE} fg:{design.WARN}",
+    }

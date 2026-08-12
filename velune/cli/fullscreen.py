@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -31,10 +32,12 @@ from rich.console import Console, ConsoleDimensions
 
 from velune.cli import design
 from velune.cli.clipboard import copy_to_clipboard, extract_last_code_block
-from velune.cli.home import HOME_STYLES, HomeState, render_home
+from velune.cli.home import HomeState, home_styles, render_home
 from velune.cli.rendering.markdown import CustomMarkdown, MarkdownStreamBuffer
 from velune.cli.rendering.segments_to_pt import render_to_fragments
 from velune.cli.statusbar import render_status_bar
+
+_log = logging.getLogger("velune.cli.fullscreen")
 
 # General-purpose "is there any escape sequence at all" check, used only to
 # decide whether a console line needs the ANSI() parse path in
@@ -248,6 +251,7 @@ def _build_floats(
     model_switcher: Any | None = None,
     inline_flow: Any | None = None,
     model_palette: Any | None = None,
+    theme_palette: Any | None = None,
 ) -> list[Float]:
     """The CompletionsMenu float (model-id/@@symbol completion), plus the
     command palette's float when one is supplied.
@@ -282,6 +286,21 @@ def _build_floats(
         floats.append(
             Float(
                 content=model_palette.container(),
+                left=2,
+                right=2,
+                top=1,
+                height=18,
+                allow_cover_cursor=True,
+                z_index=21,
+            )
+        )
+    if theme_palette is not None:
+        # Same rectangle again, for the same reason: "/theme" reads as the
+        # palette staying put and switching from commands to themes. The
+        # command palette suppresses itself while this one is active.
+        floats.append(
+            Float(
+                content=theme_palette.container(),
                 left=2,
                 right=2,
                 top=1,
@@ -362,6 +381,77 @@ class _ScrollableConversationWindow(Window):
 class FullscreenREPLUI:
     """Owns the alternate-screen UI, prompt buffer, status line, and transcript."""
 
+    def _build_style(self) -> dict[str, str]:
+        """The complete style sheet, interpolated from the *current* theme.
+
+        Called once at construction and again by :meth:`restyle` after a theme
+        change. Every value below reads ``design.*`` at call time, so this
+        function is the reason a theme swap can repaint the transcript, prompt,
+        and chrome without rebuilding the Application.
+        """
+        style = dict(self._style_fragments)
+        if self._style_provider is not None:
+            try:
+                style.update(self._style_provider())
+            except Exception:
+                # A broken provider must never take the UI down; the frozen
+                # fragments captured at construction remain a usable sheet.
+                _log.debug("Style provider failed; keeping previous fragments", exc_info=True)
+        style.update(
+            {
+                "": f"bg:{design.BACKGROUND} {design.WHITE}",
+                "conversation": f"bg:{design.BACKGROUND} {design.WHITE}",
+                "conversation.dim": f"bg:{design.BACKGROUND} {design.SECONDARY}",
+                "conversation.user": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.user.marker": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.user.text": f"bg:{design.BACKGROUND} {design.WHITE}",
+                "conversation.assistant": f"bg:{design.BACKGROUND} {design.WHITE}",
+                "conversation.assistant.diamond": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.assistant.label": f"bg:{design.BACKGROUND} {design.GRAD_MID} bold",
+                "conversation.system": f"bg:{design.BACKGROUND} {design.SECONDARY}",
+                "conversation.thinking": f"bg:{design.BACKGROUND} {design.SECONDARY} italic",
+                "conversation.spinner": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                # Tool-activity cards (agentic loop): ● Verb(target) · 1.2s
+                "conversation.tool.spinner": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "conversation.tool.name": f"bg:{design.BACKGROUND} {design.WHITE} bold",
+                "conversation.tool.arg": f"bg:{design.BACKGROUND} {design.SECONDARY}",
+                "conversation.tool.elapsed": f"bg:{design.BACKGROUND} {design.FAINT}",
+                "conversation.tool.ok": f"bg:{design.BACKGROUND} {design.OK} bold",
+                "conversation.tool.err": f"bg:{design.BACKGROUND} {design.DANGER} bold",
+                "conversation.tool.warn": f"bg:{design.BACKGROUND} {design.WARN} bold",
+                "conversation.tool.result": f"bg:{design.BACKGROUND} {design.MUTED}",
+                # Inline diff blocks nested under tool cards
+                "diff.add": f"bg:{design.BACKGROUND} {design.OK}",
+                "diff.del": f"bg:{design.BACKGROUND} {design.DANGER}",
+                "diff.hunk": f"bg:{design.BACKGROUND} {design.ACCENT_SOFT}",
+                "diff.meta": f"bg:{design.BACKGROUND} {design.FAINT}",
+                **home_styles(),
+                # Hide separators for minimal look
+                "separator": f"bg:{design.BACKGROUND} {design.BACKGROUND}",
+                "prompt": f"bg:{design.BACKGROUND} {design.WHITE}",
+                "prompt.prefix": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
+                "prompt.border": f"bg:{design.BACKGROUND} {design.FAINT}",
+                "prompt.hint": f"bg:{design.BACKGROUND} {design.FAINT} italic",
+            }
+        )
+        return style
+
+    def restyle(self) -> None:
+        """Rebuild and reinstall the style sheet from the current theme.
+
+        The Application, layout, buffers, and transcript are all untouched —
+        only ``app.style`` is replaced — so a theme change costs one repaint
+        and never disturbs scroll position, in-flight generation, or the text
+        being typed. No restart, and nothing to re-enter.
+
+        Safe to call before the app exists (during startup); it becomes a
+        no-op, and the constructor will pick the theme up anyway.
+        """
+        if self._app is None:
+            return
+        self._app.style = Style.from_dict(design.themed_style(self._build_style()))
+        self._app.invalidate()
+
     def __init__(
         self,
         *,
@@ -372,9 +462,11 @@ class FullscreenREPLUI:
         style_fragments: dict[str, str],
         key_bindings: KeyBindings,
         on_interrupt: Any,
+        style_provider: Any | None = None,
         on_status_render: Any | None = None,
         command_palette: Any | None = None,
         model_palette: Any | None = None,
+        theme_palette: Any | None = None,
         model_switcher: Any | None = None,
         inline_flow: Any | None = None,
         home_provider: Any | None = None,
@@ -414,6 +506,7 @@ class FullscreenREPLUI:
         # sent, or manually cleared) — see `_prompt_window_height`.
         self._prompt_frozen_at_max = False
         self._inline_flow = inline_flow
+        self._theme_palette = theme_palette
         self._on_status_render = on_status_render
         # Callable returning a fresh HomeState; rendered while the transcript
         # is empty. None falls back to a minimal wordmark line.
@@ -514,43 +607,14 @@ class FullscreenREPLUI:
             soft_wrap=True,
         )
 
-        style = dict(style_fragments)
-        style.update(
-            {
-                "": f"bg:{design.BACKGROUND} {design.WHITE}",
-                "conversation": f"bg:{design.BACKGROUND} {design.WHITE}",
-                "conversation.dim": f"bg:{design.BACKGROUND} {design.SECONDARY}",
-                "conversation.user": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                "conversation.user.marker": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                "conversation.user.text": f"bg:{design.BACKGROUND} {design.WHITE}",
-                "conversation.assistant": f"bg:{design.BACKGROUND} {design.WHITE}",
-                "conversation.assistant.diamond": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                "conversation.assistant.label": f"bg:{design.BACKGROUND} {design.GRAD_MID} bold",
-                "conversation.system": f"bg:{design.BACKGROUND} {design.SECONDARY}",
-                "conversation.thinking": f"bg:{design.BACKGROUND} {design.SECONDARY} italic",
-                "conversation.spinner": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                # Tool-activity cards (agentic loop): ● Verb(target) · 1.2s
-                "conversation.tool.spinner": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                "conversation.tool.name": f"bg:{design.BACKGROUND} {design.WHITE} bold",
-                "conversation.tool.arg": f"bg:{design.BACKGROUND} {design.SECONDARY}",
-                "conversation.tool.elapsed": f"bg:{design.BACKGROUND} {design.FAINT}",
-                "conversation.tool.ok": f"bg:{design.BACKGROUND} {design.OK} bold",
-                "conversation.tool.err": f"bg:{design.BACKGROUND} {design.DANGER} bold",
-                "conversation.tool.warn": f"bg:{design.BACKGROUND} {design.WARN} bold",
-                "conversation.tool.result": f"bg:{design.BACKGROUND} {design.MUTED}",
-                # Inline diff blocks nested under tool cards
-                "diff.add": f"bg:{design.BACKGROUND} {design.OK}",
-                "diff.del": f"bg:{design.BACKGROUND} {design.DANGER}",
-                "diff.hunk": f"bg:{design.BACKGROUND} {design.ACCENT_SOFT}",
-                "diff.meta": f"bg:{design.BACKGROUND} {design.FAINT}",
-                **HOME_STYLES,
-                "separator": f"bg:{design.BACKGROUND} {design.BACKGROUND}",  # Hide separators for minimal look
-                "prompt": f"bg:{design.BACKGROUND} {design.WHITE}",
-                "prompt.prefix": f"bg:{design.BACKGROUND} {design.ACCENT} bold",
-                "prompt.border": f"bg:{design.BACKGROUND} {design.FAINT}",
-                "prompt.hint": f"bg:{design.BACKGROUND} {design.FAINT} italic",
-            }
-        )
+        # Kept so `restyle()` can rebuild the whole sheet after a theme change.
+        # A *callable* provider is preferred over the plain dict: the dict was
+        # interpolated from `design.*` by the caller and is therefore frozen at
+        # whichever theme was active then, which is exactly what made live
+        # theme switching impossible before.
+        self._style_provider = style_provider
+        self._style_fragments = dict(style_fragments)
+        style = self._build_style()
 
         kb = key_bindings
 
@@ -726,7 +790,11 @@ class FullscreenREPLUI:
                 ),
             ),
             floats=_build_floats(
-                command_palette, model_switcher, inline_flow, model_palette=model_palette
+                command_palette,
+                model_switcher,
+                inline_flow,
+                model_palette=model_palette,
+                theme_palette=theme_palette,
             ),
         )
 

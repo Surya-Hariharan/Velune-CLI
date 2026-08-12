@@ -11,6 +11,8 @@ from pydantic import SecretStr
 
 from velune.core.errors.provider import (
     InferenceError,
+    InvalidRequestError,
+    ModelNotFoundError,
     ProviderAuthenticationError,
     RateLimitError,
 )
@@ -67,11 +69,14 @@ class OpenAIProvider(ModelProvider):
     def _raise_provider_error(self, exc: httpx.HTTPError, action: str) -> None:
         """Map an httpx failure to the right typed error.
 
-        A 401/403 is a verdict about the *key* and must surface as
-        :class:`ProviderAuthenticationError` — callers (council, preflight)
-        key off that type to persist the rejection and fail fast on the next
-        run. Everything else is a generic :class:`InferenceError`. Shared by
-        the Groq/OpenRouter subclasses.
+        Each branch is a *deterministic* verdict — about the key, the rate
+        limit, or the request itself — and is deliberately excluded from
+        :data:`velune.providers.retrying.RETRYABLE_EXCEPTIONS`: retrying an
+        unknown/decommissioned model id or a malformed request three times in
+        a row just delays the same inevitable failure. Only the fallback
+        :class:`InferenceError` at the bottom (5xx, network hiccups, anything
+        unclassified) is retryable. Shared by every OpenAI-compatible
+        subclass (Groq, OpenRouter, Together, Fireworks, xAI, Meta).
         """
         if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
             raise ProviderAuthenticationError(
@@ -82,6 +87,17 @@ class OpenAIProvider(ModelProvider):
             raise RateLimitError(
                 f"{self.provider_id} rate-limited (HTTP 429) during {action}.",
                 retry_after=parse_retry_after(exc.response.headers),
+            ) from exc
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404:
+            raise ModelNotFoundError(
+                f"{self.provider_id} returned HTTP 404 during {action} — the model or "
+                f"endpoint was not found. It may be mistyped, decommissioned, or "
+                f"renamed by the provider; this is not retried automatically."
+            ) from exc
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (400, 422):
+            raise InvalidRequestError(
+                f"{self.provider_id} rejected the request as malformed "
+                f"(HTTP {exc.response.status_code}) during {action}."
             ) from exc
         raise InferenceError(f"{self.provider_id} {action} failed: {exc}") from exc
 

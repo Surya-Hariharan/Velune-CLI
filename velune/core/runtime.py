@@ -73,8 +73,18 @@ def build_runtime(
 
     # Applies before any Console/theme is built below so the very first frame
     # already reflects the configured palette, not just frames after a
-    # `/theme colorblind` toggle.
+    # `/theme` change. Theme first, then the accessibility modifiers: they
+    # layer on top of whatever palette the theme supplies, and colourblind
+    # mode in particular must win over the theme's own severity trio.
     from velune.cli import design as _design
+    from velune.cli.theme_state import apply_startup_theme
+
+    theme_problem = apply_startup_theme(config)
+    if theme_problem:
+        # Reported, not corrected: the config keeps the value the user typed
+        # so `velune doctor` can point at it. Warn-level because a silently
+        # ignored setting is exactly the failure mode this rework removed.
+        logger.warning("%s", theme_problem)
 
     _design.set_colorblind_mode(bool(getattr(config.display, "colorblind_mode", False)))
     _design.set_reduced_motion(bool(getattr(config.display, "reduced_motion", False)))

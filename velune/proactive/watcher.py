@@ -15,10 +15,28 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("velune.proactive.watcher")
 
-# Providers that work with no API key at all (self-hosted / local
-# endpoints) — the periodic health check's "unconfigured, so don't nag"
-# skip in `_run_periodic_checks` doesn't apply to these.
-_KEYLESS_PROVIDERS = frozenset({"ollama", "lmstudio", "llamacpp", "openai-compat"})
+# Keyless local providers with a well-known default port that a meaningful
+# fraction of users actually have running — "might be there, alert if it goes
+# down" is a reasonable assumption for these two, so the periodic health
+# check's "unconfigured, so don't nag" skip in `_run_periodic_checks` doesn't
+# apply to them.
+#
+# Deliberately excludes "llamacpp" and "openai-compat":
+#   - "llamacpp": LlamaCppProvider.initialize() unconditionally raises
+#     ProviderConnectionError — the former [llamacpp] extra was permanently
+#     removed (llama-cpp-python pulls in an unpatched unsafe-deserialization
+#     dependency; see adapters/llamacpp.py). Its health check can never pass
+#     without the user manually installing that package out-of-band, so it
+#     is UNAVAILABLE for 100% of installs, forever, by design — treating that
+#     as alert-worthy produced a permanent, unconditional "Provider llamacpp
+#     unavailable" warning for every user regardless of which provider they
+#     actually configured or were using.
+#   - "openai-compat": a generic "point this at any self-hosted OpenAI-shaped
+#     server" catch-all with no conventional default port anyone is likely to
+#     have listening — unlike Ollama (:11434) and LM Studio (:1234), there is
+#     no real-world signal that an unreachable default here means anything
+#     went wrong for this user.
+_KEYLESS_PROVIDERS = frozenset({"ollama", "lmstudio"})
 
 
 class ProactiveWatcher:

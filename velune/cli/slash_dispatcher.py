@@ -38,11 +38,9 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "normal": "AI",
     "mode": "AI",
     # Providers
-    "providers": "Providers",
     "connect": "Providers",
     # Models
     "model": "Models",
-    "models": "Models",
     "pull": "Models",
     "delete": "Models",
     "bench": "Models",
@@ -199,19 +197,23 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
 
     # ── Environment / diagnostics ─────────────────────────────────────────────
 
+    # ``/connect`` is the *only* user-facing provider surface. The former
+    # ``/providers`` command (and its ``/provider`` / ``/prov`` aliases) was
+    # removed: it duplicated this entry point behind a management menu, so two
+    # commands owned "connect a provider" and neither was canonical. The
+    # management operations it also carried — discover / refresh / test /
+    # remove / status — were not deleted, they moved to the non-REPL
+    # ``velune provider ...`` CLI (cli/commands/providers.py), which already
+    # implemented every one of them against the same subsystem.
     registry.register(
         SlashCommand(
-            name="providers",
-            aliases=["provider", "prov"],
-            description="Add, manage, test, and discover models from cloud AI providers",
-            usage="/providers [add|manage|test|discover|refresh|remove|status] [provider-id]",
-            handler=repl._cmd_providers,
-            examples=(
-                "/providers",
-                "/providers add anthropic",
-                "/providers status",
-                "/providers discover",
-            ),
+            name="connect",
+            aliases=["login", "auth"],
+            category="Providers",
+            description="Connect an AI provider — pick one, paste your API key, get it verified",
+            usage="/connect [provider-id]",
+            handler=repl._cmd_login,
+            examples=("/connect", "/connect anthropic"),
             search_terms=(
                 "anthropic",
                 "claude",
@@ -223,37 +225,21 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "deepseek",
                 "cohere",
                 "nvidia",
-                "nvidia nim",
                 "xai",
                 "grok",
                 "meta",
                 "llama",
                 "huggingface",
                 "ollama",
-                "api key",
-                "connect provider",
-                "credentials",
-                "auth",
-                "add key",
-            ),
-            shortcut="/prov",
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="connect",
-            aliases=["login", "auth"],
-            category="Providers",
-            description="Connect an AI provider — pick one, paste your API key, get it verified",
-            usage="/connect [provider-id]",
-            handler=repl._cmd_login,
-            examples=("/connect", "/connect anthropic"),
-            search_terms=(
+                "provider",
+                "providers",
                 "api key",
                 "sign in",
                 "login",
                 "authenticate",
                 "connect provider",
+                "credentials",
+                "auth",
                 "add key",
                 "paste key",
             ),
@@ -409,17 +395,11 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             shortcut="/m",
         )
     )
-    registry.register(
-        SlashCommand(
-            name="models",
-            aliases=["ls"],
-            description="List all available models with speed, context, and capability info",
-            usage="/models",
-            handler=repl._cmd_models,
-            examples=("/models",),
-            search_terms=("list models", "available models", "all models", "model catalogue"),
-        )
-    )
+    # ``/models`` is deliberately absent: it was a duplicate registration that
+    # only forwarded to ``/model list``, so the palette listed two commands for
+    # one capability. ``/model`` is canonical. Typing ``/models`` still opens
+    # the model palette (see ``_TRIGGERS`` in cli/model_palette.py), so the
+    # muscle memory keeps working without a second registry entry.
     registry.register(
         SlashCommand(
             name="pull",

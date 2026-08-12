@@ -19,6 +19,11 @@ class ProviderHealth(StrEnum):
     OFFLINE = "offline"
     UNAUTHORIZED = "unauthorized"
     UNKNOWN = "unknown"
+    # No credentials configured for a key-requiring provider. Distinct from
+    # UNAVAILABLE ("configured but currently unreachable") — an unconfigured
+    # provider isn't broken, it's simply not set up, and must not be polled or
+    # warned about the way a real outage is. See ProviderHealthMonitor.
+    UNCONFIGURED = "unconfigured"
 
 
 class ProviderConfig(BaseModel):

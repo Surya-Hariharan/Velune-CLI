@@ -131,9 +131,58 @@ async def cmd_approve(repl: VeluneREPL, args: str) -> None:
     repl.console.print(f"[{style}]Approval mode set to:[/{style}] [bold]{new_mode.value}[/bold]")
 
 
+#: Accessibility modifier names accepted by ``/theme``, with their aliases.
+#: These are display preferences, not themes — see ``ThemeConfig``.
+_ACCESSIBILITY_OPTIONS: frozenset[str] = frozenset(
+    {"colorblind", "cb", "motion", "animation", "animations"}
+)
+
+
+def _is_accessibility_option(name: str) -> bool:
+    return name in _ACCESSIBILITY_OPTIONS
+
+
 async def cmd_theme(repl: VeluneREPL, args: str) -> None:
-    """Show or toggle display appearance options: colorblind palette, reduced motion."""
-    from velune.cli import design
+    """Switch the colour theme, or toggle an accessibility modifier.
+
+    Grammar, in the order it is checked:
+
+    * ``/theme <theme-id>``  — switch to that theme
+    * ``/theme colorblind|motion [on|off]`` — accessibility modifiers, which
+      are *not* themes (Part 2D): they layer on top of whichever theme is
+      active and survive a theme change
+    * ``/theme`` / ``/theme status`` — current state
+
+    In the fullscreen REPL a bare ``/theme`` never reaches this handler at
+    all: the theme palette binds Enter eagerly and applies the selection
+    in-place (see ``cli/theme_palette.py``). This path is what serves
+    ``--plain`` mode, a piped/scripted session, and an explicit id.
+    """
+    from velune.cli import design, themes
+
+    sub_raw = args.strip()
+    first = sub_raw.split()[0].lower() if sub_raw else ""
+
+    # A recognised theme id wins over everything else. Checked before the
+    # accessibility table so a future theme named e.g. "motion" could not be
+    # shadowed silently — the registry is the authority on what is a theme.
+    if first and themes.get(first) is not None:
+        theme = themes.get(first)
+        assert theme is not None  # narrowed by the guard above
+        repl._apply_theme_choice(theme)
+        repl.console.print(
+            f"[cyan]Theme set to[/cyan] [bold]{theme.name}[/bold]. "
+            f"[dim]Saved to velune.toml — applies to this and future sessions.[/dim]"
+        )
+        return
+
+    if first and first not in ("status",) and not _is_accessibility_option(first):
+        known = ", ".join(t.id for t in themes.list_themes())
+        repl.console.print(
+            f"[red]Unknown theme or option: {first!r}[/red]\n"
+            f"[dim]Themes: {known}  ·  Options: colorblind | motion[/dim]"
+        )
+        return
 
     # name -> (aliases, config key, getter, setter, label)
     options = {
@@ -153,15 +202,20 @@ async def cmd_theme(repl: VeluneREPL, args: str) -> None:
         ),
     }
 
-    sub = args.strip().lower()
+    sub = sub_raw.lower()
 
     if sub in ("", "status"):
-        lines = [
+        active = design.active_theme()
+        lines = [f"[cyan]Theme:[/cyan] [bold]{active.name}[/bold] [dim]({active.id})[/dim]"]
+        lines += [
             f"[cyan]{label}:[/cyan] [bold]{'on' if getter() else 'off'}[/bold]"
             for _, _, getter, _, label in options.values()
         ]
+        known = ", ".join(t.id for t in themes.list_themes())
         repl.console.print(
-            "\n".join(lines) + "\n[dim]Usage: /theme <colorblind|motion> [on|off][/dim]"
+            "\n".join(lines)
+            + f"\n[dim]Themes: {known}[/dim]"
+            + "\n[dim]Usage: /theme <theme-id> | /theme <colorblind|motion> [on|off][/dim]"
         )
         return
 
@@ -251,6 +305,7 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_anthropic_api_key,
         _check_config,
         _check_core_dependencies,
+        _check_credential_chain,
         _check_git,
         _check_gpu,
         _check_groq,
@@ -263,6 +318,7 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_qdrant,
         _check_sqlite,
         _check_telemetry,
+        _check_theme,
         _check_treesitter,
         _check_velune_dir,
         _check_vram,
@@ -282,6 +338,8 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_sqlite,
         _check_qdrant,
         _check_config,
+        _check_theme,
+        _check_credential_chain,
         _check_telemetry,
         _check_treesitter,
         _check_git,
@@ -310,12 +368,12 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
             "[dim]Run [cyan]velune doctor --fix[/cyan] to attempt automatic fixes.[/dim]"
         )
         repl.console.print(
-            "[dim]→ /providers to add or fix API keys  ·  /settings to reconfigure[/dim]"
+            "[dim]→ /connect to add or fix API keys  ·  /settings to reconfigure[/dim]"
         )
     else:
         repl.console.print("[green]All checks passed.[/green]")
         repl.console.print(
-            "[dim]→ /models to see available models  ·  /run <task> to start working[/dim]"
+            "[dim]→ /model to see available models  ·  /run <task> to start working[/dim]"
         )
 
 
@@ -394,16 +452,34 @@ async def cmd_sandbox(repl: VeluneREPL, args: str) -> None:
 
 # ── Settings Interface TUI ───────────────────────────────────────────────────
 
+
+def _theme_choices():
+    """The registered themes, for the settings TUI's Theme row.
+
+    A function so the choice list is built from the live registry at import of
+    SETTINGS_DEFS rather than being a hand-maintained copy that can drift out
+    of sync with ``velune.cli.themes``.
+    """
+    from velune.cli import themes
+
+    return themes.list_themes()
+
+
 SETTINGS_DEFS = {
     "Appearance": [
+        # Points at the canonical theme registry and the real config location.
+        # It previously offered dark/light/monokai/nord/dracula under
+        # `[appearance] theme`, a section VeluneConfig does not define and
+        # (being extra="ignore") silently discards — so the setting was
+        # written, dropped at parse time, and read by nothing.
         {
             "name": "Theme",
-            "desc": "UI Theme color palette",
+            "desc": "UI color theme",
             "type": "choice",
-            "choices": ["dark", "light", "monokai", "nord", "dracula"],
-            "section": "appearance",
-            "key": "theme",
-            "default": "dark",
+            "choices": [t.id for t in _theme_choices()],
+            "section": "theme",
+            "key": "active",
+            "default": "velune",
         },
         {
             "name": "Show Status Bar",
@@ -630,19 +706,71 @@ def get_setting_value(repl: VeluneREPL, section: str, key: str, default: Any) ->
 
 
 def save_setting_to_toml(repl: VeluneREPL, section: str, key: str, value: Any) -> None:
-    try:
-        import toml
+    """Merge ``[section] key = value`` into velune.toml, atomically.
 
+    The write goes to a sibling temp file which is flushed, fsynced, and only
+    then ``os.replace``-d over the real config. ``os.replace`` is atomic on
+    both POSIX and Windows, so a crash or power loss during persistence can
+    leave the config either fully old or fully new — never the truncated file
+    the previous ``open(path, "w")`` implementation could produce, which would
+    have taken every unrelated setting (providers, memory, execution) down
+    with it.
+
+    Existing content is read and merged rather than replaced, so writing one
+    setting never drops the others. A read failure is *not* treated as "start
+    from an empty config": that would silently overwrite a file we simply
+    could not parse, so the save is abandoned instead and the last known-good
+    configuration is left exactly as it was.
+    """
+    import os
+    import tempfile
+
+    import toml
+
+    try:
         workspace = Path(repl.container.get("runtime.workspace"))
         config_path = repl.container.get("runtime.config_path") or (workspace / "velune.toml")
         config_path = Path(config_path)
-        data = toml.load(config_path) if config_path.exists() else {}
-        data.setdefault(section, {})[key] = value
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as fh:
-            toml.dump(data, fh)
     except Exception as exc:
-        _log.debug("Could not save setting to velune.toml: %s", exc)
+        _log.debug("Could not resolve config path: %s", exc)
+        return
+
+    data: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            data = toml.load(config_path)
+        except Exception as exc:
+            _log.warning(
+                "velune.toml could not be parsed (%s); refusing to overwrite it. "
+                "Setting %s.%s was not saved.",
+                exc,
+                section,
+                key,
+            )
+            return
+
+    data.setdefault(section, {})[key] = value
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        # Same directory as the target so the replace stays on one filesystem.
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{config_path.name}.", suffix=".tmp", dir=str(config_path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                toml.dump(data, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_name, config_path)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+    except Exception as exc:
+        _log.warning("Could not save %s.%s to velune.toml: %s", section, key, exc)
 
 
 def _update_runtime_config(repl: VeluneREPL, section: str, key: str, value: Any) -> None:
@@ -655,6 +783,23 @@ def _update_runtime_config(repl: VeluneREPL, section: str, key: str, value: Any)
         pass
 
     # Custom triggers
+    if section == "theme" and key == "active":
+        # Makes the settings TUI's Theme row take effect immediately, the same
+        # as the theme palette — otherwise picking a theme there would write
+        # the config and change nothing on screen until the next launch, which
+        # is the exact failure this rework removed.
+        try:
+            from velune.cli import design, themes
+
+            theme, ok = themes.resolve(str(value))
+            if ok:
+                design.apply_theme(theme)
+                ui = getattr(repl, "_fullscreen_ui", None)
+                if ui is not None:
+                    ui.restyle()
+        except Exception as exc:
+            _log.debug("Could not apply theme %r live: %s", value, exc)
+
     if section == "models" and key == "active_model_id":
         try:
             registry = repl.container.get("runtime.model_registry")

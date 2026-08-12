@@ -485,18 +485,26 @@ class CommandPalette:
         )
 
 
-PALETTE_STYLES: dict[str, str] = {
-    "palette.frame": f"bg:{design.SURFACE} fg:{design.FAINT}",
-    "palette.frame-title": f"bg:{design.SURFACE} fg:{design.ACCENT} bold",
-    "palette.border": f"bg:{design.SURFACE} fg:{design.FAINT}",
-    "palette.title": f"bg:{design.SURFACE} fg:{design.WHITE} bold",
-    "palette.label": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
-    "palette.query": f"bg:{design.SURFACE} fg:{design.ACCENT} bold",
-    "palette.group": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
-    "palette.command": f"bg:{design.SURFACE} fg:{design.WHITE}",
-    "palette.selected": f"bg:{design.LIGHT_BG} fg:{design.ACCENT_SOFT} bold",
-    "palette.text": f"bg:{design.SURFACE} fg:{design.WHITE}",
-    "palette.code": f"bg:{design.SURFACE} fg:{design.ACCENT_SOFT}",
-    "palette.muted": f"bg:{design.SURFACE} fg:{design.FAINT}",
-    "palette.warning": f"bg:{design.SURFACE} fg:{design.WARN}",
-}
+def palette_styles() -> dict[str, str]:
+    """Command-palette style rules for the *currently active* theme.
+
+    A function, not a module-level dict: a dict would interpolate
+    ``design.*`` once at import and then keep painting the startup theme
+    forever, which is exactly what made live theme switching impossible.
+    Callers rebuild from this whenever the theme changes.
+    """
+    return {
+        "palette.frame": f"bg:{design.SURFACE} fg:{design.FAINT}",
+        "palette.frame-title": f"bg:{design.SURFACE} fg:{design.ACCENT} bold",
+        "palette.border": f"bg:{design.SURFACE} fg:{design.FAINT}",
+        "palette.title": f"bg:{design.SURFACE} fg:{design.WHITE} bold",
+        "palette.label": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
+        "palette.query": f"bg:{design.SURFACE} fg:{design.ACCENT} bold",
+        "palette.group": f"bg:{design.SURFACE} fg:{design.MUTED} bold",
+        "palette.command": f"bg:{design.SURFACE} fg:{design.WHITE}",
+        "palette.selected": f"bg:{design.LIGHT_BG} fg:{design.ACCENT_SOFT} bold",
+        "palette.text": f"bg:{design.SURFACE} fg:{design.WHITE}",
+        "palette.code": f"bg:{design.SURFACE} fg:{design.ACCENT_SOFT}",
+        "palette.muted": f"bg:{design.SURFACE} fg:{design.FAINT}",
+        "palette.warning": f"bg:{design.SURFACE} fg:{design.WARN}",
+    }

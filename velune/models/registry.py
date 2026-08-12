@@ -135,11 +135,35 @@ class ModelCapabilityRegistry:
             logger.error("Failed to discover models during catalog refresh: %s", e)
 
     def register(self, descriptor: ModelDescriptor) -> None:
-        """Explicitly register a custom model descriptor."""
+        """Explicitly register a custom model descriptor.
+
+        In-memory only. Callers registering a batch that should outlive the
+        process (``/connect``'s post-verification discovery, for example) must
+        follow up with :meth:`persist` — see the note there.
+        """
         key = f"{descriptor.provider_id}/{descriptor.model_id}"
         self._models[key] = descriptor
         if descriptor.model_id not in self._models:
             self._models[descriptor.model_id] = descriptor
+
+    def persist(self) -> bool:
+        """Write the current catalog to the on-disk cache. True if it was saved.
+
+        Previously only :meth:`refresh` ever saved, so models discovered
+        through :meth:`register` — which is the path ``/connect`` takes right
+        after verifying a new API key — lived in memory and died with the
+        process. The next launch loaded a cache that had never heard of the
+        provider, showed no models for it, and read to the user as the
+        connection having been lost.
+        """
+        if self._registry_cache is None:
+            return False
+        try:
+            self._registry_cache.save(self.list_all())
+            return True
+        except Exception as exc:
+            logger.debug("Registry cache save failed: %s", exc)
+            return False
 
     def remove(self, model_id: str, provider_id: str | None = None) -> bool:
         """Remove a model from the in-memory catalog. Returns True if anything was removed."""

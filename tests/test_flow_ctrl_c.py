@@ -21,7 +21,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.output.vt100 import Vt100_Output
 
-from velune.cli.command_palette import PALETTE_STYLES, CommandPalette
+from velune.cli.command_palette import CommandPalette, palette_styles
 from velune.cli.fullscreen import FullscreenREPLUI
 from velune.cli.inline_flow import FlowCancelled, InlineFlow
 from velune.cli.interactive.widgets import Option
@@ -49,7 +49,7 @@ class _Harness:
             history=InMemoryHistory(),
             completer=None,
             validator=None,
-            style_fragments=dict(PALETTE_STYLES),
+            style_fragments=palette_styles(),
             key_bindings=kb,
             on_interrupt=lambda _e: (self.repl_interrupts.append(1), False)[1],
             command_palette=self.palette,

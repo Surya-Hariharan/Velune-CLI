@@ -156,7 +156,7 @@ automatically on launch.
 flowchart TD
     Start([velune]) --> CLI[CLI opens instantly]
     CLI --> Connect[Connect a model]
-    Connect -.-> C1("`/providers add`")
+    Connect -.-> C1("`/connect`")
     Connect -.-> C2("`/model connect`")
     Connect -.-> C3("`/model use`")
     Connect --> Open[Open a project]
@@ -197,23 +197,23 @@ render as panels above the input line.
 | **Ollama** | 🏠 Local | Free | Any pulled model | Install Ollama, pull a model |
 | **LM Studio** | 🏠 Local | Free | Any GGUF / MLX model | Launch LM Studio server |
 | **OpenAI-compatible** | 🏠 Local | Free | vLLM, LocalAI, text-generation-webui, … | Point at your server's base URL |
-| **Groq** | ☁️ Cloud | Free tier | Llama 3.3 70B, Mixtral, Gemma2 | `/providers add groq` |
-| **OpenRouter** | ☁️ Cloud | Pay-per-token | 100+ models | `/providers add openrouter` |
-| **OpenAI** | ☁️ Cloud | Pay-per-token | GPT-4o, GPT-4o Mini | `/providers add openai` |
-| **Anthropic** | ☁️ Cloud | Pay-per-token | Claude Opus, Sonnet, Haiku | `/providers add anthropic` |
-| **xAI (Grok)** | ☁️ Cloud | Pay-per-token | Grok 2, Grok 2 Mini | `/providers add xai` |
-| **Google** | ☁️ Cloud | Free quota | Gemini 2.0 Flash, 1.5 Pro/Flash | `/providers add google` |
-| **Together AI** | ☁️ Cloud | Pay-per-token | Llama 3.3 70B, Qwen 2.5, DeepSeek R1 | `/providers add together` |
-| **Fireworks AI** | ☁️ Cloud | Pay-per-token | DeepSeek R1, Qwen 2.5, Mixtral 8x22B | `/providers add fireworks` |
-| **Mistral** | ☁️ Cloud | Pay-per-token | Mistral Large, Codestral, Mixtral | `/providers add mistral` |
-| **DeepSeek** | ☁️ Cloud | Pay-per-token | DeepSeek R1, DeepSeek Coder | `/providers add deepseek` |
-| **Cohere** | ☁️ Cloud | Pay-per-token | Command R+, Command R | `/providers add cohere` |
-| **NVIDIA NIM** | ☁️ Cloud | Pay-per-token | Llama, Mistral, and other NIM models | `/providers add nvidia` |
-| **HuggingFace** | ☁️ Cloud | Free/paid | Open models via Inference API | `/providers add huggingface` |
+| **Groq** | ☁️ Cloud | Free tier | Llama 3.3 70B, Mixtral, Gemma2 | `/connect groq` |
+| **OpenRouter** | ☁️ Cloud | Pay-per-token | 100+ models | `/connect openrouter` |
+| **OpenAI** | ☁️ Cloud | Pay-per-token | GPT-4o, GPT-4o Mini | `/connect openai` |
+| **Anthropic** | ☁️ Cloud | Pay-per-token | Claude Opus, Sonnet, Haiku | `/connect anthropic` |
+| **xAI (Grok)** | ☁️ Cloud | Pay-per-token | Grok 2, Grok 2 Mini | `/connect xai` |
+| **Google** | ☁️ Cloud | Free quota | Gemini 2.0 Flash, 1.5 Pro/Flash | `/connect google` |
+| **Together AI** | ☁️ Cloud | Pay-per-token | Llama 3.3 70B, Qwen 2.5, DeepSeek R1 | `/connect together` |
+| **Fireworks AI** | ☁️ Cloud | Pay-per-token | DeepSeek R1, Qwen 2.5, Mixtral 8x22B | `/connect fireworks` |
+| **Mistral** | ☁️ Cloud | Pay-per-token | Mistral Large, Codestral, Mixtral | `/connect mistral` |
+| **DeepSeek** | ☁️ Cloud | Pay-per-token | DeepSeek R1, DeepSeek Coder | `/connect deepseek` |
+| **Cohere** | ☁️ Cloud | Pay-per-token | Command R+, Command R | `/connect cohere` |
+| **NVIDIA NIM** | ☁️ Cloud | Pay-per-token | Llama, Mistral, and other NIM models | `/connect nvidia` |
+| **HuggingFace** | ☁️ Cloud | Free/paid | Open models via Inference API | `/connect huggingface` |
 
 > Keys are stored in your OS keyring, encrypted at rest — never in plain
-> text files, never in git. `velune setup` and the REPL's `/providers` /
-> `/connect` walk you through it either way.
+> text files, never in git. `velune setup` and the REPL's `/connect`
+> walk you through it either way.
 
 ---
 
@@ -308,8 +308,8 @@ velune recover [id] [--all] [--discard <id>]       # Recover an unsaved session 
 <tr><td><strong>Session</strong></td><td><code>/help</code> · <code>/exit</code> · <code>/clear</code> · <code>/new</code></td></tr>
 <tr><td><strong>AI</strong></td><td><code>/run &lt;task&gt;</code> · <code>/council &lt;task&gt;</code> · <code>/jobs</code> · <code>/dashboard</code> · <code>/fast</code> · <code>/max</code> · <code>/normal</code> · <code>/mode</code></td></tr>
 <tr><td><strong>Projects</strong></td><td><code>/project [open|close|status|list|add]</code> · <code>/index [quick|standard|deep|status|rebuild]</code> <em>(alias <code>/cognition</code>)</em></td></tr>
-<tr><td><strong>Providers</strong></td><td><code>/providers [add|test|discover|status]</code> · <code>/connect [provider-id]</code></td></tr>
-<tr><td><strong>Models</strong></td><td><code>/model [discover|connect|use|status|locate]</code> · <code>/models</code> · <code>/pull</code> · <code>/delete</code> · <code>/roles</code> · <code>/bench</code></td></tr>
+<tr><td><strong>Providers</strong></td><td><code>/connect [provider-id]</code></td></tr>
+<tr><td><strong>Models</strong></td><td><code>/model [discover|connect|use|list|status|locate]</code> · <code>/pull</code> · <code>/delete</code> · <code>/roles</code> · <code>/bench</code></td></tr>
 <tr><td><strong>Memory</strong></td><td><code>/memory [clear|stats]</code> · <code>/context</code> · <code>/graph</code></td></tr>
 <tr><td><strong>Git</strong></td><td><code>/diff</code> · <code>/undo</code> · <code>/hunk</code> · <code>/push</code> · <code>/pr</code> · <code>/issue</code> · <code>/sandbox</code></td></tr>
 <tr><td><strong>Tools</strong></td><td><code>/lint</code> · <code>/refactor</code> · <code>/types</code> · <code>/plugin</code> · <code>/hooks</code></td></tr>

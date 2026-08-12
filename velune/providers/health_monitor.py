@@ -25,6 +25,11 @@ class ProviderHealthMonitor:
             lambda: deque(maxlen=3)
         )
         self._polling_task: asyncio.Task | None = None
+        # Providers currently reported as "unavailable for 3 consecutive
+        # polls" — logged once on entry into that state, not on every poll
+        # while it persists. Cleared the moment health changes away from
+        # UNAVAILABLE, so a real recovery-then-outage cycle warns again.
+        self._flagged_unavailable: set[str] = set()
         # 5 minutes by default: this polls every *configured* provider,
         # including cloud ones, over the network for the life of the
         # process — a 30s interval (the original value) meant continuous
@@ -88,6 +93,35 @@ class ProviderHealthMonitor:
             )
             manifest.estimated_latency_ms = avg_latency
 
+    def _requires_unset_key(self, provider_id: str) -> bool:
+        """True if *provider_id* needs an API key and none is configured.
+
+        Sourced from the provider catalog (the same "requires_key" fact
+        ``/providers``, ``/connect``, and the setup wizard use) rather than
+        guessing from the adapter's behavior at call time.
+        """
+        from velune.providers import catalog
+
+        meta = catalog.get(provider_id)
+        if meta is None or not meta.requires_key:
+            return False
+        return not self._registry.check_provider_available(provider_id)
+
+    def _record_unconfigured(self, provider_id: str) -> None:
+        """Record UNCONFIGURED without a live probe, and without repolling it."""
+        self._flagged_unavailable.discard(provider_id)
+        self._health_history[provider_id].clear()
+        existing = self._manifests.get(provider_id)
+        if existing is not None and existing.health == ProviderHealth.UNCONFIGURED:
+            return
+        self._manifests[provider_id] = CapabilityManifest(
+            provider_id=provider_id,
+            health=ProviderHealth.UNCONFIGURED,
+            available_models=[],
+            is_online=False,
+            refreshed_at=time.time(),
+        )
+
     async def _polling_loop(self) -> None:
         """Background task that polls all providers every 30 seconds."""
         # Standard provider IDs that may be registered
@@ -113,10 +147,21 @@ class ProviderHealthMonitor:
 
         while self._running:
             try:
-                # Get all registered provider IDs
+                # Get all registered provider IDs. A key-requiring provider
+                # with no credentials configured is UNCONFIGURED, not
+                # UNAVAILABLE — it has never been set up, so there is nothing
+                # to poll and nothing wrong to warn about. Only providers that
+                # are actually configured (local, or a key is present) get a
+                # live health_check.
                 providers_to_check = []
                 for provider_id in standard_providers:
-                    if provider := self._registry.get(provider_id):
+                    if not self._registry.get(provider_id):
+                        continue
+                    if self._requires_unset_key(provider_id):
+                        self._record_unconfigured(provider_id)
+                        continue
+                    provider = self._registry.get(provider_id)
+                    if provider:
                         providers_to_check.append((provider_id, provider))
 
                 # Poll all providers in parallel
@@ -186,10 +231,19 @@ class ProviderHealthMonitor:
         if old_manifest and old_manifest.health != health:
             logger.info(f"Provider {provider_id} health changed: {old_manifest.health} → {health}")
 
-        # Check for 3 consecutive unavailable polls
-        if len(self._health_history[provider_id]) >= 3:
+        # 3 consecutive unavailable polls: a real, configured provider that
+        # has gone unreachable is worth one state-transition warning — logged
+        # once on entry into that state, never repeated every poll while it
+        # persists (that produced an unbroken stream of identical warnings
+        # for the life of the process). Cleared as soon as health improves so
+        # a later, genuinely new outage warns again.
+        if health != ProviderHealth.UNAVAILABLE:
+            self._flagged_unavailable.discard(provider_id)
+        elif len(self._health_history[provider_id]) >= 3:
             recent = list(self._health_history[provider_id])
             if all(h == ProviderHealth.UNAVAILABLE for h in recent[-3:]):
-                logger.warning(f"Provider {provider_id} unavailable for 3 consecutive polls")
+                if provider_id not in self._flagged_unavailable:
+                    self._flagged_unavailable.add(provider_id)
+                    logger.warning(f"Provider {provider_id} unavailable for 3 consecutive polls")
 
         self._manifests[provider_id] = manifest

@@ -234,7 +234,7 @@ async def _project_status(repl: VeluneREPL) -> None:
     if not repl.active_model:
         pending_warnings.append("No active model selected — run /model to choose one")
     if not configured_providers:
-        pending_warnings.append("No AI providers configured — run /providers to add API keys")
+        pending_warnings.append("No AI providers configured — run /connect to add API keys")
 
     # Clean table layout
     from velune.cli import ui

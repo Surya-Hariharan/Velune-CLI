@@ -45,6 +45,37 @@ def render_unexpected_error(exc: Exception) -> Panel:
     )
 
 
+_PROVIDER_ERROR_TITLES: dict[str, str] = {
+    "ModelNotFoundError": "Model or Endpoint Not Found",
+    "InvalidRequestError": "Request Rejected",
+    "ProviderAuthenticationError": "Authentication Failed",
+    "RateLimitError": "Rate Limited",
+    "ProviderConnectionError": "Connection Failed",
+    "ProviderTimeoutError": "Provider Timed Out",
+    "InferenceError": "Provider Request Failed",
+}
+
+
+def render_provider_error(exc: Exception) -> Panel:
+    """Build a Rich Panel for a provider/inference failure.
+
+    A provider being down, rejecting a decommissioned model, or hitting a
+    rate limit is an expected, everyday failure mode — not a Velune bug. It
+    must not be rendered as :func:`render_unexpected_error`'s "Unexpected
+    Error... report an issue" panel, which misattributes the provider's
+    behavior to Velune and sends the user down the wrong path. This gives one
+    clear, actionable line instead, with ``/doctor`` as the next step for
+    anyone who needs more than that.
+    """
+    kind = type(exc).__name__
+    title = _PROVIDER_ERROR_TITLES.get(kind, "Provider Request Failed")
+    return ui.error_panel(
+        title=title,
+        cause=str(exc),
+        fix=["Run /doctor for provider diagnostics"],
+    )
+
+
 def print_error(error: VeluneError, console: Console | None = None) -> None:
     """Convenience wrapper: render and print a VeluneError to the given console."""
     (console or Console()).print(render_error(error))

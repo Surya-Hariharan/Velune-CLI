@@ -24,6 +24,10 @@ class CriticAgent(BaseCouncilAgent):
             model=model,
             provider=provider,
             system_prompt=config.system_prompt,
+            # Every critic shares the REVIEWER (or CHALLENGER) role descriptor,
+            # so the role cannot identify it in a trace — name the seat from the
+            # critic's own config instead.
+            seat_name=f"{config.name.lower()}_critic",
         )
         self.config = config
 

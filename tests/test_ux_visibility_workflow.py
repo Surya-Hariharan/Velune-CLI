@@ -215,4 +215,4 @@ def test_palette_finds_providers_by_credentials():
     model = _palette_model()
     matches = model.matches("credentials")
     names = {m.command.name for m in matches}
-    assert "providers" in names
+    assert "connect" in names

@@ -77,14 +77,26 @@ Connecting and managing cloud/local AI providers.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `providers` | `provider`, `prov` | `/providers [add\|manage\|test\|discover\|refresh\|remove\|status] [provider-id]` | Add, manage, test, and discover models from cloud AI providers |
 | `connect` | `login`, `auth` | `/connect [provider-id]` | Connect an AI provider — pick one, paste your API key, get it verified |
 
-> Keys are stored in your OS keyring, encrypted at rest. `/connect` is the
-> fast path for a single provider; `/providers` is the full management
-> surface (test, discover models, refresh catalog, remove). `/login` still
-> works as an alias, but `/connect` is the name that actually describes
+> `/connect` is the only provider command in the REPL. Keys are AES-GCM
+> encrypted at rest, with the master key held in your OS keyring. `/login`
+> still works as an alias, but `/connect` is the name that actually describes
 > what it does — this isn't a username/password sign-in.
+>
+> **`/providers` (and `/provider`, `/prov`) was removed.** It duplicated
+> `/connect` behind a management menu, so two commands both meant "connect a
+> provider". Its management-only operations were *not* dropped — they live in
+> the terminal CLI, outside the REPL:
+>
+> | Was | Now |
+> | --- | --- |
+> | `/providers add` | `/connect` |
+> | `/providers status` | `velune provider status` |
+> | `/providers test` | `velune provider test [id]` |
+> | `/providers manage` | `velune provider inspect <id>` / `edit <id>` |
+> | `/providers remove` | `velune provider remove <id>` |
+> | `/providers discover` | `/model discover` |
 
 ---
 
@@ -96,7 +108,6 @@ council assignment.
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `model` | `m` | `/model [model-id\|discover\|connect <id>\|use <id>\|list\|status\|remove <id>\|locate\|locations]` | Discover, connect, switch, inspect, or locate models |
-| `models` | `ls` | `/models` | List all available models with speed, context, and capability info |
 | `pull` | `download`, `get` | `/pull [model-id]` | Download an Ollama model interactively |
 | `delete` | `remove`, `rm` | `/delete <model-id>` | Delete a locally installed Ollama model |
 | `bench` | `b` | `/bench [run]` | View or run empirical model capability benchmarks |
@@ -210,7 +221,22 @@ Configuration and tool/command approval gating.
 | `settings` | `setup` | `/settings` | Interactive settings dashboard (keyboard navigation) |
 | `config` | `cfg` | `/config` | Show current system configuration settings |
 | `approve` | `approval` | `/approve [safe\|ask\|block]` | Set tool/command approval mode |
+| `theme` | `appearance` | `/theme [theme-id\|colorblind\|motion] [on\|off]` | Switch the colour theme, or toggle an accessibility modifier |
 
+> Typing `/theme` and pressing Enter opens the **theme palette** — arrow keys
+> to browse, Enter to apply. The change is immediate and applies to every
+> surface (transcript, prompt, palettes, status bar, panels); nothing needs
+> restarting. The choice is saved to `[theme] active` in `velune.toml`.
+>
+> Themes: `velune` (default), `amber`, `emerald`, `crimson`, `azure`.
+> `/theme emerald` applies one directly without opening the palette.
+>
+> **Themes and accessibility settings are separate.** A theme is a colour
+> palette; `colorblind` (Okabe-Ito severity colours) and `motion` (static
+> spinners) are independent modifiers that layer on top and survive a theme
+> change. `/theme colorblind on` and `/theme motion off` still work exactly
+> as before.
+>
 > `/approve` controls how much Velune CLI can do without asking: `safe`
 > auto-runs read-only actions and prompts for writes/exec, `ask` prompts
 > for everything non-trivial, `block` requires explicit confirmation for
@@ -250,7 +276,7 @@ Session lifecycle, diagnostics, and disaster recovery.
 
 | Alias | Command | Alias | Command |
 | --- | --- | --- | --- |
-| `?` | `/help` | `ls` | `/models` |
+| `?` | `/help` | `login` | `/connect` |
 | `approval` | `/approve` | `m` | `/model` |
 | `auth` | `/connect` | `mem` | `/memory` |
 | `b` | `/bench` | `mr` | `/pr` |
@@ -260,8 +286,8 @@ Session lifecycle, diagnostics, and disaster recovery.
 | `cls` | `/clear` | `pl` | `/plugin` |
 | `cm` | `/roles` | `plugins` | `/plugin` |
 | `cog` | `/index` | `proj` | `/project` |
-| `cognition` | `/index` | `prov` | `/providers` |
-| `councilmodel` | `/roles` | `provider` | `/providers` |
+| `cognition` | `/index` | `appearance` | `/theme` |
+| `councilmodel` | `/roles` | `auth` | `/connect` |
 | `ctx` | `/context` | `pull-request` | `/pr` |
 | `d` | `/diff` | `q` | `/exit` |
 | `dash` | `/dashboard` | `quit` | `/exit` |

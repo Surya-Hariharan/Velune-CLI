@@ -83,10 +83,24 @@ class ModelRegistryCache:
         except Exception as exc:
             _log.warning("Could not save registry cache: %s", exc)
 
-    def load(self) -> list:
-        """Return valid (non-stale) ``ModelDescriptor`` objects from the cache.
+    def load(self, *, drop_stale: bool = False) -> list:
+        """Return the cached ``ModelDescriptor`` objects.
 
-        Returns an empty list when the cache is absent, corrupt, or fully stale.
+        Returns an empty list when the cache is absent or corrupt.
+
+        Staleness is a *refresh hint*, not a delete signal, which is why
+        ``drop_stale`` defaults to False. Dropping aged entries here is what
+        made a connected provider look disconnected after a restart: a cloud
+        model older than the 60-minute TTL was discarded on load, so a user
+        whose API key was still stored, still valid, and still verified came
+        back to an empty model list and a palette telling them to run
+        ``/connect``. The credential had never been lost — its models had.
+
+        Keeping the entries and letting the background scan replace them means
+        the worst case is a briefly out-of-date model list rather than a
+        provider that appears to have vanished. Callers that genuinely need
+        only fresh rows can still pass ``drop_stale=True``; :meth:`is_stale`
+        reports whether a refresh is due.
         """
         if not self.path.exists():
             return []
@@ -100,20 +114,23 @@ class ModelRegistryCache:
         now = time.time()
         raw_models: list[dict] = payload.get("models", [])
 
-        valid: list = []
+        loaded: list = []
+        stale = 0
         for raw in raw_models:
             provider_id = raw.get("provider_id", "")
-            ttl = _ttl_for(provider_id)
-            if (now - saved_at) <= ttl:
-                try:
-                    valid.append(self._deserialize(raw))
-                except Exception as exc:
-                    _log.debug(
-                        "Could not deserialize cached model %s: %s", raw.get("model_id"), exc
-                    )
+            if (now - saved_at) > _ttl_for(provider_id):
+                stale += 1
+                if drop_stale:
+                    continue
+            try:
+                loaded.append(self._deserialize(raw))
+            except Exception as exc:
+                _log.debug("Could not deserialize cached model %s: %s", raw.get("model_id"), exc)
 
-        _log.debug("Registry cache loaded: %d/%d fresh models", len(valid), len(raw_models))
-        return valid
+        _log.debug(
+            "Registry cache loaded: %d models (%d past TTL, refresh due)", len(loaded), stale
+        )
+        return loaded
 
     def is_fresh(self) -> bool:
         """True if any entry in the cache is within its TTL."""

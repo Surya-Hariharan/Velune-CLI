@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from velune.providers.keystore import get_key
+from velune.providers.keystore import get_key, verification_state
 
 console = Console()
 doctor_cmd = typer.Typer(help="Check that providers, models, and paths are healthy.")
@@ -174,6 +174,7 @@ def check(
         _check_internet_connectivity,
         _check_ollama_connectivity,
         _check_ollama_models,
+        _check_memory_embedding,
         _check_lm_studio,
         _check_openai_api_key,
         _check_anthropic_api_key,
@@ -183,6 +184,8 @@ def check(
         _check_sqlite,
         _check_qdrant,
         _check_config,
+        _check_theme,
+        _check_credential_chain,
         _check_telemetry,
         _check_treesitter,
         _check_git,
@@ -406,6 +409,47 @@ def _check_ollama_models() -> dict:
         }
 
 
+def _check_memory_embedding() -> dict:
+    """Report which provider/model the memory pipeline actually embeds with.
+
+    Deliberately separate from ``_check_ollama_connectivity``/``_check_groq``:
+    those answer "is my chat provider reachable", this answers "what does
+    memory use for embeddings, and is *that* reachable" — a chat model is
+    never eligible here (see ``embedding_pipeline.py``/``memory/subsystems.
+    py``'s ``_create_embedding_pipeline``, which always resolves the
+    dedicated ``ollama`` provider, never the active chat provider/model).
+    Surfacing this explicitly is what would have made a Groq chat 404 and an
+    unrelated "Ollama not running" embedding failure look like the two
+    independent problems they are, instead of one undiagnosed cascade.
+    """
+    import httpx
+
+    # Mirrors memory/subsystems.py::_create_embedding_pipeline, the one place
+    # that constructs the real pipeline — kept as a literal rather than
+    # imported so this check has zero import cost even when memory/embedding
+    # modules are unavailable (doctor runs with bootstrap="light").
+    embedding_provider_id = "ollama"
+    embedding_model_id = "nomic-embed-text"
+
+    try:
+        httpx.get("http://localhost:11434/api/tags", timeout=3.0)
+        return {
+            "name": "Memory Embedding Provider",
+            "status": "ok",
+            "message": f"{embedding_provider_id} / {embedding_model_id} — reachable",
+        }
+    except Exception:
+        return {
+            "name": "Memory Embedding Provider",
+            "status": "warn",
+            "message": (
+                f"{embedding_provider_id} / {embedding_model_id} — not reachable. "
+                "New turns queue for embedding and retry in the background; "
+                "chat inference is unaffected. Start Ollama to clear the backlog."
+            ),
+        }
+
+
 def _check_lm_studio() -> dict:
     import httpx
 
@@ -431,12 +475,16 @@ def _check_lm_studio() -> dict:
 
 
 def _check_openai_api_key() -> dict:
-    key = get_key("openai")
-    if key:
+    # No key fragment in the message, ever — /doctor output can end up in a
+    # pasted bug report or a shared terminal recording, and even a partial
+    # key (first/last few characters) narrows a brute-force search. Report
+    # configured/verified state only, the same predicate the rest of the CLI
+    # uses (KeyState), never the key material itself.
+    if get_key("openai"):
         return {
             "name": "OpenAI API Key",
             "status": "ok",
-            "message": f"Configured ({key[:4]}...{key[-4:] if len(key) > 8 else ''})",
+            "message": f"Configured ({verification_state('openai').value})",
         }
     return {
         "name": "OpenAI API Key",
@@ -446,12 +494,11 @@ def _check_openai_api_key() -> dict:
 
 
 def _check_anthropic_api_key() -> dict:
-    key = get_key("anthropic")
-    if key:
+    if get_key("anthropic"):
         return {
             "name": "Anthropic API Key",
             "status": "ok",
-            "message": f"Configured ({key[:4]}...{key[-4:] if len(key) > 8 else ''})",
+            "message": f"Configured ({verification_state('anthropic').value})",
         }
     return {
         "name": "Anthropic API Key",
@@ -555,6 +602,116 @@ def _check_config() -> dict:
             "status": "fail",
             "message": f"Invalid velune.toml format or schema validation error: {e}",
         }
+
+
+def _check_theme() -> dict:
+    """Report the active theme, and name a configured id that isn't registered.
+
+    A theme id that no longer exists silently falls back to the default at
+    startup rather than raising, so without this check the only symptom is
+    "my theme keeps resetting" — which is exactly how the previous, entirely
+    unwired theme setting presented.
+    """
+    from velune.cli import design, themes
+    from velune.cli.theme_state import configured_theme_id
+
+    try:
+        from velune.kernel.config import ConfigLoader
+
+        config = ConfigLoader().load()
+        configured = configured_theme_id(config)
+    except Exception as exc:
+        return {
+            "name": "UI Theme",
+            "status": "warn",
+            "message": f"Could not read theme configuration: {exc}",
+        }
+
+    if configured and themes.get(configured) is None:
+        known = ", ".join(t.id for t in themes.list_themes())
+        return {
+            "name": "UI Theme",
+            "status": "fail",
+            "message": (
+                f"[theme] active = {configured!r} is not a known theme, so the default "
+                f"is being used. Set it to one of: {known}"
+            ),
+        }
+
+    active = design.active_theme()
+    return {
+        "name": "UI Theme",
+        "status": "ok",
+        "message": f"{active.name} ({active.id})",
+    }
+
+
+def _check_credential_chain() -> dict:
+    """Verify stored credentials can actually be decrypted and resolved.
+
+    Reports *state*, never key material: no branch below reads a key value,
+    only its presence and lifecycle state. This is the check that tells a user
+    whose provider "disappeared" which link in the chain broke — an
+    undecryptable store (encryption key changed) reads very differently from a
+    store that decrypts fine but has no models cached for the provider.
+    """
+    from velune.providers import keystore
+    from velune.providers.crypto import DecryptionError
+
+    path = keystore.credentials_file_path()
+    if not path.exists():
+        return {
+            "name": "Credential Persistence",
+            "status": "warn",
+            "message": "No stored credentials yet. Run /connect to add a provider.",
+        }
+
+    try:
+        records = keystore._manager.get_all_providers()
+    except DecryptionError:
+        return {
+            "name": "Credential Persistence",
+            "status": "fail",
+            "message": (
+                "Stored credentials exist but cannot be decrypted — the encryption key "
+                "changed (new machine, reset OS keyring, or changed "
+                "VELUNE_MASTER_PASSPHRASE). Providers will appear unconfigured. "
+                "Re-add them with /connect; the file was not modified."
+            ),
+        }
+    except Exception as exc:
+        return {
+            "name": "Credential Persistence",
+            "status": "fail",
+            "message": f"Could not read the credential store: {exc}",
+        }
+
+    if not records:
+        return {
+            "name": "Credential Persistence",
+            "status": "warn",
+            "message": "Credential store is readable but empty. Run /connect to add a provider.",
+        }
+
+    unavailable = [pid for pid in records if not keystore.get_key(pid)]
+    if unavailable:
+        return {
+            "name": "Credential Persistence",
+            "status": "fail",
+            "message": (
+                f"Provider metadata exists but no credential could be resolved for: "
+                f"{', '.join(sorted(unavailable))}. These are kept, not deleted — "
+                f"reconnect with /connect."
+            ),
+        }
+
+    states = {pid: str(keystore.verification_state(pid)) for pid in records}
+    summary = ", ".join(f"{pid}: {state}" for pid, state in sorted(states.items()))
+    return {
+        "name": "Credential Persistence",
+        "status": "ok",
+        "message": f"{len(records)} stored credential(s) resolved — {summary}",
+    }
 
 
 def _check_telemetry() -> dict:

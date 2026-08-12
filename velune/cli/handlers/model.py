@@ -27,6 +27,15 @@ def _sel(style: str, selected: bool) -> str:
     return f"{_SEL_BG}{style}" if selected else style
 
 
+def _provider_display_name(provider_id: str) -> str:
+    """Canonical provider display name from the catalog — the single source of
+    truth also used by ``/providers`` and ``/connect``, not an ad hoc mapping."""
+    from velune.providers import catalog
+
+    meta = catalog.get(provider_id)
+    return meta.display_name if meta is not None else provider_id
+
+
 def _print_no_models_guidance(repl: VeluneREPL, *, has_registered_models: bool) -> None:
     """Explain an empty model catalog as a setup step, not a failure.
 
@@ -86,20 +95,26 @@ async def cmd_model(repl: VeluneREPL, args: str) -> None:
     if provider_registry is None:
         return
 
-    if args.strip():
-        model = model_registry.get(args.strip())
+    # An exact model id after `/model` still jumps straight to it (unchanged
+    # fast path: `/model gpt-4o`). Anything else typed after `/model` is not a
+    # command token — it's the start of the user's actual message (e.g.
+    # `/model Explain how authentication works`). That text is not a target to
+    # look up; it's carried through the palette and handed back to the prompt
+    # box once a model is chosen (or unchanged, on Esc) so it never gets
+    # silently swallowed or misreported as "model not found".
+    leftover = args.strip()
+    if leftover:
+        model = model_registry.get(leftover)
         if model:
             # Route through activate_model like /model use and /model connect do.
             # Setting repl.active_model directly skipped persistence, the recents
             # list, and the default-provider write, so `/model <name>` silently
             # behaved differently from every other way of switching models.
             await activate_model(repl, model)
-        else:
-            from velune.cli.rendering.error_panel import render_error
-            from velune.core.errors.catalog import ModelNotFoundError
-
-            repl.console.print(render_error(ModelNotFoundError(f"'{args.strip()}'")))
-        return
+            return
+        leftover_text = leftover
+    else:
+        leftover_text = ""
 
     models = model_registry.list_all()
     if not models:
@@ -109,6 +124,8 @@ async def cmd_model(repl: VeluneREPL, args: str) -> None:
     selected = await _show_model_picker(repl, models)
     if selected:
         await activate_model(repl, selected)
+    if leftover_text:
+        repl._pending_prompt_text = leftover_text
 
 
 RECOMMENDED_MODELS = [
@@ -204,7 +221,8 @@ async def _show_model_picker(
         s1 = fuzzy_score(query, m.model_id)
         s2 = fuzzy_score(query, m.display_name or "")
         s3 = fuzzy_score(query, m.provider_id)
-        return max(s1, s2, s3)
+        s4 = fuzzy_score(query, _provider_display_name(m.provider_id))
+        return max(s1, s2, s3, s4)
 
     def check_reasoning(m: ModelDescriptor) -> bool:
         if m.capabilities and hasattr(m.capabilities, "reasoning"):
@@ -465,9 +483,11 @@ async def _show_model_picker(
             lines.append((star_style, f"  {prefix}{star_char}"))
             lines.append((model_name_style, name_padded))
 
-            # 2. Provider (12 chars)
+            # 2. Provider (12 chars) — canonical display name from the provider
+            # catalog (the same source /providers and /connect use), not the
+            # raw internal id ("google" -> "Gemini", "xai" -> "xAI").
             lines.append((row_bg, "  "))
-            lines.append((provider_style, f"{m.provider_id:<12}"[:12]))
+            lines.append((provider_style, f"{_provider_display_name(m.provider_id):<12}"[:12]))
 
             # 3. Context (8 chars)
             if m.context_length >= 1_000_000:
@@ -647,8 +667,57 @@ async def cmd_models(repl: VeluneREPL, args: str) -> None:
     )
 
 
+def _activation_blocker(model: ModelDescriptor) -> str | None:
+    """Reason activation must be refused, or None if *model* may activate.
+
+    Deliberately narrow and fast (no network calls): only refuses when the
+    provider's credential is definitively unusable — missing entirely, or
+    actively rejected by the provider (``KeyState.INVALID``). A stale or
+    never-verified key is still allowed to activate — see keystore.py's
+    ``KeyState`` docstring: stale means "due for a re-check", not "broken",
+    and every provider call already goes through validation/retry/health
+    machinery of its own. This just stops the one case that can never work:
+    activating a cloud model with no usable credential at all, which
+    previously always "succeeded" and only failed later, mid-turn.
+    """
+    from velune.providers import catalog
+
+    meta = catalog.get(model.provider_id)
+    if meta is None or not meta.requires_key:
+        return None  # local/keyless provider — nothing to validate here
+
+    from velune.providers.keystore import KeyState, verification_state
+
+    state = verification_state(model.provider_id)
+    if state is KeyState.MISSING:
+        return (
+            f"No credential configured for '{model.provider_id}'. "
+            f"Run /connect {model.provider_id} first."
+        )
+    if state is KeyState.INVALID:
+        return (
+            f"'{model.provider_id}' rejected its stored credential. "
+            f"Run /connect {model.provider_id} to replace it."
+        )
+    return None
+
+
 async def activate_model(repl: VeluneREPL, model: ModelDescriptor) -> None:
-    """Set *model* as active and persist it as the default for next launch."""
+    """Set *model* as active and persist it as the default for next launch.
+
+    Refuses — rather than silently "succeeding" and failing later, mid-turn —
+    when the provider has no usable credential at all. See
+    :func:`_activation_blocker` for exactly what is and isn't checked.
+    """
+    blocker = _activation_blocker(model)
+    if blocker is not None:
+        from velune.cli import design
+
+        repl.console.print(
+            f"[{design.DANGER}]Cannot activate {model.model_id}:[/{design.DANGER}] {blocker}"
+        )
+        return
+
     repl.active_model = model
 
     # Resize the context meter here rather than waiting for the next render.

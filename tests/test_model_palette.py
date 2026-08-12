@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from velune.cli.model_palette import (
-    MODEL_PALETTE_STYLES,
+    model_palette_styles,
     ModelPalette,
     ModelPaletteModel,
     connected_models,
@@ -251,7 +251,7 @@ def test_details_pane_describes_the_highlighted_model():
     out = _text(palette.render_details())
 
     assert "llama3.2" in out
-    assert "ollama" in out
+    assert "Ollama" in out  # canonical catalog display name, not the raw provider id
     assert "8,192 tokens" in out
     assert "tools" in out and "reasoning" in out
 
@@ -436,6 +436,41 @@ def test_enter_is_swallowed_when_there_is_nothing_to_select(text):
     assert buffer.text == text, "Enter must not rewrite the prompt line"
 
 
+def test_enter_falls_through_to_the_raw_command_when_free_text_matches_no_model():
+    """`/model Explain how authentication works` is a message, not a filter.
+
+    The catalog is not empty, but nothing matches that text as a model name —
+    so unlike the truly-empty-catalog case, Enter must NOT be swallowed. It
+    should submit the raw buffer text unchanged, letting cmd_model() open the
+    full picker and hand the leftover text back to the prompt afterward.
+    """
+    text = "/model Explain how authentication works"
+    submitted = []
+
+    class _Buffer:
+        def __init__(self):
+            self.text = text
+            self.cursor_position = len(text)
+
+        def validate_and_handle(self):
+            submitted.append(self.text)
+
+    class _P(ModelPalette):
+        def _buffer_text(self):
+            return text
+
+    models = [_model("first"), _model("second")]
+    palette = _P(container=None, models_source=lambda: models, registered_probe=lambda: True)
+    bindings = _KeyBindingsSpy()
+    palette.add_bindings(bindings)
+
+    buffer = _Buffer()
+    bindings.fire("enter", SimpleNamespace(current_buffer=buffer, app=_NoopApp()))
+
+    assert submitted == [text], "a filter miss with a non-empty catalog must submit as-is"
+    assert buffer.text == text, "the raw text (including the leftover message) must be preserved"
+
+
 @pytest.mark.parametrize("text", ["/model", "/models"])
 def test_enter_selects_the_highlighted_model_when_one_exists(text):
     """With models present, Enter routes through the ordinary command path."""
@@ -530,8 +565,9 @@ def test_palette_is_cyan_blue_not_indigo():
     """The two palettes share a rectangle; hue is what distinguishes them."""
     from velune.cli import design
 
-    title = MODEL_PALETTE_STYLES["model-palette.frame-title"]
-    selected = MODEL_PALETTE_STYLES["model-palette.selected"]
+    styles = model_palette_styles()
+    title = styles["model-palette.frame-title"]
+    selected = styles["model-palette.selected"]
 
     assert design.CYAN in title
     assert design.CYAN in selected
@@ -547,10 +583,10 @@ def test_style_roles_mirror_the_command_palette():
     The single intentional difference is the per-row role: a row here is a
     model, not a command.
     """
-    from velune.cli.command_palette import PALETTE_STYLES
+    from velune.cli.command_palette import palette_styles
 
-    command_roles = {key.split(".", 1)[1] for key in PALETTE_STYLES}
-    model_roles = {key.split(".", 1)[1] for key in MODEL_PALETTE_STYLES}
+    command_roles = {key.split(".", 1)[1] for key in palette_styles()}
+    model_roles = {key.split(".", 1)[1] for key in model_palette_styles()}
 
     assert command_roles - model_roles == {"command"}
     assert model_roles - command_roles == {"model"}
@@ -566,4 +602,5 @@ def test_every_style_class_used_in_rendering_is_defined():
     src = Path("velune/cli/model_palette.py").read_text(encoding="utf-8")
     used = set(re.findall(r"class:(model-palette\.[a-z-]+)", src))
     assert used, "expected the renderer to reference style classes"
-    assert used <= set(MODEL_PALETTE_STYLES), f"undefined: {used - set(MODEL_PALETTE_STYLES)}"
+    defined = set(model_palette_styles())
+    assert used <= defined, f"undefined: {used - defined}"

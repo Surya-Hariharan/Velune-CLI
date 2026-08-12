@@ -138,6 +138,11 @@ class VeluneREPL:
         except Exception:
             self._alert_store = None
         self._prev_ctx_pct: float = 0.0
+        # Leftover free text from a mixed "/model <text>" invocation (or any
+        # future command that wants to hand text back to the user rather than
+        # swallow it) — reseeded into the prompt box on the next loop turn.
+        # See ``cmd_model``'s carry-over path in cli/handlers/model.py.
+        self._pending_prompt_text: str = ""
         self._fullscreen_ui = None
         # Built by _build_fullscreen_ui(); stays None in --plain (linear) mode,
         # where there is no Application for a multi-step flow to draw into —
@@ -267,29 +272,22 @@ class VeluneREPL:
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.key_binding import KeyBindings
 
-        from velune.cli import design
-        from velune.cli.command_palette import PALETTE_STYLES, CommandPalette, FavoritesStore
+        from velune.cli.command_palette import CommandPalette, FavoritesStore
         from velune.cli.fullscreen import FullscreenREPLUI
         from velune.cli.inline_flow import InlineFlow
-        from velune.cli.model_palette import MODEL_PALETTE_STYLES, ModelPalette
-        from velune.cli.model_switcher import MODEL_SWITCHER_STYLES, ModelSwitcher
+        from velune.cli.model_palette import ModelPalette
+        from velune.cli.model_switcher import ModelSwitcher
         from velune.cli.prompt_recall import PromptRecallState
-        from velune.cli.statusbar import STATUS_BAR_STYLES
+        from velune.cli.theme_palette import ThemePalette, all_palette_styles
         from velune.cli.validators import InlineSyntaxValidator
 
-        style_fragments = {
-            "prompt.arrow": f"{design.ACCENT_SOFT} bold",
-            **STATUS_BAR_STYLES,
-            **PALETTE_STYLES,
-            **MODEL_PALETTE_STYLES,
-            **MODEL_SWITCHER_STYLES,
-        }
+        style_fragments = all_palette_styles()
 
         completer = self._build_completer()
 
-        # Multi-step slash-command flows (/connect, /providers) render into the
-        # palette's own float and drive the prompt box, instead of each step
-        # standing up its own Application below it.
+        # Multi-step slash-command flows (/connect) render into the palette's
+        # own float and drive the prompt box, instead of each step standing up
+        # its own Application below it.
         flow = InlineFlow()
         self._inline_flow = flow
 
@@ -301,24 +299,39 @@ class VeluneREPL:
         model_palette = ModelPalette(self.container, suppressed=flow.is_active)
         self._model_palette = model_palette
 
+        # "/theme" claims the same rectangle on the same terms.
+        theme_palette = ThemePalette(
+            suppressed=flow.is_active,
+            on_select=self._apply_theme_choice,
+        )
+        self._theme_palette = theme_palette
+
         palette = CommandPalette(
             self._registry.all_unique(),
             recency_source=completer.recent_commands,
             favorites=FavoritesStore(),
-            suppressed=lambda: flow.is_active() or model_palette.is_active(),
+            suppressed=lambda: (
+                flow.is_active() or model_palette.is_active() or theme_palette.is_active()
+            ),
         )
         self._command_palette = palette
 
         model_switcher = ModelSwitcher(
             self,
-            suppressed=lambda: flow.is_active() or palette.is_active() or model_palette.is_active(),
+            suppressed=lambda: (
+                flow.is_active()
+                or palette.is_active()
+                or model_palette.is_active()
+                or theme_palette.is_active()
+            ),
         )
         self._model_switcher = model_switcher
 
         kb = KeyBindings()
         # Registered before the command palette so that if both were ever
-        # active at once, the model picker's eager arrow bindings win.
+        # active at once, the picker's eager arrow bindings win.
         model_palette.add_bindings(kb)
+        theme_palette.add_bindings(kb)
         palette.add_bindings(kb)
         model_switcher.add_bindings(kb)
         flow.add_bindings(kb)
@@ -397,11 +410,15 @@ class VeluneREPL:
             completer=completer,
             validator=InlineSyntaxValidator(),
             style_fragments=style_fragments,
+            # Re-invoked on every theme change so the whole sheet is rebuilt
+            # from the new palette rather than the one captured above.
+            style_provider=all_palette_styles,
             key_bindings=kb,
             on_interrupt=_interrupt,
             on_status_render=self._refresh_status_state,
             command_palette=palette,
             model_palette=model_palette,
+            theme_palette=theme_palette,
             model_switcher=model_switcher,
             inline_flow=flow,
             home_provider=self._home_state,
@@ -409,6 +426,32 @@ class VeluneREPL:
             composer_min_lines=composer_min_lines,
             composer_max_lines=composer_max_lines,
         )
+
+    def _apply_theme_choice(self, theme) -> None:
+        """Apply *theme* to the live UI and persist it for next launch.
+
+        The single place a theme selection is committed, so the palette, the
+        ``/theme <id>`` command form, and the settings TUI cannot drift apart.
+        Ordering matters: the palette must repoint *before* the style sheet is
+        rebuilt, since the rebuild reads ``design.*``.
+
+        Persistence failure is reported but does not block the visual change —
+        a read-only config directory should not mean you cannot recolour your
+        terminal for this session.
+        """
+        from velune.cli import design
+        from velune.cli.theme_state import persist_theme
+
+        design.apply_theme(theme)
+
+        ui = getattr(self, "_fullscreen_ui", None)
+        if ui is not None:
+            ui.restyle()
+
+        try:
+            persist_theme(self, theme.id)
+        except Exception as exc:
+            _log.debug("Could not persist theme selection: %s", exc)
 
     async def _reverify_stale_keys(self) -> None:
         """Re-check any stored API key that has aged past its TTL.
@@ -748,7 +791,15 @@ class VeluneREPL:
         try:
             while not self._exit_requested:
                 try:
-                    raw = await (session.prompt_async() if plain else ui.read_input())
+                    seed = self._pending_prompt_text
+                    self._pending_prompt_text = ""
+                    if plain:
+                        raw = await session.prompt_async(default=seed)
+                    else:
+                        if seed:
+                            ui.buffer.text = seed
+                            ui.buffer.cursor_position = len(seed)
+                        raw = await ui.read_input()
                     from velune.cli.handlers.council import poll_and_render_alerts
 
                     poll_and_render_alerts(self)
@@ -781,12 +832,16 @@ class VeluneREPL:
                 except Exception as e:
                     from velune.cli.rendering.error_panel import (
                         render_error,
+                        render_provider_error,
                         render_unexpected_error,
                     )
                     from velune.core.errors.catalog import VeluneError
+                    from velune.core.errors.provider import ProviderError
 
                     if isinstance(e, VeluneError):
                         self.console.print(render_error(e))
+                    elif isinstance(e, ProviderError):
+                        self.console.print(render_provider_error(e))
                     else:
                         self.console.print(render_unexpected_error(e))
         finally:
@@ -972,11 +1027,18 @@ class VeluneREPL:
             # REPL, when all the user asked for was to back out of /connect.
             self._interrupts.reset_exit_window()
         except Exception as e:
-            from velune.cli.rendering.error_panel import render_error, render_unexpected_error
+            from velune.cli.rendering.error_panel import (
+                render_error,
+                render_provider_error,
+                render_unexpected_error,
+            )
             from velune.core.errors.catalog import VeluneError
+            from velune.core.errors.provider import ProviderError
 
             if isinstance(e, VeluneError):
                 self.console.print(render_error(e))
+            elif isinstance(e, ProviderError):
+                self.console.print(render_provider_error(e))
             else:
                 self.console.print(render_unexpected_error(e))
         finally:
@@ -1303,6 +1365,24 @@ class VeluneREPL:
         """
         from velune.core.types.inference import InferenceRequest
 
+        # Defense in depth: the main loop already routes on `text.startswith
+        # ("/")` before this method is ever called, so this should be
+        # unreachable — but that routing lives in one caller, and this is the
+        # only gate standing between arbitrary text and a real InferenceRequest.
+        # A slash command must never reach the provider as ordinary prompt
+        # content, even if some future caller (a retry, a hook, a plugin)
+        # invokes this method directly.
+        if text.lstrip().startswith("/"):
+            _log.warning(
+                "Refusing to submit slash-command-shaped text as an LLM prompt: %r",
+                text[:80],
+            )
+            self.console.print(
+                "[yellow]That looks like a command, not a message — "
+                "it was not sent to the model.[/yellow]"
+            )
+            return
+
         if model_override is not None and provider_override is not None:
             model, provider = model_override, provider_override
         else:
@@ -1404,8 +1484,10 @@ class VeluneREPL:
         # a hard error instead of risking a silent replay elsewhere.
         from velune.cli.handlers.tool_chat import TurnProviderError, run_tool_chat
         from velune.core.errors.provider import (
+            ModelNotFoundError,
             ProviderAuthenticationError,
             ProviderConnectionError,
+            ProviderTimeoutError,
             RateLimitError,
         )
 
@@ -1458,6 +1540,17 @@ class VeluneREPL:
                             "see the tool activity above."
                         )
                         self.console.print(f"[yellow]{assistant_text}[/yellow]")
+                    elif not assistant_text.strip():
+                        # A turn can legitimately finish with no text at all —
+                        # e.g. the provider's last turn was tool-calls only,
+                        # with no accompanying explanation. Silently recording
+                        # an empty assistant turn is confusing both in the
+                        # transcript and in token accounting (0 tokens looks
+                        # identical to "still running"); say so explicitly.
+                        assistant_text = (
+                            "[Velune] The model finished this turn without returning any text."
+                            + (" See the tool activity above." if loop_result.invocations else "")
+                        )
                 else:
                     render = await self._stream_renderer.render(provider, request)
                     full_content = render.full_content
@@ -1487,11 +1580,17 @@ class VeluneREPL:
                 ProviderConnectionError,
                 ProviderAuthenticationError,
                 RateLimitError,
+                ModelNotFoundError,
+                ProviderTimeoutError,
             ) as exc:
                 # The legacy StreamRenderer path never executes tools, so a
                 # bare provider exception from it is always safe to retry
                 # elsewhere; TurnProviderError carries that verdict explicitly
-                # for the tool-loop path, where it isn't always true.
+                # for the tool-loop path, where it isn't always true. A raw
+                # ModelNotFoundError (404) or ProviderTimeoutError (no
+                # response within budget) reaching here directly, rather than
+                # wrapped in TurnProviderError, means it came from the legacy
+                # path too, so it is likewise always safe to retry elsewhere.
                 safe = exc.safe_to_retry_elsewhere if isinstance(exc, TurnProviderError) else True
                 original = exc.original if isinstance(exc, TurnProviderError) else exc
                 if not safe:
@@ -1660,11 +1759,6 @@ class VeluneREPL:
         from velune.cli.handlers.model import cmd_model
 
         await cmd_model(self, args)
-
-    async def _cmd_models(self, args: str) -> None:
-        from velune.cli.handlers.model import cmd_models
-
-        await cmd_models(self, args)
 
     async def _cmd_pull(self, args: str) -> None:
         from velune.cli.handlers.model import cmd_pull
@@ -1864,11 +1958,6 @@ class VeluneREPL:
         from velune.cli.handlers.code_intel import cmd_typify
 
         await cmd_typify(self, args)
-
-    async def _cmd_providers(self, args: str) -> None:
-        from velune.cli.handlers.providers import cmd_providers
-
-        await cmd_providers(self, args)
 
     async def _cmd_login(self, args: str) -> None:
         from velune.cli.handlers.providers import cmd_login

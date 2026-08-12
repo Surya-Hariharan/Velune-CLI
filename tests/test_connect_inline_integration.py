@@ -94,7 +94,7 @@ def test_connect_runs_pick_then_key_then_verify_in_one_panel(flow, monkeypatch, 
     seen = _steps(flow)
 
     async def _drive():
-        task = asyncio.ensure_future(palette.run("add"))
+        task = asyncio.ensure_future(palette.run())
 
         # 1. The provider picker opens in the panel.
         await asyncio.sleep(0)
@@ -149,7 +149,7 @@ def test_ctrl_c_at_the_provider_picker_abandons_the_whole_command(flow, monkeypa
     palette = provider_ui.ProviderPalette(console=_Console(), container=None)
 
     async def _drive():
-        task = asyncio.ensure_future(palette.run("add"))
+        task = asyncio.ensure_future(palette.run())
         await asyncio.sleep(0)
         flow.cancel()
         await task
@@ -172,7 +172,7 @@ def test_ctrl_c_at_the_key_field_never_saves_a_partial_key(flow, monkeypatch):
     palette = provider_ui.ProviderPalette(console=_Console(), container=None)
 
     async def _drive():
-        task = asyncio.ensure_future(palette.run("add"))
+        task = asyncio.ensure_future(palette.run())
         await asyncio.sleep(0)
         flow._resolve("anthropic")  # get past the picker, onto the key field
         await asyncio.sleep(0)

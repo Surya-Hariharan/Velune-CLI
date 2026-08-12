@@ -55,6 +55,50 @@ class ValidationResult:
         return self.message
 
 
+# Well-documented, stable key prefixes. Deliberately sparse — a provider left
+# out here (no fixed public format, or one that changes) just skips the
+# prefix check and falls through to the minimum-length check plus the real
+# network round-trip. This is a cheap pre-filter, never a substitute for it:
+# matching a prefix does not mean the key is valid, only that it is not
+# obviously wrong.
+_KEY_PREFIXES: dict[str, tuple[str, ...]] = {
+    "openai": ("sk-",),
+    "anthropic": ("sk-ant-",),
+    "groq": ("gsk_",),
+    "openrouter": ("sk-or-",),
+    "nvidia": ("nvapi-",),
+    "xai": ("xai-",),
+    "huggingface": ("hf_",),
+    "deepseek": ("sk-",),
+}
+
+_MIN_KEY_LENGTH = 16
+
+
+def _structural_issue(provider_id: str, api_key: str) -> str | None:
+    """Cheap, provider-aware pre-check for an obviously malformed key.
+
+    Runs before any network request. Catches what a bad paste produces (an
+    empty field, embedded whitespace, a key far too short to be real, or a
+    prefix that rules out the provider entirely) — never what only the
+    provider's own API can determine. A key passing this check is not "valid",
+    only "not obviously wrong"; the network round-trip in ``_VALIDATORS`` is
+    still the only source of truth for OK.
+    """
+    key = api_key.strip()
+    if not key:
+        return "Key is empty."
+    if any(ch.isspace() for ch in key):
+        return "Key contains whitespace or line breaks — check what you pasted."
+    if len(key) < _MIN_KEY_LENGTH:
+        return f"Key is too short to be a real {provider_id} credential."
+    prefixes = _KEY_PREFIXES.get(provider_id)
+    if prefixes and not key.startswith(prefixes):
+        want = " or ".join(f"'{p}'" for p in prefixes)
+        return f"{provider_id} keys start with {want} — this one doesn't."
+    return None
+
+
 def _redact_key(text: str, api_key: str) -> str:
     """Strip *api_key* out of *text* before it can be shown or persisted.
 
@@ -737,6 +781,12 @@ async def validate_provider(provider_id: str, api_key: str = "") -> ValidationRe
                 "configure its endpoint and Velune will use it directly."
             ),
         )
+    if provider_id not in ("ollama", "lmstudio"):
+        issue = _structural_issue(provider_id, api_key)
+        if issue is not None:
+            return ValidationResult(
+                provider_id=provider_id, status=ValidationStatus.MALFORMED_KEY, message=issue
+            )
     try:
         return await asyncio.wait_for(validator(api_key), timeout=15.0)
     except TimeoutError:

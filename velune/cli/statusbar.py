@@ -25,21 +25,29 @@ from prompt_toolkit.formatted_text import FormattedText
 
 from velune.cli import design
 
-_BG = design.BACKGROUND
-STATUS_BAR_STYLES: dict[str, str] = {
-    "bottom-toolbar": f"noinherit bg:{_BG} {design.MUTED}",
-    "bottom-toolbar.key": f"bg:{_BG} {design.FAINT}",
-    "bottom-toolbar.model": f"bg:{_BG} {design.MUTED}",
-    "bottom-toolbar.mode": f"bg:{_BG} {design.MUTED}",
-    "bottom-toolbar.ok": f"bg:{_BG} {design.MUTED}",
-    "bottom-toolbar.ctx-ok": f"bg:{_BG} {design.OK}",
-    "bottom-toolbar.warn": f"bg:{_BG} {design.WARN}",
-    "bottom-toolbar.danger": f"bg:{_BG} {design.DANGER}",
-    "bottom-toolbar.hint": f"bg:{_BG} {design.MUTED} italic",
-    "bottom-toolbar.speed": f"bg:{_BG} {design.FAINT}",
-    "bottom-toolbar.privacy": f"bg:{_BG} {design.FAINT}",
-    "bottom-toolbar.project": f"bg:{_BG} {design.FAINT}",
-}
+
+def status_bar_styles() -> dict[str, str]:
+    """Status-bar style rules for the *currently active* theme.
+
+    A function rather than a module-level dict so a theme change is picked up
+    — see ``design.apply_theme`` for why frozen dicts broke live switching.
+    """
+    bg = design.BACKGROUND
+    return {
+        "bottom-toolbar": f"noinherit bg:{bg} {design.MUTED}",
+        "bottom-toolbar.key": f"bg:{bg} {design.FAINT}",
+        "bottom-toolbar.model": f"bg:{bg} {design.MUTED}",
+        "bottom-toolbar.mode": f"bg:{bg} {design.MUTED}",
+        "bottom-toolbar.ok": f"bg:{bg} {design.MUTED}",
+        "bottom-toolbar.ctx-ok": f"bg:{bg} {design.OK}",
+        "bottom-toolbar.warn": f"bg:{bg} {design.WARN}",
+        "bottom-toolbar.danger": f"bg:{bg} {design.DANGER}",
+        "bottom-toolbar.hint": f"bg:{bg} {design.MUTED} italic",
+        "bottom-toolbar.speed": f"bg:{bg} {design.FAINT}",
+        "bottom-toolbar.privacy": f"bg:{bg} {design.FAINT}",
+        "bottom-toolbar.project": f"bg:{bg} {design.FAINT}",
+    }
+
 
 _SEP = ("class:bottom-toolbar.key", " │ ")
 
@@ -222,7 +230,7 @@ def render_status_bar(state: StatusBarState, width: int | None = None) -> Format
     if state.alert_count > 0:
         optional_groups.append([_SEP, ("class:bottom-toolbar.warn", f"alerts:{state.alert_count}")])
 
-    if state.invalid_keys:
+    if state.invalid_keys and state.model_id:
         names = ", ".join(state.invalid_keys)
         optional_groups.append(
             [_SEP, ("class:bottom-toolbar.danger", f"{names} key invalid — /connect")]

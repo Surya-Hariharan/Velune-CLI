@@ -614,7 +614,10 @@ def inspect_provider(
     if is_local:
         lines.append(f"[{design.MUTED}]Auth[/{design.MUTED}]           no key required")
     elif key:
-        masked = key[:6] + "***" + key[-4:] if len(key) > 10 else "***"
+        # No fragment of the real key, ever — this output can end up pasted
+        # into a shared terminal, a bug report, or a screen recording, and
+        # even a partial key materially narrows a brute-force search.
+        masked = "•" * 20
         source_label = info.get("source", "file")
         if source_label == "environment":
             env_var = meta.get("env", "")

@@ -71,27 +71,6 @@ GROQ_MODELS: list[ModelDescriptor] = [
         tags=["cloud", "groq", "free", "gpt-oss"],
         metadata={"free_tier": True},
     ),
-    ModelDescriptor(
-        model_id="qwen/qwen3-32b",
-        provider_id="groq",
-        display_name="Qwen3 32B",
-        context_length=131072,
-        is_local=False,
-        free_tier=True,
-        cost_per_1k_tokens=0.0,
-        speed_tier="fast",
-        capabilities=ModelCapabilityProfile(
-            coding=CapabilityLevel.ADVANCED,
-            reasoning=CapabilityLevel.ADVANCED,
-            planning=CapabilityLevel.INTERMEDIATE,
-            summarization=CapabilityLevel.ADVANCED,
-            instruction_following=CapabilityLevel.ADVANCED,
-            tool_use=CapabilityLevel.INTERMEDIATE,
-            long_context=CapabilityLevel.ADVANCED,
-        ),
-        tags=["cloud", "groq", "free", "qwen"],
-        metadata={"free_tier": True},
-    ),
 ]
 # Note on this list: `mixtral-8x7b-32768`, `gemma2-9b-it`, and
 # `llama-3.2-11b-vision-preview` were removed 2026-07 — Groq decommissioned
@@ -102,6 +81,15 @@ GROQ_MODELS: list[ModelDescriptor] = [
 # rather than a live query because the curated CapabilityProfile scores
 # below aren't available from Groq's API — but that means this list needs a
 # periodic manual check against a real `GET /v1/models` call.
+#
+# `qwen/qwen3-32b` was removed 2026-08-12 — Groq deprecated it 2026-07-17
+# (confirmed via console.groq.com/docs/deprecations), recommending
+# `openai/gpt-oss-120b` (already listed above) as the successor. Selecting it
+# produced a live HTTP 404 from /openai/v1/chat/completions, surfaced to the
+# user as a generic InferenceError — see also the 404 error classification in
+# adapters/openai.py._raise_provider_error and RETRYABLE_EXCEPTIONS in
+# providers/retrying.py, which previously retried this 404 three times before
+# giving up, since it wasn't distinguished from a transient failure.
 
 
 class GroqProvider(OpenAIProvider):

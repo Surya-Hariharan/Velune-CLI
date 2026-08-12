@@ -8,6 +8,7 @@ ProviderRegistry.get() gives every call site retry for free.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,7 @@ import pytest
 from velune.core.errors.provider import (
     InferenceError,
     ProviderAuthenticationError,
+    ProviderTimeoutError,
     RateLimitError,
 )
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
@@ -44,8 +46,11 @@ class _FlakyProvider:
         if self.calls <= self._fail_times:
             raise self._exc_factory()
         return InferenceResponse(
-            content="ok", model_id=request.model_id, finish_reason="stop",
-            tokens_used=1, latency_ms=1.0,
+            content="ok",
+            model_id=request.model_id,
+            finish_reason="stop",
+            tokens_used=1,
+            latency_ms=1.0,
         )
 
     async def stream(self, request: InferenceRequest):
@@ -167,3 +172,102 @@ def test_provider_id_and_unknown_attrs_forwarded():
     wrapped = RetryingProvider(Extra())
     assert wrapped.provider_id == "groq"
     assert wrapped.get_provider_info() == {"is_free_tier": True}
+
+
+# --- first-chunk timeout: the REPL must never wait forever for a stream ------
+
+
+class _HangingProvider:
+    """Accepts the call but never yields anything — simulates a provider
+    that connects successfully yet sends no data at all."""
+
+    provider_id = "fake"
+    SUPPORTS_STREAMING_TOOL_CALLS = True
+
+    def __init__(self):
+        self.calls = 0
+
+    def get_capabilities(self):
+        return SimpleNamespace(supports_streaming=True)
+
+    async def stream(self, request):
+        self.calls += 1
+        await asyncio.sleep(3600)  # "never" responds, relative to the test
+        yield StreamChunk(content="too late")  # pragma: no cover
+
+
+async def test_stream_raises_provider_timeout_instead_of_hanging_forever():
+    inner = _HangingProvider()
+    provider = RetryingProvider(inner, max_attempts=1, first_chunk_timeout_s=0.05)
+
+    with pytest.raises(ProviderTimeoutError):
+        async for _ in provider.stream(_request()):
+            pass
+
+
+async def test_stream_retries_after_a_timeout_then_succeeds(monkeypatch):
+    async def fake_sleep(seconds):
+        return None
+
+    monkeypatch.setattr("velune.providers.retrying.asyncio.sleep", fake_sleep)
+
+    class _HangsOnceThenWorks:
+        provider_id = "fake"
+        SUPPORTS_STREAMING_TOOL_CALLS = True
+
+        def __init__(self):
+            self.calls = 0
+
+        def get_capabilities(self):
+            return SimpleNamespace(supports_streaming=True)
+
+        async def stream(self, request):
+            self.calls += 1
+            if self.calls == 1:
+                # A real never-set Event, not asyncio.sleep — this test also
+                # patches asyncio.sleep process-wide to make the retry
+                # backoff instant, which would otherwise nullify a
+                # sleep-based "hang" simulation too.
+                await asyncio.Event().wait()
+                return
+            yield StreamChunk(content="ok")
+
+    inner = _HangsOnceThenWorks()
+    provider = RetryingProvider(inner, max_attempts=3, first_chunk_timeout_s=0.05)
+
+    chunks = [c async for c in provider.stream(_request())]
+
+    assert [c.content for c in chunks] == ["ok"]
+    assert inner.calls == 2
+
+
+async def test_provider_timeout_error_is_itself_retryable():
+    """Classified as InferenceError's family (408/timeout -> retry policy),
+    not a hard-stop like auth failure."""
+    from velune.providers.retrying import RETRYABLE_EXCEPTIONS
+
+    assert issubclass(ProviderTimeoutError, RETRYABLE_EXCEPTIONS)
+
+
+async def test_a_slow_but_progressing_stream_is_never_killed():
+    """The timeout only bounds the wait for the *first* chunk — a stream that
+    is already sending content must not be interrupted just because a later
+    chunk takes a while."""
+
+    class _SlowButProgressing:
+        provider_id = "fake"
+        SUPPORTS_STREAMING_TOOL_CALLS = True
+
+        def get_capabilities(self):
+            return SimpleNamespace(supports_streaming=True)
+
+        async def stream(self, request):
+            yield StreamChunk(content="first")
+            await asyncio.sleep(0.2)  # would exceed a 0.05s first-chunk budget
+            yield StreamChunk(content="second")
+
+    provider = RetryingProvider(_SlowButProgressing(), first_chunk_timeout_s=0.05)
+
+    chunks = [c async for c in provider.stream(_request())]
+
+    assert [c.content for c in chunks] == ["first", "second"]

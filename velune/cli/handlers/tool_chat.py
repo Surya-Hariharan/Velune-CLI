@@ -227,8 +227,10 @@ async def run_tool_chat(
     from velune._compat import uncancel_task
     from velune.core.errors.provider import (
         InferenceError,
+        ModelNotFoundError,
         ProviderAuthenticationError,
         ProviderConnectionError,
+        ProviderTimeoutError,
         RateLimitError,
     )
     from velune.orchestration.tool_loop import ToolLoopResult, ToolLoopRunner
@@ -284,15 +286,23 @@ async def run_tool_chat(
             invocations=executed,
             stop_reason="interrupted",
         )
-    except (ProviderConnectionError, ProviderAuthenticationError, RateLimitError) as exc:
+    except (
+        ProviderConnectionError,
+        ProviderAuthenticationError,
+        RateLimitError,
+        ModelNotFoundError,
+        ProviderTimeoutError,
+    ) as exc:
         # The provider itself is the problem (down, rejected the key, rate-
-        # limited) — not a "this model can't do tools" signal, so this must
-        # not fall through to the generic InferenceError branch below, which
-        # would misclassify a transient outage as a permanent tool-payload
-        # rejection and demote the model for the rest of the session.
-        # _handle_prompt decides whether to retry elsewhere, gated on
-        # safe_to_retry_elsewhere so a turn that already ran a tool never
-        # gets silently replayed against a different provider.
+        # limited, timed out, or the model id/endpoint doesn't exist) — not a
+        # "this model can't do tools" signal, so this must not fall through to
+        # the generic
+        # InferenceError branch below, which would misclassify a deterministic
+        # config problem as a permanent tool-payload rejection and demote the
+        # model for the rest of the session. _handle_prompt decides whether to
+        # retry elsewhere, gated on safe_to_retry_elsewhere so a turn that
+        # already ran a tool never gets silently replayed against a different
+        # provider.
         ui.close()
         executed = runner.executed_invocations
         repl._tool_call_count += len(executed)
@@ -783,8 +793,17 @@ class _ToolActivityUI:
 
     def _finish_live(self) -> None:
         if self._fullscreen_ui is not None:
-            if self._stream_text:
-                self._fullscreen_ui.update_assistant(self._stream_text, final=True)
+            # Always call update_assistant, even with empty text — a tool-only
+            # turn (content_delta never fired) must overwrite the fullscreen
+            # UI's own `_stream_text`, which `begin_assistant()` seeded with a
+            # thinking-word placeholder ("Cooking…", "Mapping…", …). Skipping
+            # this call when self._stream_text is empty (the previous
+            # behavior) left that placeholder in place, and
+            # finish_assistant()'s final render then displayed it as though
+            # it were the actual response — a silently empty turn rendered as
+            # a permanently "stuck" thinking word. update_assistant("", ...)
+            # renders the fullscreen UI's own empty-response fallback instead.
+            self._fullscreen_ui.update_assistant(self._stream_text, final=True)
             self._fullscreen_ui.finish_assistant()
             self._stream_text = ""
             return

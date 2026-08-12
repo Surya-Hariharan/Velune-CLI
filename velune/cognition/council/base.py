@@ -31,12 +31,19 @@ class BaseCouncilAgent(ABC):
         system_prompt: str,
         live_lock: asyncio.Lock | None = None,
         fallback_providers: list[tuple[ModelProvider, ModelDescriptor]] | None = None,
+        seat_name: str | None = None,
     ) -> None:
         self.role = role
         self.model = model
         self.provider = provider
         self.system_prompt = system_prompt
         self.live_lock = live_lock
+        # The council *seat* this agent occupies, which is not the same thing
+        # as its CouncilRole: the security, performance, and maintainability
+        # critics are all built on the REVIEWER role descriptor, so role
+        # identity alone cannot tell their provider calls apart in a trace.
+        # Defaults to the role for the five agents where the two coincide.
+        self.seat_name = seat_name or role.value
         # Ordered list of (provider, model) pairs tried in sequence on primary failure.
         self._fallback_providers: list[tuple[ModelProvider, ModelDescriptor]] = (
             fallback_providers or []
@@ -108,6 +115,28 @@ class BaseCouncilAgent(ABC):
             timeout = agent_timeouts.get(self.role, 120.0)
 
             import time
+
+            from velune.cognition.execution_trace import (
+                CallReason,
+                current_reason,
+                current_trace,
+            )
+
+            # Open a ledger entry for the physical provider call this method is
+            # about to make, attributed to the seat (not the role) and carrying
+            # the reason the orchestrator established for this scope. Purely
+            # structural: no prompt text, no completion, no credentials.
+            _trace = current_trace()
+            _call = None
+            if _trace is not None:
+                _call = _trace.open_call(
+                    seat=self.seat_name,
+                    component=type(self).__name__,
+                    provider=self.provider.provider_id,
+                    model=self.model.model_id,
+                    purpose=f"{self.seat_name}.deliberate",
+                    reason=current_reason(),
+                )
 
             start = time.perf_counter()
             try:
@@ -208,15 +237,36 @@ class BaseCouncilAgent(ABC):
                 )
                 if elapsed > 60.0:
                     logger.warning("Agent %s took %.1fs (>60s)", self.role.value, elapsed)
+                if _call is not None:
+                    _call.finish("ok")
                 return content
             except TimeoutError:
                 logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)
+                if _call is not None:
+                    _call.finish("timeout", error_type="TimeoutError")
                 return f"[Agent {self.role.value} timed out — using empty response]"
             except Exception as e:
+                if _call is not None:
+                    _call.finish("error", error_type=type(e).__name__)
                 self._note_provider_failure(self.provider.provider_id, e)
                 logger.error("deliberation failed for agent %s: %s", self.role.value, str(e)[:300])
                 # Attempt fallback providers before giving up.
-                for fb_provider, fb_model in self._fallback_providers:
+                for fb_index, (fb_provider, fb_model) in enumerate(
+                    self._fallback_providers, start=1
+                ):
+                    _fb_call = None
+                    if _trace is not None:
+                        _fb_call = _trace.open_call(
+                            seat=self.seat_name,
+                            component=type(self).__name__,
+                            provider=fb_model.provider_id,
+                            model=fb_model.model_id,
+                            purpose=f"{self.seat_name}.deliberate",
+                            reason=CallReason.FALLBACK,
+                            attempt=fb_index + 1,
+                            streaming=False,
+                            parent_call_id=_call.call_id if _call else None,
+                        )
                     try:
                         logger.info(
                             "Agent %s retrying with fallback provider %s/%s",
@@ -240,8 +290,12 @@ class BaseCouncilAgent(ABC):
                             self.role.value,
                             fb_model.provider_id,
                         )
+                        if _fb_call is not None:
+                            _fb_call.finish("ok")
                         return fb_response.content
                     except Exception as fb_exc:
+                        if _fb_call is not None:
+                            _fb_call.finish("error", error_type=type(fb_exc).__name__)
                         self._note_provider_failure(fb_model.provider_id, fb_exc)
                         logger.warning(
                             "Fallback provider %s also failed: %s",

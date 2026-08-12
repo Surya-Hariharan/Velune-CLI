@@ -25,7 +25,11 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 
-from velune.core.errors.provider import InferenceError, ProviderConnectionError
+from velune.core.errors.provider import (
+    InferenceError,
+    ProviderConnectionError,
+    ProviderTimeoutError,
+)
 from velune.core.retry import RetryPolicy, retry_async
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import ModelDescriptor
@@ -50,9 +54,23 @@ class RetryingProvider(ModelProvider):
     """
 
     def __init__(
-        self, inner: ModelProvider, *, max_attempts: int = 3, max_concurrent: int = 4
+        self,
+        inner: ModelProvider,
+        *,
+        max_attempts: int = 3,
+        max_concurrent: int = 4,
+        first_chunk_timeout_s: float = 30.0,
     ) -> None:
         self._inner = inner
+        # Bounds how long stream() will wait for the *first* chunk before
+        # treating the provider as unresponsive. Deliberately does not bound
+        # the gap between later chunks — a slow-but-progressing long
+        # generation is normal and must not be killed for taking a while;
+        # only "sent nothing at all" is a timeout. The REPL must reach a
+        # terminal state (ProviderTimeoutError, which the caller renders as a
+        # clean error) rather than sit at its "thinking" indicator forever if
+        # a provider genuinely never responds.
+        self._first_chunk_timeout_s = first_chunk_timeout_s
         # Adapters that support streamed tool-call turns advertise it as a
         # class attribute the tool loop checks via getattr(provider, ...) —
         # copied onto the instance so wrapping a provider never silently
@@ -91,21 +109,44 @@ class RetryingProvider(ModelProvider):
         request from scratch would duplicate or silently drop what was
         already delivered — safer to let a mid-stream failure propagate
         untouched, exactly as it did before this wrapper existed.
+
+        The wait for that first chunk is itself bounded by
+        ``first_chunk_timeout_s``: a provider that accepts the connection but
+        never sends anything back would otherwise leave the caller awaiting
+        the async generator forever, with no exception to retry or surface.
         """
         attempt = 0
         async with self._concurrency_gate:
             while True:
                 attempt += 1
-                started = False
+                agen = self._inner.stream(request)
                 try:
-                    async for chunk in self._inner.stream(request):
-                        started = True
-                        yield chunk
-                    return
+                    first_chunk = await asyncio.wait_for(
+                        agen.__anext__(), timeout=self._first_chunk_timeout_s
+                    )
+                except StopAsyncIteration:
+                    return  # a genuinely empty stream is not a failure
                 except asyncio.CancelledError:
                     raise
+                except TimeoutError as exc:
+                    if attempt >= self._policy.max_attempts:
+                        raise ProviderTimeoutError(
+                            f"{self._inner.provider_id} sent no response within "
+                            f"{self._first_chunk_timeout_s:.0f}s."
+                        ) from exc
+                    delay = self._policy._delay(attempt)
+                    logger.warning(
+                        "Retrying %s.stream() attempt %d/%d after %.1fs (no response within %.0fs)",
+                        self._inner.provider_id,
+                        attempt,
+                        self._policy.max_attempts,
+                        delay,
+                        self._first_chunk_timeout_s,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 except RETRYABLE_EXCEPTIONS as exc:
-                    if started or attempt >= self._policy.max_attempts:
+                    if attempt >= self._policy.max_attempts:
                         raise
                     delay = getattr(exc, "retry_after", None)
                     if delay is None:
@@ -120,6 +161,17 @@ class RetryingProvider(ModelProvider):
                         exc,
                     )
                     await asyncio.sleep(delay)
+                    continue
+
+                # A chunk has reached the caller: no path from here retries
+                # from scratch again — a mid-stream failure propagates as-is,
+                # exactly as it did before this wrapper existed, since
+                # restarting would duplicate or silently drop what was
+                # already delivered.
+                yield first_chunk
+                async for chunk in agen:
+                    yield chunk
+                return
 
     async def list_models(self) -> list[ModelDescriptor]:
         return await self._inner.list_models()

@@ -128,6 +128,16 @@ class EmbeddingPipeline:
         self._worker_task: asyncio.Task | None = None
         self._running = False
         self._backoff = _BACKOFF_BASE
+        # State-transition logging: a down embedding provider (Ollama not
+        # running, no model pulled, ...) produces the exact same failure for
+        # every queued turn until the underlying cause is fixed. Warning on
+        # every single retry — which is what an unbounded "log on every
+        # failure" loop does — turns one root cause into an unbroken stream
+        # of identical REPL warnings for the life of the process. Only the
+        # first failure since the last success is logged at WARNING; repeats
+        # of the same ongoing outage are DEBUG-only, and recovery gets one
+        # explicit "back online" line.
+        self._consecutive_failures = 0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -224,15 +234,33 @@ class EmbeddingPipeline:
 
             try:
                 await self.embed_turn(item)
+                if self._consecutive_failures > 0:
+                    logger.info(
+                        "Embedding pipeline recovered after %d failed attempt(s).",
+                        self._consecutive_failures,
+                    )
+                self._consecutive_failures = 0
                 self._backoff = _BACKOFF_BASE  # reset on success
                 self._queue.task_done()
             except Exception as exc:
-                logger.warning(
-                    "Embedding failed for turn %s (%s) — retry in %.1fs",
-                    item.turn_id,
-                    type(exc).__name__,
-                    self._backoff,
-                )
+                self._consecutive_failures += 1
+                if self._consecutive_failures == 1:
+                    logger.warning(
+                        "Embedding failed for turn %s (%s) — retry in %.1fs. "
+                        "Further retries of this ongoing failure are logged at DEBUG.",
+                        item.turn_id,
+                        type(exc).__name__,
+                        self._backoff,
+                    )
+                else:
+                    logger.debug(
+                        "Embedding failed for turn %s (%s) — retry in %.1fs "
+                        "[%d consecutive failures]",
+                        item.turn_id,
+                        type(exc).__name__,
+                        self._backoff,
+                        self._consecutive_failures,
+                    )
                 # Re-enqueue for retry; drop silently if queue is full.
                 try:
                     self._queue.put_nowait(item)

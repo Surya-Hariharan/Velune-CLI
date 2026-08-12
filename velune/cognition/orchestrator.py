@@ -204,16 +204,23 @@ class CouncilOrchestrator:
         temps = get_sampling_profile(CouncilRole.CODER).sample_temperatures(n_samples)
         provider_id = coder.model.provider_id
 
+        from velune.cognition.execution_trace import CallReason, trace_seat
+
         def _make_job(idx: int, temp: float) -> CouncilJob:
             async def _run() -> str:
-                return await coder.write_code(
-                    prompt=prompt,
-                    current_code=current_code,
-                    plan_context=plan_context,
-                    style_profile=style_profile,
-                    format_instructions=format_instructions,
-                    temperature=temp,
-                )
+                # The first sample is the seat's contract-sanctioned execution;
+                # every additional one is self-consistency sampling and says so
+                # in the ledger, so it can never read as a silent repeat.
+                reason = CallReason.PRIMARY if idx == 0 else CallReason.SELF_CONSISTENCY
+                with trace_seat("coder", reason):
+                    return await coder.write_code(
+                        prompt=prompt,
+                        current_code=current_code,
+                        plan_context=plan_context,
+                        style_profile=style_profile,
+                        format_instructions=format_instructions,
+                        temperature=temp,
+                    )
 
             return CouncilJob(name=f"coder#{idx}", provider_id=provider_id, run=_run)
 
@@ -221,7 +228,10 @@ class CouncilOrchestrator:
         if progress_callback and n_samples > 1:
             progress_callback(f"[Coder] Diverge round: {n_samples} candidate solutions...")
 
-        results = await self.scheduler.run(jobs, timeout=timeout)
+        from velune.cognition.execution_trace import NodeType, trace_node
+
+        with trace_node(NodeType.SEAT_EXECUTION, f"coder diverge ({n_samples} sample(s))"):
+            results = await self.scheduler.run(jobs, timeout=timeout)
         # deliberate() converts agent exceptions into sentinel strings rather than
         # raising, so a sample that failed still comes back r.ok — drop those too,
         # or a provider error would win the self-consistency vote as the "answer".
@@ -394,17 +404,20 @@ class CouncilOrchestrator:
         async def run_execution():
             coder_proposal: str | None = None
             try:
-                from velune.core.retry import retry_async
-
-                result = await retry_async(
-                    self._retry_policy,
-                    lambda: self.execute_task(
-                        prompt=prompt,
-                        repo_context=repo_context,
-                        progress_callback=progress_callback,
-                    ),
-                    bus=self._bus,
-                    source="council_orchestrator",
+                # Retry ownership sits at exactly one layer: the provider.
+                # `RetryingProvider` (wired in at ProviderRegistry.get) already
+                # retries each individual inference up to max_attempts on
+                # transient failures. Wrapping the *entire council run* in a
+                # second retry_async multiplied the two — a provider flapping
+                # through 3 attempts inside a 10-call STANDARD run, retried 3
+                # times at this layer, is up to 90 provider calls for one
+                # request. Worse, it re-ran every seat that had already
+                # succeeded. A council run that fails after partial success is
+                # not a transient fault this layer can fix by repeating itself.
+                result = await self.execute_task(
+                    prompt=prompt,
+                    repo_context=repo_context,
+                    progress_callback=progress_callback,
                 )
                 final_summary = result.get("final_summary", "Execution completed successfully.")
                 status = ExecutionStatus.COMPLETED
@@ -635,12 +648,22 @@ class CouncilOrchestrator:
         budget: CouncilExecutionBudget | None = None,
     ) -> dict[str, Any]:
         """Orchestrate a complete council deliberation pass for a task prompt with wall-time limit."""
+        from velune.cognition.execution_trace import current_trace, trace_request
+
         await self._maybe_gate_cost(prompt, repo_context)
         budget = budget or CouncilExecutionBudget(
             max_wall_time_seconds=int(self.max_wall_time_seconds)
         )
         tier = self._resolve_tier(prompt, repo_context, council_tier)
         tier_str = tier.value
+
+        # Establish the request-scoped correlation id here when no caller has
+        # opened one, so every downstream provider call is attributable to this
+        # request even for entry points that don't trace explicitly.
+        owns_trace = current_trace() is None
+        ctx = trace_request(prompt_preview=prompt) if owns_trace else None
+        if ctx is not None:
+            ctx.__enter__()
 
         try:
             return await asyncio.wait_for(
@@ -659,6 +682,9 @@ class CouncilOrchestrator:
                 budget.max_wall_time_seconds,
             )
             return self._build_timeout_result(prompt, tier_str)
+        finally:
+            if ctx is not None:
+                ctx.__exit__(None, None, None)
 
     async def _maybe_gate_cost(self, prompt: str, repo_context: str) -> None:
         """Prompt for confirmation when estimated cloud cost exceeds the configured threshold.
@@ -792,6 +818,21 @@ class CouncilOrchestrator:
             CriticMessage,
             ReviewerMessage,
         )
+        from velune.cognition.council.contracts import (
+            SEAT_CHALLENGER,
+            SEAT_MAINTAINABILITY,
+            SEAT_PERFORMANCE,
+            SEAT_SCALABILITY,
+            SEAT_SECURITY,
+            contract_for,
+        )
+        from velune.cognition.execution_trace import (
+            CallReason,
+            NodeType,
+            current_trace,
+            trace_node,
+            trace_seat,
+        )
         from velune.cognition.firewall import CognitiveFirewall
         from velune.core.trace import TraceContext
 
@@ -799,6 +840,11 @@ class CouncilOrchestrator:
             run_id = f"council-{uuid.uuid4().hex[:8]}"
 
         tier_level = {"instant": 1, "minimal": 2, "standard": 3, "full": 4}[tier.value]
+        contract = contract_for(tier)
+        request_trace = current_trace()
+        if request_trace is not None:
+            request_trace.tier = tier.value
+            request_trace.contract_summary = contract.summary()
         budget = budget or CouncilExecutionBudget()
 
         with TraceContext(run_id=run_id):
@@ -842,25 +888,48 @@ class CouncilOrchestrator:
             except Exception as _fe:
                 logger.debug("Could not resolve edit format instructions: %s", _fe)
 
-            # Agent instantiation based on tier
+            # Agent instantiation is driven by the tier's declared contract, not
+            # by ad-hoc `tier_level >= N` comparisons. Those comparisons were the
+            # mechanism by which runtime composition silently drifted away from
+            # the documented tier semantics (STANDARD advertised "Coder +
+            # Reviewer" while activating a planner, three coder samples, four
+            # critics, and a synthesizer). One table now decides both.
             coder = self.agent_factory.create_coder(run_id)
-            planner = self.agent_factory.create_planner(run_id) if tier_level >= 2 else None
-            reviewer = self.agent_factory.create_reviewer(run_id) if tier_level >= 3 else None
-            synthesizer = self.agent_factory.create_synthesizer(run_id) if tier_level >= 3 else None
+            planner = (
+                self.agent_factory.create_planner(run_id) if contract.uses_planner else None
+            )
+            reviewer = (
+                self.agent_factory.create_reviewer(run_id) if contract.uses_reviewer else None
+            )
+            synthesizer = (
+                self.agent_factory.create_synthesizer(run_id)
+                if contract.uses_synthesizer
+                else None
+            )
 
-            challenger = self.agent_factory.create_challenger(run_id) if tier_level == 4 else None
+            challenger = (
+                self.agent_factory.create_challenger(run_id)
+                if contract.activates(SEAT_CHALLENGER)
+                else None
+            )
             scalability_critic = (
-                self.agent_factory.create_scalability_critic(run_id) if tier_level >= 3 else None
+                self.agent_factory.create_scalability_critic(run_id)
+                if contract.activates(SEAT_SCALABILITY)
+                else None
             )
             security_critic = (
-                self.agent_factory.create_security_critic(run_id) if tier_level >= 2 else None
+                self.agent_factory.create_security_critic(run_id)
+                if contract.activates(SEAT_SECURITY)
+                else None
             )
             performance_critic = (
-                self.agent_factory.create_performance_critic(run_id) if tier_level >= 3 else None
+                self.agent_factory.create_performance_critic(run_id)
+                if contract.activates(SEAT_PERFORMANCE)
+                else None
             )
             maintainability_critic = (
                 self.agent_factory.create_maintainability_critic(run_id)
-                if tier_level >= 2
+                if contract.activates(SEAT_MAINTAINABILITY)
                 else None
             )
 
@@ -953,10 +1022,11 @@ class CouncilOrchestrator:
                 if progress_callback:
                     progress_callback("[Planner] Decomposing task...")
                 try:
-                    task_plan = await asyncio.wait_for(
-                        planner.generate_plan(prompt, enriched_repo_context),
-                        timeout=budget.planner_timeout_seconds,
-                    )
+                    with trace_node(NodeType.PLANNING, "planning"), trace_seat("planner"):
+                        task_plan = await asyncio.wait_for(
+                            planner.generate_plan(prompt, enriched_repo_context),
+                            timeout=budget.planner_timeout_seconds,
+                        )
                 except TimeoutError:
                     logger.error("Planner timed out after %ds", budget.planner_timeout_seconds)
                     task_plan = None
@@ -986,10 +1056,15 @@ class CouncilOrchestrator:
             except Exception:
                 pass
 
-            # Only the deliberative tiers (>=3) draw multiple candidates; instant
-            # and minimal stay single-shot for latency.
-            n_samples = (
-                coder_sample_count(coder_low_resource, degraded_diversity) if tier_level >= 3 else 1
+            # How many candidates the Coder draws is a property of the tier
+            # contract, not of a `tier_level >= 3` threshold. Multi-sample
+            # self-consistency is deliberation *depth* — the thing that
+            # distinguishes FULL — so STANDARD draws one candidate and the
+            # runtime constraints below can only reduce that further, never
+            # raise a tier above what it declared.
+            n_samples = min(
+                contract.coder_samples,
+                coder_sample_count(coder_low_resource, degraded_diversity),
             )
 
             candidate_pool = await self._diverge_candidates(
@@ -1031,10 +1106,11 @@ class CouncilOrchestrator:
                         f"[Coder] Self-consistency vote: selected candidate {winner_idx + 1}/{len(candidate_pool)}"
                     )
 
-            # Early Return for Instant/Minimal
-            if tier_level < 3:
+            # Early return for tiers whose contract has no judging seat: with no
+            # reviewer there is nothing to critique, debate, or synthesize.
+            if not contract.uses_reviewer:
                 arbitration_dict = {"overall_confidence": 0.85, "requires_human_review": False}
-                if tier_level == 2 and task_plan:
+                if task_plan:
                     if progress_callback:
                         progress_callback("[Arbitration] Arbitrating proposal...")
                     arbitration = self.arbitrator.arbitrate(
@@ -1093,7 +1169,15 @@ class CouncilOrchestrator:
             from velune.cognition.council.scheduler import CouncilJob
 
             def _critic_job(name: str, agent, run) -> CouncilJob:
-                return CouncilJob(name=name, provider_id=agent.model.provider_id, run=run)
+                # Attribute every judging call to its own seat. Without this the
+                # four critics — all built on the REVIEWER/CHALLENGER role
+                # descriptors — appear in the ledger as extra, unexplained
+                # "reviewer" calls.
+                async def _traced():
+                    with trace_seat(agent.seat_name):
+                        return await run()
+
+                return CouncilJob(name=name, provider_id=agent.model.provider_id, run=_traced)
 
             jobs = [
                 _critic_job(
@@ -1155,7 +1239,8 @@ class CouncilOrchestrator:
                     )
                 )
 
-            job_results = {r.name: r for r in await self.scheduler.run(jobs)}
+            with trace_node(NodeType.REVIEW, f"review ({len(jobs)} judging seat(s))"):
+                job_results = {r.name: r for r in await self.scheduler.run(jobs)}
 
             reviewer_result = job_results["reviewer"]
             if reviewer_result.ok:
@@ -1200,21 +1285,28 @@ class CouncilOrchestrator:
                 self.config and self.config.execution.low_resource_mode
             ) or os.environ.get("VELUNE_LOW_RESOURCE", "").lower() in ("true", "1", "yes")
 
+            # Debate depth is bounded by the tier contract first and the runtime
+            # budget second, so no tier can silently out-deliberate what it
+            # declared. A contract with max_debate_turns == 0 forbids revision
+            # entirely: no seat re-executes outside retry/fallback.
             max_debate_turns = 0
-            if tier_level == 3 and objections and not low_resource:
-                max_debate_turns = min(1, budget.max_review_cycles)
-            elif tier_level == 4:
-                all_critic_reports = {
-                    "security": security_report,
-                    "scalability": scalability_report,
-                    "challenger": challenger_report,
-                }
-                max_debate_turns = calculate_max_debate_turns(
-                    initial_objections=objections,
-                    critic_reports=all_critic_reports,
-                    task_complexity="structural",
+            if objections and contract.max_debate_turns > 0 and not low_resource:
+                if contract.critic_seats:
+                    all_critic_reports = {
+                        "security": security_report,
+                        "scalability": scalability_report,
+                        "challenger": challenger_report,
+                    }
+                    max_debate_turns = calculate_max_debate_turns(
+                        initial_objections=objections,
+                        critic_reports=all_critic_reports,
+                        task_complexity="structural",
+                    )
+                else:
+                    max_debate_turns = 1
+                max_debate_turns = min(
+                    contract.max_debate_turns, budget.max_review_cycles, max_debate_turns
                 )
-                max_debate_turns = min(budget.max_review_cycles, max_debate_turns)
 
             refined_proposal = coder_proposal
             initial_objection_count = len(objections)
@@ -1268,16 +1360,24 @@ class CouncilOrchestrator:
                         )
 
                         try:
-                            refined_proposal = await asyncio.wait_for(
-                                coder.write_code(
-                                    prompt=prompt,
-                                    current_code=enriched_repo_context,
-                                    plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
-                                    style_profile=style_profile,
-                                    format_instructions=_coder_format_instructions,
+                            # The Coder re-executing here is a REVISION driven by
+                            # named critic objections, never a bare repeat.
+                            with (
+                                trace_node(
+                                    NodeType.DEBATE, f"debate turn {debate_turn}"
                                 ),
-                                timeout=budget.coder_timeout_seconds,
-                            )
+                                trace_seat("coder", CallReason.REVISION),
+                            ):
+                                refined_proposal = await asyncio.wait_for(
+                                    coder.write_code(
+                                        prompt=prompt,
+                                        current_code=enriched_repo_context,
+                                        plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
+                                        style_profile=style_profile,
+                                        format_instructions=_coder_format_instructions,
+                                    ),
+                                    timeout=budget.coder_timeout_seconds,
+                                )
                         except TimeoutError:
                             logger.error(
                                 "[COUNCIL - DEBATE] Coder timed out on turn %d after %ds; stopping debate.",
@@ -1293,72 +1393,52 @@ class CouncilOrchestrator:
                         re_jobs: list[CouncilJob] = []
                         re_critics = []
 
-                        if not reviewer_report.passed:
+                        def _revision_job(name: str, agent, report, rp: str) -> None:
+                            """Queue *agent* to re-judge *rp*, if it objected.
+
+                            Every re-judgement is tagged REVISION so the ledger
+                            attributes the repeat to reviewer feedback rather
+                            than leaving it as a bare second call.
+                            """
+                            if agent is None or report.passed:
+                                return
+
+                            async def _run(_agent=agent, _rp=rp):
+                                with trace_seat(_agent.seat_name, CallReason.REVISION):
+                                    judge = getattr(_agent, "review", None)
+                                    if judge is not None:
+                                        return await judge(
+                                            task=prompt, proposal=_rp, context=repo_context
+                                        )
+                                    return await _agent.critique(
+                                        task=prompt, proposal=_rp, context=repo_context
+                                    )
+
                             re_jobs.append(
                                 CouncilJob(
-                                    name="reviewer",
-                                    provider_id=reviewer.model.provider_id,
-                                    run=lambda rp=refined_proposal: reviewer.review(
-                                        task=prompt, proposal=rp, context=repo_context
-                                    ),
+                                    name=name,
+                                    provider_id=agent.model.provider_id,
+                                    run=_run,
                                 )
                             )
-                            re_critics.append("reviewer")
-                        if tier_level == 4:
-                            if not scalability_report.passed:
-                                re_jobs.append(
-                                    CouncilJob(
-                                        name="scalability",
-                                        provider_id=scalability_critic.model.provider_id,
-                                        run=lambda rp=refined_proposal: scalability_critic.critique(
-                                            task=prompt,
-                                            proposal=rp,
-                                            context=repo_context,
-                                        ),
-                                    )
-                                )
-                                re_critics.append("scalability")
-                            if not security_report.passed:
-                                re_jobs.append(
-                                    CouncilJob(
-                                        name="security",
-                                        provider_id=security_critic.model.provider_id,
-                                        run=lambda rp=refined_proposal: security_critic.critique(
-                                            task=prompt,
-                                            proposal=rp,
-                                            context=repo_context,
-                                        ),
-                                    )
-                                )
-                                re_critics.append("security")
-                            if not performance_report.passed:
-                                re_jobs.append(
-                                    CouncilJob(
-                                        name="performance",
-                                        provider_id=performance_critic.model.provider_id,
-                                        run=lambda rp=refined_proposal: performance_critic.critique(
-                                            task=prompt,
-                                            proposal=rp,
-                                            context=repo_context,
-                                        ),
-                                    )
-                                )
-                                re_critics.append("performance")
-                            if not maintainability_report.passed:
-                                re_jobs.append(
-                                    CouncilJob(
-                                        name="maintainability",
-                                        provider_id=maintainability_critic.model.provider_id,
-                                        run=lambda rp=refined_proposal: (
-                                            maintainability_critic.critique(
-                                                task=prompt,
-                                                proposal=rp,
-                                                context=repo_context,
-                                            )
-                                        ),
-                                    )
-                                )
-                                re_critics.append("maintainability")
+                            re_critics.append(name)
+
+                        _revision_job("reviewer", reviewer, reviewer_report, refined_proposal)
+                        _revision_job(
+                            "scalability", scalability_critic, scalability_report, refined_proposal
+                        )
+                        _revision_job(
+                            "security", security_critic, security_report, refined_proposal
+                        )
+                        _revision_job(
+                            "performance", performance_critic, performance_report, refined_proposal
+                        )
+                        _revision_job(
+                            "maintainability",
+                            maintainability_critic,
+                            maintainability_report,
+                            refined_proposal,
+                        )
 
                         if re_jobs:
                             re_job_results = await self.scheduler.run(re_jobs)
@@ -1461,15 +1541,22 @@ class CouncilOrchestrator:
             logger.info("Council Phase: Arbitration")
             if progress_callback:
                 progress_callback("[Arbitration] Arbitrating proposal...")
+            # task_plan is None whenever the Planner timed out — the previous
+            # unguarded `task_plan.steps` turned a recoverable planner timeout
+            # into an AttributeError that aborted the whole run after every
+            # other seat had already been paid for.
+            plan_steps = [s.description for s in task_plan.steps] if task_plan else []
             arbitration = self.arbitrator.arbitrate(
-                plan_steps=[s.description for s in task_plan.steps],
+                plan_steps=plan_steps,
                 coder_proposal=coder_proposal,
                 reviewer_report=reviewer_report,
-                challenger_report=challenger_report if tier_level == 4 else None,
-                scalability_report=scalability_report if tier_level == 4 else None,
-                security_report=security_report if tier_level == 4 else None,
-                performance_report=performance_report if tier_level == 4 else None,
-                maintainability_report=maintainability_report if tier_level == 4 else None,
+                challenger_report=challenger_report if challenger else None,
+                scalability_report=scalability_report if scalability_critic else None,
+                security_report=security_report if security_critic else None,
+                performance_report=performance_report if performance_critic else None,
+                maintainability_report=(
+                    maintainability_report if maintainability_critic else None
+                ),
                 shi=shi,
                 candidates=candidate_pool,
             )
@@ -1480,25 +1567,28 @@ class CouncilOrchestrator:
                 progress_callback("[Synthesis] Synthesizing final summary...")
 
             audit_reports = [reviewer_report.model_dump()]
-            if tier_level == 4:
-                audit_reports.extend(
-                    [
-                        challenger_report.model_dump(),
-                        scalability_report.model_dump(),
-                        security_report.model_dump(),
-                        performance_report.model_dump(),
-                        maintainability_report.model_dump(),
-                    ]
-                )
+            for _agent, _report in (
+                (challenger, challenger_report),
+                (scalability_critic, scalability_report),
+                (security_critic, security_report),
+                (performance_critic, performance_report),
+                (maintainability_critic, maintainability_report),
+            ):
+                if _agent is not None:
+                    audit_reports.append(_report.model_dump())
 
             try:
-                final_summary = await synthesizer.synthesize(
-                    task=prompt,
-                    winning_claims=arbitration.winning_claims,
-                    plan=coder_proposal,
-                    audit_reports=audit_reports,
-                    context=repo_context,
-                )
+                with (
+                    trace_node(NodeType.SYNTHESIS, "synthesis"),
+                    trace_seat("synthesizer"),
+                ):
+                    final_summary = await synthesizer.synthesize(
+                        task=prompt,
+                        winning_claims=arbitration.winning_claims,
+                        plan=coder_proposal,
+                        audit_reports=audit_reports,
+                        context=repo_context,
+                    )
                 if final_summary.startswith("Deliberation failure inside agent"):
                     raise ValueError(final_summary)
             except Exception as e:
@@ -1587,11 +1677,17 @@ class CouncilOrchestrator:
             ]
             _total_prompt = len(prompt.encode()) // 4
             _total_completion = sum(len(str(t).encode()) // 4 for t in _agent_texts)
-            _agent_count = 1 + (1 if tier_level >= 3 else 0) + (4 if tier_level == 4 else 0)
+            # Report the seats the contract actually activated. The old formula
+            # hardcoded "1 + 1 + 4" against tier_level and disagreed with the
+            # run it was describing.
+            _agent_count = len(contract.required_seats)
+            _actual_calls = (
+                len(request_trace.calls) if request_trace is not None else _agent_count
+            )
             if progress_callback:
                 progress_callback(
                     f"[Usage] ~{_total_prompt + _total_completion:,} tokens "
-                    f"across {_agent_count} agents (estimated)"
+                    f"across {_agent_count} seats / {_actual_calls} provider calls (estimated)"
                 )
 
             logger.info("Executed %s tier in %.2fs", tier.value, time.time() - start_time)
@@ -1600,11 +1696,16 @@ class CouncilOrchestrator:
                 "task_plan": task_plan,
                 "coder_proposal": coder_proposal,
                 "reviewer_report": reviewer_report,
-                "challenger_report": challenger_report if tier_level == 4 else None,
-                "scalability_report": scalability_report if tier_level == 4 else None,
-                "security_report": security_report if tier_level == 4 else None,
-                "performance_report": performance_report if tier_level == 4 else None,
-                "maintainability_report": maintainability_report if tier_level == 4 else None,
+                "challenger_report": challenger_report if challenger else None,
+                "scalability_report": scalability_report if scalability_critic else None,
+                "security_report": security_report if security_critic else None,
+                "performance_report": performance_report if performance_critic else None,
+                "maintainability_report": (
+                    maintainability_report if maintainability_critic else None
+                ),
                 "arbitration": arbitration.to_dict(),
                 "final_summary": final_summary,
+                "execution_trace": (
+                    request_trace.to_dict() if request_trace is not None else None
+                ),
             }
