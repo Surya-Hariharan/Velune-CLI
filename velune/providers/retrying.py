@@ -128,7 +128,7 @@ class RetryingProvider(ModelProvider):
                     return  # a genuinely empty stream is not a failure
                 except asyncio.CancelledError:
                     raise
-                except TimeoutError as exc:
+                except (asyncio.TimeoutError, TimeoutError) as exc:  # distinct classes before 3.11
                     if attempt >= self._policy.max_attempts:
                         raise ProviderTimeoutError(
                             f"{self._inner.provider_id} sent no response within "
