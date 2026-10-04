@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sqlite3
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -31,6 +33,11 @@ _WRITE_PRAGMAS = (
     # briefly; retry for up to 5s instead of surfacing that as an error.
     "PRAGMA busy_timeout=5000",
 )
+
+
+def _is_corruption(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "malformed" in text or "not a database" in text or "corrupt" in text
 
 
 class SQLiteConnectionPool:
@@ -73,13 +80,67 @@ class SQLiteConnectionPool:
     # ------------------------------------------------------------------
 
     async def startup(self) -> None:
-        """Open the write connection and configure SQLite PRAGMAs."""
+        """Open the write connection and configure SQLite PRAGMAs.
+
+        If the database file is damaged ("database disk image is malformed" /
+        "file is not a database" — e.g. after a killed process or a bad sync),
+        it is moved aside as ``<name>.corrupt-<timestamp>`` and a fresh database
+        is created, instead of leaving every memory subsystem degraded on every
+        launch. The damaged file is kept so nothing is destroyed.
+        """
+        try:
+            await self._open_and_verify()
+        except sqlite3.DatabaseError as exc:
+            if not _is_corruption(exc):
+                raise
+            await self._close_quietly()
+            moved = self._quarantine_database(exc)
+            await self._open_and_verify()
+            logger.warning(
+                "Memory database %s was damaged (%s); started a fresh one. "
+                "The damaged copy was kept at %s.",
+                self._db_path,
+                exc,
+                moved,
+            )
+        logger.info("SQLiteConnectionPool started at %s", self._db_path)
+
+    async def _open_and_verify(self) -> None:
         self._write_conn = await aiosqlite.connect(str(self._db_path))
         self._write_conn.row_factory = sqlite3.Row
         for pragma in _WRITE_PRAGMAS:
             await self._write_conn.execute(pragma)
+        # Cheap structural scan: touches every page, so damage that would
+        # otherwise surface later as an error deep inside a query shows up here.
+        cursor = await self._write_conn.execute("PRAGMA quick_check(1)")
+        row = await cursor.fetchone()
+        if row is not None and str(row[0]).lower() != "ok":
+            raise sqlite3.DatabaseError(f"database disk image is malformed ({row[0]})")
         await self._write_conn.commit()
-        logger.info("SQLiteConnectionPool started at %s", self._db_path)
+
+    async def _close_quietly(self) -> None:
+        if self._write_conn is not None:
+            try:
+                await self._write_conn.close()
+            except Exception:
+                pass
+            finally:
+                self._write_conn = None
+
+    def _quarantine_database(self, exc: Exception) -> Path:
+        """Move the database and its -wal/-shm sidecars out of the way."""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        moved = self._db_path.with_name(f"{self._db_path.name}.corrupt-{stamp}")
+        for suffix in ("", "-wal", "-shm"):
+            src = self._db_path.with_name(self._db_path.name + suffix)
+            if src.exists():
+                dst = moved if not suffix else moved.with_name(moved.name + suffix)
+                try:
+                    os.replace(src, dst)
+                except OSError as move_exc:
+                    logger.error("Could not move damaged file %s aside: %s", src, move_exc)
+                    raise exc from move_exc
+        return moved
 
     async def shutdown(self) -> None:
         """Commit any pending work and close the write connection."""
