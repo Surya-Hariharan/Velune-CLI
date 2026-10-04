@@ -130,5 +130,4 @@ credentials.json
 master.key
 
 # Internal docs (kept local, not published)
-docs/*
-!docs/project-origin.md
+docs/internal/
