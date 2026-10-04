@@ -1,7 +1,7 @@
 """Provider capability/preference registry, keyed by ``ModelFamily``.
 
 Adding a new provider is one :func:`register_provider_profile` call — see
-docs/02-prompt-intelligence.md §17. Built on top of the existing
+the Prompt Intelligence design notes §17. Built on top of the existing
 :func:`velune.models.family.detect_family`; this module does not add a
 second family detector.
 """

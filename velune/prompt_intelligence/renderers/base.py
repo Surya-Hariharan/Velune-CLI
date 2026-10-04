@@ -1,6 +1,6 @@
 """``ProviderRenderer`` ABC + the shared IR-to-messages rendering algorithm.
 
-See ``docs/02-prompt-intelligence.md`` §11. Every renderer implements the
+See the Prompt Intelligence design notes §11. Every renderer implements the
 same four steps (order sections, apply delimiter style, apply planning
 style, emit final messages); they differ only in *how*, per the
 ``ProviderProfile`` they're given — most families need only a profile, not a

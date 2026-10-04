@@ -1,4 +1,4 @@
-"""Task Template Registry — see docs/02-prompt-intelligence.md §4."""
+"""Task Template Registry — see the Prompt Intelligence design notes §4."""
 
 from __future__ import annotations
 

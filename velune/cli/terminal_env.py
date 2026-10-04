@@ -15,7 +15,7 @@ the emulator's own persistent, global keybinding config — off-limits here
 both because Velune must not touch it and because a config edit doesn't
 satisfy "session-scoped, reverts automatically on exit" anyway.
 
-See ``docs/terminal-zoom-lock.md`` for the full per-terminal writeup this
+See the terminal zoom-lock investigation for the full per-terminal writeup this
 module's ``reason`` strings are drawn from.
 """
 

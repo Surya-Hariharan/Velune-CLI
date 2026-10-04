@@ -6,7 +6,7 @@ is a forward-looking guardrail, not a fix for an existing call site. It
 exists because the architecture direction this pipeline is heading toward
 (a semantic capability layer above the structural graph — see
 ``velune.knowledge.schemas.NodeType.CAPABILITY``/``RUNTIME_ENTRYPOINT``,
-and docs/repository-intelligence-baseline.md's discussion of "targeted LLM
+and the repository-intelligence baseline audit's discussion of "targeted LLM
 reasoning") will eventually need one, and the cold-start path is exactly
 the wrong place for it to end up.
 

@@ -69,7 +69,7 @@ def _dotted_names(nodes: list[ast.expr]) -> list[str]:
     structural evidence ``CodebaseAnalyzer``'s shape-based layer fallback
     (decorator-based routing, ORM model shape) reads instead of relying
     solely on folder-name conventions. See
-    docs/repository-intelligence-baseline.md §8/Recommendation on framework
+    the repository-intelligence baseline audit §8/Recommendation on framework
     shape fingerprinting.
     """
     names: list[str] = []
@@ -706,7 +706,7 @@ class RepositorySnapshotParser:
     # language tagged by EXTENSION_LANGUAGE_MAP but absent from this dict
     # falls through to _GENERIC_FALLBACK_PATTERNS instead of yielding zero
     # symbols — the "no generic path for unsupported languages" gap named in
-    # docs/repository-intelligence-baseline.md §8/Recommendation 4.
+    # the repository-intelligence baseline audit §8/Recommendation 4.
     _LANGUAGE_PATTERNS: dict[RepositoryLanguage, list[tuple[str, RepositorySymbolKind]]] = {
         RepositoryLanguage.JAVASCRIPT: [
             (r"(?:export\s+)?class\s+(\w+)", RepositorySymbolKind.CLASS),

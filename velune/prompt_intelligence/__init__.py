@@ -1,5 +1,5 @@
 """Prompt Intelligence: compiles provider-optimized prompts from the same
-abstract task intent, context, and tool set — see ``docs/02-prompt-intelligence.md``.
+abstract task intent, context, and tool set — see the Prompt Intelligence design notes.
 
 Nothing in Velune's live REPL or council call paths imports this package
 yet; wiring it in is a separate, flag-gated migration (design doc §18).

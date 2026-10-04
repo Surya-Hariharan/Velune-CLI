@@ -1,4 +1,4 @@
-"""Provider renderers — see docs/02-prompt-intelligence.md §11."""
+"""Provider renderers — see the Prompt Intelligence design notes §11."""
 
 from __future__ import annotations
 

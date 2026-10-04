@@ -245,7 +245,7 @@ class Claim(BaseModel):
     more named signals.
 
     This is the answer to a structural weakness named throughout
-    docs/repository-intelligence-baseline.md (§8, Recommendations 4-5):
+    the repository-intelligence baseline audit (§8, Recommendations 4-5):
     classifiers previously returned a bare label with no way to say how
     sure they were, so "we're confident this is unknown" and "we didn't
     recognize the naming convention" were indistinguishable — and a

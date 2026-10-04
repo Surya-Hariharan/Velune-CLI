@@ -1,6 +1,6 @@
 """ContextBuilder: wraps the existing ContextAssembler, unchanged.
 
-See ``docs/02-prompt-intelligence.md`` §12. ``ContextAssembler`` keeps
+See the Prompt Intelligence design notes §12. ``ContextAssembler`` keeps
 ownership of ordering, trust-based trimming, and budget enforcement exactly
 as it does today — this module packages its output as :class:`IRContextNode`
 objects, it does not fork or reimplement any of that logic.

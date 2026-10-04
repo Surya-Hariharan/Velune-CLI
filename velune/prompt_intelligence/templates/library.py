@@ -2,7 +2,7 @@
 
 Role fragments are sourced from :mod:`velune.cognition.prompts` wherever an
 equivalent council seat already exists — this registry never re-authors
-prompt text that already lives there (``docs/02-prompt-intelligence.md`` §3.3,
+prompt text that already lives there (the Prompt Intelligence design notes §3.3,
 §10). Task kinds with no council-seat equivalent (documentation, research,
 terminal execution) fall back to the interactive-chat baseline persona.
 """

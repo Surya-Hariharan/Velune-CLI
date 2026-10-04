@@ -1,6 +1,6 @@
 """Prompt Compiler: TaskIntent + context chunks + tools -> CompiledPrompt.
 
-See ``docs/02-prompt-intelligence.md`` §10 (compilation pipeline). Nothing in
+See the Prompt Intelligence design notes §10 (compilation pipeline). Nothing in
 Velune's live REPL/council call paths imports this module yet — wiring it in
 is a separate, flag-gated migration (design doc §18); this package is a
 pure addition.

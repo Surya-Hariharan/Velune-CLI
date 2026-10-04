@@ -1137,7 +1137,7 @@ def _check_terminal_zoom_lock() -> dict:
 
     Always a "warn," never a "fail" — this isn't a misconfiguration of the
     user's environment, it's an inherent limitation of every terminal
-    emulator investigated (see docs/terminal-zoom-lock.md): zoom shortcuts
+    emulator investigated (see the terminal zoom-lock investigation): zoom shortcuts
     are consumed by the emulator's own input layer before any byte reaches
     this process over the PTY, so there is nothing here to fix or retry.
     """

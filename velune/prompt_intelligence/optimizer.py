@@ -2,7 +2,7 @@
 
 Delegates numeric budget allocation to ``ContextBudget``/``ContextAssembler``
 (unchanged); this module only adds the per-family system-prompt ceiling on
-top. See ``docs/02-prompt-intelligence.md`` §6, §15.
+top. See the Prompt Intelligence design notes §6, §15.
 """
 
 from __future__ import annotations

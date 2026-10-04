@@ -1,10 +1,10 @@
 """Task intent resolution for prompt compilation.
 
 Wraps the existing zero-latency :class:`~velune.cognition.intent.IntentClassifier`
-rather than adding a second classifier — see ``docs/02-prompt-intelligence.md``
+rather than adding a second classifier — see the Prompt Intelligence design notes
 §10. ``TaskIntent`` deliberately carries no urgency/tier field: as of this
 writing, ``IntentClassifier`` and the Council's ``classify_task_tier`` are
-independent, uncorrelated classifiers (``docs/03-cognitive-architecture.md``
+independent, uncorrelated classifiers (the cognitive-architecture design notes
 §0.2). Add one here once a unified ``TurnUnderstanding`` exists upstream —
 reintroducing a second, uncorrelated tier guess in the meantime would just
 recreate the problem that document names.

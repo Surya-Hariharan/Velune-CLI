@@ -1,5 +1,5 @@
 """Prompt validation: duplicate/conflict/overflow detection over the
-assembled IR, before any renderer runs. See ``docs/02-prompt-intelligence.md``
+assembled IR, before any renderer runs. See the Prompt Intelligence design notes
 §14 — failures are surfaced in a report and resolved per an explicit
 precedence, never silently dropped.
 """
@@ -51,7 +51,7 @@ class PromptValidator:
                 message=(
                     "A context node with trust_score < 1.0 is marked "
                     "is_instruction_bearing=True — this must never happen "
-                    "(docs/02-prompt-intelligence.md §16)."
+                    "(the Prompt Intelligence design notes §16)."
                 ),
                 severity="error",
             )

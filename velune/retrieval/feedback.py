@@ -7,7 +7,7 @@ structured-logging path (``velune/telemetry/``), not a new storage system.
 Deliberately scoped to *recording*: nothing here re-tunes fusion weights,
 reranker trust scores, or the intent→strategy table automatically. Turning
 this data into closed-loop auto-tuning is real, separate work — see
-``docs/PHASE4_INTELLIGENT_RETRIEVAL.md`` — and isn't attempted here.
+the Phase 4 retrieval plan — and isn't attempted here.
 """
 
 from __future__ import annotations

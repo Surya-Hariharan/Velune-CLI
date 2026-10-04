@@ -4,7 +4,7 @@ Used for any family without a registered profile (local models: Qwen,
 DeepSeek, Llama3, Phi, Mistral, Gemma, and UNKNOWN). The 2048-token system
 ceiling mirrors the deleted PromptAdaptationEngine's per-family caps (e.g.
 Phi's 512-token limit) generalized to one conservative default — see
-docs/02-prompt-intelligence.md §0.
+the Prompt Intelligence design notes §0.
 """
 
 from __future__ import annotations

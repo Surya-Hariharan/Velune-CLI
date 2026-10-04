@@ -10,7 +10,7 @@ synchronous, frequently-called, offline-capable budgeting path: it would
 add network+auth+latency to every context-assembly pass, including
 sessions that only ever talk to a local model). See
 ``TokenCounter._count_claude_approx`` for the approximation and its
-documented safety margin — docs/repository-intelligence-baseline.md's
+documented safety margin — the repository-intelligence baseline audit's
 finding that Claude counts silently reused GPT's tokenizer with no
 acknowledgment of the gap, risking assembled context silently exceeding
 the real window.

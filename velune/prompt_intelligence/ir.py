@@ -3,7 +3,7 @@
 The IR is the only shape task templates, context, and constraints are
 expressed in; providers differ only in how a :class:`~velune.prompt_intelligence.
 renderers.base.ProviderRenderer` reads it, never in what it contains. See
-``docs/02-prompt-intelligence.md`` §3.1, §7.
+the Prompt Intelligence design notes §3.1, §7.
 """
 
 from __future__ import annotations

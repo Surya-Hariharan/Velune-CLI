@@ -24,7 +24,7 @@ Composition rationale (derived from the existing design, not invented):
 - **INSTANT** — one Coder pass. Read-only queries and explanations. Unchanged.
 - **MINIMAL** — Planner + Coder, no judgment. Unchanged.
 - **STANDARD** — the documented "Coder + Reviewer", plus the Planner that
-  ``docs/03-cognitive-architecture.md`` already assigns to STANDARD, plus the
+  the cognitive-architecture design notes already assigns to STANDARD, plus the
   Synthesizer needed to turn plan + code + review into an answer. Single Coder
   sample: multi-sample self-consistency is deliberation depth, which is what
   distinguishes FULL. The four critics are FULL's "all agents".
