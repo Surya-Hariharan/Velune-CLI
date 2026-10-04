@@ -293,9 +293,11 @@ def _render_council_failure(cli_context: CLIContext, summary: str, flags: list[s
             )
     else:
         lines.append(
-            "\nCommon causes: an invalid or expired API key, or an unreachable provider.\n"
+            "\nCommon causes: an invalid or expired API key, a model the provider no "
+            "longer serves (HTTP 404), or an unreachable provider.\n"
             "  [bold white]Check:[/bold white] [bold green]velune doctor check[/bold green]"
-            "  [dim]or[/dim]  [bold green]velune providers[/bold green]"
+            "  [dim]or[/dim]  [bold green]velune provider list[/bold green]\n"
+            "  [bold white]Stale model?[/bold white] [bold green]velune models refresh[/bold green]"
         )
 
     console.print()

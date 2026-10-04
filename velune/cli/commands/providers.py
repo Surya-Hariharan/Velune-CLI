@@ -109,10 +109,10 @@ def list_providers() -> None:
     )
     table.add_column(" ", width=2)  # default marker
     table.add_column("Provider", style=design.INFO, min_width=14)
-    table.add_column("Label", style=design.MUTED, min_width=20)
+    table.add_column("Label", style=design.MUTED, min_width=12)
     table.add_column("Type", style=design.MUTED, width=7)
-    table.add_column("Status", min_width=16)
-    table.add_column("Source", style=design.MUTED, width=5)
+    table.add_column("Status", min_width=12)
+    table.add_column("Source", style=design.MUTED, width=6)
 
     for pid in _all_provider_ids():
         meta = _meta_dict(pid)
