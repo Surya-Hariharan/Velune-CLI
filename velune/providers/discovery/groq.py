@@ -16,9 +16,7 @@ class GroqDiscovery:
         # always reflects the current keystore state and stays patchable.
         if not keystore.has_key("groq"):
             return []
-        from velune.providers.adapters.groq import fetch_live_model_ids, reconcile_with_live
+        from velune.providers.adapters.groq import fetch_live_models, reconcile_with_live
 
-        live = await fetch_live_model_ids(
-            keystore.get_key("groq"), "https://api.groq.com/openai/v1"
-        )
+        live = await fetch_live_models(keystore.get_key("groq"), "https://api.groq.com/openai/v1")
         return reconcile_with_live(live)

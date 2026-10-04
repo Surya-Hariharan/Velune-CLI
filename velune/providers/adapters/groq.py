@@ -102,10 +102,10 @@ GROQ_MODELS: list[ModelDescriptor] = [
 _NON_CHAT_MARKERS = ("whisper", "orpheus", "prompt-guard", "safeguard", "guard", "tts")
 
 
-async def fetch_live_model_ids(
+async def fetch_live_models(
     api_key: str | None, base_url: str, timeout: float = 5.0
-) -> set[str] | None:
-    """Return the model IDs Groq currently serves to *api_key*, or None on any failure."""
+) -> dict[str, int | None] | None:
+    """Return ``{model_id: context_window}`` Groq serves to *api_key*, or None on failure."""
     if not api_key:
         return None
     try:
@@ -114,13 +114,15 @@ async def fetch_live_model_ids(
                 f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"}
             )
             resp.raise_for_status()
-            return {m["id"] for m in resp.json().get("data", []) if "id" in m}
+            return {
+                m["id"]: m.get("context_window") for m in resp.json().get("data", []) if "id" in m
+            }
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         logger.debug("Could not fetch live Groq model list (using static catalog): %s", exc)
         return None
 
 
-def reconcile_with_live(live_ids: set[str] | None) -> list[ModelDescriptor]:
+def reconcile_with_live(live: dict[str, int | None] | None) -> list[ModelDescriptor]:
     """Intersect the curated catalog with what Groq actually serves.
 
     The static list carries curated capability scores but rots whenever Groq
@@ -129,31 +131,36 @@ def reconcile_with_live(live_ids: set[str] | None) -> list[ModelDescriptor]:
     chat model with a conservative default profile. Without one (offline, bad
     key), fall back to the static catalog unchanged.
     """
-    if not live_ids:
+    if not live:
         return list(GROQ_MODELS)
     curated = {m.model_id: m for m in GROQ_MODELS}
-    result = [m for mid, m in curated.items() if mid in live_ids]
-    for mid in sorted(live_ids - curated.keys()):
+    result = [m for mid, m in curated.items() if mid in live]
+    for mid in sorted(live.keys() - curated.keys()):
         if any(marker in mid.lower() for marker in _NON_CHAT_MARKERS):
             continue
+        # Groq reports each model's real window (allam-2-7b is only 4096); assuming
+        # a large one made Velune send oversized prompts that came back as HTTP 400.
+        window = live[mid] or 8192
         result.append(
             ModelDescriptor(
                 model_id=mid,
                 provider_id="groq",
                 display_name=mid.split("/")[-1],
-                context_length=131072,
+                context_length=window,
                 is_local=False,
                 free_tier=True,
                 cost_per_1k_tokens=0.0,
                 speed_tier="fast",
                 capabilities=ModelCapabilityProfile(
-                    coding=CapabilityLevel.ADVANCED,
-                    reasoning=CapabilityLevel.ADVANCED,
+                    coding=CapabilityLevel.INTERMEDIATE,
+                    reasoning=CapabilityLevel.INTERMEDIATE,
                     planning=CapabilityLevel.INTERMEDIATE,
                     summarization=CapabilityLevel.ADVANCED,
                     instruction_following=CapabilityLevel.ADVANCED,
                     tool_use=CapabilityLevel.INTERMEDIATE,
-                    long_context=CapabilityLevel.ADVANCED,
+                    long_context=(
+                        CapabilityLevel.ADVANCED if window >= 32768 else CapabilityLevel.BASIC
+                    ),
                 ),
                 tags=["cloud", "groq", "free", "live-discovered"],
                 metadata={"free_tier": True},
@@ -180,7 +187,7 @@ class GroqProvider(OpenAIProvider):
         return "groq"
 
     async def list_models(self) -> list[ModelDescriptor]:
-        live = await fetch_live_model_ids(get_key("groq"), self._base_url)
+        live = await fetch_live_models(get_key("groq"), self._base_url)
         return reconcile_with_live(live)
 
     async def health_check(self) -> ProviderHealth:

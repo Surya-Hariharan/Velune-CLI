@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -101,6 +102,43 @@ class _Line:
     # streaming line). None means "render `text`/`style` flat," the original
     # behavior.
     fragments: list[tuple[str, str]] | None = field(default=None)
+
+
+@contextlib.contextmanager
+def _muted_console_logging():
+    """Keep stray log lines off the screen while the full-screen app owns the terminal.
+
+    Library warnings (stderr handler) and structlog's default stdout printer
+    otherwise get written straight over the composer. File handlers are left
+    alone, so nothing is lost from the log files; everything is restored on exit.
+    """
+    root = logging.getLogger()
+    muted = [
+        (h, h.level)
+        for h in root.handlers
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+    ]
+    for handler, _ in muted:
+        handler.setLevel(logging.CRITICAL + 1)
+
+    previous_factory = None
+    try:
+        import structlog
+
+        previous_factory = structlog.get_config().get("logger_factory")
+        structlog.configure(logger_factory=structlog.stdlib.LoggerFactory())
+    except Exception:  # structlog is optional here; never block the UI on it
+        previous_factory = None
+    try:
+        yield
+    finally:
+        for handler, level in muted:
+            handler.setLevel(level)
+        if previous_factory is not None:
+            with contextlib.suppress(Exception):
+                import structlog
+
+                structlog.configure(logger_factory=previous_factory)
 
 
 class _ConsoleSink:
@@ -847,7 +885,8 @@ class FullscreenREPLUI:
             return
         self._running = True
         try:
-            await self._app.run_async()
+            with _muted_console_logging():
+                await self._app.run_async()
         finally:
             self._running = False
 

@@ -57,7 +57,8 @@ def test_reconcile_drops_models_groq_no_longer_serves():
     from velune.providers.adapters.groq import reconcile_with_live
 
     result = {
-        m.model_id for m in reconcile_with_live({"openai/gpt-oss-120b", "openai/gpt-oss-20b"})
+        m.model_id
+        for m in reconcile_with_live({"openai/gpt-oss-120b": 131072, "openai/gpt-oss-20b": 131072})
     }
     assert "llama-3.3-70b-versatile" not in result
     assert result == {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}
@@ -67,10 +68,10 @@ def test_reconcile_skips_non_chat_models_and_adds_new_chat_models():
     from velune.providers.adapters.groq import reconcile_with_live
 
     live = {
-        "openai/gpt-oss-120b",
-        "qwen/qwen3.8-27b",
-        "whisper-large-v3",
-        "meta-llama/llama-prompt-guard-2-22m",
+        "openai/gpt-oss-120b": 131072,
+        "qwen/qwen3.8-27b": 131072,
+        "whisper-large-v3": 448,
+        "meta-llama/llama-prompt-guard-2-22m": 512,
     }
     result = {m.model_id for m in reconcile_with_live(live)}
     assert result == {"openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
@@ -80,3 +81,13 @@ def test_reconcile_falls_back_to_static_catalog_when_offline():
     from velune.providers.adapters.groq import reconcile_with_live
 
     assert {m.model_id for m in reconcile_with_live(None)} == {m.model_id for m in GROQ_MODELS}
+
+
+def test_reconcile_uses_the_context_window_groq_reports():
+    from velune.providers.adapters.groq import reconcile_with_live
+
+    models = {
+        m.model_id: m for m in reconcile_with_live({"allam-2-7b": 4096, "mystery-model": None})
+    }
+    assert models["allam-2-7b"].context_length == 4096
+    assert models["mystery-model"].context_length == 8192
