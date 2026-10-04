@@ -2,35 +2,95 @@ from __future__ import annotations
 
 import time
 
+from rich import box
 from rich.console import Console, ConsoleOptions, RenderResult
-from rich.markdown import CodeBlock, Markdown
+from rich.markdown import CodeBlock, Markdown, TableElement
 from rich.syntax import Syntax
+from rich.table import Table
+from rich.text import Text
+
+from velune.cli import design
+
+# Glyphs that mark a fenced block as a chart/diagram rather than code: wrapping
+# such a block at the terminal width destroys its alignment, so it is cropped.
+_CHART_GLYPHS = frozenset("█▇▆▅▄▃▂▁▏▎▍▌▋▊▉░▒▓┌┐└┘├┤┬┴┼─│╭╮╯╰═║")
+_CHART_LEXERS = frozenset({"ascii", "chart", "diagram", "graph"})
+
+
+def _looks_like_chart(code: str, lexer: str) -> bool:
+    if lexer.lower() in _CHART_LEXERS:
+        return True
+    return sum(ch in _CHART_GLYPHS for ch in code) >= 3
 
 
 class CustomCodeBlock(CodeBlock):
-    """A code block with syntax highlighting and line numbers for blocks >5 lines."""
+    """Code block with syntax highlighting; mermaid flowcharts and ASCII charts get special care."""
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         code = str(self.text).rstrip()
+        lexer = (self.lexer_name or "").lower()
+
+        if lexer == "mermaid":
+            from velune.cli.rendering.mermaid import render_mermaid
+
+            tree = render_mermaid(code, options.max_width - 2)
+            if tree is not None:
+                yield Text(" ")
+                yield tree
+                yield Text(" ")
+                return
+
+        if _looks_like_chart(code, lexer):
+            yield Text(" ")
+            for raw in code.splitlines():
+                yield Text(" " + raw, no_wrap=True, overflow="ellipsis")
+            yield Text(" ")
+            return
+
         line_count = len(code.splitlines())
-        line_numbers = line_count > 5
-        syntax = Syntax(
+        yield Syntax(
             code,
             self.lexer_name,
             theme="monokai",
             word_wrap=True,
-            line_numbers=line_numbers,
+            line_numbers=line_count > 5,
             padding=1,
         )
-        yield syntax
+
+
+class CustomTableElement(TableElement):
+    """Markdown table with visible borders whose long cells wrap instead of truncating."""
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        table = Table(
+            box=box.ROUNDED,
+            border_style=design.FAINT,
+            header_style=f"bold {design.ACCENT}",
+            show_lines=False,
+            pad_edge=True,
+            expand=False,
+        )
+        if self.header is not None and self.header.row is not None:
+            for column in self.header.row.cells:
+                table.add_column(
+                    column.content.copy(),
+                    overflow="fold",
+                    no_wrap=False,
+                    justify=column.justify if column.justify != "default" else "left",
+                )
+        if self.body is not None:
+            for row in self.body.rows:
+                table.add_row(*[element.content for element in row.cells])
+        yield table
 
 
 class CustomMarkdown(Markdown):
-    """Custom Markdown renderer that overrides CodeBlock element handling."""
+    """Markdown renderer with terminal-friendly code blocks, tables and diagrams."""
 
     elements = Markdown.elements.copy()
     elements["fence"] = CustomCodeBlock
     elements["code_block"] = CustomCodeBlock
+    elements["table_open"] = CustomTableElement
 
     def __init__(self, markup: str, code_theme: str = "monokai", **kwargs) -> None:
         super().__init__(markup, code_theme=code_theme, **kwargs)
