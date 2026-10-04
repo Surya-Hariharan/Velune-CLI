@@ -128,3 +128,6 @@ yarn.lock
 *.bak
 credentials.json
 master.key
+
+# Internal docs (kept local, not published)
+docs/

@@ -319,8 +319,7 @@ velune recover [id] [--all] [--discard <id>]       # Recover an unsaved session 
 <tr><td><strong>System</strong></td><td><code>/history</code> · <code>/stats</code> · <code>/session</code> · <code>/doctor</code> · <code>/backup</code> · <code>/restore</code> · <code>/recover</code></td></tr>
 </table>
 
-Full reference with every alias, shortcut, and usage string:
-**[docs/slash-commands.md](docs/slash-commands.md)**.
+Run `/help` in the REPL for every alias, shortcut, and usage string.
 
 ---
 
@@ -369,8 +368,6 @@ velune/
 
 </details>
 
-Full write-up of the process model and control flow through every
-subsystem: **[docs/architecture.md](docs/architecture.md)**.
 
 ---
 
@@ -417,8 +414,7 @@ Velune CLI works as both an MCP **server** and an MCP **client**:
   automatically.
 
 Outbound connections to external MCP servers are trust-gated — see
-[MCP trust gating](SECURITY.md#mcp-trust-gating) in the security policy, and
-the full guide at [docs/mcp.md](docs/mcp.md).
+[MCP trust gating](SECURITY.md#mcp-trust-gating) in the security policy.
 
 ---
 
@@ -438,12 +434,6 @@ unmodified under WSL2 if preferred.
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, adding providers/commands/agents, PR workflow |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards and enforcement |
 | [CHANGELOG.md](CHANGELOG.md) | Full version history |
-| [docs/architecture.md](docs/architecture.md) | Process model, package layout, control flow through every subsystem |
-| [docs/slash-commands.md](docs/slash-commands.md) | Full REPL command reference, grouped by category |
-| [docs/usage-guide.md](docs/usage-guide.md) | How to use Velune CLI effectively — tiers, memory, extensions, troubleshooting |
-| [docs/mcp.md](docs/mcp.md) | MCP server + client integration guide, transports, trust gating |
-| [docs/development.md](docs/development.md) | DI kernel, module boundaries, CI pipeline, extension-point design, debugging |
-| [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md) | Why terminal font-zoom can't be locked for a session, per emulator investigated |
 
 ---
 

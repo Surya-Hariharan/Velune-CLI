@@ -120,8 +120,7 @@ pytest tests/ --cov=velune --cov-report=term-missing -q
 
 All of `ruff check`, `ruff format --check`, `pyright`, and `pytest` must
 pass before a PR will be merged — see the `lint` and `test` jobs in
-[docs/development.md § CI pipeline](docs/development.md#4-ci-pipeline) for
-exactly what CI runs.
+`.github/workflows` for exactly what CI runs.
 
 ---
 
@@ -312,8 +311,7 @@ CommandSpec(
 
 Set `bootstrap="light"` only if the command doesn't touch memory,
 retrieval, cognition, or orchestration — that skips the expensive Tier-1
-subsystem bootstrap entirely and saves roughly 2 seconds of startup. See
-[docs/development.md § The bootstrap / DI layer](docs/development.md#1-the-bootstrap--di-layer).
+subsystem bootstrap entirely and saves roughly 2 seconds of startup..
 
 ### Step 2 — Implement the command function
 

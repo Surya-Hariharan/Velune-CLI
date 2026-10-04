@@ -147,7 +147,7 @@ velune-cli = "velune.main:main"
 [project.urls]
 Homepage = "https://github.com/Surya-Hariharan/Velune-CLI"
 Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
-Documentation = "https://github.com/Surya-Hariharan/Velune-CLI/tree/main/docs"
+Documentation = "https://github.com/Surya-Hariharan/Velune-CLI#readme"
 Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
 Changelog = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md"
 
