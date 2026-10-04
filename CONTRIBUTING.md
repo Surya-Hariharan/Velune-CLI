@@ -101,10 +101,10 @@ velune doctor
 ## Running tests and linting
 
 ```bash
-# Fast unit tests
-pytest tests/unit -q
+# Quick run
+pytest -q
 
-# Full suite
+# Full suite, verbose
 pytest tests/ -v
 
 # Lint (must pass before merging)
@@ -127,7 +127,7 @@ pass before a PR will be merged — see the `lint` and `test` jobs in
 ## How to add a new cloud provider
 
 This example adds a fictional **Nebula** provider. Follow the same pattern
-for any new cloud API — Velune CLI ships 17 real provider adapters under
+for any new cloud API — Velune CLI ships 18 real provider adapters under
 `velune/providers/adapters/` you can use as references (`together.py` and
 `fireworks.py` are good OpenAI-compatible examples; `anthropic.py` and
 `google.py` are good from-scratch examples).

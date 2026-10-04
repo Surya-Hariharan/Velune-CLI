@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **Richer inline Markdown.** Tables render with borders and wrap long cells instead of truncating;
+  `` ```mermaid `` flowcharts (`graph`/`flowchart`, labelled and chained links, node shapes) draw as a
+  box-drawing tree; fenced ASCII/bar charts are cropped to the terminal width instead of wrapped, so their
+  alignment survives narrow terminals. Unsupported diagram types still show as code.
+- **Live model catalogs for OpenAI, Anthropic and Gemini.** Each curated model list is now reconciled with
+  the provider's live model listing, so retired models drop out and new chat models appear with the
+  provider-reported context window (offline, the curated list is used unchanged). OpenAI reasoning models
+  (`o*`, `gpt-5*`) now receive `max_completion_tokens` and no custom sampling instead of an HTTP 400.
+- **Self-repairing memory database.** A damaged SQLite file ("database disk image is malformed") is moved aside
+  as `<name>.corrupt-<timestamp>` and recreated at startup, instead of leaving every memory subsystem failed
+  on each launch.
+- Project provenance files: `AUTHORS.md`, `NOTICE`, `GOVERNANCE.md`, `.github/CODEOWNERS`,
+  `docs/project-origin.md`; contribution-licensing terms in `CONTRIBUTING.md`; each GitHub release body now
+  names its source tag, commit and repository.
+- Documentation checks: tests keep `docs/slash-commands.md` in sync with the registered commands and keep
+  relative Markdown links valid.
+
 - **Model palette (`/model`, `/models`).** Typing `/model` or `/models` now
   opens a keyboard-driven picker in the same floating rectangle the command
   palette uses — arrow keys to highlight, Enter to switch (routed through the
@@ -20,6 +37,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   printing an error panel.
 
 ### Fixed
+
+- **Groq chat failed with HTTP 404 / 400.** The static model list kept models Groq had retired, and models
+  discovered later were assumed to have a 131k-token window (`allam-2-7b` has 4k). Groq models now come from
+  the live `/models` list with the real context window.
+- **Gemini errors were all generic.** Gemini now raises the same typed errors as the other adapters (rejected
+  key, rate limit with `Retry-After`, retired model, malformed request); the retired Gemini 1.5 and
+  thinking-exp entries were replaced.
+- **Anthropic key validation spent a billed completion** against a hardcoded model (a retired model made a
+  valid key look broken). It now calls the free `/v1/models` endpoint.
+- **`/doctor` tore up the full-screen UI** (its report was written to the real terminal, and ~20 blocking
+  checks froze the app). It now renders through the REPL console and runs its checks in a worker thread.
+- **Log lines were printed over the composer.** Console log handlers are muted, and structlog is routed
+  through stdlib logging, while the full-screen app runs.
+- **Misleading error hints.** Provider failures now suggest the real remedy (`/connect` for a rejected key,
+  `/model` for a retired model, retry for rate limits); the "Council Failed" panel names retired models and
+  `velune models refresh`; `velune provider list` fits an 80-column terminal.
+- **Python 3.10:** `asyncio.TimeoutError` is not the builtin `TimeoutError` before 3.11, so first-chunk and
+  health-check timeouts escaped their handlers; both are now caught.
+- Lint (`ruff`), formatting and `pyright` regressions on `main`.
 
 - **`velune health` crashed with a raw `ImportError` traceback** on every
   invocation — it imported a provider-metadata symbol removed in the
@@ -48,6 +84,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Security
 
+- Bumped `pyjwt` 2.13.0 → 2.15.1, `urllib3` 2.7.0 → 2.8.0, `virtualenv` 21.7.0 → 21.14.5 and `pip` 26.1.2 →
+  26.2.1 in `uv.lock` (all transitive) to clear the open Dependabot alerts.
+- Closed the mcp 2.x major-bump Dependabot PR (the 2.x low-level Server API is not yet supported).
+
 - Bumped `cryptography` 49.0.0 → 50.0.0 (GHSA/Dependabot alert #8: PKCS#7
   Bleichenbacher oracle in a transitive dependency path; Velune does not use
   the affected API directly).
@@ -61,6 +101,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- Minimal chat output: no "Velune" header above replies, a per-turn footer of just the token count (plus cost
+  when known), and a one-line connection confirmation.
+- Documentation reorganised: the public guides live in `docs/`; the architecture reference is kept private.
+  `docs/development.md`, `docs/usage-guide.md` and `docs/slash-commands.md` were brought back in line with the
+  code (commands, CI, bootstrap, file locations).
 - `pyproject.toml` license metadata migrated to PEP 639 (`license =
   "Apache-2.0"` + `license-files`), replacing the legacy `{file = "LICENSE"}`
   form that duplicated the full license text into package metadata.
@@ -81,7 +126,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   byte reaches the child process — so no lock is implemented. `velune
   doctor` now detects the hosting terminal and surfaces this as a documented
   "warn," not a silent no-op; full per-terminal findings in
-  [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md). Extended to cover
+  docs/terminal-zoom-lock.md. Extended to cover
   WezTerm (Lua-configured `key_bindings`, resolved by its own `winit` event
   loop — same structural dead end, same verdict).
 
@@ -92,7 +137,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   best only at whatever width a developer happened to be testing at.**
   Re-investigated a report that the UI "looks optimized at 90% zoom but not
   100%": terminal zoom is not something a terminal app can observe or control
-  at all (see [docs/terminal-zoom-lock.md](docs/terminal-zoom-lock.md)) — a
+  at all (see docs/terminal-zoom-lock.md) — a
   text-mode app only ever sees a COLUMNS×LINES grid, so a narrower zoom level
   is indistinguishable from a narrower terminal window. Auditing every
   rendering surface in `velune/cli/fullscreen.py` found the home screen,

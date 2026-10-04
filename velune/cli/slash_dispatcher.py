@@ -37,6 +37,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "max": "AI",
     "normal": "AI",
     "mode": "AI",
+    "retry": "AI",
     # Providers
     "connect": "Providers",
     # Models
@@ -81,6 +82,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "exit": "System",
     "clear": "System",
     "new": "System",
+    "fork": "System",
     "history": "System",
     "stats": "System",
     "session": "System",
@@ -283,7 +285,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="restore",
             aliases=[],
             description="Restore Velune state from a backup archive",
-            usage="/restore <archive> [--overwrite] [--dry-run]",
+            usage="/restore <archive> [--include a,b] [--overwrite] [--dry-run]",
             handler=repl._cmd_restore,
             examples=("/restore velune-backup-20260630.tar.gz", "/restore backup.tar.gz --dry-run"),
             search_terms=("restore", "import", "recover state", "unpack archive"),
@@ -699,10 +701,10 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="theme",
             aliases=["appearance"],
-            description="Show or toggle display appearance options (colorblind palette, reduced motion)",
-            usage="/theme <colorblind|motion> [on|off]",
+            description="Switch the colour theme, or toggle an accessibility modifier",
+            usage="/theme [theme-id|colorblind|motion] [on|off]",
             handler=repl._cmd_theme,
-            examples=("/theme", "/theme colorblind on", "/theme motion off"),
+            examples=("/theme", "/theme emerald", "/theme colorblind on", "/theme motion off"),
             search_terms=(
                 "colorblind",
                 "color blind",
@@ -775,7 +777,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="resource",
             aliases=["resources", "res"],
             description="Connect and inspect local resources — Docker, PostgreSQL, MySQL, Supabase",
-            usage="/resource [list|discover|connect <id>|disconnect <id>|status|info <id>]",
+            usage="/resource [list|discover|configure <id>|connect <id>|disconnect <id>|status|info <id>]",
             handler=repl._cmd_resource,
             examples=(
                 "/resource discover",

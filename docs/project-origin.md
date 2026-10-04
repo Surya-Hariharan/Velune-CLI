@@ -70,6 +70,13 @@ relevant code.
 - **0.9.6:** key-verification lifecycle, incremental repository cognition,
   and architectural convergence of the memory and context layers.
 - **0.9.7:** `velune doctor` terminal-capability reporting.
+- **After 0.9.7 (unreleased):** live model catalogs for OpenAI, Anthropic,
+  Gemini and Groq (retired models drop out automatically); inline Markdown
+  rendering of tables, charts and Mermaid diagrams in the REPL; SQLite
+  corruption quarantine with self-repair; a minimal, Claude Code-style chat
+  surface; `/fork`, `/retry`, `/trace` and `/theme` commands; provenance files
+  (AUTHORS, NOTICE, GOVERNANCE); and a documentation overhaul with tests that
+  keep the command reference in sync with the code.
 
 ## Security milestones
 

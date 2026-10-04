@@ -198,8 +198,8 @@ are choosing to run.
 
 ### Secrets protection
 
-- API keys live in the OS keyring (BYOK) with per-provider environment-variable
-  fallback (e.g. `GROQ_API_KEY`); they are never cached process-wide and never written
+- API keys are bring-your-own and stored AES-GCM-encrypted on disk (master key in the OS keyring), with
+  per-provider environment-variable fallback (e.g. `GROQ_API_KEY`); they are never cached process-wide and never written
   into the workspace.
 - On disk, keys are AES-GCM encrypted (`velune/providers/crypto.py`) under a master
   key sourced with a strength-first fallback: an existing OS keyring entry, else a
