@@ -28,6 +28,8 @@ PROVIDER_COSTS: dict[str, dict[str, float]] = {
     "google": {
         "gemini-2.0-flash": 0.000075,
         "gemini-1.5-pro": 0.00125,
+        "gemini-2.5-pro": 0.00125,
+        "gemini-2.5-flash": 0.0003,
         "gemini-1.5-flash": 0.000075,
         "gemini-2.0-flash-thinking-exp": 0.0,
     },

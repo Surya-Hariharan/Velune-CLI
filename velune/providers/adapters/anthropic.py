@@ -9,17 +9,119 @@ from collections.abc import AsyncIterator
 import httpx
 from pydantic import SecretStr
 
-from velune.core.errors.provider import (
-    InferenceError,
-    ProviderAuthenticationError,
-    RateLimitError,
-)
+from velune.core.errors.provider import ProviderAuthenticationError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk, ToolCall
-from velune.core.types.model import CapabilityLevel, ModelDescriptor
+from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.providers.adapters._http_errors import parse_retry_after
+from velune.providers.adapters._http_errors import raise_typed_http_error
+from velune.providers.adapters._live_catalog import get_json, reconcile
 from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
+
+_ANTHROPIC_VERSION = "2023-06-01"
+
+
+def anthropic_profile(model_id: str) -> ModelCapabilityProfile:
+    """Capability profile by model tier (the API reports none)."""
+    mid = model_id.lower()
+    expert, adv, mid_lvl = (
+        CapabilityLevel.EXPERT,
+        CapabilityLevel.ADVANCED,
+        CapabilityLevel.INTERMEDIATE,
+    )
+    if "opus" in mid or "fable" in mid:
+        return ModelCapabilityProfile(
+            coding=expert,
+            reasoning=expert,
+            planning=expert,
+            summarization=expert,
+            instruction_following=expert,
+            tool_use=expert,
+            long_context=expert,
+            vision=expert,
+            multimodal=expert,
+        )
+    if "haiku" in mid:
+        return ModelCapabilityProfile(
+            coding=mid_lvl,
+            reasoning=mid_lvl,
+            planning=mid_lvl,
+            summarization=mid_lvl,
+            instruction_following=adv,
+            tool_use=adv,
+            long_context=mid_lvl,
+            vision=mid_lvl,
+            multimodal=mid_lvl,
+        )
+    return ModelCapabilityProfile(  # sonnet and anything newer/unknown
+        coding=adv,
+        reasoning=adv,
+        planning=adv,
+        summarization=adv,
+        instruction_following=adv,
+        tool_use=expert,
+        long_context=adv,
+        vision=adv,
+        multimodal=adv,
+    )
+
+
+def _anthropic_curated(model_id: str, name: str, cost: float, speed: str) -> ModelDescriptor:
+    return ModelDescriptor(
+        model_id=model_id,
+        display_name=name,
+        provider_id="anthropic",
+        context_length=200000,
+        capabilities=anthropic_profile(model_id),
+        speed_tier=speed,
+        cost_per_1k_tokens=cost,
+        location="cloud",
+        tags=["cloud", "anthropic"],
+        is_local=False,
+    )
+
+
+ANTHROPIC_MODELS: list[ModelDescriptor] = [
+    _anthropic_curated("claude-opus-4-5", "Claude Opus 4.5", 0.015, "medium"),
+    _anthropic_curated("claude-sonnet-4-5", "Claude Sonnet 4.5", 0.003, "medium"),
+    _anthropic_curated("claude-haiku-4-5", "Claude Haiku 4.5", 0.00025, "fast"),
+]
+
+
+async def fetch_live_models(api_key: str | None, base_url: str) -> dict[str, int | None] | None:
+    """Return ``{model_id: max_input_tokens}`` from ``GET /v1/models``, or None on failure."""
+    if not api_key:
+        return None
+    data = await get_json(
+        f"{base_url}/v1/models",
+        {"x-api-key": api_key, "anthropic-version": _ANTHROPIC_VERSION},
+        params={"limit": 1000},
+    )
+    if not isinstance(data, dict):
+        return None
+    return {
+        m["id"]: m.get("max_input_tokens")
+        for m in data.get("data", [])
+        if isinstance(m, dict) and "id" in m
+    }
+
+
+async def discover_anthropic_models(
+    api_key: str | None, base_url: str = "https://api.anthropic.com"
+) -> list[ModelDescriptor]:
+    """Curated Claude catalog reconciled with the live listing (offline: curated as-is)."""
+    live = await fetch_live_models(api_key, base_url)
+    models = reconcile(
+        ANTHROPIC_MODELS,
+        live,
+        "anthropic",
+        accept=lambda mid: mid.lower().startswith("claude"),
+        fallback_window=lambda _mid: 200000,
+    )
+    for m in models:
+        if "live-discovered" in m.tags:
+            m.capabilities = anthropic_profile(m.model_id)
+    return models
 
 
 class AnthropicProvider(ModelProvider):
@@ -57,16 +159,7 @@ class AnthropicProvider(ModelProvider):
         :class:`velune.providers.retrying.RetryingProvider`. Everything else
         is a generic :class:`InferenceError`.
         """
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
-            raise ProviderAuthenticationError(
-                f"Anthropic rejected the API key (HTTP {exc.response.status_code}) during {action}."
-            ) from exc
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-            raise RateLimitError(
-                f"Anthropic rate-limited (HTTP 429) during {action}.",
-                retry_after=parse_retry_after(exc.response.headers),
-            ) from exc
-        raise InferenceError(f"Anthropic {action} failed: {exc}") from exc
+        raise_typed_http_error("Anthropic", exc, action)
 
     async def initialize(self) -> None:
         """Initialize HTTP client with Anthropic specific headers."""
@@ -77,7 +170,7 @@ class AnthropicProvider(ModelProvider):
         if not self.client:
             headers = {
                 "x-api-key": self._api_key,
-                "anthropic-version": "2023-06-01",
+                "anthropic-version": _ANTHROPIC_VERSION,
                 # Enable prompt-caching beta. Harmless when no cache_control blocks
                 # are present in the payload — activates automatically when they are.
                 "anthropic-beta": "prompt-caching-2024-07-31",
@@ -86,59 +179,9 @@ class AnthropicProvider(ModelProvider):
             self.client = httpx.AsyncClient(base_url=self._base_url, headers=headers, timeout=300.0)
 
     async def list_models(self) -> list[ModelDescriptor]:
-        """List active Claude models."""
+        """List Claude models, reconciled with what the account can actually call."""
         await self.initialize()
-        # Anthropic has static lists, or we can query their endpoints. Here we provide the standard suite.
-        return [
-            ModelDescriptor(
-                model_id="claude-opus-4-5",
-                display_name="Claude Opus 4.5",
-                provider_id="anthropic",
-                context_length=200000,
-                capabilities={
-                    "coding": CapabilityLevel.EXPERT,
-                    "reasoning": CapabilityLevel.EXPERT,
-                    "planning": CapabilityLevel.EXPERT,
-                    "summarization": CapabilityLevel.EXPERT,
-                    "instruction_following": CapabilityLevel.EXPERT,
-                    "tool_use": CapabilityLevel.EXPERT,
-                    "long_context": CapabilityLevel.EXPERT,
-                },
-                is_local=False,
-            ),
-            ModelDescriptor(
-                model_id="claude-sonnet-4-5",
-                display_name="Claude Sonnet 4.5",
-                provider_id="anthropic",
-                context_length=200000,
-                capabilities={
-                    "coding": CapabilityLevel.ADVANCED,
-                    "reasoning": CapabilityLevel.ADVANCED,
-                    "planning": CapabilityLevel.ADVANCED,
-                    "summarization": CapabilityLevel.ADVANCED,
-                    "instruction_following": CapabilityLevel.ADVANCED,
-                    "tool_use": CapabilityLevel.EXPERT,
-                    "long_context": CapabilityLevel.ADVANCED,
-                },
-                is_local=False,
-            ),
-            ModelDescriptor(
-                model_id="claude-haiku-4-5",
-                display_name="Claude Haiku 4.5",
-                provider_id="anthropic",
-                context_length=200000,
-                capabilities={
-                    "coding": CapabilityLevel.INTERMEDIATE,
-                    "reasoning": CapabilityLevel.INTERMEDIATE,
-                    "planning": CapabilityLevel.INTERMEDIATE,
-                    "summarization": CapabilityLevel.INTERMEDIATE,
-                    "instruction_following": CapabilityLevel.ADVANCED,
-                    "tool_use": CapabilityLevel.ADVANCED,
-                    "long_context": CapabilityLevel.INTERMEDIATE,
-                },
-                is_local=False,
-            ),
-        ]
+        return await discover_anthropic_models(self._api_key, self._base_url)
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         """Perform Claude inference."""

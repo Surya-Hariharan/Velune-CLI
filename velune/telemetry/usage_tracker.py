@@ -54,6 +54,7 @@ PROVIDER_COSTS: dict[str, dict[str, dict[str, float]]] = {
         "gemini-1.5-pro": {"input": 3.50, "output": 10.50},
         "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
         "gemini-2.5-pro": {"input": 1.25, "output": 10.0},
+        "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     },
     "groq": {
         # Groq free tier — $0 for public models. mixtral-8x7b-32768,

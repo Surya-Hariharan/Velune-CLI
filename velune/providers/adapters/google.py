@@ -10,96 +10,96 @@ from typing import Any
 
 import httpx
 
-from velune.core.errors.provider import InferenceError, ProviderAuthenticationError
+from velune.core.errors.provider import ProviderAuthenticationError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk, ToolCall
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._http_errors import raise_typed_http_error
+from velune.providers.adapters._live_catalog import get_json, reconcile
 from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
+_NON_CHAT_MARKERS = (
+    "embedding", "aqa", "imagen", "tts", "image", "live", "audio", "robotics", "computer-use",
+    "veo", "learnlm", "gemma",
+)  # fmt: skip
+
+
+def is_gemini_chat_model(model_id: str) -> bool:
+    mid = model_id.lower()
+    return mid.startswith("gemini") and not any(m in mid for m in _NON_CHAT_MARKERS)
+
+
+def _gemini(
+    model_id: str, name: str, window: int, level: CapabilityLevel, cost: float, speed: str
+) -> ModelDescriptor:
+    return ModelDescriptor(
+        model_id=model_id,
+        display_name=name,
+        provider_id="google",
+        context_length=window,
+        capabilities={
+            "coding": level,
+            "reasoning": level,
+            "planning": level,
+            "summarization": CapabilityLevel.EXPERT,
+            "instruction_following": CapabilityLevel.EXPERT,
+            "tool_use": level,
+            "long_context": CapabilityLevel.EXPERT,
+        },
+        is_local=False,
+        speed_tier=speed,
+        cost_per_1k_tokens=cost,
+        tags=["cloud", "google"],
+    )
+
+
 _MODELS = [
-    ModelDescriptor(
-        model_id="gemini-2.0-flash",
-        display_name="Gemini 2.0 Flash",
-        provider_id="google",
-        context_length=1048576,
-        capabilities={
-            "coding": CapabilityLevel.ADVANCED,
-            "reasoning": CapabilityLevel.ADVANCED,
-            "planning": CapabilityLevel.ADVANCED,
-            "summarization": CapabilityLevel.EXPERT,
-            "instruction_following": CapabilityLevel.EXPERT,
-            "tool_use": CapabilityLevel.ADVANCED,
-            "long_context": CapabilityLevel.EXPERT,
-        },
-        is_local=False,
-        speed_tier="fast",
-        cost_per_1k_tokens=0.000075,
-        tags=["cloud", "google", "flash", "free"],
+    _gemini("gemini-2.5-pro", "Gemini 2.5 Pro", 1048576, CapabilityLevel.EXPERT, 0.00125, "medium"),
+    _gemini(
+        "gemini-2.5-flash", "Gemini 2.5 Flash", 1048576, CapabilityLevel.ADVANCED, 0.0003, "fast"
     ),
-    ModelDescriptor(
-        model_id="gemini-1.5-pro",
-        display_name="Gemini 1.5 Pro",
-        provider_id="google",
-        context_length=2097152,
-        capabilities={
-            "coding": CapabilityLevel.EXPERT,
-            "reasoning": CapabilityLevel.EXPERT,
-            "planning": CapabilityLevel.EXPERT,
-            "summarization": CapabilityLevel.EXPERT,
-            "instruction_following": CapabilityLevel.EXPERT,
-            "tool_use": CapabilityLevel.EXPERT,
-            "long_context": CapabilityLevel.EXPERT,
-        },
-        is_local=False,
-        speed_tier="medium",
-        cost_per_1k_tokens=0.00125,
-        tags=["cloud", "google", "pro"],
-    ),
-    ModelDescriptor(
-        model_id="gemini-1.5-flash",
-        display_name="Gemini 1.5 Flash",
-        provider_id="google",
-        context_length=1048576,
-        capabilities={
-            "coding": CapabilityLevel.ADVANCED,
-            "reasoning": CapabilityLevel.ADVANCED,
-            "planning": CapabilityLevel.INTERMEDIATE,
-            "summarization": CapabilityLevel.ADVANCED,
-            "instruction_following": CapabilityLevel.EXPERT,
-            "tool_use": CapabilityLevel.ADVANCED,
-            "long_context": CapabilityLevel.EXPERT,
-        },
-        is_local=False,
-        speed_tier="fast",
-        cost_per_1k_tokens=0.000075,
-        tags=["cloud", "google", "flash", "free"],
-    ),
-    ModelDescriptor(
-        model_id="gemini-2.0-flash-thinking-exp",
-        display_name="Gemini 2.0 Flash Thinking",
-        provider_id="google",
-        context_length=32767,
-        capabilities={
-            "coding": CapabilityLevel.EXPERT,
-            "reasoning": CapabilityLevel.EXPERT,
-            "planning": CapabilityLevel.EXPERT,
-            "summarization": CapabilityLevel.ADVANCED,
-            "instruction_following": CapabilityLevel.EXPERT,
-            "tool_use": CapabilityLevel.ADVANCED,
-            "long_context": CapabilityLevel.INTERMEDIATE,
-        },
-        is_local=False,
-        speed_tier="medium",
-        cost_per_1k_tokens=0.0,
-        tags=["cloud", "google", "thinking", "free"],
+    _gemini(
+        "gemini-2.0-flash", "Gemini 2.0 Flash", 1048576, CapabilityLevel.ADVANCED, 0.000075, "fast"
     ),
 ]
 
 # Public alias used by tests and tooling
 GEMINI_MODELS = _MODELS
+
+
+async def fetch_live_models(api_key: str | None) -> dict[str, int | None] | None:
+    """Return ``{model_id: inputTokenLimit}`` for models that support generateContent."""
+    if not api_key:
+        return None
+    data = await get_json(
+        f"{_BASE_URL}/models", {"x-goog-api-key": api_key}, params={"pageSize": 1000}
+    )
+    if not isinstance(data, dict):
+        return None
+    live: dict[str, int | None] = {}
+    for m in data.get("models", []):
+        if not isinstance(m, dict) or "generateContent" not in (
+            m.get("supportedGenerationMethods") or []
+        ):
+            continue
+        live[str(m.get("name", "")).removeprefix("models/")] = m.get("inputTokenLimit")
+    live.pop("", None)
+    return live
+
+
+async def discover_gemini_models(api_key: str | None) -> list[ModelDescriptor]:
+    """Curated Gemini catalog reconciled with the live listing (offline: curated as-is)."""
+    return reconcile(
+        _MODELS,
+        await fetch_live_models(api_key),
+        "google",
+        accept=is_gemini_chat_model,
+        fallback_window=lambda _mid: 1048576,
+        is_strong=lambda mid: "pro" in mid.lower(),
+    )
 
 
 def _build_contents(messages: list[dict]) -> tuple[list[dict], str]:
@@ -257,7 +257,7 @@ class GoogleProvider(ModelProvider):
             )
 
     async def list_models(self) -> list[ModelDescriptor]:
-        return list(_MODELS)
+        return await discover_gemini_models(self._api_key)
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         await self.initialize()
@@ -290,7 +290,7 @@ class GoogleProvider(ModelProvider):
                 tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
-            raise InferenceError(f"Google Gemini inference failed: {e}")
+            raise_typed_http_error("google", e, "completion")
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         await self.initialize()
@@ -329,7 +329,7 @@ class GoogleProvider(ModelProvider):
                     metadata={"tool_calls": collected_calls},
                 )
         except httpx.HTTPError as e:
-            raise InferenceError(f"Google Gemini stream failed: {e}")
+            raise_typed_http_error("google", e, "stream")
 
     async def embed(self, texts: list[str], model_id: str) -> list[list[float]]:
         raise NotImplementedError("GoogleProvider does not support embeddings via this adapter.")

@@ -1,101 +1,36 @@
+"""OpenAI model discovery: the curated catalog reconciled with the account's live models."""
+
 from __future__ import annotations
 
-import httpx
-
-from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
+from velune.core.types.model import ModelDescriptor
+from velune.providers.adapters._live_catalog import reconcile
+from velune.providers.adapters.openai import (
+    OPENAI_MODELS,
+    fetch_live_models,
+    is_openai_chat_model,
+    openai_context_window,
+)
 from velune.providers.keystore import get_key
 
 
 class OpenAIDiscovery:
-    """Discovers models from OpenAI."""
+    """Discovers the chat models an OpenAI key can actually use."""
 
-    def __init__(self):
-        self.provider_id = "openai"
+    provider_id = "openai"
+
+    def __init__(self) -> None:
         self.api_key = get_key("openai")
         self.base_url = "https://api.openai.com/v1"
 
     async def discover(self) -> list[ModelDescriptor]:
-        """Discover models from OpenAI."""
         if not self.api_key:
             return []
-
-        models = []
-
-        try:
-            headers = {"Authorization": f"Bearer {self.api_key}"}
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/models",
-                    headers=headers,
-                )
-                response.raise_for_status()
-                data = response.json()
-
-                for model in data.get("data", []):
-                    if "gpt" in model["id"].lower():
-                        descriptor = self._parse_model(model)
-                        if descriptor:
-                            models.append(descriptor)
-        except Exception:
-            pass
-
-        return models
-
-    def _parse_model(self, model_data: dict) -> ModelDescriptor:
-        """Parse model data into descriptor."""
-        model_id = model_data["id"]
-
-        capabilities = self._classify_capabilities(model_id)
-
-        # Determine context length and cost
-        if "gpt-4" in model_id:
-            context_length = 128000
-            cost_per_1k = 0.03
-        elif "gpt-3.5" in model_id:
-            context_length = 16385
-            cost_per_1k = 0.002
-        else:
-            context_length = 4096
-            cost_per_1k = 0.001
-
-        return ModelDescriptor(
-            model_id=model_id,
-            provider_id=self.provider_id,
-            display_name=model_id,
-            context_length=context_length,
-            capabilities=capabilities,
-            quantization=None,
-            vram_required_gb=None,
-            parameter_count_b=None,
-            speed_tier="fast",
-            cost_per_1k_tokens=cost_per_1k,
-            location="cloud",
-            health="unknown",
-            tags=["cloud", "openai"],
-            metadata={"raw": model_data},
+        live = await fetch_live_models(self.api_key, self.base_url)
+        return reconcile(
+            OPENAI_MODELS,
+            live,
+            "openai",
+            accept=is_openai_chat_model,
+            fallback_window=openai_context_window,
+            is_strong=lambda mid: openai_context_window(mid) >= 128000,
         )
-
-    def _classify_capabilities(self, model_id: str) -> ModelCapabilityProfile:
-        """Classify capabilities for OpenAI models."""
-        profile = ModelCapabilityProfile()
-
-        if "gpt-4" in model_id:
-            profile.coding = CapabilityLevel.ADVANCED
-            profile.reasoning = CapabilityLevel.EXPERT
-            profile.planning = CapabilityLevel.EXPERT
-            profile.summarization = CapabilityLevel.ADVANCED
-            profile.instruction_following = CapabilityLevel.EXPERT
-            profile.tool_use = CapabilityLevel.EXPERT
-            profile.long_context = CapabilityLevel.ADVANCED
-            if "o" in model_id.lower() or "vision" in model_id.lower():
-                profile.vision = CapabilityLevel.ADVANCED
-                profile.multimodal = CapabilityLevel.ADVANCED
-        elif "gpt-3.5" in model_id:
-            profile.coding = CapabilityLevel.INTERMEDIATE
-            profile.reasoning = CapabilityLevel.INTERMEDIATE
-            profile.planning = CapabilityLevel.INTERMEDIATE
-            profile.summarization = CapabilityLevel.INTERMEDIATE
-            profile.instruction_following = CapabilityLevel.INTERMEDIATE
-            profile.tool_use = CapabilityLevel.INTERMEDIATE
-
-        return profile

@@ -148,12 +148,12 @@ RECOMMENDED_MODELS = [
         "capabilities": ["coding", "reasoning", "planning", "vision", "tool_use"],
     },
     {
-        "model_id": "gemini-1.5-pro",
+        "model_id": "gemini-2.5-pro",
         # "google", not "gemini" — the registry, catalog, keystore, and
         # validators all key on "google". Selecting this entry with the wrong id
         # produced a ProviderNotFoundError at inference time.
         "provider_id": "google",
-        "display_name": "Gemini 1.5 Pro",
+        "display_name": "Gemini 2.5 Pro",
         "context_length": 1048576,
         "is_local": False,
         "speed_tier": "medium",

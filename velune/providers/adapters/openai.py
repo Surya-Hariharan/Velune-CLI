@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 
 import httpx
 from pydantic import SecretStr
 
-from velune.core.errors.provider import (
-    InferenceError,
-    InvalidRequestError,
-    ModelNotFoundError,
-    ProviderAuthenticationError,
-    RateLimitError,
-)
+from velune.core.errors.provider import ProviderAuthenticationError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
-from velune.providers.adapters._http_errors import parse_retry_after
+from velune.providers.adapters._http_errors import raise_typed_http_error
+from velune.providers.adapters._live_catalog import get_json, reconcile
 from velune.providers.adapters._toolcalls import (
     OpenAIStreamToolAccumulator,
     attach_openai_tools,
@@ -27,6 +23,85 @@ from velune.providers.adapters._toolcalls import (
 )
 from velune.providers.base import ModelProvider
 from velune.providers.keystore import get_key
+
+_REASONING_MODEL = re.compile(r"^(o\d|gpt-5)", re.IGNORECASE)
+
+
+def is_openai_reasoning_model(model_id: str) -> bool:
+    """True for OpenAI models that use ``max_completion_tokens`` and fixed sampling."""
+    mid = model_id.lower()
+    return bool(_REASONING_MODEL.match(mid)) and "chat" not in mid
+
+
+_NON_CHAT_MARKERS = (
+    "audio", "realtime", "image", "tts", "transcribe", "embedding", "moderation",
+    "search", "instruct", "davinci", "babbage", "whisper", "dall-e", "sora", "computer-use",
+)  # fmt: skip
+_CHAT_PREFIX = re.compile(r"^(gpt-|o\d|chatgpt-)", re.IGNORECASE)
+# (prefix, context window) - first match wins, so order specific before general.
+_CONTEXT_WINDOWS = (
+    ("gpt-5", 400000),
+    ("gpt-4.1", 1047576),
+    ("o1", 200000),
+    ("o3", 200000),
+    ("o4", 200000),
+    ("gpt-4o", 128000),
+    ("chatgpt-4o", 128000),
+    ("gpt-4-turbo", 128000),
+    ("gpt-4-32k", 32768),
+    ("gpt-4", 8192),
+)
+
+
+def is_openai_chat_model(model_id: str) -> bool:
+    """True for chat-completions models; False for audio/image/embedding/etc."""
+    mid = model_id.lower()
+    return bool(_CHAT_PREFIX.match(mid)) and not any(m in mid for m in _NON_CHAT_MARKERS)
+
+
+def openai_context_window(model_id: str) -> int:
+    """Best-known context window (the /models endpoint doesn't report one)."""
+    mid = model_id.lower()
+    for prefix, window in _CONTEXT_WINDOWS:
+        if mid.startswith(prefix):
+            return window
+    return 16385
+
+
+async def fetch_live_models(api_key: str | None, base_url: str) -> dict[str, int | None] | None:
+    """Return ``{model_id: None}`` for models the key can use, or None on failure."""
+    if not api_key:
+        return None
+    data = await get_json(f"{base_url}/models", {"Authorization": f"Bearer {api_key}"})
+    if not isinstance(data, dict):
+        return None
+    return {m["id"]: None for m in data.get("data", []) if isinstance(m, dict) and "id" in m}
+
+
+def _curated(model_id: str, name: str, window: int, level: CapabilityLevel, cost: float):
+    return ModelDescriptor(
+        model_id=model_id,
+        display_name=name,
+        provider_id="openai",
+        context_length=window,
+        cost_per_1k_tokens=cost,
+        capabilities={
+            "coding": level,
+            "reasoning": level,
+            "planning": level,
+            "summarization": level,
+            "instruction_following": CapabilityLevel.EXPERT,
+            "tool_use": CapabilityLevel.EXPERT,
+            "long_context": level,
+        },
+        is_local=False,
+    )
+
+
+OPENAI_MODELS: list[ModelDescriptor] = [
+    _curated("gpt-4o", "GPT-4o", 128000, CapabilityLevel.EXPERT, 0.005),
+    _curated("gpt-4o-mini", "GPT-4o Mini", 128000, CapabilityLevel.ADVANCED, 0.00015),
+]
 
 
 class OpenAIProvider(ModelProvider):
@@ -78,83 +153,43 @@ class OpenAIProvider(ModelProvider):
         unclassified) is retryable. Shared by every OpenAI-compatible
         subclass (Groq, OpenRouter, Together, Fireworks, xAI, Meta).
         """
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
-            raise ProviderAuthenticationError(
-                f"{self.provider_id} rejected the API key "
-                f"(HTTP {exc.response.status_code}) during {action}."
-            ) from exc
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-            raise RateLimitError(
-                f"{self.provider_id} rate-limited (HTTP 429) during {action}.",
-                retry_after=parse_retry_after(exc.response.headers),
-            ) from exc
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404:
-            raise ModelNotFoundError(
-                f"{self.provider_id} returned HTTP 404 during {action} — the model or "
-                f"endpoint was not found. It may be mistyped, decommissioned, or "
-                f"renamed by the provider; this is not retried automatically."
-            ) from exc
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (400, 422):
-            raise InvalidRequestError(
-                f"{self.provider_id} rejected the request as malformed "
-                f"(HTTP {exc.response.status_code}) during {action}."
-            ) from exc
-        raise InferenceError(f"{self.provider_id} {action} failed: {exc}") from exc
+        raise_typed_http_error(self.provider_id, exc, action)
 
     async def list_models(self) -> list[ModelDescriptor]:
-        """Return the current OpenAI model lineup."""
+        """Return the OpenAI lineup, reconciled with the models the account can use."""
         await self.initialize()
-        return [
-            ModelDescriptor(
-                model_id="gpt-4o",
-                display_name="GPT-4o",
-                provider_id="openai",
-                context_length=128000,
-                capabilities={
-                    "coding": CapabilityLevel.EXPERT,
-                    "reasoning": CapabilityLevel.EXPERT,
-                    "planning": CapabilityLevel.EXPERT,
-                    "summarization": CapabilityLevel.EXPERT,
-                    "instruction_following": CapabilityLevel.EXPERT,
-                    "tool_use": CapabilityLevel.EXPERT,
-                    "long_context": CapabilityLevel.EXPERT,
-                },
-                is_local=False,
-            ),
-            ModelDescriptor(
-                model_id="gpt-4o-mini",
-                display_name="GPT-4o Mini",
-                provider_id="openai",
-                context_length=128000,
-                capabilities={
-                    "coding": CapabilityLevel.ADVANCED,
-                    "reasoning": CapabilityLevel.ADVANCED,
-                    "planning": CapabilityLevel.ADVANCED,
-                    "summarization": CapabilityLevel.ADVANCED,
-                    "instruction_following": CapabilityLevel.EXPERT,
-                    "tool_use": CapabilityLevel.EXPERT,
-                    "long_context": CapabilityLevel.ADVANCED,
-                },
-                is_local=False,
-            ),
-            ModelDescriptor(
-                model_id="gpt-3.5-turbo",
-                display_name="GPT-3.5 Turbo",
-                provider_id="openai",
-                context_length=16385,
-                capabilities={
-                    "coding": CapabilityLevel.INTERMEDIATE,
-                    "reasoning": CapabilityLevel.INTERMEDIATE,
-                    "planning": CapabilityLevel.INTERMEDIATE,
-                    "summarization": CapabilityLevel.ADVANCED,
-                    "instruction_following": CapabilityLevel.ADVANCED,
-                    "tool_use": CapabilityLevel.INTERMEDIATE,
-                    "long_context": CapabilityLevel.BASIC,
-                },
-                is_local=False,
-                tags=["fallback"],
-            ),
-        ]
+        if self.provider_id != "openai":
+            return list(OPENAI_MODELS)
+        return reconcile(
+            OPENAI_MODELS,
+            await fetch_live_models(self._api_key, self._base_url),
+            "openai",
+            accept=is_openai_chat_model,
+            fallback_window=openai_context_window,
+            is_strong=lambda mid: openai_context_window(mid) >= 128000,
+        )
+
+    def _chat_payload(self, request: InferenceRequest) -> dict:
+        """Build the /chat/completions body for *request*.
+
+        OpenAI's reasoning families (o-series, gpt-5) reject ``max_tokens`` and
+        any non-default sampling parameter with an HTTP 400 — they take
+        ``max_completion_tokens`` and fix temperature/top_p themselves. Other
+        OpenAI-compatible providers (Groq, xAI, ...) subclass this adapter and
+        keep the classic fields.
+        """
+        payload: dict = {"model": request.model_id, "messages": request.messages}
+        if self.provider_id == "openai" and is_openai_reasoning_model(request.model_id):
+            payload["max_completion_tokens"] = request.max_tokens
+        else:
+            payload["temperature"] = request.temperature
+            payload["max_tokens"] = request.max_tokens
+            payload["top_p"] = request.top_p
+        if request.stop_sequences and not (
+            self.provider_id == "openai" and is_openai_reasoning_model(request.model_id)
+        ):
+            payload["stop"] = request.stop_sequences
+        return payload
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         """Standard chat inference."""
@@ -162,15 +197,7 @@ class OpenAIProvider(ModelProvider):
         assert self.client is not None
         start = time.perf_counter()
         try:
-            payload = {
-                "model": request.model_id,
-                "messages": request.messages,
-                "temperature": request.temperature,
-                "max_tokens": request.max_tokens,
-                "top_p": request.top_p,
-            }
-            if request.stop_sequences:
-                payload["stop"] = request.stop_sequences
+            payload = self._chat_payload(request)
             attach_openai_tools(payload, request)
 
             response = await self.client.post("/chat/completions", json=payload)
@@ -210,16 +237,8 @@ class OpenAIProvider(ModelProvider):
         assert self.client is not None
         accumulator = OpenAIStreamToolAccumulator()
         try:
-            payload = {
-                "model": request.model_id,
-                "messages": request.messages,
-                "temperature": request.temperature,
-                "max_tokens": request.max_tokens,
-                "top_p": request.top_p,
-                "stream": True,
-            }
-            if request.stop_sequences:
-                payload["stop"] = request.stop_sequences
+            payload = self._chat_payload(request)
+            payload["stream"] = True
             attach_openai_tools(payload, request)
 
             async with self.client.stream("POST", "/chat/completions", json=payload) as response:

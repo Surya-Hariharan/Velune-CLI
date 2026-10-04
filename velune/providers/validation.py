@@ -167,28 +167,23 @@ async def _validate_anthropic(api_key: str) -> ValidationResult:
         import httpx
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Anthropic has no cheap /models endpoint that lists all models without billing;
-            # send a minimal 1-token completion which is the canonical auth test.
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5",
-                    "messages": [{"role": "user", "content": "hi"}],
-                    "max_tokens": 1,
-                },
+            # GET /v1/models is free (no tokens billed) and independent of any one
+            # model id staying available, unlike a 1-token completion against a
+            # hardcoded model that turns a valid key into a 404 once it is retired.
+            resp = await client.get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
             )
-        if resp.status_code in (200, 400):
-            # 400 can mean valid key but bad params — auth passed either way
+        if resp.status_code == 200:
+            try:
+                ids = [m["id"] for m in resp.json().get("data", []) if "id" in m]
+            except (ValueError, AttributeError, TypeError):
+                ids = []
             return ValidationResult(
                 provider_id="anthropic",
                 status=ValidationStatus.OK,
                 message="Authenticated successfully",
-                models=["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
+                models=ids or ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
                 account_info={"organization": "verified"},
             )
         if resp.status_code == 401:

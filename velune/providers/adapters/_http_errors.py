@@ -37,3 +37,44 @@ def parse_retry_after(headers: httpx.Headers) -> float | None:
         return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
     except (TypeError, ValueError):
         return None
+
+
+def raise_typed_http_error(provider_label: str, exc: httpx.HTTPError, action: str) -> None:
+    """Translate an httpx failure into the right typed provider error, then raise it.
+
+    Each branch is a *deterministic* verdict (about the key, the rate limit, or
+    the request) and is excluded from ``RETRYABLE_EXCEPTIONS`` — retrying a
+    decommissioned model id or a malformed request just delays the same
+    failure. Only the final generic :class:`InferenceError` (5xx, network
+    hiccups, anything unclassified) is retryable. Always raises.
+    """
+    from velune.core.errors.provider import (
+        InferenceError,
+        InvalidRequestError,
+        ModelNotFoundError,
+        ProviderAuthenticationError,
+        RateLimitError,
+    )
+
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    if status in (401, 403):
+        raise ProviderAuthenticationError(
+            f"{provider_label} rejected the API key (HTTP {status}) during {action}."
+        ) from exc
+    if status == 429:
+        assert isinstance(exc, httpx.HTTPStatusError)
+        raise RateLimitError(
+            f"{provider_label} rate-limited (HTTP 429) during {action}.",
+            retry_after=parse_retry_after(exc.response.headers),
+        ) from exc
+    if status == 404:
+        raise ModelNotFoundError(
+            f"{provider_label} returned HTTP 404 during {action} — the model or "
+            f"endpoint was not found. It may be mistyped, decommissioned, or "
+            f"renamed by the provider; this is not retried automatically."
+        ) from exc
+    if status in (400, 422):
+        raise InvalidRequestError(
+            f"{provider_label} rejected the request as malformed (HTTP {status}) during {action}."
+        ) from exc
+    raise InferenceError(f"{provider_label} {action} failed: {exc}") from exc
