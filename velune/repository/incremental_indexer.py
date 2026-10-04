@@ -24,8 +24,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from velune.repository._native import scan_directory as _native_scan_directory
-from velune.repository._native import sha256_file as _native_sha256_file
+from velune.repository.file_scan import scan_directory as _native_scan_directory
+from velune.repository.file_scan import sha256_file as _native_sha256_file
 from velune.repository.index_state import IndexedFile, IndexState, index_state_lock_async
 from velune.repository.schemas import MAX_STRUCTURAL_PARSE_BYTES, is_generated_content
 
@@ -484,9 +484,8 @@ class IncrementalIndexer:
     def _fallback_scan(self) -> list[Path]:
         """Minimal walk used when FilesystemScanner is unavailable.
 
-        Delegates the directory walk to the native extension (falls back to
-        pure Python automatically when the Rust wheel isn't installed — see
-        velune/repository/_native.py). ``scan_directory`` only prunes by exact
+        Delegates the directory walk to ``velune/repository/file_scan.py``.
+        ``scan_directory`` only prunes by exact
         directory name, so ``_is_always_skip``'s suffix rules (``.egg-info``)
         are still applied as a post-filter to keep results identical to the
         previous pure-Python walk.

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from velune.cognition.firewall import CognitiveFirewall
-from velune.repository._native import sha256_file as _sha256_file
+from velune.repository.file_scan import sha256_file as _sha256_file
 from velune.repository.parser import RepositorySnapshotParser
 from velune.repository.scanner import FilesystemScanner
 from velune.repository.schemas import (

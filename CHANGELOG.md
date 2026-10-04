@@ -101,6 +101,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- **Removed the unshipped Go launcher and Rust native module** (`ext/`) and their CI jobs. Neither was part of the
+  PyPI package; the repository indexers now use the plain-Python helpers in `velune/repository/file_scan.py`
+  (formerly `_native.py`), whose behaviour is unchanged.
+
 - Minimal chat output: no "Velune" header above replies, a per-turn footer of just the token count (plus cost
   when known), and a one-line connection confirmation.
 - Documentation reorganised: the public guides live in `docs/`; the architecture reference is kept private.

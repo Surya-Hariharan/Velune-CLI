@@ -70,7 +70,8 @@ relevant code.
 - **0.9.6:** key-verification lifecycle, incremental repository cognition,
   and architectural convergence of the memory and context layers.
 - **0.9.7:** `velune doctor` terminal-capability reporting.
-- **After 0.9.7 (unreleased):** live model catalogs for OpenAI, Anthropic,
+- **After 0.9.7 (unreleased):** the optional Go launcher and Rust module (added in 0.9.4, never shipped in
+  the PyPI package) were removed to keep the repository pure-Python; live model catalogs for OpenAI, Anthropic,
   Gemini and Groq (retired models drop out automatically); inline Markdown
   rendering of tables, charts and Mermaid diagrams in the REPL; SQLite
   corruption quarantine with self-repair; a minimal, Claude Code-style chat

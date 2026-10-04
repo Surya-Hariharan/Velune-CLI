@@ -116,10 +116,8 @@ pip install velune-cli
 velune --version
 ```
 
-The Python package is the authoritative runtime. Optional Go and Rust native
-components live under `ext/` and are validated in CI; Velune CLI keeps
-pure-Python fallbacks for the Rust-backed repository helpers, so the
-standard PyPI install works without compiling native code.
+Velune CLI is a pure-Python package, so a plain `pip install` works on every platform with no
+compiler or native build step.
 
 If your shell reports **`velune: command not found`** (or, on Windows,
 *"'velune' is not recognized…"*), the install succeeded but your Python

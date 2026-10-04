@@ -51,8 +51,7 @@ pip install -e ".[dev]"
 
 `[dev]` installs `ruff`, `pyright`, `pre-commit`, `pip-audit`,
 `bandit[toml]`, `build`, `twine`, `pytest`, and `pytest-asyncio` — everything
-CI runs, minus the OS-level Go/Rust toolchains (only needed if you're
-touching `ext/go` or `ext/rust`).
+CI runs.
 
 `uv.lock` pins the exact resolved dependency graph (versions + hashes) on top
 of `pyproject.toml`'s version floors, so a dev machine, CI, and a release

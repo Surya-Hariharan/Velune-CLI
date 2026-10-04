@@ -137,8 +137,6 @@ aggregation job:
 | **Security** | `pip-audit --skip-editable`; `uv lock --check` (the committed `uv.lock` must match `pyproject.toml`); `bandit` (medium+ severity/confidence gates the build, plus a low-severity count baseline that may not grow); a gitleaks secret scan; regression guards: no `shell=True` in `velune/`, `create_subprocess_shell` only at allow-listed sites, and no new `asyncio.run()` call sites |
 | **Tests** | `pip install -e ".[all,dev]"` then `pytest`, across Python 3.10–3.13 × Ubuntu / Windows / macOS |
 | **Build & Validate Artifacts** | Hatchling sdist + wheel (reproducible via `SOURCE_DATE_EPOCH`), `twine check --strict`, and the wheel must be pure-Python (`py3-none-any`) |
-| **Go Launcher** | builds/tests/vets the optional Go launcher under `ext/go/` on all three OSes |
-| **Rust Native** | `cargo fmt --check`, `clippy -D warnings`, `cargo test` for the optional helpers under `ext/rust/velune-native/` on all three OSes |
 | **Wheel Install + REPL Smoke** | installs the built wheel into a clean environment and runs `velune --version`, `velune --help`, `python -m velune --version`, `velune doctor check` across OS × Python |
 | **CI Pass** | fails if any of the above failed — the single required status check |
 
@@ -146,9 +144,8 @@ CodeQL runs separately. `.github/workflows/release.yml` handles publishing (tag-
 tag matches the package version, builds, publishes to PyPI and creates the GitHub release) — read that file
 for the exact steps.
 
-**Invariant:** the PyPI wheel stays pure-Python. The Go and Rust components under `ext/` are validated in CI
-but are optional; every accelerated path has a pure-Python fallback, so don't add a hard dependency on
-either to a path that must work after a bare `pip install velune-cli`.
+**Invariant:** the PyPI wheel stays pure-Python (`py3-none-any`); the repository contains no Go or Rust code,
+so don't add a compiled dependency to a path that must work after a bare `pip install velune-cli`.
 
 > Dependency versions are pinned in the committed `uv.lock` (check with `uv lock --check`; refresh with
 > `uv lock --upgrade-package <name>`). `[project.optional-dependencies]` defines `rag`, `parsing`,

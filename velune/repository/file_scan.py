@@ -1,22 +1,9 @@
-"""Optional bridge to the Rust native extension (velune_native).
+"""File-system helpers for the repository indexers.
 
-Exposes the same API whether or not the compiled extension is available:
+    sha256_file(path: str | Path) -> str
+    scan_directory(root, extensions, skip_names) -> list[str]
 
-    sha256_file(path: str) -> str
-    scan_directory(root: str, extensions: list[str], skip_names: list[str]) -> list[str]
-
-When the Rust wheel is installed (``pip install velune-native``), calls are
-delegated to the compiled C-extension.  When it is not available the functions
-fall back to pure-Python implementations so the rest of the codebase never
-needs to guard for the import.
-
-Performance note (no benchmark is recorded in the repo; measure before claiming a speed-up):
-  Python's hashlib.sha256 is already OpenSSL-backed (~1.4 GB/s on large files).
-  Rust's sha2 crate without explicit SIMD flags is unlikely to beat it.
-  sha256_file is kept here as a clean, unified interface — the Python fallback
-  is the correct default until a benchmark on the target release platform proves
-  Rust wins.  scan_directory is where Rust is more likely to provide real gains
-  for large repos (reduced per-entry Python overhead over os.walk).
+Both are plain Python (``hashlib`` and ``os.walk``).
 """
 
 from __future__ import annotations
@@ -25,18 +12,7 @@ import hashlib
 import os
 from pathlib import Path
 
-__all__ = ["sha256_file", "scan_directory", "NATIVE_AVAILABLE"]
-
-# ─── Try to load the Rust extension ──────────────────────────────────────────
-
-try:
-    import velune_native as _rust  # type: ignore[import-not-found]
-
-    NATIVE_AVAILABLE: bool = True
-except ImportError:
-    _rust = None  # type: ignore[assignment]
-    NATIVE_AVAILABLE = False
-
+__all__ = ["sha256_file", "scan_directory"]
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -44,13 +20,9 @@ except ImportError:
 def sha256_file(path: str | Path) -> str:
     """Return the SHA-256 hex digest of the file at *path*.
 
-    Uses the Rust native extension when available, otherwise falls back to
-    ``hashlib``.  Raises ``OSError`` when the file cannot be read.
+    Raises ``OSError`` when the file cannot be read.
     """
-    path = str(path)
-    if NATIVE_AVAILABLE:
-        return _rust.sha256_file(path)
-    return _sha256_file_py(path)
+    return _sha256_file_py(str(path))
 
 
 def scan_directory(
@@ -69,13 +41,10 @@ def scan_directory(
     Returns:
         Sorted list of absolute path strings.
     """
-    root = str(root)
-    if NATIVE_AVAILABLE:
-        return _rust.scan_directory(root, extensions, skip_names)
-    return _scan_directory_py(root, extensions, skip_names)
+    return _scan_directory_py(str(root), extensions, skip_names)
 
 
-# ─── Pure-Python fallbacks ────────────────────────────────────────────────────
+# ─── Implementations ────────────────────────────────────────────────────────
 
 
 def _sha256_file_py(path: str) -> str:
