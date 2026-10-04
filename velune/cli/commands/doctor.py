@@ -1151,7 +1151,8 @@ def _check_terminal_zoom_lock() -> dict:
     }
 
 
-def _render_results(results: list) -> None:
+def _render_results(results: list, out: Console | None = None) -> None:
+    out = out or console
     from rich.panel import Panel
     from rich.text import Text
 
@@ -1215,15 +1216,15 @@ def _render_results(results: list) -> None:
         summary_icon = "OK"
         summary_tail = f"  [{design.OK}]all clear[/{design.OK}]"
 
-    console.print()
-    console.print(
+    out.print()
+    out.print(
         Text.assemble(
             (f" {summary_icon} ", f"bold {summary_color}"),
             ("Velune Environment — ", "bold white"),
             (f"{total} checks", "white"),
         ).__add__(Text.from_markup(summary_tail))
     )
-    console.print()
+    out.print()
 
     # --- Per-category panels ---
     status_icons = {
@@ -1251,7 +1252,7 @@ def _render_results(results: list) -> None:
             icon_markup, _ = status_icons.get(r["status"], ("?", design.MUTED))
             table.add_row(icon_markup, r["name"], r.get("message", ""))
 
-        console.print(
+        out.print(
             Panel(
                 table,
                 title=f"[bold]{cat}[/bold]",

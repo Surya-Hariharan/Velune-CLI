@@ -56,6 +56,24 @@ _PROVIDER_ERROR_TITLES: dict[str, str] = {
 }
 
 
+_DOCTOR_HINT = "Run /doctor for provider diagnostics"
+
+# The first line is the actual remedy for each failure; /doctor is the fallback.
+_PROVIDER_ERROR_FIXES: dict[str, list[str]] = {
+    "ProviderAuthenticationError": [
+        "Run /connect to enter a new API key for this provider",
+        _DOCTOR_HINT,
+    ],
+    "ModelNotFoundError": [
+        "Pick another model with /model",
+        "The provider may have retired it; /doctor shows what is available",
+    ],
+    "RateLimitError": ["Wait a moment and retry, or switch model with /model"],
+    "ProviderConnectionError": ["Check your network connection and the provider's status page"],
+    "ProviderTimeoutError": ["Retry, or switch to a faster model with /model", _DOCTOR_HINT],
+}
+
+
 def render_provider_error(exc: Exception) -> Panel:
     """Build a Rich Panel for a provider/inference failure.
 
@@ -72,7 +90,7 @@ def render_provider_error(exc: Exception) -> Panel:
     return ui.error_panel(
         title=title,
         cause=str(exc),
-        fix=["Run /doctor for provider diagnostics"],
+        fix=_PROVIDER_ERROR_FIXES.get(kind, [_DOCTOR_HINT]),
     )
 
 

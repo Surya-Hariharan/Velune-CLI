@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -347,20 +348,30 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_vram,
         _check_model_benchmarks,
     ]
-    results = []
-    with repl.console.status("[cyan]Running health checks...[/cyan]"):
+
+    def _run_checks() -> list:
+        collected = []
         for check_fn in checks:
             try:
-                results.append(check_fn())
+                collected.append(check_fn())
             except Exception as e:
-                results.append(
+                collected.append(
                     {
                         "name": check_fn.__name__.replace("_check_", "").replace("_", " ").title(),
                         "status": "error",
                         "message": str(e),
                     }
                 )
-    _render_results(results)
+        return collected
+
+    # The checks do blocking network/subprocess work: run them off the event
+    # loop so the full-screen UI keeps repainting and accepting input.
+    with repl.console.status("[cyan]Running health checks...[/cyan]"):
+        results = await asyncio.to_thread(_run_checks)
+    # Render through the app's own console. The module-level console in
+    # commands/doctor.py writes straight to the real stdout, which tears the
+    # full-screen display apart.
+    _render_results(results, repl.console)
     failures = sum(1 for r in results if r["status"] == "fail")
     if failures:
         repl.console.print(
