@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from typing import NoReturn
 
 import httpx
 
@@ -39,7 +40,7 @@ def parse_retry_after(headers: httpx.Headers) -> float | None:
         return None
 
 
-def raise_typed_http_error(provider_label: str, exc: httpx.HTTPError, action: str) -> None:
+def raise_typed_http_error(provider_label: str, exc: httpx.HTTPError, action: str) -> NoReturn:
     """Translate an httpx failure into the right typed provider error, then raise it.
 
     Each branch is a *deterministic* verdict (about the key, the rate limit, or

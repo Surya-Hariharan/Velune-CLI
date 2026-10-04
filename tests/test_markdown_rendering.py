@@ -20,7 +20,8 @@ def test_table_has_borders_and_wraps_instead_of_truncating():
         "| groq | Large open-weight reasoning model with long context |\n"
     )
     out = _render(md, 50)
-    assert "┌" in out and "│" in out and "└" in out
+    # Rounded corners on most terminals; Windows' legacy console falls back to square ones.
+    assert ("╭" in out or "┌" in out) and "│" in out and ("╰" in out or "└" in out)
     assert "…" not in out
     for word in ("Large", "open-weight", "reasoning", "context"):
         assert word in out
