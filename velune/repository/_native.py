@@ -10,7 +10,7 @@ delegated to the compiled C-extension.  When it is not available the functions
 fall back to pure-Python implementations so the rest of the codebase never
 needs to guard for the import.
 
-Performance note (see scripts/benchmark_native.py):
+Performance note (no benchmark is recorded in the repo; measure before claiming a speed-up):
   Python's hashlib.sha256 is already OpenSSL-backed (~1.4 GB/s on large files).
   Rust's sha2 crate without explicit SIMD flags is unlikely to beat it.
   sha256_file is kept here as a clean, unified interface — the Python fallback
