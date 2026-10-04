@@ -25,6 +25,13 @@ def ask_command(
     council_tier: str | None = typer.Option(
         None, "--council-tier", help="Override council execution tier (instant, standard, full)"
     ),
+    explain_trace: bool = typer.Option(
+        False,
+        "--explain-trace",
+        help="Print the request execution trace: every provider call made, "
+        "which seat and reason caused it, and whether the run honoured its "
+        "tier's contract.",
+    ),
 ) -> None:
     """Ask a question or request a code review (no code execution)."""
 
@@ -53,11 +60,14 @@ def ask_command(
 
     from velune.core.event_loop import submit
 
-    submit(_ask_command_async(cli_context, prompt, council_tier))
+    submit(_ask_command_async(cli_context, prompt, council_tier, explain_trace))
 
 
 async def _ask_command_async(
-    cli_context: CLIContext, prompt: str, council_tier: str | None = None
+    cli_context: CLIContext,
+    prompt: str,
+    council_tier: str | None = None,
+    explain_trace: bool = False,
 ) -> None:
     lifecycle = cli_context.container.get("runtime.lifecycle")
 
@@ -66,7 +76,7 @@ async def _ask_command_async(
         console.print("[dim]Thinking…[/dim]")
     await lifecycle.startup()
     try:
-        await _ask_with_runtime(cli_context, prompt, council_tier)
+        await _ask_with_runtime(cli_context, prompt, council_tier, explain_trace)
     finally:
         # Shutdown must run on every exit path — including typer.Exit and
         # council errors — or background tasks outlive the command.
@@ -74,7 +84,10 @@ async def _ask_command_async(
 
 
 async def _ask_with_runtime(
-    cli_context: CLIContext, prompt: str, council_tier: str | None = None
+    cli_context: CLIContext,
+    prompt: str,
+    council_tier: str | None = None,
+    explain_trace: bool = False,
 ) -> None:
     container = cli_context.container
     model_registry = container.get("runtime.model_registry")
@@ -135,6 +148,23 @@ async def _ask_with_runtime(
     else:
         formatted_snap = "No repository context — answering as a general question."
 
+    # C3 memory parity: `ask` previously skipped straight from a fresh AST
+    # snapshot to the council with no memory retrieval at all, unlike the REPL
+    # (which assembles context through ContextAssembler + MemoryLifecycleManager
+    # via prompt_context.build_turn_context). This calls the exact same
+    # MemoryLifecycleManager retrieval the REPL uses — read-only, no session
+    # state mutated — so a one-off `ask` still benefits from persistent
+    # semantic/episodic/knowledge-graph memory the product advertises.
+    from velune.cli.handlers.prompt_context import retrieve_memory_context
+
+    memory_chunks = await retrieve_memory_context(container, prompt, cli_context.workspace)
+    if memory_chunks:
+        memory_text = "\n\n".join(f"[{c.source}] {c.content}" for c in memory_chunks)
+        formatted_snap = (
+            f"{formatted_snap}\n\n[RELEVANT MEMORY]\n"
+            f"{_wrap_memory_content(firewall, memory_text)}"
+        )
+
     # 5. deliberating debate loop
     council_res = None
     if not cli_context.json_mode:
@@ -151,6 +181,26 @@ async def _ask_with_runtime(
 
     arbitration = council_res["arbitration"]
     final_summary = council_res["final_summary"]
+
+    if explain_trace:
+        trace_data = council_res.get("execution_trace")
+        if trace_data:
+            from velune.cognition.execution_trace import render_trace_dict
+
+            console.print("\n[bold]Execution trace[/bold]")
+            console.print(render_trace_dict(trace_data))
+        verdict = council_res.get("contract_verdict")
+        if verdict is not None:
+            if verdict["ok"]:
+                console.print(
+                    f"[green]Tier contract honoured ({verdict['total_calls']} provider calls).[/green]"
+                )
+            else:
+                console.print(
+                    f"[red]{len(verdict['violations'])} tier contract violation(s):[/red]"
+                )
+                for v in verdict["violations"]:
+                    console.print(f"  - [{v['kind']}] {v['detail']}")
 
     # Total failure (wall-time exhausted or every agent call failed) is an
     # error, not an answer: one actionable message and a non-zero exit code
@@ -276,6 +326,19 @@ def _looks_like_project(workspace: object) -> bool:
         return any((root / marker).exists() for marker in _PROJECT_MARKERS)
     except Exception:
         return False
+
+
+def _wrap_memory_content(firewall: CognitiveFirewall, content: str) -> str:
+    """Route retrieved memory through the same untrusted-content boundary the
+    REPL uses (see ``prompt_context._wrap_workspace_content``), so retrieved
+    text is never treated as instructions by the model."""
+    try:
+        scan = firewall.scan_file_for_injection("retrieved_memory", content)
+        if scan.get("quarantined"):
+            content = scan.get("neutralized_content", "")
+        return firewall.wrap_workspace_content("retrieved_memory", content)
+    except Exception:
+        return content
 
 
 def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: CognitiveFirewall) -> str:

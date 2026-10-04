@@ -127,7 +127,7 @@ async def build_turn_context(
     #   - REPOSITORY_SNAPSHOT / ARCHITECTURAL_DRIFT
     hybrid_chunks, memory_chunks, continuity_chunk, repo_chunks = await asyncio.gather(
         _retrieve_hybrid(repl, text, depth, intent, confidence),
-        _retrieve_via_memory_lifecycle(repl, text, workspace, depth, budget.retrieval_allocation),
+        retrieve_memory_context(repl.container, text, workspace, depth, budget.retrieval_allocation),
         _lineage_chunk(repl, text),
         _repository_snapshot_chunks(repl, repo_snapshot_budget),
     )
@@ -335,10 +335,17 @@ _MEMORY_SOURCE_PRIORITY = {
 }
 
 
-async def _retrieve_via_memory_lifecycle(
-    repl: VeluneREPL, text: str, workspace: Path, depth: int, budget_tokens: int
+async def retrieve_memory_context(
+    container: object, text: str, workspace: Path, depth: int = 3, budget_tokens: int = 2000
 ) -> list[ContextChunk]:
     """Vitality-aware semantic/episodic/kg retrieval via ``MemoryLifecycleManager``.
+
+    Public and REPL-independent (takes the DI container directly) so both the
+    REPL's turn-context assembly below and ``velune ask`` — which previously
+    bypassed memory retrieval entirely and went straight from a fresh AST
+    snapshot to the council, despite the product advertising persistent
+    memory for every entry point — call the exact same retrieval, rather than
+    ``ask`` reimplementing a second, divergent memory path.
 
     Previously this queried ``ThreeBrainCoordinator`` directly and reimplemented
     a cruder version of trust shaping inline (flat 0.6-0.7 trust scores, no
@@ -350,13 +357,14 @@ async def _retrieve_via_memory_lifecycle(
     designed for, so a stale semantic hit from a month ago no longer carries
     the same weight as one from the current session.
 
-    ``working`` results are dropped: ``repl._conversation`` already supplies
-    WORKING_MEMORY directly, and once ``record_turn()`` fills
+    ``working`` results are dropped: the REPL's own conversation history
+    already supplies WORKING_MEMORY directly, and once ``record_turn()`` fills
     ``runtime.working_memory`` too, including its hits would double-count the
-    same turns.
+    same turns. ``ask`` has no conversation history, so this is simply absent
+    for it rather than needing special-casing.
     """
     try:
-        manager = repl.container.get("runtime.memory_lifecycle")
+        manager = container.get("runtime.memory_lifecycle")  # type: ignore[attr-defined]
     except Exception:
         return []
     if not manager:

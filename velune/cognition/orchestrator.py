@@ -144,21 +144,13 @@ class CouncilOrchestrator:
             low_resource_mode=low_resource_mode,
         )
 
-        # Error loop detection + retry policy — wired into agent call sites
-        from velune.core.loop_detector import ErrorLoopDetector
-        from velune.core.retry import RetryPolicy
-
-        self._loop_detector = ErrorLoopDetector()
-        _max_retries = 3
-        if config and hasattr(config, "providers"):
-            _max_retries = getattr(config.providers, "max_retries", 3)
-        self._retry_policy = RetryPolicy(
-            max_attempts=_max_retries,
-            base_delay_s=2.0,
-            max_delay_s=30.0,
-            jitter=True,
-            loop_detector=self._loop_detector,
-        )
+        # Retry ownership sits at exactly one layer: RetryingProvider (see the
+        # retry-ownership note in run_execution() below). A council-level
+        # RetryPolicy/ErrorLoopDetector used to be constructed here too but
+        # was never wired into any call site — dead scaffolding that
+        # contradicted its own "wired into agent call sites" comment and
+        # invited a second retry layer to be added on top of the provider's,
+        # which would multiply retries instead of composing with them.
 
         # Resolve the event bus for retry event emission (best-effort)
         self._bus: Any | None = None
@@ -629,13 +621,28 @@ class CouncilOrchestrator:
             if profile and profile.tps > 0.0:
                 estimated_tps = profile.tps
 
+        # One canonical intent judgement feeds tier sizing here; the REPL's
+        # context assembly (prompt_context.build_turn_context) computes the
+        # same IntentClassifier independently for a different purpose
+        # (retrieval/context shaping). Both derive from the same classifier
+        # rather than each re-deriving complexity from separate keyword sets.
+        from velune.cognition.intent import IntentClassifier
+
+        intent_hint: str | None = None
+        try:
+            intent_hint = IntentClassifier().classify(prompt).value
+        except Exception:
+            intent_hint = None
+
         # Temporarily apply override if specified
         original_override = self.tier_classifier.default_tier_override
         if council_tier:
             self.tier_classifier.default_tier_override = council_tier
 
         try:
-            return self.tier_classifier.classify(prompt, repo_context, estimated_tps)
+            return self.tier_classifier.classify(
+                prompt, repo_context, estimated_tps, intent_hint=intent_hint
+            )
         finally:
             self.tier_classifier.default_tier_override = original_override
 
@@ -1691,6 +1698,33 @@ class CouncilOrchestrator:
                 )
 
             logger.info("Executed %s tier in %.2fs", tier.value, time.time() - start_time)
+
+            # Close the loop C2 exists to guarantee: a finished run's provider-call
+            # ledger is checked against the tier's own contract, not just recorded.
+            # A violation here means a seat ran outside what the tier declares, or
+            # the run made an unexplained repeat call — surfaced via /doctor and
+            # logged loudly rather than only discoverable by manually reading the
+            # trace dict.
+            contract_verdict = None
+            if request_trace is not None:
+                from velune.cognition.council.contracts import verify_trace_against_contract
+
+                verdict = verify_trace_against_contract(request_trace, tier)
+                contract_verdict = {
+                    "ok": verdict.ok,
+                    "total_calls": verdict.total_calls,
+                    "violations": [
+                        {"kind": v.kind, "detail": v.detail} for v in verdict.violations
+                    ],
+                }
+                if not verdict.ok:
+                    logger.warning(
+                        "Council tier contract violation for %s (run_id=%s): %s",
+                        tier.value,
+                        run_id,
+                        verdict.render(),
+                    )
+
             return {
                 "tier": tier.value,
                 "task_plan": task_plan,
@@ -1708,4 +1742,5 @@ class CouncilOrchestrator:
                 "execution_trace": (
                     request_trace.to_dict() if request_trace is not None else None
                 ),
+                "contract_verdict": contract_verdict,
             }

@@ -316,6 +316,58 @@ class RequestTrace:
 # ── context helpers ───────────────────────────────────────────────────────
 
 
+def render_trace_dict(data: dict) -> str:
+    """Render the human-readable trace from a ``RequestTrace.to_dict()`` payload.
+
+    Lets a CLI surface (``velune ask --explain-trace``, a future debug command)
+    explain "why did this request consume N provider calls?" from the plain
+    dict a council run already returns, without needing the live
+    :class:`RequestTrace` object — which is gone by the time the caller has
+    the result in hand.
+    """
+    lines = [
+        f"Request {data.get('request_id', '?')}  tier={data.get('tier') or 'n/a'}  "
+        f"calls={data.get('total_provider_calls', 0)}"
+    ]
+    if data.get("contract"):
+        lines.append(f"  contract: {data['contract']}")
+
+    nodes = data.get("nodes", [])
+    calls_by_id = {c["call_id"]: c for c in data.get("calls", [])}
+    children: dict[str | None, list[dict]] = {}
+    for node in nodes:
+        children.setdefault(node.get("parent_id"), []).append(node)
+
+    root_id = nodes[0]["node_id"] if nodes else None
+
+    def walk(node: dict, depth: int) -> None:
+        pad = "  " * (depth + 1)
+        lines.append(
+            f"{pad}├── {node['label']} [{node['status']}] {node['duration_ms']:.0f}ms"
+        )
+        for call_id in node.get("provider_call_ids", []):
+            call = calls_by_id.get(call_id)
+            if call is None:
+                continue
+            lines.append(
+                f"{pad}    └── {call['call_id']}  seat={call['seat']}  "
+                f"{call['provider']}/{call['model']}  reason={call['reason']}  "
+                f"[{call['status']}] {call['duration_ms']:.0f}ms"
+            )
+        for child in children.get(node["node_id"], []):
+            walk(child, depth + 1)
+
+    for child in children.get(root_id, []):
+        walk(child, 0)
+
+    unexplained = data.get("unexplained_calls", [])
+    if unexplained:
+        lines.append(f"  WARNING: {len(unexplained)} unexplained repeat call(s): " + ", ".join(unexplained))
+    else:
+        lines.append("  All provider calls accounted for.")
+    return "\n".join(lines)
+
+
 def current_trace() -> RequestTrace | None:
     """Return the trace for the in-flight request, if one is active."""
     return _active_trace.get()

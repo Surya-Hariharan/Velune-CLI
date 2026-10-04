@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from velune.cli.handlers.prompt_context import (
     _repository_snapshot_chunks,
     _retrieve_hybrid,
-    _retrieve_via_memory_lifecycle,
+    retrieve_memory_context,
     build_turn_context,
 )
 from velune.cli.modes import ModeConfig, ModeManager, SessionMode
@@ -204,8 +204,8 @@ async def test_memory_lifecycle_drops_working_results_to_avoid_double_count():
         )
     )
     repl = _make_repl({"runtime.memory_lifecycle": manager})
-    chunks = await _retrieve_via_memory_lifecycle(
-        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
+    chunks = await retrieve_memory_context(
+        repl.container, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
     )
     assert chunks == []
 
@@ -224,8 +224,8 @@ async def test_memory_lifecycle_converts_semantic_episodic_and_kg_results():
         )
     )
     repl = _make_repl({"runtime.memory_lifecycle": manager})
-    chunks = await _retrieve_via_memory_lifecycle(
-        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
+    chunks = await retrieve_memory_context(
+        repl.container, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
     )
 
     sources = {c.source for c in chunks}
@@ -252,8 +252,8 @@ async def test_memory_lifecycle_carries_vitality_into_chunk_metadata():
         )
     )
     repl = _make_repl({"runtime.memory_lifecycle": manager})
-    chunks = await _retrieve_via_memory_lifecycle(
-        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
+    chunks = await retrieve_memory_context(
+        repl.container, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
     )
 
     assert len(chunks) == 1
@@ -267,8 +267,8 @@ async def test_memory_lifecycle_passes_budget_and_depth_through():
     manager.retrieve = AsyncMock(return_value=RetrievedContext())
     repl = _make_repl({"runtime.memory_lifecycle": manager})
 
-    await _retrieve_via_memory_lifecycle(
-        repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=7, budget_tokens=3000
+    await retrieve_memory_context(
+        repl.container, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=7, budget_tokens=3000
     )
 
     manager.retrieve.assert_awaited_once()
@@ -280,8 +280,8 @@ async def test_memory_lifecycle_passes_budget_and_depth_through():
 async def test_memory_lifecycle_degrades_silently_when_manager_missing():
     repl = _make_repl({"runtime.memory_lifecycle": None})
     assert (
-        await _retrieve_via_memory_lifecycle(
-            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
+        await retrieve_memory_context(
+            repl.container, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
         )
         == []
     )
@@ -292,8 +292,8 @@ async def test_memory_lifecycle_swallows_retrieve_errors():
     manager.retrieve = AsyncMock(side_effect=RuntimeError("boom"))
     repl = _make_repl({"runtime.memory_lifecycle": manager})
     assert (
-        await _retrieve_via_memory_lifecycle(
-            repl, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
+        await retrieve_memory_context(
+            repl.container, "q", workspace=MagicMock(__str__=lambda s: "/ws"), depth=5, budget_tokens=2000
         )
         == []
     )

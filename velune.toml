@@ -1,2 +1,2 @@
 [providers]
-default_provider = "groq"
+default_provider = "ollama"
