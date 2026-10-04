@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
+import httpx
+
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 from velune.core.types.provider import ProviderHealth
 from velune.providers.adapters.openai import OpenAIProvider
 from velune.providers.keystore import get_key, has_key
+
+logger = logging.getLogger(__name__)
 
 GROQ_MODELS: list[ModelDescriptor] = [
     ModelDescriptor(
@@ -91,6 +97,70 @@ GROQ_MODELS: list[ModelDescriptor] = [
 # providers/retrying.py, which previously retried this 404 three times before
 # giving up, since it wasn't distinguished from a transient failure.
 
+# Live /models entries that are not chat-completion models; never offered to
+# the Council (audio, safety classifiers, TTS).
+_NON_CHAT_MARKERS = ("whisper", "orpheus", "prompt-guard", "safeguard", "guard", "tts")
+
+
+async def fetch_live_model_ids(
+    api_key: str | None, base_url: str, timeout: float = 5.0
+) -> set[str] | None:
+    """Return the model IDs Groq currently serves to *api_key*, or None on any failure."""
+    if not api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(
+                f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"}
+            )
+            resp.raise_for_status()
+            return {m["id"] for m in resp.json().get("data", []) if "id" in m}
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.debug("Could not fetch live Groq model list (using static catalog): %s", exc)
+        return None
+
+
+def reconcile_with_live(live_ids: set[str] | None) -> list[ModelDescriptor]:
+    """Intersect the curated catalog with what Groq actually serves.
+
+    The static list carries curated capability scores but rots whenever Groq
+    deprecates a model (a stale entry becomes a live HTTP 404 mid-turn). With a
+    live listing, drop curated entries Groq no longer serves and add any new
+    chat model with a conservative default profile. Without one (offline, bad
+    key), fall back to the static catalog unchanged.
+    """
+    if not live_ids:
+        return list(GROQ_MODELS)
+    curated = {m.model_id: m for m in GROQ_MODELS}
+    result = [m for mid, m in curated.items() if mid in live_ids]
+    for mid in sorted(live_ids - curated.keys()):
+        if any(marker in mid.lower() for marker in _NON_CHAT_MARKERS):
+            continue
+        result.append(
+            ModelDescriptor(
+                model_id=mid,
+                provider_id="groq",
+                display_name=mid.split("/")[-1],
+                context_length=131072,
+                is_local=False,
+                free_tier=True,
+                cost_per_1k_tokens=0.0,
+                speed_tier="fast",
+                capabilities=ModelCapabilityProfile(
+                    coding=CapabilityLevel.ADVANCED,
+                    reasoning=CapabilityLevel.ADVANCED,
+                    planning=CapabilityLevel.INTERMEDIATE,
+                    summarization=CapabilityLevel.ADVANCED,
+                    instruction_following=CapabilityLevel.ADVANCED,
+                    tool_use=CapabilityLevel.INTERMEDIATE,
+                    long_context=CapabilityLevel.ADVANCED,
+                ),
+                tags=["cloud", "groq", "free", "live-discovered"],
+                metadata={"free_tier": True},
+            )
+        )
+    return result or list(GROQ_MODELS)
+
 
 class GroqProvider(OpenAIProvider):
     """Groq Cloud provider — wire-compatible with the OpenAI chat API.
@@ -110,7 +180,8 @@ class GroqProvider(OpenAIProvider):
         return "groq"
 
     async def list_models(self) -> list[ModelDescriptor]:
-        return GROQ_MODELS
+        live = await fetch_live_model_ids(get_key("groq"), self._base_url)
+        return reconcile_with_live(live)
 
     async def health_check(self) -> ProviderHealth:
         if not has_key("groq"):

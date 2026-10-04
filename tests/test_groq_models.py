@@ -51,3 +51,32 @@ def test_replacement_models_have_advanced_coding_capability():
         caps = ids[model_id].capabilities
         assert caps is not None
         assert caps.coding >= CapabilityLevel.ADVANCED
+
+
+def test_reconcile_drops_models_groq_no_longer_serves():
+    from velune.providers.adapters.groq import reconcile_with_live
+
+    result = {
+        m.model_id for m in reconcile_with_live({"openai/gpt-oss-120b", "openai/gpt-oss-20b"})
+    }
+    assert "llama-3.3-70b-versatile" not in result
+    assert result == {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}
+
+
+def test_reconcile_skips_non_chat_models_and_adds_new_chat_models():
+    from velune.providers.adapters.groq import reconcile_with_live
+
+    live = {
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
+        "whisper-large-v3",
+        "meta-llama/llama-prompt-guard-2-22m",
+    }
+    result = {m.model_id for m in reconcile_with_live(live)}
+    assert result == {"openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
+
+
+def test_reconcile_falls_back_to_static_catalog_when_offline():
+    from velune.providers.adapters.groq import reconcile_with_live
+
+    assert {m.model_id for m in reconcile_with_live(None)} == {m.model_id for m in GROQ_MODELS}

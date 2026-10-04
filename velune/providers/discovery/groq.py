@@ -1,4 +1,4 @@
-"""Groq model discovery — returns GROQ_MODELS when a key is configured."""
+"""Groq model discovery — the curated catalog reconciled with Groq's live /models."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from velune.providers import keystore
 
 
 class GroqDiscovery:
-    """Returns the hardcoded Groq model list when a key is configured."""
+    """Returns Groq models (live-reconciled) when a key is configured."""
 
     provider_id = "groq"
 
@@ -16,6 +16,9 @@ class GroqDiscovery:
         # always reflects the current keystore state and stays patchable.
         if not keystore.has_key("groq"):
             return []
-        from velune.providers.adapters.groq import GROQ_MODELS
+        from velune.providers.adapters.groq import fetch_live_model_ids, reconcile_with_live
 
-        return GROQ_MODELS
+        live = await fetch_live_model_ids(
+            keystore.get_key("groq"), "https://api.groq.com/openai/v1"
+        )
+        return reconcile_with_live(live)
