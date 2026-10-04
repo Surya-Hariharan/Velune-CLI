@@ -1164,16 +1164,10 @@ class VeluneREPL:
         self.session_cost += query_cost
         self._record_usage_telemetry(model, tokens, completion_tokens)
 
-        parts = [f"[dim]{tokens:,} tokens"]
+        line = f"{tokens:,} tokens"
         if query_cost > 0:
-            parts.append(f"~${query_cost:.4f}")
-        parts.append(f"session: {self.session_tokens:,} tokens")
-        if self.session_cost > 0:
-            parts.append(f"~${self.session_cost:.4f}[/dim]")
-        else:
-            parts.append("[/dim]")
-
-        self.console.print(" · ".join(parts))
+            line += f" · ~${query_cost:.4f}"
+        self.console.print(f"[dim]{line}[/dim]")
 
     def _record_usage_telemetry(
         self,

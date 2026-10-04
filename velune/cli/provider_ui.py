@@ -274,12 +274,7 @@ class ProviderPalette:
         key lives in the OS keyring — falling back to a machine-derived key when
         no keyring is available.
         """
-        from velune.providers.keystore import credentials_file_path
-
         self.console.print(f"[bold {design.OK}]{label} connected.[/bold {design.OK}]")
-        self.console.print(
-            f"[{design.MUTED}]Key encrypted (AES-GCM) at {credentials_file_path()}[/{design.MUTED}]"
-        )
 
     # ------------------------------------------------------------------
     # Model discovery

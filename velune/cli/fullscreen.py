@@ -964,27 +964,15 @@ class FullscreenREPLUI:
         cycle: bool = True,
         show_label: bool = True,
     ) -> None:
-        """Open an assistant block: label line + animated thinking spinner.
+        """Open an assistant block: an animated thinking spinner, no header.
 
-        ``text`` seeds the spinner verb (empty → the shuffled verb pool);
-        ``cycle=False`` pins the verb (only the spinner glyph animates) — used
-        for the between-tool-batches "Continuing…" state; ``show_label=False``
-        skips the ``◆ Velune`` header so continuation turns of one response
-        don't repeat it.
+        ``text`` seeds the spinner verb (empty -> the shuffled verb pool);
+        ``cycle=False`` pins the verb (only the spinner glyph animates) -- used
+        for the between-tool-batches "Continuing..." state. ``show_label`` is
+        kept for caller compatibility; responses no longer carry a name header.
         """
         self._history_started = True
         self._append_gap()
-        if show_label:
-            self._lines.append(
-                _Line(
-                    "◆ Velune",
-                    "class:conversation.assistant.label",
-                    fragments=[
-                        ("class:conversation.assistant.diamond", "◆ "),
-                        ("class:conversation.assistant.label", "Velune"),
-                    ],
-                )
-            )
         self._stream_start = len(self._lines)
         self._thinking_idx = 0
         self._stream_text = text or self._thinking_words[0]
@@ -1022,6 +1010,10 @@ class FullscreenREPLUI:
             self._thinking_task = None
 
         if self._stream_start is None:
+            if not text.strip():
+                # A late empty update after the block closed would otherwise
+                # reopen a blank "..." response.
+                return
             self.begin_assistant()
             if self._thinking_task:
                 self._thinking_task.cancel()
