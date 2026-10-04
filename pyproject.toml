@@ -8,9 +8,12 @@ dynamic = ["version"]
 description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [
+  { name = "Surya HA", email = "suryahariharan2006@gmail.com" }
+]
+maintainers = [
   { name = "Surya HA", email = "suryahariharan2006@gmail.com" }
 ]
 keywords = [
@@ -168,6 +171,9 @@ include = [
   "velune/",
   "README.md",
   "LICENSE",
+  "NOTICE",
+  "AUTHORS.md",
+  "GOVERNANCE.md",
   "CHANGELOG.md",
   "pyproject.toml",
 ]

@@ -18,6 +18,25 @@ No cloud required. No quota. No lock-in.
 
 ---
 
+## Project identity
+
+Velune CLI is an open-source project originally created and maintained by
+**Surya HA**. This repository is the canonical Velune CLI repository; official
+releases are the tags and GitHub Releases published here and the
+[`velune-cli`](https://pypi.org/project/velune-cli/) package on PyPI.
+
+- **Source code: Apache-2.0.** You are free to use, modify, fork, and
+  redistribute it under the terms of the [license](LICENSE) (keep the
+  copyright and [NOTICE](NOTICE) attributions).
+- **Project identity.** The Velune name, wordmark, logo, and branding are not
+  licensed by Apache-2.0 (see [NOTICE](NOTICE) and the [License](#license)
+  section). Forks are welcome; they are simply not the canonical project.
+
+See [AUTHORS.md](AUTHORS.md), [GOVERNANCE.md](GOVERNANCE.md), and
+[docs/project-origin.md](docs/project-origin.md).
+
+---
+
 ## Contents
 
 - [What it does](#what-it-does)

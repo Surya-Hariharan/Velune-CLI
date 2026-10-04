@@ -591,6 +591,24 @@ Include the exact command that failed, the full error message (run with
 
 ---
 
+## Licensing of contributions
+
+By submitting a pull request you confirm that:
+
+- you wrote the contribution or otherwise have the right to submit it, and it
+  does not include code you are not permitted to license (including code
+  copied from incompatible-licensed or proprietary sources);
+- your contribution is submitted under, and will be distributed under, the
+  project's [Apache License 2.0](LICENSE) (Section 5 of that license);
+- you keep whatever rights you hold in your own contribution; and
+- contributing does not make you a co-owner of the overall Velune CLI project,
+  its name, or its canonical repository. Contributors are credited through the
+  Git history and [AUTHORS.md](AUTHORS.md). See also [GOVERNANCE.md](GOVERNANCE.md).
+
+There is no separate CLA.
+
+---
+
 ## Code of conduct
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).

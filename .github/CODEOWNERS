@@ -1,0 +1,7 @@
+# Canonical maintainer reviews everything, with explicit coverage of the
+# files that define licensing, packaging, and release behavior.
+*                   @Surya-Hariharan
+/.github/           @Surya-Hariharan
+/pyproject.toml     @Surya-Hariharan
+/LICENSE            @Surya-Hariharan
+/NOTICE             @Surya-Hariharan
