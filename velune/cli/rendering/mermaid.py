@@ -15,12 +15,34 @@ from rich.text import Text
 from velune.cli import design
 
 _HEADER = re.compile(r"^(?:graph|flowchart)\b", re.IGNORECASE)
-_ARROW = re.compile(r"\s*(?:-->|---|-\.->|==>|--o|--x)\s*(?:\|([^|]*)\|)?\s*")
+# Flowchart link operators, longest first so "-.->" wins over "---" at the same spot.
+_ARROWS = ("-" * 2 + ">", "-" * 3, "-." + "-" + ">", "=" * 2 + ">", "--o", "--x")
 _NODE = re.compile(
     r"^\s*([A-Za-z0-9_]+)\s*"
     r"(?:\[\[?(.*?)\]?\]|\(\((.*?)\)\)|\((.*?)\)|\{(.*?)\}|>(.*?)\])?\s*$"
 )
 _MAX_NODES = 60
+
+
+def _split_chain(stmt: str) -> tuple[list[str], list[str]]:
+    """Split ``A --> B -->|text| C`` into node tokens and the labels between them."""
+    nodes: list[str] = []
+    labels: list[str] = []
+    rest = stmt
+    while True:
+        found = [(rest.find(a), a) for a in _ARROWS if a in rest]
+        if not found:
+            nodes.append(rest)
+            return nodes, labels
+        # earliest operator; prefer the longest when several start at the same index
+        pos, arrow = min(found, key=lambda f: (f[0], -len(f[1])))
+        nodes.append(rest[:pos])
+        rest = rest[pos + len(arrow) :].lstrip()
+        label = ""
+        if rest.startswith("|") and "|" in rest[1:]:
+            end = rest.index("|", 1)
+            label, rest = rest[1:end], rest[end + 1 :]
+        labels.append(label)
 
 
 def _parse(source: str) -> tuple[dict[str, str], list[tuple[str, str, str]]] | None:
@@ -44,10 +66,7 @@ def _parse(source: str) -> tuple[dict[str, str], list[tuple[str, str, str]]] | N
     for stmt in statements[1:]:
         if stmt.lower().startswith(("subgraph", "end", "style", "classdef", "class ", "click")):
             continue
-        pieces = _ARROW.split(stmt)
-        # split() with one capture group yields [node, label, node, label, node...]
-        node_tokens = pieces[0::2]
-        arrow_labels = pieces[1::2]
+        node_tokens, arrow_labels = _split_chain(stmt)
         ids = [node(t) for t in node_tokens]
         if any(i is None for i in ids):
             return None
