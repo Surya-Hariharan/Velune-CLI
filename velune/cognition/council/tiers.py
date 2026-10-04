@@ -75,9 +75,7 @@ def classify_task_tier(
 
     # 2. Heuristics with queue depth checks to avoid CPU starvation
     # INSTANT: read-only, explanation, or trivial
-    if word_count < 20 and (
-        intent_hint in _INSTANT_INTENTS or _INSTANT_PATTERN.search(normalized)
-    ):
+    if word_count < 20 and (intent_hint in _INSTANT_INTENTS or _INSTANT_PATTERN.search(normalized)):
         return _apply_ceiling(CouncilTier.INSTANT, max_council_tier)
 
     # MINIMAL: simple bug fixes, typos, comment edits

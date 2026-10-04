@@ -263,9 +263,7 @@ def verify_trace_against_contract(trace, tier: CouncilTier) -> ContractVerdict:
         )
 
     coder_primary = [
-        c
-        for c in deliberations
-        if c.seat == SEAT_CODER and c.reason is not CallReason.REVISION
+        c for c in deliberations if c.seat == SEAT_CODER and c.reason is not CallReason.REVISION
     ]
     if len(coder_primary) > contract.coder_samples:
         verdict.violations.append(

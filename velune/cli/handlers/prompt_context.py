@@ -127,7 +127,9 @@ async def build_turn_context(
     #   - REPOSITORY_SNAPSHOT / ARCHITECTURAL_DRIFT
     hybrid_chunks, memory_chunks, continuity_chunk, repo_chunks = await asyncio.gather(
         _retrieve_hybrid(repl, text, depth, intent, confidence),
-        retrieve_memory_context(repl.container, text, workspace, depth, budget.retrieval_allocation),
+        retrieve_memory_context(
+            repl.container, text, workspace, depth, budget.retrieval_allocation
+        ),
         _lineage_chunk(repl, text),
         _repository_snapshot_chunks(repl, repo_snapshot_budget),
     )

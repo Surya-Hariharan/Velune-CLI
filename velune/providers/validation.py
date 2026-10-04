@@ -789,7 +789,7 @@ async def validate_provider(provider_id: str, api_key: str = "") -> ValidationRe
             )
     try:
         return await asyncio.wait_for(validator(api_key), timeout=15.0)
-    except TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):  # distinct classes before 3.11
         return ValidationResult(
             provider_id=provider_id,
             status=ValidationStatus.NETWORK_ERROR,

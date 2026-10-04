@@ -37,7 +37,7 @@ from velune._compat import StrEnum
 # across asyncio tasks spawned by the scheduler, which inherit the context at
 # creation time, so a trace set at the top of a request is visible to every
 # seat beneath it without threading an argument through every call site.
-_active_trace: contextvars.ContextVar["RequestTrace | None"] = contextvars.ContextVar(
+_active_trace: contextvars.ContextVar[RequestTrace | None] = contextvars.ContextVar(
     "velune_request_trace", default=None
 )
 _active_seat: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -157,9 +157,7 @@ class RequestTrace:
 
     # ── graph construction ────────────────────────────────────────────────
 
-    def open_node(
-        self, type: NodeType, label: str, parent_id: str | None = None
-    ) -> ExecutionNode:
+    def open_node(self, type: NodeType, label: str, parent_id: str | None = None) -> ExecutionNode:
         node = ExecutionNode(
             node_id=f"n{len(self.nodes)}",
             parent_id=parent_id or _active_node.get() or self._root.node_id,
@@ -342,9 +340,7 @@ def render_trace_dict(data: dict) -> str:
 
     def walk(node: dict, depth: int) -> None:
         pad = "  " * (depth + 1)
-        lines.append(
-            f"{pad}├── {node['label']} [{node['status']}] {node['duration_ms']:.0f}ms"
-        )
+        lines.append(f"{pad}├── {node['label']} [{node['status']}] {node['duration_ms']:.0f}ms")
         for call_id in node.get("provider_call_ids", []):
             call = calls_by_id.get(call_id)
             if call is None:
@@ -362,7 +358,9 @@ def render_trace_dict(data: dict) -> str:
 
     unexplained = data.get("unexplained_calls", [])
     if unexplained:
-        lines.append(f"  WARNING: {len(unexplained)} unexplained repeat call(s): " + ", ".join(unexplained))
+        lines.append(
+            f"  WARNING: {len(unexplained)} unexplained repeat call(s): " + ", ".join(unexplained)
+        )
     else:
         lines.append("  All provider calls accounted for.")
     return "\n".join(lines)
@@ -433,7 +431,7 @@ class trace_seat:
         self._seat_token: contextvars.Token | None = None
         self._reason_token: contextvars.Token | None = None
 
-    def __enter__(self) -> "trace_seat":
+    def __enter__(self) -> trace_seat:
         self._seat_token = _active_seat.set(self.seat)
         self._reason_token = _active_reason.set(self.reason)
         return self

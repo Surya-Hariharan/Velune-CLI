@@ -161,8 +161,7 @@ async def _ask_with_runtime(
     if memory_chunks:
         memory_text = "\n\n".join(f"[{c.source}] {c.content}" for c in memory_chunks)
         formatted_snap = (
-            f"{formatted_snap}\n\n[RELEVANT MEMORY]\n"
-            f"{_wrap_memory_content(firewall, memory_text)}"
+            f"{formatted_snap}\n\n[RELEVANT MEMORY]\n{_wrap_memory_content(firewall, memory_text)}"
         )
 
     # 5. deliberating debate loop

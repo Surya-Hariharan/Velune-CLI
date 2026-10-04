@@ -820,11 +820,6 @@ class CouncilOrchestrator:
         """Consolidated orchestrator execution path for all tiers."""
         import uuid
 
-        from velune.cognition.council.messages import (
-            ChallengerMessage,
-            CriticMessage,
-            ReviewerMessage,
-        )
         from velune.cognition.council.contracts import (
             SEAT_CHALLENGER,
             SEAT_MAINTAINABILITY,
@@ -832,6 +827,11 @@ class CouncilOrchestrator:
             SEAT_SCALABILITY,
             SEAT_SECURITY,
             contract_for,
+        )
+        from velune.cognition.council.messages import (
+            ChallengerMessage,
+            CriticMessage,
+            ReviewerMessage,
         )
         from velune.cognition.execution_trace import (
             CallReason,
@@ -902,16 +902,12 @@ class CouncilOrchestrator:
             # Reviewer" while activating a planner, three coder samples, four
             # critics, and a synthesizer). One table now decides both.
             coder = self.agent_factory.create_coder(run_id)
-            planner = (
-                self.agent_factory.create_planner(run_id) if contract.uses_planner else None
-            )
+            planner = self.agent_factory.create_planner(run_id) if contract.uses_planner else None
             reviewer = (
                 self.agent_factory.create_reviewer(run_id) if contract.uses_reviewer else None
             )
             synthesizer = (
-                self.agent_factory.create_synthesizer(run_id)
-                if contract.uses_synthesizer
-                else None
+                self.agent_factory.create_synthesizer(run_id) if contract.uses_synthesizer else None
             )
 
             challenger = (
@@ -1370,9 +1366,7 @@ class CouncilOrchestrator:
                             # The Coder re-executing here is a REVISION driven by
                             # named critic objections, never a bare repeat.
                             with (
-                                trace_node(
-                                    NodeType.DEBATE, f"debate turn {debate_turn}"
-                                ),
+                                trace_node(NodeType.DEBATE, f"debate turn {debate_turn}"),
                                 trace_seat("coder", CallReason.REVISION),
                             ):
                                 refined_proposal = await asyncio.wait_for(
@@ -1421,14 +1415,14 @@ class CouncilOrchestrator:
                                         task=prompt, proposal=_rp, context=repo_context
                                     )
 
-                            re_jobs.append(
+                            re_jobs.append(  # noqa: B023 - list is created and consumed within this same loop iteration
                                 CouncilJob(
                                     name=name,
                                     provider_id=agent.model.provider_id,
                                     run=_run,
                                 )
                             )
-                            re_critics.append(name)
+                            re_critics.append(name)  # noqa: B023 - same-iteration list, see above
 
                         _revision_job("reviewer", reviewer, reviewer_report, refined_proposal)
                         _revision_job(
@@ -1561,9 +1555,7 @@ class CouncilOrchestrator:
                 scalability_report=scalability_report if scalability_critic else None,
                 security_report=security_report if security_critic else None,
                 performance_report=performance_report if performance_critic else None,
-                maintainability_report=(
-                    maintainability_report if maintainability_critic else None
-                ),
+                maintainability_report=(maintainability_report if maintainability_critic else None),
                 shi=shi,
                 candidates=candidate_pool,
             )
@@ -1688,9 +1680,7 @@ class CouncilOrchestrator:
             # hardcoded "1 + 1 + 4" against tier_level and disagreed with the
             # run it was describing.
             _agent_count = len(contract.required_seats)
-            _actual_calls = (
-                len(request_trace.calls) if request_trace is not None else _agent_count
-            )
+            _actual_calls = len(request_trace.calls) if request_trace is not None else _agent_count
             if progress_callback:
                 progress_callback(
                     f"[Usage] ~{_total_prompt + _total_completion:,} tokens "
@@ -1739,8 +1729,6 @@ class CouncilOrchestrator:
                 ),
                 "arbitration": arbitration.to_dict(),
                 "final_summary": final_summary,
-                "execution_trace": (
-                    request_trace.to_dict() if request_trace is not None else None
-                ),
+                "execution_trace": (request_trace.to_dict() if request_trace is not None else None),
                 "contract_verdict": contract_verdict,
             }
