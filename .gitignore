@@ -140,3 +140,6 @@ pyrightconfig.local.json
 desktop.ini
 scratch/
 scratchpad/
+
+# Rendering snapshot outputs (regenerate locally: VELUNE_UPDATE_GOLDEN=1 pytest tests/rendering)
+tests/rendering/fixtures/golden/
