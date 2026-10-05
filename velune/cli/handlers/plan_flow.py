@@ -94,9 +94,32 @@ def before_turn(repl: VeluneREPL, text: str) -> str | None:
         )
     return (
         "PLAN MODE. Investigate with read-only tools (read files, search, git status/diff, "
-        "read-only commands). Then write a plan with the write_plan tool using exactly "
-        "these sections, and stop — do not change project files:\n" + PLAN_TEMPLATE
+        "read-only commands). Then you MUST save the plan by calling the write_plan tool "
+        "(do not just print it), using exactly these sections, and stop — do not change "
+        "project files:\n" + PLAN_TEMPLATE
     )
+
+
+def looks_like_plan(text: str) -> bool:
+    """A plan printed as text: at least two of the template's main sections."""
+    lowered = text.lower()
+    markers = ("## files affected", "## proposed changes", "## execution order", "## objective")
+    return sum(marker in lowered for marker in markers) >= 2
+
+
+def save_text_plan(pm: PlanManager, text: str) -> Path:
+    """Save a plan the model printed (instead of calling write_plan) as the active plan."""
+    import re
+
+    from velune.permissions.plans import WAITING, parse_status, set_status, slugify
+
+    title = re.search(r"^##\s*Objective\s*\n+(.+)$", text, re.M | re.I)
+    name = slugify(title.group(1)[:50] if title else "plan")
+    path = pm.plans_dir / f"{name}.md"
+    pm.plans_dir.mkdir(parents=True, exist_ok=True)
+    body = text if parse_status(text) == WAITING else set_status(text, WAITING)
+    path.write_text(body.rstrip() + "\n", encoding="utf-8")
+    return path
 
 
 def after_turn(repl: VeluneREPL, assistant_text: str) -> None:
@@ -111,6 +134,10 @@ def after_turn(repl: VeluneREPL, assistant_text: str) -> None:
         )
         return
     written = pm.newest_written_this_turn()
+    if written is None and pm.active is None and looks_like_plan(assistant_text):
+        # The model printed the plan instead of calling write_plan. Velune saves
+        # it itself (its own plans dir) so the approve/revise flow still works.
+        written = save_text_plan(pm, assistant_text)
     if written is None:
         return
     revised = pm.active is not None and written == pm.active

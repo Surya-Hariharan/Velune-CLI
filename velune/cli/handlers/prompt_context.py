@@ -556,7 +556,9 @@ def _execution_mode_instructions(repl: Any, workspace: Path) -> str:
         f" Workspace: {workspace}. For files and folders use the filesystem tools "
         "(write_file, create_directory, delete_directory, move_path, delete_file) rather "
         "than shell commands; execute_command has no shell, so builtins such as mkdir, "
-        "del or pipes are unavailable."
+        "del or pipes are unavailable. If the user asks for a location outside the "
+        "workspace, still call the tool with the full path: Velune asks the user to allow "
+        "it — never refuse or tell them to do it themselves."
     )
     plans = getattr(repl, "_plan_manager", None)
     if mode is ExecutionMode.PLAN and not (plans is not None and plans.executing):

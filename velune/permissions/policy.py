@@ -95,9 +95,15 @@ def _decide_one(action: Action, state: PolicyState) -> tuple[Verdict, str]:
         return Verdict.DENY, f"blocked in every mode: {action.reason or action.target}"
 
     if action.action_type is ActionType.WRITE_PLAN:
-        if _in_plans_dir(action, state):
+        if not _in_plans_dir(action, state):
+            return Verdict.DENY, "plans can only be written under .velune/plans/"
+        if state.mode is ExecutionMode.PLAN and not state.plan_executing:
             return Verdict.ALLOW, "plan file"
-        return Verdict.DENY, "plans can only be written under .velune/plans/"
+        # Outside planning a plan file is an ordinary file write: MANUAL asks,
+        # AUTO allows (the model once wrote a plan after a MANUAL rejection).
+        if state.mode is ExecutionMode.AUTO:
+            return Verdict.ALLOW, "plan file (auto)"
+        return Verdict.ASK, "writes a plan file outside plan mode"
 
     sensitive = action.secret or action.outside_workspace or action.risk is Risk.HIGH
 

@@ -240,3 +240,23 @@ def test_write_plan_is_in_the_real_registry(tmp_path):
     container = SimpleNamespace(get=lambda k: services[k], has=lambda k: k in services)
     reg = _create_tool_registry(SimpleNamespace(workspace=tmp_path, container=container))
     assert "write_plan" in reg.list_tools()
+
+
+def test_a_plan_printed_as_text_is_saved_by_velune(tmp_path):
+    """Seen live: the model printed the plan instead of calling write_plan, so the
+    approve/revise flow had no plan and 'approve' was treated as a new task."""
+    repl = _repl(tmp_path)
+    plan_flow.before_turn(repl, "fix add()")
+    plan_flow.after_turn(repl, PLAN.replace("Fix token expiry.", "Fix the add function"))
+    pm = repl._plan_manager
+    assert pm.waiting and pm.active.name == "fix-the-add-function.md"
+    assert "Plan created" in repl.output.getvalue()
+    # ...and the next message is now correctly understood as approval.
+    assert plan_flow.before_turn(repl, "approve").startswith("The user APPROVED")
+
+
+def test_ordinary_answers_are_not_mistaken_for_plans(tmp_path):
+    repl = _repl(tmp_path)
+    plan_flow.before_turn(repl, "what does calc.py do?")
+    plan_flow.after_turn(repl, "## Objective\ncalc.py adds numbers.")
+    assert repl._plan_manager.active is None

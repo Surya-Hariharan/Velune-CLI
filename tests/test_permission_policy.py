@@ -201,3 +201,11 @@ def test_boundary_task_grants(tmp_path):
 )
 def test_secret_paths(path, secret):
     assert is_secret_path(Path(path)) is secret
+
+
+def test_plan_files_are_only_free_while_planning():
+    """Seen live: after a MANUAL rejection the model wrote a plan file unasked."""
+    plan = _act(ActionType.WRITE_PLAN, ".velune/plans/x.md")
+    assert decide([plan], _state(ExecutionMode.PLAN)).verdict is Verdict.ALLOW
+    assert decide([plan], _state(ExecutionMode.MANUAL)).verdict is Verdict.ASK
+    assert decide([plan], _state(ExecutionMode.AUTO)).verdict is Verdict.ALLOW
