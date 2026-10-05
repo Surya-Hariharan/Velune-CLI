@@ -28,7 +28,12 @@ updates:
       # migration is deliberately deferred, so stop proposing the major
       # bump every cycle (PR #17); minor/patch bumps within <2.0.0 are
       # still welcome.
+      # `update-types` alone did not stop PR #21, which *widened* the allowed
+      # range to <3.0.0 instead of proposing a major update. Verified: with
+      # mcp 2.3.0 `Server.list_tools`/`call_tool` no longer exist and the
+      # server integration tests fail. Ignore the versions explicitly.
       - dependency-name: "mcp"
+        versions: [">=2.0.0"]
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
