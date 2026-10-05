@@ -21,35 +21,38 @@ doctor_cmd = typer.Typer(help="Check that providers, models, and paths are healt
 def doctor_main(
     ctx: typer.Context,
     perf: bool = typer.Option(False, "--perf", help="Check startup performance"),
+    fix: bool = typer.Option(False, "--fix", help="Attempt to fix issues automatically"),
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
 ) -> None:
-    """Callback for doctor command group to enable startup performance diagnostics."""
-    if ctx.invoked_subcommand is None:
-        if perf:
-            import time
+    """Diagnose this Velune installation (run with no subcommand)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if perf:
+        import time
 
-            from velune.core.startup_profiler import _PROCESS_START
+        from velune.core.startup_profiler import _PROCESS_START
 
-            startup_time_ms = (time.perf_counter() - _PROCESS_START) * 1000.0
+        startup_time_ms = (time.perf_counter() - _PROCESS_START) * 1000.0
 
-            if json_output:
-                import json
+        if json_output:
+            import json
 
-                print(
-                    json.dumps(
-                        {
-                            "startup_time_ms": round(startup_time_ms, 2),
-                            "status": "ok" if startup_time_ms < 3000 else "fail",
-                        }
-                    )
+            print(
+                json.dumps(
+                    {
+                        "startup_time_ms": round(startup_time_ms, 2),
+                        "status": "ok" if startup_time_ms < 3000 else "fail",
+                    }
                 )
-            else:
-                status = "OK" if startup_time_ms < 3000 else "FAIL"
-                console.print(f"Startup performance: {startup_time_ms:.2f}ms [{status}]")
-            raise typer.Exit()
+            )
         else:
-            console.print(ctx.get_help())
-            raise typer.Exit()
+            status = "OK" if startup_time_ms < 3000 else "FAIL"
+            console.print(f"Startup performance: {startup_time_ms:.2f}ms [{status}]")
+        raise typer.Exit()
+    # Bare `velune doctor` is the documented entry point, so it runs the
+    # diagnostics (it used to print help, which sent users looking for
+    # `doctor check`). JSON here is the richer envelope with the environment.
+    _run_doctor(fix=fix, json_output=json_output, envelope=True)
 
 
 @doctor_cmd.command(name="providers")
@@ -125,47 +128,29 @@ def check(
     fix: bool = typer.Option(False, "--fix", help="Attempt to fix issues automatically"),
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
 ) -> None:
-    """Run Velune environment health checks."""
-    if fix:
-        console.print("[yellow]Attempting automatic fixes...[/yellow]")
+    """Run Velune environment health checks (same as bare `velune doctor`)."""
+    # JSON stays the bare results list here for backward compatibility.
+    _run_doctor(fix=fix, json_output=json_output, envelope=False)
 
-        # Fix 1: Create .velune/ directory
-        velune_dir = Path.cwd() / ".velune"
-        if not velune_dir.exists():
-            try:
-                velune_dir.mkdir(parents=True, exist_ok=True)
-                console.print("[green]Created .velune/ directory.[/green]")
-            except Exception as e:
-                console.print(f"[red]Failed to create .velune/: {e}[/red]")
 
-        # Fix 2: Create default velune.toml if missing
-        config_file = Path.cwd() / "velune.toml"
-        if not config_file.exists():
-            try:
-                import toml  # type: ignore[import-untyped]
+# Checks that decide whether the *installation* works. Everything else is an
+# optional integration (providers, local model servers, extras, GPU, keys…):
+# reported, but never a reason for a non-zero exit or an "unhealthy" verdict.
+CORE_CHECKS = frozenset(
+    {
+        "Python Version",
+        "Console Launcher",
+        "Scripts on PATH",
+        "pip Available",
+        "Core Dependencies",
+        "Velune Data Directories Writable",
+        "SQLite DB Initializable",
+    }
+)
 
-                from velune.kernel.config import get_default_config
 
-                default_config = get_default_config()
-                with open(config_file, "w", encoding="utf-8") as f:
-                    toml.dump(default_config.model_dump(), f)
-                console.print("[green]Created default velune.toml config file.[/green]")
-            except Exception as e:
-                console.print(f"[red]Failed to create default velune.toml: {e}[/red]")
-
-        # Fix 3: Initialize databases
-        db_file = velune_dir / "velune_cognitive_core.db"
-        try:
-            from velune.telemetry.cognition import CognitivePerformanceAnalytics
-
-            CognitivePerformanceAnalytics(db_path=db_file)
-            console.print("[green]SQLite database successfully initialized.[/green]")
-        except Exception as e:
-            console.print(f"[red]Failed to initialize SQLite database: {e}[/red]")
-
-        console.print("[yellow]Re-running checks after fixes...[/yellow]\n")
-
-    checks = [
+def _all_checks() -> list:
+    return [
         _check_python_version,
         _check_console_launcher,
         _check_scripts_on_path,
@@ -199,11 +184,13 @@ def check(
         _check_terminal_zoom_lock,
     ]
 
+
+def _run_checks(checks: list) -> list[dict]:
+    """Run each check; a check that raises becomes an ``error`` row, never a crash."""
     results = []
     for check_fn in checks:
         try:
-            result = check_fn()
-            results.append(result)
+            results.append(check_fn())
         except Exception as e:
             results.append(
                 {
@@ -212,22 +199,163 @@ def check(
                     "message": str(e),
                 }
             )
+    return results
+
+
+def _environment_summary() -> dict[str, str]:
+    """Facts about this installation — what a bug report or support question needs first."""
+    import platform
+
+    from platformdirs import user_config_dir
+
+    import velune
+    from velune.core.paths import app_data_root
+
+    return {
+        "velune_version": velune.__version__,
+        "python": f"{platform.python_implementation()} {platform.python_version()}",
+        "python_executable": sys.executable,
+        "os": platform.platform(terse=True),
+        "architecture": platform.machine() or "unknown",
+        "install_location": str(Path(velune.__file__).resolve().parent),
+        "velune_command": shutil.which("velune") or "not on PATH (use 'python -m velune')",
+        "config_dir": user_config_dir("Velune"),
+        "data_dir": str(app_data_root()),
+    }
+
+
+def _verdict(results: list[dict]) -> dict:
+    """Split results into core (installation) vs optional and decide health."""
+    core_failed = [
+        r["name"] for r in results if r["name"] in CORE_CHECKS and r["status"] in ("fail", "error")
+    ]
+    core_warned = [r["name"] for r in results if r["name"] in CORE_CHECKS and r["status"] == "warn"]
+    optional = [
+        r["name"]
+        for r in results
+        if r["name"] not in CORE_CHECKS and r["status"] in ("warn", "fail", "error")
+    ]
+    return {
+        "core_healthy": not core_failed,
+        "core_failed": core_failed,
+        "core_warnings": core_warned,
+        "optional_attention": optional,
+    }
+
+
+def _render_environment(env: dict[str, str], out: Console | None = None) -> None:
+    from rich.panel import Panel
+
+    from velune.cli import design
+
+    out = out or console
+    labels = {
+        "velune_version": "Velune",
+        "python": "Python",
+        "python_executable": "Interpreter",
+        "os": "OS",
+        "architecture": "Architecture",
+        "install_location": "Installed at",
+        "velune_command": "velune command",
+        "config_dir": "Config dir",
+        "data_dir": "Data dir",
+    }
+    table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+    table.add_column("key", style=f"bold {design.MUTED}", no_wrap=True)
+    table.add_column("value", style=design.MUTED)
+    for key, label in labels.items():
+        table.add_row(label, env.get(key, ""))
+    out.print()
+    out.print(
+        Panel(table, title="[bold]Environment[/bold]", border_style=design.FAINT, padding=(0, 1))
+    )
+
+
+def _render_verdict(verdict: dict, out: Console | None = None, *, fix_hint: bool = True) -> None:
+    out = out or console
+    if verdict["core_healthy"]:
+        out.print("\n[green]✓ Core installation is healthy.[/green]")
+        if verdict["core_warnings"]:
+            out.print(
+                f"[yellow]  Notes: {', '.join(verdict['core_warnings'])} (see above).[/yellow]"
+            )
+    else:
+        out.print(
+            f"\n[red]✗ Core installation has problems: {', '.join(verdict['core_failed'])}.[/red]"
+        )
+        if fix_hint:
+            out.print("[dim]Run 'velune doctor --fix' to attempt automatic fixes.[/dim]")
+    n = len(verdict["optional_attention"])
+    if n:
+        out.print(
+            f"[dim]{n} optional integration{'s' if n != 1 else ''} need"
+            f"{'s' if n == 1 else ''} attention — these don't affect the core "
+            f"installation.[/dim]"
+        )
+
+
+def _apply_fixes() -> None:
+    console.print("[yellow]Attempting automatic fixes...[/yellow]")
+
+    # Fix 1: Create .velune/ directory
+    velune_dir = Path.cwd() / ".velune"
+    if not velune_dir.exists():
+        try:
+            velune_dir.mkdir(parents=True, exist_ok=True)
+            console.print("[green]Created .velune/ directory.[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to create .velune/: {e}[/red]")
+
+    # Fix 2: Create default velune.toml if missing
+    config_file = Path.cwd() / "velune.toml"
+    if not config_file.exists():
+        try:
+            import toml  # type: ignore[import-untyped]
+
+            from velune.kernel.config import get_default_config
+
+            default_config = get_default_config()
+            with open(config_file, "w", encoding="utf-8") as f:
+                toml.dump(default_config.model_dump(), f)
+            console.print("[green]Created default velune.toml config file.[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to create default velune.toml: {e}[/red]")
+
+    # Fix 3: Initialize databases
+    db_file = velune_dir / "velune_cognitive_core.db"
+    try:
+        from velune.telemetry.cognition import CognitivePerformanceAnalytics
+
+        CognitivePerformanceAnalytics(db_path=db_file)
+        console.print("[green]SQLite database successfully initialized.[/green]")
+    except Exception as e:
+        console.print(f"[red]Failed to initialize SQLite database: {e}[/red]")
+
+    console.print("[yellow]Re-running checks after fixes...[/yellow]\n")
+
+
+def _run_doctor(*, fix: bool, json_output: bool, envelope: bool) -> None:
+    """Run all checks, render them, and exit non-zero only if the core install is broken."""
+    if fix:
+        _apply_fixes()
+
+    results = _run_checks(_all_checks())
+    verdict = _verdict(results)
 
     if json_output:
         import json
 
-        print(json.dumps(results, indent=2))
-        return
-
-    _render_results(results)
-
-    failures = [r for r in results if r["status"] == "fail"]
-    if failures:
-        console.print(f"\n[red]{len(failures)} check(s) failed.[/red]")
-        console.print("[dim]Run 'velune doctor --fix' to attempt automatic fixes.[/dim]")
-        raise typer.Exit(1)
+        payload: object = results
+        if envelope:
+            payload = {"environment": _environment_summary(), **verdict, "checks": results}
+        print(json.dumps(payload, indent=2))
     else:
-        console.print("\n[green]All checks passed. Velune is ready.[/green]")
+        _render_environment(_environment_summary())
+        _render_results(results)
+        _render_verdict(verdict)
+
+    if not verdict["core_healthy"]:
+        raise typer.Exit(1)
 
 
 def _check_python_version() -> dict:
@@ -242,16 +370,50 @@ def _check_python_version() -> dict:
     }
 
 
-def _check_console_launcher() -> dict:
-    """Verify the generated ``velune`` launcher resolves and points at *this*
-    interpreter.
+def _launcher_interpreter(launcher: str) -> str | None:
+    """Return the Python interpreter a console-script launcher runs, if recognisable.
 
-    On Windows the ``velune.exe`` launcher embeds the absolute path of the
-    interpreter present at install time. If that interpreter is later upgraded,
-    moved, or uninstalled, the launcher fails with "cannot locate pythonXY.dll
-    (126)". We can't run the broken launcher safely, but we *can* detect that
-    the command on PATH belongs to a different interpreter than the one running
-    ``doctor`` — the strongest in-process signal that a reinstall is needed.
+    Launchers record their interpreter explicitly, so this is exact rather than
+    guessed from directory layout:
+
+    * Windows ``velune.exe`` (pip/distlib and uv trampolines alike) embeds a
+      ``#!C:\\...\\python.exe`` line in the executable's payload;
+    * POSIX launchers start with a shebang (``#!/path/bin/python``), or with
+      pip's ``#!/bin/sh`` + triple-quoted ``exec '/path/python' ...`` form for
+      long or space-containing paths. pipx / uv-tool symlinks are followed by
+      reading the file.
+    """
+    import re
+
+    try:
+        data = Path(launcher).read_bytes()
+    except OSError:
+        return None
+    exec_form = re.search(rb"exec' '?([^'\r\n]*?python[\w.]*)'?", data[:4096])
+    if exec_form:
+        return exec_form.group(1).decode(errors="replace")
+    shebangs = re.findall(rb'#!"?([^\r\n"\x00]*?pythonw?[0-9.]*(?:\.exe)?)"?(?=[\s"\x00]|$)', data)
+    return shebangs[-1].decode(errors="replace") if shebangs else None
+
+
+def _same_path(a: str, b: str) -> bool:
+    # Compare without resolving symlinks: two venvs built from one base Python
+    # resolve to the same binary yet are different installations.
+    import os
+
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def _check_console_launcher() -> dict:
+    """Verify the ``velune`` command on PATH launches *this* installation.
+
+    The launcher embeds the absolute path of the interpreter present at install
+    time. If that interpreter is later upgraded, moved, or uninstalled, the
+    launcher fails with "cannot locate pythonXY.dll (126)" on Windows; if PATH
+    finds another install's launcher, the user runs a different Velune than the
+    one they upgraded. Reading the launcher's recorded interpreter is exact and
+    also correct for pipx / ``uv tool`` installs, whose launchers live in a
+    shared bin directory (``~/.local/bin``) rather than next to the interpreter.
     """
     launcher = shutil.which("velune")
     if not launcher:
@@ -265,10 +427,26 @@ def _check_console_launcher() -> dict:
             ),
         }
 
+    target = _launcher_interpreter(launcher)
+    if target is not None:
+        if _same_path(target, sys.executable):
+            return {
+                "name": "Console Launcher",
+                "status": "ok",
+                "message": f"{launcher} runs this installation",
+            }
+        return {
+            "name": "Console Launcher",
+            "status": "warn",
+            "message": (
+                f"'velune' on PATH ({launcher}) runs a different Python ({target}), "
+                f"not this installation ({sys.executable}). If it errors or is out of "
+                f"date, run 'python -m velune' or reinstall."
+            ),
+        }
+
+    # Unrecognised launcher format: fall back to the directory-layout heuristic.
     scripts_dir = Path(sys.executable).parent
-    # The launcher for the running interpreter lives next to python.exe (in
-    # Scripts/ or bin/). If the resolved launcher is elsewhere, PATH is pointing
-    # at a different (possibly stale) install.
     launcher_parent = Path(launcher).resolve().parent
     expected_dirs = {
         scripts_dir.resolve(),
@@ -294,9 +472,24 @@ def _check_console_launcher() -> dict:
 
 
 def _check_scripts_on_path() -> dict:
-    """Check that the interpreter's Scripts/bin directory is on PATH so that
-    console entry points (``velune``) are runnable as bare commands."""
+    """Check that this installation's ``velune`` command is reachable from PATH.
+
+    Satisfied either by a launcher on PATH that runs this interpreter (the
+    pipx / ``uv tool`` layout: launcher in a shared bin dir, interpreter in a
+    private env whose Scripts dir is correctly *not* on PATH), or by the
+    interpreter's own Scripts/bin directory being on PATH (pip / venv layout).
+    """
     import os
+
+    launcher = shutil.which("velune")
+    if launcher:
+        target = _launcher_interpreter(launcher)
+        if target is not None and _same_path(target, sys.executable):
+            return {
+                "name": "Scripts on PATH",
+                "status": "ok",
+                "message": f"{Path(launcher).parent} is on PATH",
+            }
 
     base = Path(sys.executable).parent
     scripts_dir = base / "Scripts" if sys.platform == "win32" else base
@@ -361,7 +554,7 @@ def _check_core_dependencies() -> dict:
         raw_reqs = []  # running from a source tree that was never installed
     try:
         from packaging.requirements import Requirement
-    except ImportError:  # packaging is not a core dependency; degrade to presence-only
+    except ImportError:  # broken env: packaging is itself a core dependency
         Requirement = None  # noqa: N806
 
     missing: list[str] = []
@@ -374,7 +567,10 @@ def _check_core_dependencies() -> dict:
                 continue  # optional extra, or another Python version's line
             name, spec = req.name, req.specifier
         else:
-            if "extra ==" in raw:
+            # Without packaging we cannot evaluate markers, so skip every
+            # conditional line (extras, per-Python floors) rather than report a
+            # false "missing" — e.g. `tomli; python_version < '3.11'` on 3.14.
+            if ";" in raw:
                 continue
             name, spec = re.split(r"[\s<>=!~;\[(]", raw, maxsplit=1)[0], None
         if name in seen:
@@ -554,49 +750,77 @@ def _check_anthropic_api_key() -> dict:
     }
 
 
+def _velune_state_dirs() -> list[tuple[str, Path]]:
+    """Where Velune actually keeps state: heavy data (non-synced) and credentials/config."""
+    from platformdirs import user_config_dir
+
+    from velune.core.paths import app_data_root
+
+    return [("data", app_data_root()), ("config", Path(user_config_dir("Velune")))]
+
+
 def _check_velune_dir() -> dict:
-    velune_dir = Path.cwd() / ".velune"
-    try:
-        velune_dir.mkdir(exist_ok=True)
-        test_file = velune_dir / ".write_test"
-        test_file.write_text("test")
-        test_file.unlink()
+    """Velune's own data/config directories must be writable.
+
+    Deliberately does NOT touch the current directory: doctor used to create
+    ``./.velune/`` wherever it ran (stray state in arbitrary folders, and a
+    false *fail* when started from a read-only directory such as System32).
+    The probe file is a temp file inside each directory, removed on close.
+    """
+    writable: list[str] = []
+    problems: list[str] = []
+    for label, directory in _velune_state_dirs():
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=directory, prefix=".velune-doctor-") as probe:
+                probe.write(b"ok")
+            writable.append(f"{label}: {directory}")
+        except Exception as e:
+            problems.append(f"{label} directory {directory}: {e}")
+    if problems:
         return {
-            "name": ".velune Directory Writable",
-            "status": "ok",
-            "message": f"Writable directory at {velune_dir}",
-        }
-    except Exception as e:
-        return {
-            "name": ".velune Directory Writable",
+            "name": "Velune Data Directories Writable",
             "status": "fail",
-            "message": f"Cannot write to {velune_dir}: {e}",
+            "message": "Cannot write to " + "; ".join(problems),
         }
+    return {
+        "name": "Velune Data Directories Writable",
+        "status": "ok",
+        "message": "Writable — " + "; ".join(writable),
+    }
 
 
 def _check_sqlite() -> dict:
-    velune_dir = Path.cwd() / ".velune"
-    db_file = velune_dir / "velune_cognitive_core.db"
+    """SQLite can create and write a database where Velune stores its own.
+
+    Uses a throwaway directory under ``app_data_root()`` (cleaned up), never
+    the current directory — see :func:`_check_velune_dir`.
+    """
+    import sqlite3
+    from contextlib import closing
+
+    from velune.core.paths import app_data_root
+
+    root = app_data_root()
     try:
-        velune_dir.mkdir(exist_ok=True)
-        import sqlite3
-
-        # closing() so an exception between connect and close cannot leak the
-        # handle — the previous bare close() was skipped on any failure path.
-        from contextlib import closing
-
-        with closing(sqlite3.connect(str(db_file), timeout=3.0)) as conn:
-            conn.execute("SELECT 1")
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root, prefix=".velune-doctor-") as tmp:
+            # closing() so the handle is released before the directory is
+            # removed (Windows cannot delete an open database file).
+            with closing(sqlite3.connect(str(Path(tmp) / "probe.db"), timeout=3.0)) as conn:
+                conn.execute("CREATE TABLE probe (x INTEGER)")
+                conn.execute("INSERT INTO probe VALUES (1)")
+                conn.commit()
         return {
             "name": "SQLite DB Initializable",
             "status": "ok",
-            "message": f"Successfully initialized/opened sqlite database at {db_file}",
+            "message": f"SQLite {sqlite3.sqlite_version} can create databases in {root}",
         }
     except Exception as e:
         return {
             "name": "SQLite DB Initializable",
             "status": "fail",
-            "message": f"Failed to initialize SQLite database: {e}",
+            "message": f"Failed to create a SQLite database in {root}: {e}",
         }
 
 
@@ -814,45 +1038,37 @@ def _check_telemetry() -> dict:
 
 
 def _check_treesitter() -> dict:
-    try:
-        import tree_sitter_go
-        import tree_sitter_python
-        import tree_sitter_rust
-        import tree_sitter_typescript
-        from tree_sitter import Language
+    """Report the [parsing] extra using the parser's own loader (one source of truth).
 
-        langs = []
-        for name, mod in [
-            ("python", tree_sitter_python),
-            ("typescript", tree_sitter_typescript),
-            ("go", tree_sitter_go),
-            ("rust", tree_sitter_rust),
-        ]:
-            try:
-                if name == "typescript":
-                    Language(mod.language_typescript())  # type: ignore
-                else:
-                    Language(mod.language())  # type: ignore
-                langs.append(name)
-            except Exception:
-                pass
-        if langs:
-            return {
-                "name": "Tree-sitter Grammars",
-                "status": "ok",
-                "message": f"Tree-sitter grammars loaded: {', '.join(langs)}.",
-            }
+    Three outcomes: extra absent (expected on a lean install → warn with the
+    install hint), some/all grammars broken (version mismatch → warn naming
+    them), or every grammar loaded (ok).
+    """
+    from velune.repository import parser as ts
+
+    ts._ensure_tree_sitter()
+    loaded = sorted(ts._TS_LANGUAGES)
+    if ts._TS_IMPORT_ERROR is not None:
         return {
             "name": "Tree-sitter Grammars",
             "status": "warn",
-            "message": "tree-sitter installed but no grammars loaded correctly.",
+            # `\[` escapes Rich markup, which would otherwise eat "[parsing]".
+            "message": "Optional \\[parsing] extra not installed — repository parsing uses the "
+            "built-in ast/regex fallback. Enable: pip install 'velune-cli\\[parsing]'",
         }
-    except ImportError as e:
+    if ts._TS_LOAD_ERRORS:
         return {
             "name": "Tree-sitter Grammars",
             "status": "warn",
-            "message": f"Tree-sitter package or parser modules missing: {e}.",
+            "message": f"Grammars failed to load: {'; '.join(ts._TS_LOAD_ERRORS)}. "
+            f"Loaded: {', '.join(loaded) or 'none'}. "
+            "Fix: pip install --upgrade 'velune-cli\\[parsing]'",
         }
+    return {
+        "name": "Tree-sitter Grammars",
+        "status": "ok",
+        "message": f"Tree-sitter grammars loaded: {', '.join(loaded)}.",
+    }
 
 
 def _check_git() -> dict:
@@ -1117,8 +1333,21 @@ def _check_memory_health() -> dict:
     into a container that was never bootstrapped, but computes the exact
     same metrics the other two surfaces do.
     """
+    from velune.core.paths import COGNITIVE_DB_NAME, workspace_storage_dir
     from velune.kernel.entrypoint import run_async
     from velune.memory.lifecycle import read_memory_health
+
+    # Read-only: never create a memory store for a folder Velune was never
+    # used in (opening one created an empty, schema-less DB and then logged
+    # "no such table: sessions" as an ERROR on a perfectly fresh install).
+    db_file = workspace_storage_dir(Path.cwd(), create=False) / COGNITIVE_DB_NAME
+    if not db_file.exists():
+        return {
+            "name": "Memory Subsystem",
+            "status": "ok",
+            "message": "No memory store for this folder yet — it is created on the first "
+            "'velune' session here.",
+        }
 
     try:
         health = run_async(read_memory_health(Path.cwd()))
@@ -1220,8 +1449,8 @@ def _render_results(results: list, out: Console | None = None) -> None:
         "Ollama Connectivity": "Providers",
         "Ollama Model Availability": "Providers",
         "LM Studio Connectivity": "Providers",
-        ".velune Directory Writable": "Storage",
-        "SQLite DB Initializable": "Storage",
+        "Velune Data Directories Writable": "Installation",
+        "SQLite DB Initializable": "Installation",
         "Qdrant In-Process Initializable": "Storage",
         "velune.toml Config File": "Storage",
         "Memory Subsystem": "Storage",
@@ -1231,11 +1460,11 @@ def _render_results(results: list, out: Console | None = None) -> None:
         "Groq": "Security",
         "Google Gemini": "Security",
         "Runtime Path Safety": "Security",
-        "Python Version": "Performance",
-        "Console Launcher": "Performance",
-        "Scripts on PATH": "Performance",
-        "pip Available": "Performance",
-        "Core Dependencies": "Performance",
+        "Python Version": "Installation",
+        "Console Launcher": "Installation",
+        "Scripts on PATH": "Installation",
+        "pip Available": "Installation",
+        "Core Dependencies": "Installation",
         "Git in PATH": "Performance",
         "Tree-sitter Grammars": "Performance",
         "GPU Detection": "Performance",
@@ -1245,7 +1474,15 @@ def _render_results(results: list, out: Console | None = None) -> None:
         "Terminal Zoom Lock": "Terminal",
     }
 
-    categories = ["Providers", "Storage", "Security", "Performance", "Council", "Terminal"]
+    categories = [
+        "Installation",
+        "Providers",
+        "Storage",
+        "Security",
+        "Performance",
+        "Council",
+        "Terminal",
+    ]
     grouped: dict[str, list] = {cat: [] for cat in categories}
     for r in results:
         cat = categories_map.get(r["name"], "Performance")
@@ -1256,9 +1493,20 @@ def _render_results(results: list, out: Console | None = None) -> None:
     fails = sum(1 for r in results if r["status"] in ("fail", "error"))
     warns = sum(1 for r in results if r["status"] == "warn")
 
-    if fails:
+    # The label follows the *core* verdict: a failing optional integration
+    # (e.g. an invalid provider key) is reported in the counts, but must not
+    # brand a working installation "FAIL".
+    if not _verdict(results)["core_healthy"]:
         summary_color = design.DANGER
         summary_icon = "FAIL"
+        summary_tail = f"  [{design.DANGER}]{fails} failed[/{design.DANGER}]"
+        if warns:
+            summary_tail += (
+                f"  [{design.WARN}]{warns} warning{'s' if warns > 1 else ''}[/{design.WARN}]"
+            )
+    elif fails:
+        summary_color = design.WARN
+        summary_icon = "NOTE"
         summary_tail = f"  [{design.DANGER}]{fails} failed[/{design.DANGER}]"
         if warns:
             summary_tail += (

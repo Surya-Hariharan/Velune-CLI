@@ -96,6 +96,16 @@ class LanceDBStore:
         try:
             await asyncio.to_thread(self._open_or_create)
             logger.info("LanceDB store ready at %s (%d-dim)", self._store_path, self._embedding_dim)
+        except ImportError as exc:
+            # lancedb/pyarrow ship in the optional [rag] extra. A lean install
+            # without them is a supported configuration, not an error — logging
+            # it at ERROR printed a scary line on every first run.
+            logger.info(
+                "Semantic memory disabled: optional [rag] extra not installed (%s). "
+                "Enable with: pip install 'velune-cli[rag]'",
+                exc,
+            )
+            self._degraded = True
         except Exception as exc:
             logger.error("LanceDB startup failed; falling back to degraded mode: %s", exc)
             self._degraded = True

@@ -65,6 +65,9 @@ dependencies = [
     "keyring>=24.0.0",
     "prompt-toolkit>=3.0.48,<4",
     "pathspec>=0.12.0",
+    # `velune doctor` evaluates our own requirement markers/specifiers with it;
+    # without it the check could not tell a stale dependency from a good one.
+    "packaging>=23.0",
 
     # Providers talk to every API over plain httpx — no vendor SDKs (the
     # openai/anthropic packages were declared here but never imported).
@@ -103,19 +106,36 @@ dependencies = [
 # RAG: semantic memory + vector retrieval. Pulls the large compiled wheels
 # (lancedb/pyarrow/qdrant/numpy). Without it, semantic/vector features
 # transparently degrade to no-ops; lexical (BM25) search still works.
+#
+# Floors are empirical (CI `install-lowest` installs them) and track the first
+# release with a wheel for each Python — older lancedb/pyarrow floors resolved
+# to sdists on newer Pythons (a C++/Rust source build on the user's machine).
 rag = [
-    "qdrant-client>=1.7.0",
-    "lancedb>=0.5.0",
-    "pyarrow>=14.0.0",
+    # 1.10 added QdrantClient.query_points (velune/retrieval/vector.py); with
+    # 1.7–1.9 every vector search failed at runtime.
+    "qdrant-client>=1.10.0",
+    "lancedb>=0.14.0; python_version < '3.13'",
+    "lancedb>=0.16.0; python_version >= '3.13'",
+    "pyarrow>=14.0.0; python_version < '3.13'",
+    "pyarrow>=18.0.0; python_version == '3.13'",
+    "pyarrow>=22.0.0; python_version >= '3.14'",
 ]
 # Tree-sitter source parsing for deep repository cognition (compiled grammars).
 # Without it, repository indexing falls back to lighter heuristics.
+#
+# Floors are empirical (CI `install-lowest` installs them): the parser calls
+# `Language(grammar.language())`, which needs tree-sitter >= 0.23 together with
+# grammar packages >= 0.23 (capsule-style language objects). With 0.21/0.22
+# every grammar failed to load and parsing silently fell back to regex.
+# Per-Python lines track the first release with a wheel for that Python.
 parsing = [
-    "tree-sitter>=0.21.0",
-    "tree-sitter-python>=0.21.0",
-    "tree-sitter-typescript>=0.21.0",
-    "tree-sitter-rust>=0.21.0",
-    "tree-sitter-go>=0.21.0",
+    "tree-sitter>=0.23.0,<1; python_version < '3.13'",
+    "tree-sitter>=0.23.1,<1; python_version == '3.13'",
+    "tree-sitter>=0.25.1,<1; python_version >= '3.14'",
+    "tree-sitter-python>=0.23.0",
+    "tree-sitter-typescript>=0.23.0",
+    "tree-sitter-rust>=0.23.0",
+    "tree-sitter-go>=0.23.0",
 ]
 # OpenTelemetry exporters for external trace/metric backends. Velune's own
 # trace log works without these; install only to ship spans to an OTLP collector.
@@ -147,7 +167,8 @@ dev = [
     "pip-audit>=2.6.0",
     "bandit[toml]>=1.7.0",
     "build>=1.0.0",
-    "twine>=4.0.0",
+    # 7.0+ reads Metadata-Version 2.5, which current Hatchling emits.
+    "twine>=7.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]

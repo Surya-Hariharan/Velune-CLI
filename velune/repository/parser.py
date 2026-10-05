@@ -20,6 +20,7 @@ real-time-scan startup costs.
 
 import ast
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,8 @@ from velune.repository.schemas import (
     RepositorySymbol,
     RepositorySymbolKind,
 )
+
+logger = logging.getLogger("velune.repository.parser")
 
 
 def _leading_decorator_texts(code: str, def_line_idx: int) -> list[str]:
@@ -97,11 +100,16 @@ def _dotted_names(nodes: list[ast.expr]) -> list[str]:
 HAS_TREE_SITTER: bool | None = None
 _TS_LANGUAGES: dict[str, Any] = {}
 _TS_PARSER_CLS: Any = None
+# Why tree-sitter is unavailable/degraded, for diagnostics (`velune doctor`):
+# the ImportError text when the [parsing] extra is absent, and one entry per
+# grammar that imported but failed to load.
+_TS_IMPORT_ERROR: str | None = None
+_TS_LOAD_ERRORS: list[str] = []
 
 
 def _ensure_tree_sitter() -> bool:
     """Lazily import tree-sitter grammars on first use. Returns availability."""
-    global HAS_TREE_SITTER, _TS_PARSER_CLS
+    global HAS_TREE_SITTER, _TS_PARSER_CLS, _TS_IMPORT_ERROR
     if HAS_TREE_SITTER is not None:
         return HAS_TREE_SITTER
     try:
@@ -121,10 +129,22 @@ def _ensure_tree_sitter() -> bool:
         ):
             try:
                 _TS_LANGUAGES[name] = Language(factory())
-            except Exception:
-                pass
-        HAS_TREE_SITTER = True
-    except ImportError:
+            except Exception as exc:
+                # Typically a tree-sitter / grammar-package version mismatch
+                # (e.g. tree-sitter 0.22 + grammars 0.23 → "an integer is
+                # required"). Parsing still works via the ast/regex fallback,
+                # but a broken [parsing] install must not be invisible.
+                _TS_LOAD_ERRORS.append(f"{name} ({type(exc).__name__}: {exc})")
+        if _TS_LOAD_ERRORS:
+            logger.warning(
+                "tree-sitter grammars failed to load, using the ast/regex fallback for: %s. "
+                "Reinstall with: pip install --upgrade 'velune-cli[parsing]'",
+                "; ".join(_TS_LOAD_ERRORS),
+            )
+        # Available only if at least one grammar actually loaded.
+        HAS_TREE_SITTER = bool(_TS_LANGUAGES)
+    except ImportError as exc:
+        _TS_IMPORT_ERROR = str(exc)
         HAS_TREE_SITTER = False
     return HAS_TREE_SITTER
 

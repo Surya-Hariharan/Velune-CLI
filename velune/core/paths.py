@@ -88,10 +88,15 @@ def _workspace_slug(workspace: Path) -> str:
     return f"{name}-{digest}"
 
 
-def workspace_storage_dir(workspace: Path) -> Path:
-    """Return (creating) the non-synced storage dir for *workspace*."""
+def workspace_storage_dir(workspace: Path, *, create: bool = True) -> Path:
+    """Return the non-synced storage dir for *workspace*, creating it unless ``create=False``.
+
+    ``create=False`` is for read-only callers (``velune doctor``) that must not
+    leave storage behind for folders Velune was never used in.
+    """
     target = app_data_root() / "workspaces" / _workspace_slug(workspace)
-    target.mkdir(parents=True, exist_ok=True)
+    if create:
+        target.mkdir(parents=True, exist_ok=True)
     return target
 
 

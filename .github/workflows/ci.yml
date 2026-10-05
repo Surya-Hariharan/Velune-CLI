@@ -305,9 +305,12 @@ jobs:
           # is where a dependency API mismatch (e.g. old typer + new click)
           # crashes, so it must succeed strictly (no `|| true`).
           for cmd in doctor config provider models; do velune "$cmd" --help > /dev/null; done
-          # Environment diagnostics must run without import-time crashes on
-          # every supported interpreter (exit code ignored — warnings are fine).
-          velune doctor check || true
+          # Diagnostics are strict: `velune doctor` exits non-zero only when the
+          # *core* installation is broken (optional integrations such as
+          # provider keys or a local Ollama only warn), so a fresh install in
+          # CI must pass it. --json must also be valid JSON.
+          velune doctor
+          velune doctor --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['core_healthy'], d"
 
   # The declared dependency floors are a promise: anyone whose environment
   # already holds exactly those versions keeps them (pip treats the floor as
@@ -316,7 +319,7 @@ jobs:
   # (API break at runtime) or has no wheel for some Python/OS (→ "Microsoft
   # Visual C++ 14.0 is required" source build on a user's machine) fails here.
   install-lowest:
-    name: Lowest Dependency Versions (${{ matrix.os }}, py${{ matrix.python-version }})
+    name: Lowest Dependency Versions (${{ matrix.os }}, py${{ matrix.python-version }}${{ matrix.extras && format(', +{0}', matrix.extras) || '' }})
     needs: build
     runs-on: ${{ matrix.os }}
     strategy:
@@ -324,6 +327,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.14"]
+        extras: [""]
+        # The optional extras carry compiled wheels too (pyarrow, lancedb,
+        # tree-sitter) — floor-test them at both ends of the Python range.
+        include:
+          - { os: ubuntu-latest, python-version: "3.10", extras: "rag,parsing" }
+          - { os: windows-latest, python-version: "3.14", extras: "rag,parsing" }
     env:
       PYTHONIOENCODING: utf-8
       PYTHONUTF8: "1"
@@ -346,7 +355,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip uv
           # --no-build: a floor without a wheel for this Python/OS is a bug.
-          uv pip install --system --no-build --resolution lowest-direct -r pyproject.toml
+          extra_args=""
+          for e in $(echo "${{ matrix.extras }}" | tr ',' ' '); do extra_args="$extra_args --extra $e"; done
+          uv pip install --system --no-build --resolution lowest-direct -r pyproject.toml $extra_args
           uv pip install --system --no-deps dist/*.whl
           # Test tooling at current versions (not part of the floor check).
           uv pip install --system "pytest>=8.0.0" "pytest-asyncio>=0.23.0"
@@ -358,7 +369,7 @@ jobs:
           velune --version
           velune --help
           for cmd in doctor config provider models; do velune "$cmd" --help > /dev/null; done
-          velune doctor check || true
+          velune doctor
 
       - name: Test suite at lowest versions
         run: pytest -m "not integration"
@@ -414,7 +425,7 @@ jobs:
           EOF
           velune --version
           for cmd in doctor config provider models; do velune "$cmd" --help > /dev/null; done
-          velune doctor check || true
+          velune doctor
 
   # The one-line installers (scripts/install.sh / install.ps1) on clean
   # runners, pointed at the freshly built wheel instead of PyPI.

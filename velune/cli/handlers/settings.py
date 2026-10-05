@@ -324,6 +324,9 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_velune_dir,
         _check_vram,
         _render_results,
+        _render_verdict,
+        _run_checks,
+        _verdict,
     )
 
     checks = [
@@ -349,42 +352,23 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         _check_model_benchmarks,
     ]
 
-    def _run_checks() -> list:
-        collected = []
-        for check_fn in checks:
-            try:
-                collected.append(check_fn())
-            except Exception as e:
-                collected.append(
-                    {
-                        "name": check_fn.__name__.replace("_check_", "").replace("_", " ").title(),
-                        "status": "error",
-                        "message": str(e),
-                    }
-                )
-        return collected
-
     # The checks do blocking network/subprocess work: run them off the event
     # loop so the full-screen UI keeps repainting and accepting input.
     with repl.console.status("[cyan]Running health checks...[/cyan]"):
-        results = await asyncio.to_thread(_run_checks)
+        results = await asyncio.to_thread(_run_checks, checks)
     # Render through the app's own console. The module-level console in
     # commands/doctor.py writes straight to the real stdout, which tears the
     # full-screen display apart.
     _render_results(results, repl.console)
-    failures = sum(1 for r in results if r["status"] == "fail")
-    if failures:
-        repl.console.print(
-            f"[red]{failures} check(s) failed.[/red]  "
-            "[dim]Run [cyan]velune doctor --fix[/cyan] to attempt automatic fixes.[/dim]"
-        )
-        repl.console.print(
-            "[dim]→ /connect to add or fix API keys  ·  /settings to reconfigure[/dim]"
-        )
-    else:
-        repl.console.print("[green]All checks passed.[/green]")
+    verdict = _verdict(results)
+    _render_verdict(verdict, repl.console)
+    if verdict["core_healthy"]:
         repl.console.print(
             "[dim]→ /model to see available models  ·  /run <task> to start working[/dim]"
+        )
+    if verdict["optional_attention"]:
+        repl.console.print(
+            "[dim]→ /connect to add or fix API keys  ·  /settings to reconfigure[/dim]"
         )
 
 

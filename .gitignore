@@ -70,6 +70,8 @@ velune/cognition/prompts/_premium.py
 # Scripts (local utility scripts)
 scripts/*.sh
 scripts/*.ts
+# ...except the public one-line installer, which the README curls from main.
+!scripts/install.sh
 
 # Project-specific
 examples/

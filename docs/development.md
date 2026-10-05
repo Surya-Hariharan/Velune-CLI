@@ -137,8 +137,8 @@ aggregation job:
 | **Security** | `pip-audit --skip-editable`; `uv lock --check` (the committed `uv.lock` must match `pyproject.toml`); `bandit` (medium+ severity/confidence gates the build, plus a low-severity count baseline that may not grow); a gitleaks secret scan; regression guards: no `shell=True` in `velune/`, `create_subprocess_shell` only at allow-listed sites, and no new `asyncio.run()` call sites |
 | **Tests** | `pip install -e ".[all,dev]"` then `pytest`, across Python 3.10–3.14 × Ubuntu / Windows / macOS |
 | **Build & Validate Artifacts** | Hatchling sdist + wheel (reproducible via `SOURCE_DATE_EPOCH`), `twine check --strict`, and the wheel must be pure-Python (`py3-none-any`) |
-| **Wheel Install + REPL Smoke** | installs the built wheel into a clean environment and runs `velune --version`, `velune --help`, `python -m velune --version`, `velune <doctor|config|provider|models> --help` (strict), `velune doctor check` across OS × Python |
-| **Lowest Dependency Versions** | installs the *lowest* version allowed by every `pyproject.toml` floor, **wheels only** (`uv pip install --no-build --resolution lowest-direct`), then runs the smoke test and `pytest -m "not integration"` on Python 3.10 and 3.14 × all three OSes. It fails if a floor is too old for the code, or if it has no prebuilt wheel for some Python/OS (which would make a user's `pip install` compile from source) |
+| **Wheel Install + REPL Smoke** | installs the built wheel into a clean environment and runs `velune --version`, `velune --help`, `python -m velune --version`, `velune <doctor|config|provider|models> --help` (strict), and `velune doctor` / `velune doctor --json` (strict: they fail only on a *core* installation problem) across OS × Python |
+| **Lowest Dependency Versions** | installs the *lowest* version allowed by every `pyproject.toml` floor, **wheels only** (`uv pip install --no-build --resolution lowest-direct`), then runs the smoke test and `pytest -m "not integration"` on Python 3.10 and 3.14 × all three OSes, plus two jobs that also install the `[rag,parsing]` extras at their floors. It fails if a floor is too old for the code, or if it has no prebuilt wheel for some Python/OS (which would make a user's `pip install` compile from source) |
 | **Install Over Stale Dependencies** | pre-installs old, incompatible versions of core deps (as another tool in a shared environment would), installs the wheel on top, and asserts pip upgraded them and Velune starts |
 | **One-line Installer** | runs `scripts/install.sh` (Linux/macOS, plus `shellcheck`) and `scripts/install.ps1` (Windows) on clean runners against the built wheel |
 | **CI Pass** | fails if any of the above failed — the single required status check |
@@ -158,7 +158,18 @@ leaves a stale copy from another tool in place and Velune breaks at runtime (e.g
 raise a floor or add a dependency, the **Lowest Dependency Versions** job proves it. Don't declare a
 dependency that `velune/` never imports: `openai`, `anthropic` and `orjson` used to be listed but were never
 imported (providers use plain `httpx`), and they only added install surface. `velune doctor`'s *Core
-Dependencies* check reads the installed package metadata, so it always matches `pyproject.toml`.
+Dependencies* check reads the installed package metadata (evaluated with `packaging`, which is a core
+dependency for that reason), so it always matches `pyproject.toml`.
+
+**`velune doctor` contract.**
+- A bare `velune doctor` runs the diagnostics; `doctor check` is the same thing.
+- It shows an environment summary (version, interpreter, OS/arch, install, config and data locations).
+- It ends with a *core* verdict. Checks in `CORE_CHECKS` (`velune/cli/commands/doctor.py`) decide the
+  exit code: Python version, launcher, Scripts on PATH, pip, core dependencies, data dirs, SQLite.
+- Everything else is an optional integration. It is reported but never makes the exit code non-zero.
+  A missing extra is a `warn` with an install hint, never a `fail`.
+- Doctor never writes to the current directory; probes use self-cleaning temp files in Velune's own data
+  and config dirs. Keep all of this true when adding checks.
 
 > Dependency versions are pinned in the committed `uv.lock` (check with `uv lock --check`; refresh with
 > `uv lock --upgrade-package <name>`). `[project.optional-dependencies]` defines `rag`, `parsing`,

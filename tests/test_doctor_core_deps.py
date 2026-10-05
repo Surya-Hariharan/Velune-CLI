@@ -66,3 +66,27 @@ def test_real_installed_metadata_passes_in_dev_env():
     except md.PackageNotFoundError:
         pytest.skip("velune-cli not installed in this environment")
     assert _check_core_dependencies()["status"] == "ok"
+
+
+def test_without_packaging_marker_lines_are_skipped_not_reported_missing(monkeypatch):
+    """Regression: a fresh pip install has no `packaging` (until it became a
+    core dependency); the presence-only fallback then ignored markers and
+    reported `tomli; python_version < '3.11'` as missing on Python 3.14."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "packaging.requirements", None)  # → ImportError
+    monkeypatch.setattr(
+        md, "requires", lambda dist: ["typer>=0.16.0", "tomli>=2.0.1; python_version < '3.0'"]
+    )
+    monkeypatch.setattr(md, "version", lambda name: {"typer": "0.27.0"}[name])
+    result = _check_core_dependencies()
+    assert result["status"] == "ok", result["message"]
+
+
+def test_packaging_is_a_declared_core_dependency():
+    """doctor's version/marker checks depend on it, so it must ship in the lean install."""
+    try:
+        reqs = md.requires("velune-cli") or []
+    except md.PackageNotFoundError:
+        pytest.skip("velune-cli not installed in this environment")
+    assert any(r.split(";")[0].strip().startswith("packaging") and "extra" not in r for r in reqs)

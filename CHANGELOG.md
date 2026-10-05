@@ -42,6 +42,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- `scripts/install.sh` (the macOS/Linux one-line installer) was excluded by a `.gitignore` rule for
+  local scripts, so the README's `curl … | sh` command would have returned 404. A test now checks that
+  every installer the README links exists and is tracked.
+- **`velune doctor` is now the diagnostics command, and it only fails for real installation problems.**
+  - A bare `velune doctor` runs the checks; it used to print help. `velune doctor check` still works.
+  - It opens with an environment summary: Velune version, Python and interpreter path, OS/architecture,
+    install location, the `velune` command on PATH, and the config and data directories.
+  - It ends with a core verdict ("✓ Core installation is healthy"). Optional integrations, such as
+    provider keys, Ollama or LM Studio, extras and GPU, are listed separately and no longer make the
+    exit code non-zero. Scripts can rely on `velune doctor` exiting 1 only when the installation itself
+    is broken.
+  - `velune doctor --json` includes the environment and verdict. `doctor check --json` keeps its
+    previous list format.
+- `velune doctor` no longer creates `./.velune/` and an empty database in whatever folder it runs from.
+  It also no longer reports a false failure when started from a read-only folder such as
+  `C:\Windows\System32`.
+- `velune doctor` no longer warns about the `velune` command on pipx / `uv tool` installs (including the
+  one-line installer). It now reads which Python the launcher actually runs, instead of assuming the
+  launcher sits next to `python.exe`.
+- A fresh lean install no longer prints `ERROR` lines. Two messages are gone: "LanceDB startup failed: No
+  module named 'lancedb'" (the `[rag]` extra is optional) and "no such table: sessions" (doctor opened
+  an empty memory store for an unused folder). The summary banner no longer says FAIL when only an
+  optional integration failed.
+- **Optional extras installed broken or not at all.** `velune-cli[parsing]` allowed tree-sitter
+  0.21/0.22, where every grammar failed to load and repository parsing silently fell back to regex.
+  0.21 also had no wheel for Python 3.12+. `velune-cli[rag]` allowed `qdrant-client` versions without
+  `query_points`, which broke every vector search at runtime, plus `pyarrow`/`lancedb` versions with no
+  wheel for Python 3.13/3.14. The floors are now the oldest versions that pass the tests and have wheels
+  everywhere. A broken grammar is logged and reported by `velune doctor` instead of being swallowed.
 - **`pip install velune-cli` failing or crashing on machines that already had Python packages.** The core
   dependency floors were far below anything tested (`typer>=0.9`, `prompt-toolkit>=3.0.0`, `numpy>=1.24`,
   `orjson>=3.9`…). pip therefore kept stale copies already installed by other tools, and Velune crashed at
@@ -122,6 +151,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- The `[dev]` extra requires `twine>=7.0.0`: older twine can't read the Metadata-Version 2.5 that
+  current Hatchling produces, so `twine check --strict` failed for contributors.
+- `packaging` is now a core dependency. `velune doctor` uses it to evaluate Velune's own requirement
+  markers and minimum versions.
 - Removed the `openai`, `anthropic` and `orjson` dependencies. They were never imported (every provider uses
   plain `httpx`), and dropping them removes 7 packages from a default install, two of them Rust-compiled.
 - Python 3.14 is officially supported (classifier and CI matrix).

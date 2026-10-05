@@ -105,11 +105,18 @@ Any of these works. The first two give you the same isolation as the installer:
 ```bash
 pipx install velune-cli          # isolated, auto-managed PATH
 uv tool install velune-cli       # isolated, auto-managed PATH
-pip install velune-cli           # into the current Python environment
+python -m pip install velune-cli # into the current Python environment
 ```
 
-Plain `pip install` needs Python 3.10+ and installs into whatever environment
+Use `python -m pip`, not bare `pip`. That way the package goes into the same
+Python you'll run it with, which matters on machines with several Pythons (common
+on Windows). Plain pip needs Python 3.10+ and installs into whatever environment
 is active. The usual problems with it:
+
+- **`ERROR: Could not find a version that satisfies the requirement velune-cli`**
+  (with a note about `Requires-Python`): your Python is older than 3.10. Check
+  with `python --version`. Install a newer Python, or use the one-line installer,
+  which brings its own.
 
 - **`error: externally-managed-environment`** (Debian/Ubuntu, Homebrew Python):
   the OS won't let pip write to the system Python. Use the installer, `pipx`
@@ -128,6 +135,21 @@ macOS and Linux (x86-64 and ARM64), so no compiler or build step is needed.
 CI checks this for the lowest version of each dependency.
 
 </details>
+
+#### Verify the install
+
+```bash
+velune --version
+velune doctor
+```
+
+`velune doctor` shows your Velune version, Python interpreter, OS, and where
+Velune is installed and keeps its data. It then checks the installation and
+ends with **"✓ Core installation is healthy"** or a list of what's broken.
+Optional integrations (provider keys, a local Ollama, extras such as `[rag]`)
+are reported but never count as installation failures. The exit code is
+non-zero only when the core installation has a problem. `velune doctor --json`
+gives the same report as JSON for scripts and bug reports.
 
 ### 2a. Local models (Ollama, free, no key)
 
@@ -309,7 +331,8 @@ velune health     # Provider reachability and response time
 <summary><strong>Diagnostics</strong></summary>
 
 ```bash
-velune doctor check|providers|network
+velune doctor                         # Diagnose the installation (alias: doctor check)
+velune doctor providers|network
 velune logs [recent|live]
 velune status                         # Index freshness + workspace health
 velune pipeline trace "<query>"       # Trace a query through the retrieval pipeline
@@ -515,7 +538,9 @@ If you used the one-line installer (or `uv tool`), add extras with
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). This developer setup is only for working
+on Velune itself. To *use* Velune, follow the [quickstart](#60-second-quickstart)
+instead.
 
 Before opening a PR:
 

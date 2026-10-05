@@ -237,7 +237,7 @@ def build_health_checks() -> list[tuple[str, Callable[[], dict]]]:
 
     checks: list[tuple[str, Callable[[], dict]]] = [
         ("Python version", _check_python_version),
-        (".velune directory", _check_velune_dir),
+        ("Velune data directory", _check_velune_dir),
         ("SQLite", _check_sqlite),
         ("Internet connectivity", _check_internet_connectivity),
         ("Ollama (local)", _check_ollama_connectivity),

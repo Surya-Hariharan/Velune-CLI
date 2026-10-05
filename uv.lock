@@ -2953,7 +2953,7 @@ wheels = [
 
 [[package]]
 name = "twine"
-version = "6.2.0"
+version = "7.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "id" },
@@ -2966,9 +2966,9 @@ dependencies = [
     { name = "rich" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/a8/949edebe3a82774c1ec34f637f5dd82d1cf22c25e963b7d63771083bbee5/twine-6.2.0.tar.gz", hash = "sha256:e5ed0d2fd70c9959770dce51c8f39c8945c574e18173a7b81802dab51b4b75cf", size = 172262, upload-time = "2025-09-04T15:43:17.255Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/3c/58f808a359700f39a967dffede33efeac809262c03303fa3eec6afff8f49/twine-7.0.0.tar.gz", hash = "sha256:85cdb29c518efef867360ae4acd4b0dfd61c8654a22fca08e6f8539f05022177", size = 215032, upload-time = "2026-07-27T15:59:00.825Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/7a/882d99539b19b1490cac5d77c67338d126e4122c8276bf640e411650c830/twine-6.2.0-py3-none-any.whl", hash = "sha256:418ebf08ccda9a8caaebe414433b0ba5e25eb5e4a927667122fbe8f829f985d8", size = 42727, upload-time = "2025-09-04T15:43:15.994Z" },
+    { url = "https://files.pythonhosted.org/packages/96/08/ddcdc06225eaad6de0e48e1002b06d919dbde20582d0662c7af51308e5d6/twine-7.0.0-py3-none-any.whl", hash = "sha256:b854164df26db268af05f49aa5c0344b10e27a494343ff05b1e0bad3b135f5a7", size = 43204, upload-time = "2026-07-27T15:58:59.26Z" },
 ]
 
 [[package]]
@@ -3044,6 +3044,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "packaging" },
     { name = "pathspec" },
     { name = "platformdirs" },
     { name = "prompt-toolkit" },
@@ -3122,8 +3123,10 @@ requires-dist = [
     { name = "gguf", marker = "extra == 'gguf'", specifier = ">=0.6.0" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "keyring", specifier = ">=24.0.0" },
-    { name = "lancedb", marker = "extra == 'all'", specifier = ">=0.5.0" },
-    { name = "lancedb", marker = "extra == 'rag'", specifier = ">=0.5.0" },
+    { name = "lancedb", marker = "python_full_version >= '3.13' and extra == 'all'", specifier = ">=0.16.0" },
+    { name = "lancedb", marker = "python_full_version >= '3.13' and extra == 'rag'", specifier = ">=0.16.0" },
+    { name = "lancedb", marker = "python_full_version < '3.13' and extra == 'all'", specifier = ">=0.14.0" },
+    { name = "lancedb", marker = "python_full_version < '3.13' and extra == 'rag'", specifier = ">=0.14.0" },
     { name = "mcp", specifier = ">=1.28.1,<2.0.0" },
     { name = "networkx", specifier = ">=3.2.0" },
     { name = "numpy", marker = "python_full_version < '3.13'", specifier = ">=1.26.0,<3" },
@@ -3135,22 +3138,27 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp", marker = "extra == 'telemetry'", specifier = ">=1.22.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.22.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'telemetry'", specifier = ">=1.22.0" },
+    { name = "packaging", specifier = ">=23.0" },
     { name = "pathspec", specifier = ">=0.12.0" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.6.0" },
     { name = "platformdirs", specifier = ">=4.2.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.6.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.48,<4" },
     { name = "psutil", specifier = ">=6.0.0" },
-    { name = "pyarrow", marker = "extra == 'all'", specifier = ">=14.0.0" },
-    { name = "pyarrow", marker = "extra == 'rag'", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "python_full_version == '3.13.*' and extra == 'all'", specifier = ">=18.0.0" },
+    { name = "pyarrow", marker = "python_full_version == '3.13.*' and extra == 'rag'", specifier = ">=18.0.0" },
+    { name = "pyarrow", marker = "python_full_version < '3.13' and extra == 'all'", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "python_full_version < '3.13' and extra == 'rag'", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "python_full_version >= '3.14' and extra == 'all'", specifier = ">=22.0.0" },
+    { name = "pyarrow", marker = "python_full_version >= '3.14' and extra == 'rag'", specifier = ">=22.0.0" },
     { name = "pydantic", marker = "python_full_version < '3.14'", specifier = ">=2.11.0,<3" },
     { name = "pydantic", marker = "python_full_version >= '3.14'", specifier = ">=2.12.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.350" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
-    { name = "qdrant-client", marker = "extra == 'all'", specifier = ">=1.7.0" },
-    { name = "qdrant-client", marker = "extra == 'rag'", specifier = ">=1.7.0" },
+    { name = "qdrant-client", marker = "extra == 'all'", specifier = ">=1.10.0" },
+    { name = "qdrant-client", marker = "extra == 'rag'", specifier = ">=1.10.0" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "rich", specifier = ">=13.9.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
@@ -3159,17 +3167,21 @@ requires-dist = [
     { name = "tiktoken", marker = "python_full_version >= '3.14'", specifier = ">=0.12.0" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
-    { name = "tree-sitter", marker = "extra == 'all'", specifier = ">=0.21.0" },
-    { name = "tree-sitter", marker = "extra == 'parsing'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-go", marker = "extra == 'all'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-go", marker = "extra == 'parsing'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-python", marker = "extra == 'all'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-python", marker = "extra == 'parsing'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-rust", marker = "extra == 'all'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-rust", marker = "extra == 'parsing'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-typescript", marker = "extra == 'all'", specifier = ">=0.21.0" },
-    { name = "tree-sitter-typescript", marker = "extra == 'parsing'", specifier = ">=0.21.0" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "tree-sitter", marker = "python_full_version == '3.13.*' and extra == 'all'", specifier = ">=0.23.1,<1" },
+    { name = "tree-sitter", marker = "python_full_version == '3.13.*' and extra == 'parsing'", specifier = ">=0.23.1,<1" },
+    { name = "tree-sitter", marker = "python_full_version < '3.13' and extra == 'all'", specifier = ">=0.23.0,<1" },
+    { name = "tree-sitter", marker = "python_full_version < '3.13' and extra == 'parsing'", specifier = ">=0.23.0,<1" },
+    { name = "tree-sitter", marker = "python_full_version >= '3.14' and extra == 'all'", specifier = ">=0.25.1,<1" },
+    { name = "tree-sitter", marker = "python_full_version >= '3.14' and extra == 'parsing'", specifier = ">=0.25.1,<1" },
+    { name = "tree-sitter-go", marker = "extra == 'all'", specifier = ">=0.23.0" },
+    { name = "tree-sitter-go", marker = "extra == 'parsing'", specifier = ">=0.23.0" },
+    { name = "tree-sitter-python", marker = "extra == 'all'", specifier = ">=0.23.0" },
+    { name = "tree-sitter-python", marker = "extra == 'parsing'", specifier = ">=0.23.0" },
+    { name = "tree-sitter-rust", marker = "extra == 'all'", specifier = ">=0.23.0" },
+    { name = "tree-sitter-rust", marker = "extra == 'parsing'", specifier = ">=0.23.0" },
+    { name = "tree-sitter-typescript", marker = "extra == 'all'", specifier = ">=0.23.0" },
+    { name = "tree-sitter-typescript", marker = "extra == 'parsing'", specifier = ">=0.23.0" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "typer", specifier = ">=0.16.0" },
 ]
 provides-extras = ["all", "dev", "docker", "gguf", "git", "parsing", "rag", "telemetry"]
