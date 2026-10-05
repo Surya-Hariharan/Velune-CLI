@@ -289,6 +289,9 @@ class ToolLoopRunner:
         # transcript that omits them would be a lie about what happened.
         self._executed_invocations = invocations
         tokens_used = 0
+        # Identical calls that already failed, and how often they were re-requested.
+        failed_calls: set[tuple[str, str]] = set()
+        repeated = 0
 
         for turn in range(1, self._max_turns + 1):
             req = request.model_copy(
@@ -328,7 +331,21 @@ class ToolLoopRunner:
             await self._preauthorize_batch(response.tool_calls)
             try:
                 for call in response.tool_calls:
-                    invocation = await self._execute_call(call)
+                    key = _call_key(call)
+                    if key in failed_calls:
+                        repeated += 1
+                        invocation = ToolInvocation(
+                            call=call,
+                            result=(
+                                "Error: not retried — this exact call already failed. Change "
+                                "the arguments or the approach before trying again."
+                            ),
+                            error=True,
+                        )
+                    else:
+                        invocation = await self._execute_call(call)
+                        if invocation.error:
+                            failed_calls.add(key)
                     invocations.append(invocation)
                     messages.append(
                         {
@@ -342,6 +359,19 @@ class ToolLoopRunner:
                 gate = self._base_ctx.gate if self._base_ctx else None
                 if gate is not None:
                     gate.clear_batch()
+            if repeated >= _MAX_REPEATED_FAILURES:
+                logger.warning("Tool loop stopped: repeated identical failing calls.")
+                return ToolLoopResult(
+                    content=(
+                        "I stopped because I kept retrying a tool call that had already "
+                        "failed, without changing anything. See the errors above."
+                    ),
+                    turns=turn,
+                    invocations=invocations,
+                    tokens_used=tokens_used,
+                    stop_reason="repeated_failure",
+                    messages=messages,
+                )
 
         # Bound hit: one last chance to summarize is intentionally NOT taken —
         # returning honestly beats burning another turn.
@@ -419,6 +449,7 @@ class ToolLoopRunner:
             )
 
         kind, target = route
+        exit_code: Any = None
         permissions: set[ToolPermission]
         if kind == "local":
             permissions = set(target.get_required_permissions())
@@ -454,6 +485,8 @@ class ToolLoopRunner:
                 result = await self._mcp.call_tool(target, call.arguments)
             text = _stringify(result)
             error = False
+            if isinstance(result, dict) and "exit_code" in result:
+                exit_code = result.get("exit_code")
         except (ToolBlockedError, PermissionError) as exc:
             text, error = f"Error: {exc}", True
         except asyncio.CancelledError:
@@ -462,6 +495,11 @@ class ToolLoopRunner:
             logger.debug("Tool %s failed: %s", call.name, exc, exc_info=True)
             text, error = f"Error: {type(exc).__name__}: {exc}", True
 
+        # Never hand secrets to the model: a file or command output may contain
+        # API keys or tokens (e.g. a printed config). Same redaction the logs use.
+        from velune.core.redaction import redact_secrets
+
+        text = redact_secrets(text)
         if len(text) > self._max_result_chars:
             text = (
                 text[: self._max_result_chars]
@@ -476,6 +514,8 @@ class ToolLoopRunner:
                 "error": error,
                 "duration_ms": duration,
                 "result": text[:2000],
+                "exit_code": exit_code,
+                "arguments": call.arguments,
             },
         )
         return ToolInvocation(
@@ -536,6 +576,17 @@ class ToolLoopRunner:
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
+
+# Identical failing calls the model may re-request before the loop stops.
+_MAX_REPEATED_FAILURES = 3
+
+
+def _call_key(call: ToolCall) -> tuple[str, str]:
+    try:
+        args = json.dumps(call.arguments, sort_keys=True, default=str)
+    except Exception:
+        args = repr(call.arguments)
+    return (call.name, args)
 
 
 def _assistant_tool_message(response: InferenceResponse) -> dict[str, Any]:

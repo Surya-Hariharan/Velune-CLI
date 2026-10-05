@@ -247,6 +247,14 @@ async def run_tool_chat(
     workspace = repl.container.get("runtime.workspace")
     config = getattr(repl.runtime, "config", None)
     max_turns = getattr(getattr(config, "execution", None), "max_tool_turns", 10)
+    from velune.permissions import ExecutionMode
+
+    if current_execution_mode(repl) is ExecutionMode.AUTO or (
+        getattr(getattr(repl, "_plan_manager", None), "executing", False)
+    ):
+        # Autonomous work (AUTO, or executing an approved plan) iterates:
+        # edit → run tests → fix → re-run. The config cap still applies.
+        max_turns = max(max_turns, 30)
 
     from pathlib import Path
 
@@ -864,6 +872,10 @@ class _ToolActivityUI:
                 "error": error,
                 "duration_ms": data.get("duration_ms", 0),
                 "result_preview": result_preview,
+                "exit_code": data.get("exit_code"),
+                "command": (data.get("arguments") or {}).get("command")
+                if isinstance(data.get("arguments"), dict)
+                else None,
             },
         )
         shown_key = (name, str(diff.path)) if diff is not None else None
