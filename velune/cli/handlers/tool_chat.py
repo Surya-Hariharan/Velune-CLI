@@ -62,6 +62,7 @@ _TOOL_VERBS: dict[str, str] = {
     "create_directory": "Create folder",
     "delete_directory": "Delete folder",
     "move_path": "Move",
+    "write_plan": "Plan",
     "grep_files": "Search",
     "find_files": "Find",
     "semantic_code_search": "Search",

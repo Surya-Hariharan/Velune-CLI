@@ -1467,6 +1467,19 @@ class VeluneREPL:
         except Exception as exc:
             _log.debug("Mention resolution error (non-fatal): %s", exc)
 
+        # Plan mode: tell the model whether this message starts a plan,
+        # revises the waiting plan, or approves it for execution.
+        from velune.cli.handlers import plan_flow
+
+        plan_flow.drop_stale_instructions(self._conversation)
+        plan_instruction = plan_flow.before_turn(self, text)
+        plan_message: dict | None = None
+        if plan_instruction:
+            # One-turn instruction: removed again after the turn so a stale
+            # "revise"/"execute" directive never leaks into later turns.
+            plan_message = {"role": "system", "content": plan_instruction}
+            self._conversation.append(plan_message)
+
         self._conversation.append({"role": "user", "content": text})
 
         mode_config = self._mode_manager.config
@@ -1646,6 +1659,15 @@ class VeluneREPL:
             _log.debug("MessageDisplay hook error (non-fatal): %s", exc)
 
         self._conversation.append({"role": "assistant", "content": assistant_text})
+        try:
+            plan_flow.after_turn(self, assistant_text)
+        except Exception as exc:
+            _log.debug("plan flow after-turn failed (non-fatal): %s", exc)
+        if plan_message is not None:
+            for index, message in enumerate(self._conversation):
+                if message is plan_message:  # identity, in place: others hold this list
+                    del self._conversation[index]
+                    break
         self._autosave()
         effective_tokens = tokens_used or len(assistant_text) // 4
         self._display_usage(model, effective_tokens, completion_tokens=len(assistant_text) // 4)
