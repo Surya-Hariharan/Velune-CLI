@@ -407,6 +407,11 @@ def session_gate(repl: VeluneREPL, ui: _ToolActivityUI, intent_confidence: float
         )
 
     gate.ask = ask
+
+    async def ask_batch(items: list) -> bool:
+        return await _prompt_batch(repl, ui, items)
+
+    gate.ask_batch = ask_batch
     gate.audit = lambda record: ui._emit_trace("permission.decision", "", record)
     gate.force_confirm = low_confidence
     return gate
@@ -499,6 +504,56 @@ async def _ask_decision(
         repl, ui, tool_name, arguments, reason=reason or decision.reason, decision=decision
     )
     return Approval.ALLOW_ONCE if allowed else Approval.DENY
+
+
+async def _prompt_batch(repl: VeluneREPL, ui: _ToolActivityUI, items: list) -> bool:
+    """One "approve all?" prompt for a turn's related, ordinary changes (MANUAL)."""
+    from rich.panel import Panel
+
+    from velune.cli.interactive import CANCEL, Option, is_interactive_tty, single_select
+
+    ui.pause_status()
+    gate = getattr(repl, "_permission_gate", None)
+    root = gate.boundary.workspace_root if gate is not None else None
+    lines = [f"The following {len(items)} changes are proposed:", ""]
+    deletes = 0
+    number = 0
+    for _tool_name, decision in items:
+        for action in decision.actions:
+            number += 1
+            target = _relativize(action.target, root) if root else action.target
+            label = action.action_type.value.replace("_", " ").title()
+            if action.action_type.value.startswith("DELETE"):
+                deletes += 1
+            extra = f" → {action.detail}" if action.detail else ""
+            lines.append(f"  {number}. [bold]{label}[/bold] {target}{extra}")
+    lines.append("")
+    lines.append(
+        "[dim]No files will be deleted.[/dim]"
+        if deletes == 0
+        else f"[yellow]{deletes} deletion(s) included.[/yellow]"
+    )
+    repl.console.print(
+        Panel(
+            "\n".join(lines),
+            title="[yellow]Approve changes[/yellow]",
+            border_style="yellow",
+            padding=(0, 2),
+        )
+    )
+    if not is_interactive_tty():
+        return False
+    try:
+        answer = await single_select(
+            "Approve all?",
+            [Option(id="n", label="No — reject all"), Option(id="y", label="Yes — approve all")],
+        )
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        _log.debug("Batch approval prompt unavailable (%s)", exc)
+        return False
+    return answer is not CANCEL and answer == "y"
 
 
 async def _prompt_sensitive(

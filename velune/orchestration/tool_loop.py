@@ -325,17 +325,23 @@ class ToolLoopRunner:
                 )
 
             messages.append(_assistant_tool_message(response))
-            for call in response.tool_calls:
-                invocation = await self._execute_call(call)
-                invocations.append(invocation)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": invocation.result,
-                        **({"is_error": True} if invocation.error else {}),
-                    }
-                )
+            await self._preauthorize_batch(response.tool_calls)
+            try:
+                for call in response.tool_calls:
+                    invocation = await self._execute_call(call)
+                    invocations.append(invocation)
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "content": invocation.result,
+                            **({"is_error": True} if invocation.error else {}),
+                        }
+                    )
+            finally:
+                gate = self._base_ctx.gate if self._base_ctx else None
+                if gate is not None:
+                    gate.clear_batch()
 
         # Bound hit: one last chance to summarize is intentionally NOT taken —
         # returning honestly beats burning another turn.
@@ -475,6 +481,29 @@ class ToolLoopRunner:
         return ToolInvocation(
             call=call, result=text, error=error, duration_ms=duration, source=kind
         )
+
+    async def _preauthorize_batch(self, calls: list[ToolCall]) -> None:
+        """Let the gate confirm a turn's related changes with one prompt."""
+        gate = self._base_ctx.gate if self._base_ctx else None
+        if gate is None or len(calls) < 2:
+            return
+        described: list[tuple[str, list[Any]]] = []
+        for call in calls:
+            route = self._route.get(call.name)
+            if route is None or route[0] != "local":
+                continue
+            try:
+                described.append(
+                    (call.name, route[1].describe_actions(call.arguments, gate.boundary))
+                )
+            except Exception as exc:  # bad arguments: the call itself will report it
+                logger.debug("describe_actions failed for %s: %s", call.name, exc)
+        try:
+            await gate.preauthorize(described)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # batching is a convenience; per-call checks still run
+            logger.debug("batch pre-authorization failed: %s", exc)
 
     async def _run_local(
         self, tool: BaseTool, call: ToolCall, permissions: set[ToolPermission]

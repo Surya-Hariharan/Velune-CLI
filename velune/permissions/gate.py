@@ -35,7 +35,18 @@ class Approval(StrEnum):
 
 
 AskFn = Callable[[str, Decision], Awaitable[Approval]]
+AskBatchFn = Callable[[list[tuple[str, Decision]]], Awaitable[bool]]
 AuditFn = Callable[[dict[str, Any]], None]
+
+
+def _batch_key(tool_name: str, actions: list[Action]) -> tuple:
+    return (tool_name, tuple((a.action_type.value, a.target, a.detail) for a in actions))
+
+
+def _sensitive(decision: Decision) -> bool:
+    return (
+        decision.high_risk or decision.outside_workspace or any(a.secret for a in decision.actions)
+    )
 
 
 class ActionDeniedError(PermissionError):
@@ -57,6 +68,40 @@ class PermissionGate:
     # Set for a turn whose request may have been misread (low intent
     # confidence): session grants then don't skip the human check.
     force_confirm: bool = False
+    # Batched approval (MANUAL): several ordinary changes proposed in one
+    # model turn are confirmed with a single "approve all?" prompt.
+    ask_batch: AskBatchFn | None = None
+    _preapproved: set[tuple] = field(default_factory=set)
+    _prerejected: set[tuple] = field(default_factory=set)
+
+    async def preauthorize(self, calls: list[tuple[str, list[Action]]]) -> None:
+        """Ask once for a turn's related changes instead of once per call.
+
+        Only ordinary ASK decisions are batched; high-risk, outside-workspace
+        and secret actions keep their own explicit prompt at execution time.
+        """
+        if self.ask_batch is None:
+            return
+        pending: list[tuple[str, Decision, tuple]] = []
+        for tool_name, actions in calls:
+            decision = authorize(actions, self.state)
+            if decision.verdict is not Verdict.ASK or _sensitive(decision):
+                continue
+            if tool_name in self.session_grants and not self.force_confirm:
+                continue
+            pending.append((tool_name, decision, _batch_key(tool_name, actions)))
+        if len(pending) < 2:
+            return
+        approved = await self.ask_batch([(name, decision) for name, decision, _ in pending])
+        keys = {key for _, _, key in pending}
+        if approved:
+            self._preapproved |= keys
+        else:
+            self._prerejected |= keys
+
+    def clear_batch(self) -> None:
+        self._preapproved.clear()
+        self._prerejected.clear()
 
     async def check(self, tool_name: str, actions: list[Action]) -> list[Path]:
         """Authorize *actions* for *tool_name*, or raise :class:`ActionDeniedError`.
@@ -72,11 +117,16 @@ class PermissionGate:
             self._record(tool_name, actions, decision, "denied")
             raise ActionDeniedError(tool_name, decision.reason)
 
-        sensitive = (
-            decision.high_risk
-            or decision.outside_workspace
-            or any(a.secret for a in decision.actions)
-        )
+        sensitive = _sensitive(decision)
+        key = _batch_key(tool_name, actions)
+        if key in self._preapproved and not sensitive:
+            self._preapproved.discard(key)
+            self._record(tool_name, actions, decision, "approved by user (batch)")
+            return []
+        if key in self._prerejected:
+            self._prerejected.discard(key)
+            self._record(tool_name, actions, decision, "rejected by user (batch)")
+            raise ActionDeniedError(tool_name, "the user rejected it")
         if tool_name in self.session_grants and not sensitive and not self.force_confirm:
             self._record(tool_name, actions, decision, "allowed (session grant)")
             return []
