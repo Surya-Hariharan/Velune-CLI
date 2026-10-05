@@ -15,6 +15,7 @@ the process alive indefinitely.
 from __future__ import annotations
 
 import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -160,7 +161,22 @@ async def test_cmd_memory_degrades_when_manager_missing():
 # ---------------------------------------------------------------------------
 
 
-def test_check_memory_health_uses_read_memory_health(monkeypatch):
+@pytest.fixture
+def existing_memory_store(tmp_path, monkeypatch):
+    """A workspace that already has a memory store, in an isolated data dir.
+
+    `_check_memory_health` is read-only and reports "no store yet" for folders
+    Velune was never used in, so the tests below must give it a store to read —
+    and must not depend on (or touch) the developer's real app-data directory,
+    which is why they passed locally but failed on a clean CI checkout.
+    """
+    from velune.core.paths import COGNITIVE_DB_NAME, workspace_storage_dir
+
+    monkeypatch.setenv("VELUNE_DATA_HOME", str(tmp_path / "data"))
+    (workspace_storage_dir(Path.cwd()) / COGNITIVE_DB_NAME).touch()
+
+
+def test_check_memory_health_uses_read_memory_health(monkeypatch, existing_memory_store):
     """_check_memory_health() imports read_memory_health locally on each
     call, so the patch has to target its source module — not a name cached
     on the doctor module — to actually take effect."""
@@ -178,7 +194,7 @@ def test_check_memory_health_uses_read_memory_health(monkeypatch):
     assert "1.5 MB" in result["message"]
 
 
-def test_check_memory_health_degrades_on_error(monkeypatch):
+def test_check_memory_health_degrades_on_error(monkeypatch, existing_memory_store):
     async def fake_read(_workspace):
         raise RuntimeError("disk full")
 
