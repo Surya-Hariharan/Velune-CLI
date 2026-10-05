@@ -129,3 +129,14 @@ master.key
 
 # Internal docs (kept local, not published)
 docs/internal/
+
+# Merge leftovers, extra tool caches, local-only config and scratch space
+*.orig
+*.rej
+coverage.xml
+.nox/
+.pyright/
+pyrightconfig.local.json
+desktop.ini
+scratch/
+scratchpad/
