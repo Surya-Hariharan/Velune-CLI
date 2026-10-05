@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 
 
 def _candidate_history_files() -> list[Path]:
@@ -33,6 +33,10 @@ def _candidate_history_files() -> list[Path]:
 
 class TerminalHistory(BaseTool):
     """Tool for viewing terminal history."""
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        # Read-only: runs in every execution mode without approval.
+        return {ToolPermission.FILESYSTEM_READ}
 
     def get_name(self) -> str:
         return "terminal_history"

@@ -28,6 +28,7 @@ def _create_tool_registry(env: RuntimeEnvironment):
         WriteFile,
     )
     from velune.tools.base.registry import ToolRegistry
+    from velune.tools.filesystem.dirs import CreateDirectory, DeleteDirectory, MovePath
 
     logger = logging.getLogger("velune.tools.module")
 
@@ -54,6 +55,9 @@ def _create_tool_registry(env: RuntimeEnvironment):
         WriteFile(workspace=ws, confirm=False),
         CreateFile(workspace=ws, confirm=False),
         DeleteFile(workspace=ws, confirm=False),
+        CreateDirectory(workspace=ws),
+        DeleteDirectory(workspace=ws),
+        MovePath(workspace=ws),
         GrepFiles(workspace=ws),
         FindFiles(workspace=ws),
         GitLog(workspace=ws),

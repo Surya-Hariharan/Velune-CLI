@@ -71,10 +71,18 @@ class Boundary:
             self._within(path, root) for root in self.extra_roots
         )
 
+    @staticmethod
+    def root_for(path: Path) -> Path:
+        """The directory a grant for *path* covers (the path itself if it's a folder)."""
+        return (path if path.is_dir() or not path.suffix else path.parent).resolve()
+
     def grant(self, path: Path) -> None:
         """Allow a directory outside the workspace for the rest of the task."""
-        root = path if path.is_dir() or not path.suffix else path.parent
-        self.extra_roots.add(root.resolve())
+        self.extra_roots.add(self.root_for(path))
+
+    def with_roots(self, roots: list[Path]) -> Boundary:
+        """A copy that also admits *roots* (used for one approved call)."""
+        return Boundary(self.workspace_root, set(self.extra_roots) | set(roots))
 
     def clear_grants(self) -> None:
         self.extra_roots.clear()

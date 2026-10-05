@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from velune.execution.path_guard import PathGuard
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 
 
 class SemanticCodeSearch(BaseTool):
@@ -12,6 +12,10 @@ class SemanticCodeSearch(BaseTool):
 
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        # Read-only: runs in every execution mode without approval.
+        return {ToolPermission.FILESYSTEM_READ}
 
     def get_name(self) -> str:
         return "semantic_code_search"
@@ -99,6 +103,10 @@ class SymbolSearch(BaseTool):
 
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        # Read-only: runs in every execution mode without approval.
+        return {ToolPermission.FILESYSTEM_READ}
 
     def get_name(self) -> str:
         return "symbol_search"

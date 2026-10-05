@@ -221,15 +221,18 @@ async def authorize_and_execute(
         workspace = (ctx.workspace if ctx is not None else None) or Path.cwd()
         boundary = Boundary(Path(workspace))
     actions = tool.describe_actions(dict(kwargs), boundary)
+    call_boundary = None
     if gate is None:
         if any(a.mutating or a.secret or a.outside_workspace for a in actions):
             raise ActionDeniedError(
                 tool.get_name(), "no permission gate is active for this call (fail closed)"
             )
     else:
-        await gate.check(tool.get_name(), actions)
+        approved_once = await gate.check(tool.get_name(), actions)
+        # Locations approved "once" are admitted for this call only.
+        call_boundary = gate.boundary.with_roots(approved_once) if approved_once else gate.boundary
 
-    token = set_active_boundary(gate.boundary if gate is not None else None)
+    token = set_active_boundary(call_boundary)
     try:
         return await tool.guarded_execute(ctx, **kwargs)
     finally:

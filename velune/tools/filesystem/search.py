@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from velune.execution.path_guard import PathGuard
-from velune.tools.base.tool import BaseTool
+from velune.tools.base.tool import BaseTool, ToolPermission
 from velune.tools.filesystem.ignore import load_ignore
 
 
@@ -13,6 +13,10 @@ class GrepFiles(BaseTool):
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
         self._ignore = load_ignore(self.workspace)
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        # Read-only: runs in every execution mode without approval.
+        return {ToolPermission.FILESYSTEM_READ}
 
     def get_name(self) -> str:
         return "grep_files"
@@ -97,6 +101,10 @@ class FindFiles(BaseTool):
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
         self._ignore = load_ignore(self.workspace)
+
+    def get_required_permissions(self) -> set[ToolPermission]:
+        # Read-only: runs in every execution mode without approval.
+        return {ToolPermission.FILESYSTEM_READ}
 
     def get_name(self) -> str:
         return "find_files"

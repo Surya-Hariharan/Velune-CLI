@@ -58,12 +58,16 @@ class PermissionGate:
     # confidence): session grants then don't skip the human check.
     force_confirm: bool = False
 
-    async def check(self, tool_name: str, actions: list[Action]) -> None:
-        """Authorize *actions* for *tool_name*; return normally or raise."""
+    async def check(self, tool_name: str, actions: list[Action]) -> list[Path]:
+        """Authorize *actions* for *tool_name*, or raise :class:`ActionDeniedError`.
+
+        Returns the outside-workspace roots the user approved *once*: the
+        caller admits them for this single call only.
+        """
         decision = authorize(actions, self.state)
         if decision.verdict is Verdict.ALLOW:
             self._record(tool_name, actions, decision, "allowed")
-            return
+            return []
         if decision.verdict is Verdict.DENY:
             self._record(tool_name, actions, decision, "denied")
             raise ActionDeniedError(tool_name, decision.reason)
@@ -75,7 +79,7 @@ class PermissionGate:
         )
         if tool_name in self.session_grants and not sensitive and not self.force_confirm:
             self._record(tool_name, actions, decision, "allowed (session grant)")
-            return
+            return []
         if self.ask is None:
             self._record(tool_name, actions, decision, "denied (no interactive approval)")
             raise ActionDeniedError(
@@ -86,14 +90,18 @@ class PermissionGate:
         if answer is Approval.DENY:
             self._record(tool_name, actions, decision, "rejected by user")
             raise ActionDeniedError(tool_name, "the user rejected it")
+        outside_targets = [Path(a.target) for a in decision.actions if a.outside_workspace]
+        once: list[Path] = []
         if answer is Approval.ALLOW_TASK:
-            if decision.outside_workspace:
-                for action in decision.actions:
-                    if action.outside_workspace:
-                        self.boundary.grant(Path(action.target))
+            if outside_targets:
+                for target in outside_targets:
+                    self.boundary.grant(target)
             elif not sensitive:
                 self.session_grants.add(tool_name)
+        else:
+            once = [Boundary.root_for(t) for t in outside_targets]
         self._record(tool_name, actions, decision, f"approved by user ({answer.value})")
+        return once
 
     def _record(
         self, tool_name: str, actions: list[Action], decision: Decision, outcome: str
