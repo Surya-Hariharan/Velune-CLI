@@ -30,6 +30,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development",
   "Topic :: Terminals",
   "Typing :: Typed",
@@ -41,24 +42,33 @@ classifiers = [
 # compiled, or feature-specific dependencies live in the extras below and every
 # import site for them is lazy + self-degrading, so the CLI starts and runs
 # (Ollama / cloud chat, sessions, config, doctor) without any extra installed.
+#
+# Version floors are NOT arbitrary: each is the oldest release that (a) the
+# test suite passes against (CI `install-lowest` installs exactly these) and
+# (b) ships a prebuilt wheel for every supported Python on Windows/macOS/Linux.
+# Floors that are too old let pip keep a stale copy already in the user's
+# environment (→ runtime ImportError/TypeError) or pick a version with no wheel
+# for their Python (→ "Microsoft Visual C++ 14.0 is required" source build).
+# Compiled packages therefore carry per-Python floors. Caps exist only where a
+# next major is known to break us — never exact pins (they cause conflicts).
 dependencies = [
     # Core CLI + config
-    "pydantic>=2.5.0",
+    "pydantic>=2.11.0,<3; python_version < '3.14'",
+    "pydantic>=2.12.0,<3; python_version >= '3.14'",
     "pydantic-settings>=2.14.2",
     "toml>=0.10.2",
     # stdlib `tomllib` only exists on 3.11+; backport for 3.10.
     "tomli>=2.0.1; python_version < '3.11'",
-    "typer>=0.9.0",
-    "rich>=13.7.0",
+    "typer>=0.16.0",
+    "rich>=13.9.0",
     "platformdirs>=4.2.0",
     "keyring>=24.0.0",
-    "prompt-toolkit>=3.0.0",
+    "prompt-toolkit>=3.0.48,<4",
     "pathspec>=0.12.0",
 
-    # Providers (HTTP-only; no heavy/compiled deps)
-    "openai>=1.10.0",
-    "anthropic>=0.18.0",
-    "httpx>=0.26.0",
+    # Providers talk to every API over plain httpx — no vendor SDKs (the
+    # openai/anthropic packages were declared here but never imported).
+    "httpx>=0.27.0,<1",
     # mcp <1.28.1: CVE-2026-59950 — floor at the patched release.
     # mcp >=2.0.0: rewrote the low-level Server API (the decorator-based
     # @server.list_tools()/@server.call_tool() registration velune/mcp/server.py
@@ -73,17 +83,19 @@ dependencies = [
     # dependency graph work out of the box. rank-bm25 requires numpy, so numpy
     # is a core dependency too (it is otherwise only used lazily by [rag]).
     "rank-bm25>=0.2.2",
-    "numpy>=1.24.0",
+    "numpy>=1.26.0,<3; python_version < '3.13'",
+    "numpy>=2.1.0,<3; python_version == '3.13'",
+    "numpy>=2.3.2,<3; python_version >= '3.14'",
     "networkx>=3.2.0",
 
     # Execution + logging (small)
-    "psutil>=5.9.0",
-    "structlog>=24.0.0",
+    "psutil>=6.0.0",
+    "structlog>=24.1.0",
 
     # Utilities
-    "orjson>=3.9.0",
-    "tiktoken>=0.5.0",
-    "cryptography>=41.0.0",
+    "tiktoken>=0.8.0; python_version < '3.14'",
+    "tiktoken>=0.12.0; python_version >= '3.14'",
+    "cryptography>=43.0.1",
 ]
 
 [project.optional-dependencies]

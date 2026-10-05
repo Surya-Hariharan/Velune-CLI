@@ -135,9 +135,12 @@ aggregation job:
 | --- | --- |
 | **Lint** | `ruff check velune/`, `ruff format --check velune/`, `pyright velune/` — all blocking |
 | **Security** | `pip-audit --skip-editable`; `uv lock --check` (the committed `uv.lock` must match `pyproject.toml`); `bandit` (medium+ severity/confidence gates the build, plus a low-severity count baseline that may not grow); a gitleaks secret scan; regression guards: no `shell=True` in `velune/`, `create_subprocess_shell` only at allow-listed sites, and no new `asyncio.run()` call sites |
-| **Tests** | `pip install -e ".[all,dev]"` then `pytest`, across Python 3.10–3.13 × Ubuntu / Windows / macOS |
+| **Tests** | `pip install -e ".[all,dev]"` then `pytest`, across Python 3.10–3.14 × Ubuntu / Windows / macOS |
 | **Build & Validate Artifacts** | Hatchling sdist + wheel (reproducible via `SOURCE_DATE_EPOCH`), `twine check --strict`, and the wheel must be pure-Python (`py3-none-any`) |
-| **Wheel Install + REPL Smoke** | installs the built wheel into a clean environment and runs `velune --version`, `velune --help`, `python -m velune --version`, `velune doctor check` across OS × Python |
+| **Wheel Install + REPL Smoke** | installs the built wheel into a clean environment and runs `velune --version`, `velune --help`, `python -m velune --version`, `velune <doctor|config|provider|models> --help` (strict), `velune doctor check` across OS × Python |
+| **Lowest Dependency Versions** | installs the *lowest* version allowed by every `pyproject.toml` floor, **wheels only** (`uv pip install --no-build --resolution lowest-direct`), then runs the smoke test and `pytest -m "not integration"` on Python 3.10 and 3.14 × all three OSes. It fails if a floor is too old for the code, or if it has no prebuilt wheel for some Python/OS (which would make a user's `pip install` compile from source) |
+| **Install Over Stale Dependencies** | pre-installs old, incompatible versions of core deps (as another tool in a shared environment would), installs the wheel on top, and asserts pip upgraded them and Velune starts |
+| **One-line Installer** | runs `scripts/install.sh` (Linux/macOS, plus `shellcheck`) and `scripts/install.ps1` (Windows) on clean runners against the built wheel |
 | **CI Pass** | fails if any of the above failed — the single required status check |
 
 CodeQL runs separately. `.github/workflows/release.yml` handles publishing (tag-triggered; it verifies the
@@ -146,6 +149,16 @@ for the exact steps.
 
 **Invariant:** the PyPI wheel stays pure-Python (`py3-none-any`); the repository contains no Go or Rust code,
 so don't add a compiled dependency to a path that must work after a bare `pip install velune-cli`.
+
+**Dependency floors are tested, not guessed.** Each core floor in `pyproject.toml` is the oldest release that
+the suite passes against *and* that ships a wheel for every supported Python/OS. Compiled packages (`numpy`,
+`tiktoken`, `pydantic`) therefore have per-Python floors via environment markers. If a floor is too low, pip
+leaves a stale copy from another tool in place and Velune breaks at runtime (e.g. `typer<0.16` +
+`click>=8.2` crashes every `--help`), or pip picks a version with no wheel and tries to compile it. When you
+raise a floor or add a dependency, the **Lowest Dependency Versions** job proves it. Don't declare a
+dependency that `velune/` never imports: `openai`, `anthropic` and `orjson` used to be listed but were never
+imported (providers use plain `httpx`), and they only added install surface. `velune doctor`'s *Core
+Dependencies* check reads the installed package metadata, so it always matches `pyproject.toml`.
 
 > Dependency versions are pinned in the committed `uv.lock` (check with `uv lock --check`; refresh with
 > `uv lock --upgrade-package <name>`). `[project.optional-dependencies]` defines `rag`, `parsing`,

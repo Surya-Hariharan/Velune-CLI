@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **One-line installers.** `scripts/install.sh` (macOS/Linux/WSL) and `scripts/install.ps1` (Windows) install
+  Velune into its own isolated environment with `uv tool install`. They work with no Python installed, or one
+  that is too old or "externally managed" (PEP 668), and they can't conflict with other tools' packages.
+  This is now the recommended install path in the README.
 - **Richer inline Markdown.** Tables render with borders and wrap long cells instead of truncating;
   `` ```mermaid `` flowcharts (`graph`/`flowchart`, labelled and chained links, node shapes) draw as a
   box-drawing tree; fenced ASCII/bar charts are cropped to the terminal width instead of wrapped, so their
@@ -38,6 +42,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **`pip install velune-cli` failing or crashing on machines that already had Python packages.** The core
+  dependency floors were far below anything tested (`typer>=0.9`, `prompt-toolkit>=3.0.0`, `numpy>=1.24`,
+  `orjson>=3.9`…). pip therefore kept stale copies already installed by other tools, and Velune crashed at
+  runtime: for example, `typer<0.16` with `click>=8.2` breaks every `--help`. pip could also pick versions
+  with no wheel for newer Pythons and fail with "Microsoft Visual C++ 14.0 is required". The floors are now
+  the oldest versions that pass the test suite and ship wheels for CPython 3.10–3.14 on Windows, macOS and
+  Linux. CI installs exactly those versions to keep it that way.
+- **Misleading startup error.** Any import failure used to say "your Python installation is corrupted —
+  reinstall Python", even when the real cause was an incompatible dependency. A dependency problem now names
+  the package and its installed version and gives the upgrade/isolated-install command. Import failures
+  while the CLI is being built (not only the first import) now get this message instead of a raw traceback.
+- **`velune doctor` reporting failures on a correct install.** *Core Dependencies* listed the optional
+  `qdrant_client` and so failed on every lean install. It now checks the real declared requirements,
+  including minimum versions. *Qdrant in-process* is now a warning ("optional `[rag]` extra not installed")
+  instead of a failure.
+- Cost estimation no longer raises when `tiktoken` can't download its encoding file (offline or firewalled
+  machines); it falls back to the word-count estimate.
 - **Groq chat failed with HTTP 404 / 400.** The static model list kept models Groq had retired, and models
   discovered later were assumed to have a 131k-token window (`allam-2-7b` has 4k). Groq models now come from
   the live `/models` list with the real context window.
@@ -101,6 +122,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- Removed the `openai`, `anthropic` and `orjson` dependencies. They were never imported (every provider uses
+  plain `httpx`), and dropping them removes 7 packages from a default install, two of them Rust-compiled.
+- Python 3.14 is officially supported (classifier and CI matrix).
 - **Removed the unshipped Go launcher and Rust native module** (`ext/`) and their CI jobs. Neither was part of the
   PyPI package; the repository indexers now use the plain-Python helpers in `velune/repository/file_scan.py`
   (formerly `_native.py`), whose behaviour is unchanged.

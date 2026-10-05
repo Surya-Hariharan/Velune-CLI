@@ -344,24 +344,71 @@ def _check_pip() -> dict:
 
 
 def _check_core_dependencies() -> dict:
-    deps = ["pydantic", "typer", "rich", "httpx", "qdrant_client", "toml"]
-    missing = []
-    for dep in deps:
-        try:
-            __import__(dep)
-        except ImportError:
-            missing.append(dep)
+    """Check every *core* requirement Velune declares is installed at a compatible version.
 
-    if not missing:
+    Reads the requirements from the installed package metadata rather than a
+    hand-kept list, so it can never drift from pyproject.toml (the old list
+    named the optional [rag] extra's qdrant_client, so every lean install
+    "failed"). A stale copy left by another tool sharing this interpreter is
+    the usual way an install breaks, so versions are checked, not just presence.
+    """
+    import re
+    from importlib.metadata import PackageNotFoundError, requires, version
+
+    try:
+        raw_reqs = requires("velune-cli") or []
+    except PackageNotFoundError:
+        raw_reqs = []  # running from a source tree that was never installed
+    try:
+        from packaging.requirements import Requirement
+    except ImportError:  # packaging is not a core dependency; degrade to presence-only
+        Requirement = None  # noqa: N806
+
+    missing: list[str] = []
+    outdated: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_reqs:
+        if Requirement is not None:
+            req = Requirement(raw)
+            if req.marker is not None and not req.marker.evaluate({"extra": ""}):
+                continue  # optional extra, or another Python version's line
+            name, spec = req.name, req.specifier
+        else:
+            if "extra ==" in raw:
+                continue
+            name, spec = re.split(r"[\s<>=!~;\[(]", raw, maxsplit=1)[0], None
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            installed = version(name)
+        except PackageNotFoundError:
+            missing.append(name)
+            continue
+        if spec and not spec.contains(installed, prereleases=True):
+            outdated.append(f"{name} {installed} (needs {spec})")
+
+    if not raw_reqs:
+        return {
+            "name": "Core Dependencies",
+            "status": "warn",
+            "message": "velune-cli package metadata not found (running from source?).",
+        }
+    if not missing and not outdated:
         return {
             "name": "Core Dependencies",
             "status": "ok",
-            "message": "All core dependencies installed.",
+            "message": f"All {len(seen)} core dependencies installed at compatible versions.",
         }
+    problems = [f"missing: {', '.join(missing)}"] if missing else []
+    if outdated:
+        problems.append(f"incompatible: {', '.join(outdated)}")
     return {
         "name": "Core Dependencies",
         "status": "fail",
-        "message": f"Missing core dependencies: {', '.join(missing)}",
+        "message": "; ".join(problems)
+        + f'. Fix: "{sys.executable}" -m pip install --upgrade velune-cli '
+        "(or install isolated: pipx install velune-cli).",
     }
 
 
@@ -556,7 +603,17 @@ def _check_sqlite() -> dict:
 def _check_qdrant() -> dict:
     try:
         from qdrant_client import QdrantClient
-
+    except ImportError:
+        # qdrant-client ships in the optional [rag] extra; a lean install
+        # without it is a supported configuration, not a failure.
+        return {
+            "name": "Qdrant In-Process Initializable",
+            "status": "warn",
+            # `\\[` escapes Rich markup, which would otherwise eat "[rag]".
+            "message": "Optional \\[rag] extra not installed — vector search disabled, "
+            "keyword search still works. Enable: pip install 'velune-cli\\[rag]'",
+        }
+    try:
         with tempfile.TemporaryDirectory(prefix="velune-qdrant-") as temp_dir:
             qdrant_path = Path(temp_dir)
             client = QdrantClient(path=str(qdrant_path))

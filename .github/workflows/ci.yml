@@ -195,7 +195,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     env:
       PYTHONIOENCODING: utf-8
       PYTHONUTF8: "1"
@@ -271,7 +271,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     env:
       PYTHONIOENCODING: utf-8
     steps:
@@ -301,14 +301,162 @@ jobs:
           velune --help
           # The console-script and module form must agree.
           python -m velune --version
+          # Subcommand help builds each command's Typer/Click signature — this
+          # is where a dependency API mismatch (e.g. old typer + new click)
+          # crashes, so it must succeed strictly (no `|| true`).
+          for cmd in doctor config provider models; do velune "$cmd" --help > /dev/null; done
           # Environment diagnostics must run without import-time crashes on
           # every supported interpreter (exit code ignored — warnings are fine).
           velune doctor check || true
 
+  # The declared dependency floors are a promise: anyone whose environment
+  # already holds exactly those versions keeps them (pip treats the floor as
+  # satisfied). Install the *lowest* allowed version of every direct
+  # dependency, wheel-only, and run the suite — so a floor that is too old
+  # (API break at runtime) or has no wheel for some Python/OS (→ "Microsoft
+  # Visual C++ 14.0 is required" source build on a user's machine) fails here.
+  install-lowest:
+    name: Lowest Dependency Versions (${{ matrix.os }}, py${{ matrix.python-version }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.14"]
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install lowest direct dependencies (wheels only) + the wheel
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip uv
+          # --no-build: a floor without a wheel for this Python/OS is a bug.
+          uv pip install --system --no-build --resolution lowest-direct -r pyproject.toml
+          uv pip install --system --no-deps dist/*.whl
+          # Test tooling at current versions (not part of the floor check).
+          uv pip install --system "pytest>=8.0.0" "pytest-asyncio>=0.23.0"
+          uv pip list --system
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          velune --version
+          velune --help
+          for cmd in doctor config provider models; do velune "$cmd" --help > /dev/null; done
+          velune doctor check || true
+
+      - name: Test suite at lowest versions
+        run: pytest -m "not integration"
+
+  # Reproduces the most common real-world failure: `pip install velune-cli`
+  # into a Python that already holds stale copies of our dependencies from
+  # some other tool. pip must upgrade them to our floors and Velune must start.
+  install-polluted:
+    name: Install Over Stale Dependencies (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Pre-install old, incompatible versions of our dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "typer==0.9.0" "rich==13.7.0" "pydantic==2.5.3" \
+            "prompt-toolkit==3.0.36" "httpx==0.26.0" "numpy==1.26.4"
+
+      - name: Install the wheel on top
+        shell: bash
+        run: python -m pip install dist/*.whl packaging
+
+      - name: Stale versions were upgraded and Velune starts
+        shell: bash
+        run: |
+          python - <<'EOF'
+          from importlib.metadata import version
+          from packaging.version import Version
+          floors = {"typer": "0.16.0", "rich": "13.9.0", "pydantic": "2.11.0",
+                    "prompt-toolkit": "3.0.48", "httpx": "0.27.0"}
+          for dist, floor in floors.items():
+              got = version(dist)
+              assert Version(got) >= Version(floor), f"{dist} {got} < {floor}"
+              print(f"ok {dist} {got} >= {floor}")
+          EOF
+          velune --version
+          for cmd in doctor config provider models; do velune "$cmd" --help > /dev/null; done
+          velune doctor check || true
+
+  # The one-line installers (scripts/install.sh / install.ps1) on clean
+  # runners, pointed at the freshly built wheel instead of PyPI.
+  installer:
+    name: One-line Installer (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      PYTHONIOENCODING: utf-8
+      VELUNE_NO_MODIFY_PATH: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download built wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Lint install.sh
+        if: runner.os == 'Linux'
+        run: shellcheck scripts/install.sh
+
+      - name: Run install.sh
+        if: runner.os != 'Windows'
+        run: VELUNE_PACKAGE="$(ls "$PWD"/dist/*.whl)" sh scripts/install.sh
+
+      - name: Run install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:VELUNE_PACKAGE = (Get-ChildItem dist\*.whl).FullName
+          Get-Content -Raw scripts\install.ps1 | Invoke-Expression
+
   ci-pass:
     name: CI Pass
     runs-on: ubuntu-latest
-    needs: [lint, security, test, build, install-smoke]
+    needs: [lint, security, test, build, install-smoke, install-lowest, install-polluted, installer]
     if: always()
     steps:
       - name: Check all jobs passed
@@ -317,7 +465,10 @@ jobs:
              [ "${{ needs.security.result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ] || \
-             [ "${{ needs.install-smoke.result }}" != "success" ]; then
+             [ "${{ needs.install-smoke.result }}" != "success" ] || \
+             [ "${{ needs.install-lowest.result }}" != "success" ] || \
+             [ "${{ needs.install-polluted.result }}" != "success" ] || \
+             [ "${{ needs.installer.result }}" != "success" ]; then
             echo "❌ One or more jobs failed"
             exit 1
           fi

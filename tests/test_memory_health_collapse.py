@@ -14,8 +14,11 @@ the process alive indefinitely.
 
 from __future__ import annotations
 
+import importlib.util
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from velune.cli.commands.memory import _memory_stats_async
 from velune.cli.display.memory_view import MemoryDisplayView
@@ -48,6 +51,10 @@ async def test_read_memory_health_cold_start_never_raises(tmp_path):
     assert health.lancedb_size_mb >= 0.0
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("lancedb") is None,
+    reason="needs the [rag] extra (lancedb)",
+)
 async def test_read_memory_health_populates_lancedb_size_after_fix(tmp_path):
     """Regression: MemoryLifecycleManager.health() previously read
     semantic_memory._store._path (doesn't exist — the real attribute is

@@ -34,8 +34,12 @@ class CostEstimator:
                     content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
                     total += len(enc.encode(content)) + 4  # +4 for role/separator overhead
                 return total
-            except ImportError:
-                logger.debug("tiktoken not installed; falling back to word-count approximation")
+            except Exception as exc:
+                # ImportError, or the first-use BPE download failing on an
+                # offline/firewalled machine — an estimate must never crash a turn.
+                logger.debug(
+                    f"tiktoken unavailable ({exc}); falling back to word-count approximation"
+                )
 
         # Conservative approximation for all other providers
         total_words = 0

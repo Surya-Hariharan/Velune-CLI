@@ -77,70 +77,81 @@ OpenRouter, and others.
 
 ## 60-second quickstart
 
-### Option A — Local (Ollama, free, no key)
+### 1. Install Velune CLI
+
+**macOS / Linux / WSL**
 
 ```bash
-# 1. Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/scripts/install.sh | sh
+```
 
-# 2. Pull a model
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/scripts/install.ps1 | iex
+```
+
+The installer puts Velune in its **own isolated environment** using
+[uv](https://docs.astral.sh/uv/). It doesn't need Python already installed: if
+Python is missing or too old, uv downloads a private copy. It can't conflict
+with packages other tools have installed, and it adds `velune` to your `PATH`.
+Run the same command again to upgrade.
+
+<details>
+<summary><strong>Prefer pipx, uv or pip?</strong></summary>
+
+Any of these works. The first two give you the same isolation as the installer:
+
+```bash
+pipx install velune-cli          # isolated, auto-managed PATH
+uv tool install velune-cli       # isolated, auto-managed PATH
+pip install velune-cli           # into the current Python environment
+```
+
+Plain `pip install` needs Python 3.10+ and installs into whatever environment
+is active. The usual problems with it:
+
+- **`error: externally-managed-environment`** (Debian/Ubuntu, Homebrew Python):
+  the OS won't let pip write to the system Python. Use the installer, `pipx`
+  or `uv tool` above, or a virtualenv.
+- **Another tool needs different versions of the same libraries:** pip has only
+  one copy of each package per environment, so two tools can break each other.
+  An isolated install avoids this. If Velune detects an incompatible dependency
+  at startup, it names the package and gives you the fix command.
+- **`velune: command not found`** / *"'velune' is not recognized…"*: the
+  install worked, but your Python scripts directory isn't on `PATH`. Use
+  `python -m velune` (always works), or reinstall with `pipx`/the installer,
+  which manage `PATH` for you.
+
+Every dependency ships prebuilt wheels for CPython 3.10–3.14 on Windows,
+macOS and Linux (x86-64 and ARM64), so no compiler or build step is needed.
+CI checks this for the lowest version of each dependency.
+
+</details>
+
+### 2a. Local models (Ollama, free, no key)
+
+```bash
+# Install Ollama, then pull a model
+curl -fsSL https://ollama.com/install.sh | sh
 ollama pull qwen2.5-coder:7b
 
-# 3. Install Velune CLI
-pip install velune-cli
-
-# 4. Initialize in your project
 cd your-project
 velune init
-
-# 5. Start
 velune
 ```
 
-### Option B — Cloud free tier (Groq, fastest, no GPU needed)
+### 2b. Cloud free tier (Groq, fastest, no GPU needed)
 
 ```bash
-pip install velune-cli
 velune init --provider groq
 velune setup        # enter your free Groq key
 velune
 ```
 
-Get a free Groq key at <https://console.groq.com/keys> — no credit card.
+Get a free Groq key at <https://console.groq.com/keys>, no credit card needed.
 
-<details>
-<summary><strong>Installing the <code>velune</code> command</strong> — click if <code>command not found</code></summary>
-
-```bash
-pip install velune-cli
-velune --version
-```
-
-Velune CLI is a pure-Python package, so a plain `pip install` works on every platform with no
-compiler or native build step.
-
-If your shell reports **`velune: command not found`** (or, on Windows,
-*"'velune' is not recognized…"*), the install succeeded but your Python
-scripts directory is not on `PATH`. Two reliable fixes:
-
-- **Recommended — install with [pipx](https://pipx.pypa.io/)** (isolated env, auto-managed PATH):
-
-  ```bash
-  pipx install velune-cli
-  ```
-
-- **Or run it as a module** (always works, no PATH changes needed):
-
-  ```bash
-  python -m velune --version
-  python -m velune            # start the REPL
-  ```
-
-On Windows, a plain `pip install` puts the launcher in a per-user
-`…\PythonXX\Scripts` folder; re-running the Python installer with **"Add
-Python to PATH"** checked (or using `pipx`) resolves it permanently.
-
-</details>
+Check your setup any time with `velune doctor`.
 
 ---
 
@@ -490,6 +501,10 @@ pip install velune-cli            # lean base (Ollama, cloud providers, chat, le
 pip install 'velune-cli[rag]'     # + semantic memory & vector retrieval
 pip install 'velune-cli[all]'     # + every optional feature
 ```
+
+If you used the one-line installer (or `uv tool`), add extras with
+`uv tool install --force 'velune-cli[rag]'`. With pipx, use
+`pipx install --force 'velune-cli[rag]'`.
 
 > The former `[llamacpp]` extra has been **permanently removed**:
 > `llama-cpp-python` pulls in `diskcache ≤ 5.6.3` (unsafe pickle

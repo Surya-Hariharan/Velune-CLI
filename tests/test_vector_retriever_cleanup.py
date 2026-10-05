@@ -12,8 +12,18 @@ method would have been useless without a stable, re-derivable point ID.
 
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
 from velune.retrieval.schemas import RetrievalDocument
 from velune.retrieval.vector import VectorRetriever, _point_id
+
+# Round-trip tests need a real Qdrant client — part of the optional [rag] extra.
+requires_qdrant = pytest.mark.skipif(
+    importlib.util.find_spec("qdrant_client") is None,
+    reason="needs the [rag] extra (qdrant-client)",
+)
 
 
 def test_point_id_is_stable_across_separate_calls():
@@ -27,6 +37,7 @@ def test_point_id_is_a_valid_qdrant_uint64():
     assert 0 <= _point_id("anything") < 2**63
 
 
+@requires_qdrant
 def test_upsert_then_delete_round_trip():
     retriever = VectorRetriever(location=":memory:")
     doc = RetrievalDocument(
@@ -45,6 +56,7 @@ def test_upsert_then_delete_round_trip():
     assert retriever.retrieve([0.1] * 8, top_k=5) == []
 
 
+@requires_qdrant
 def test_reindexing_the_same_file_overwrites_rather_than_duplicates():
     """The actual production scenario: a file is re-parsed and re-embedded on
     every incremental index. Before the fix, a new random point ID could
@@ -61,6 +73,7 @@ def test_reindexing_the_same_file_overwrites_rather_than_duplicates():
     assert hits[0].document.content == "v2"
 
 
+@requires_qdrant
 def test_delete_by_ids_is_a_no_op_when_nothing_was_ever_indexed():
     retriever = VectorRetriever(location=":memory:")
     retriever.delete_by_ids(["never/indexed.py"])  # must not raise

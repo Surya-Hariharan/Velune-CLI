@@ -16,20 +16,79 @@ import sys
 __all__ = ["main"]
 
 
+def _failing_dependency(exc: BaseException) -> str | None:
+    """Return the third-party distribution an import failure points at, if any.
+
+    ``None`` means the failure is in the stdlib/interpreter itself (or can't be
+    attributed), i.e. a genuinely broken Python. A third-party module means the
+    user's environment holds a missing, stale, or conflicting copy of one of
+    our dependencies — typically left behind by another tool sharing the same
+    global interpreter — and reinstalling Python would not help at all.
+    """
+    import re
+
+    module = getattr(exc, "name", None)
+    if not module:
+        # "cannot import name 'X' from 'pkg.sub' (/path/...)"
+        m = re.search(r"from '([\w.]+)'", str(exc))
+        module = m.group(1) if m else None
+    if not module:
+        return None
+    top = module.split(".")[0]
+    if top == "velune" or top.startswith("_") or top in sys.stdlib_module_names:
+        return None
+    try:
+        from importlib.metadata import packages_distributions
+
+        return packages_distributions().get(top, [top])[0]
+    except Exception:
+        return top
+
+
 def _fatal_environment_error(exc: BaseException) -> None:
     """Print an actionable message for a broken Python/runtime, then exit.
 
-    Reached when a top-level import fails — almost always because the Python
-    installation or one of its compiled dependency DLLs is missing or
-    corrupted (e.g. ``ImportError: DLL load failed while importing _ctypes``
-    on Windows after a Python upgrade/uninstall). We deliberately do *not*
-    show a raw traceback: it confuses non-developers and buries the fix.
+    Reached when a top-level import fails. Two very different causes share
+    this path, so the message is chosen by which module failed:
+
+    * a third-party dependency (``cannot import name 'X' from 'typer'``) —
+      the environment has an incompatible/missing copy of one of our deps;
+      the fix is upgrading or isolating Velune, never reinstalling Python;
+    * the stdlib/interpreter (``DLL load failed while importing _ctypes`` on
+      Windows after a Python upgrade/uninstall) — Python itself is broken.
+
+    We deliberately do *not* show a raw traceback: it confuses
+    non-developers and buries the fix.
 
     Note: this cannot catch the ``velune.exe`` launcher failing to locate
     ``pythonXY.dll`` (Windows error 126) — that happens in the C launcher
     *before* any Python runs. The remedy for that case is the same and is
     printed here so it is discoverable via ``python -m velune``.
     """
+    dist = _failing_dependency(exc)
+    if dist is not None:
+        try:
+            from importlib.metadata import version
+
+            installed = f"version {version(dist)} is installed"
+        except Exception:
+            installed = "it is not installed"
+        msg = (
+            f"Velune could not start because its dependency '{dist}' is missing or "
+            f"incompatible ({installed}).\n\n"
+            f"  Underlying error: {type(exc).__name__}: {exc}\n\n"
+            "This usually means another tool in the same Python environment\n"
+            "installed a different version of that package.\n\n"
+            "How to fix:\n"
+            "  1. Upgrade Velune and its dependencies in this Python:\n"
+            f'       "{sys.executable}" -m pip install --upgrade velune-cli\n'
+            "  2. Or install Velune in its own isolated environment, so no other\n"
+            "     tool can change its dependencies (recommended):\n"
+            "       pipx install velune-cli     (or: uv tool install velune-cli)\n"
+        )
+        sys.stderr.write("\n" + msg + "\n")
+        raise SystemExit(1)
+
     msg = (
         "Velune could not start because the Python installation appears to be "
         "missing or corrupted.\n\n"
@@ -143,23 +202,28 @@ def main() -> None:
     if help_requested and subcommand is None:
         try:
             from velune.cli.registry import render_root_help
+
+            render_root_help()
         except ImportError as exc:
             _fatal_environment_error(exc)
-        render_root_help()
         raise SystemExit(0)
 
     try:
         from velune.cli.app import create_app
+
+        # No subcommand → the bare interactive REPL, which needs zero
+        # subcommand modules imported. Otherwise register just the invoked
+        # command. Building the app is inside the guard because create_app()
+        # and the command module import core deps (rich, typer…) lazily.
+        cli = create_app(register=subcommand)
     except ImportError as exc:
-        # A failed *top-level* import means the interpreter or a compiled
-        # dependency DLL is unusable. Surface an actionable message instead of
-        # a cryptic traceback / Windows DLL popup. Real command-level errors
-        # are raised later by Typer and are intentionally not caught here.
+        # A failed import while *building* the CLI means the interpreter or a
+        # core dependency is unusable. Surface an actionable message instead
+        # of a cryptic traceback / Windows DLL popup. Errors raised while a
+        # command *runs* are handled by Typer and intentionally not caught here.
         _fatal_environment_error(exc)
 
-    # No subcommand → the bare interactive REPL, which needs zero subcommand
-    # modules imported. Otherwise register just the invoked command.
-    create_app(register=subcommand)()
+    cli()
 
 
 def __getattr__(name: str):
