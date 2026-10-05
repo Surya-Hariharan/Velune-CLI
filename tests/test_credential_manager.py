@@ -20,6 +20,27 @@ from velune.providers.keystore import CredentialManager, get_key, has_key, verif
 from velune.providers.validation import ValidationResult, ValidationStatus
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_config_lookup(tmp_path, monkeypatch):
+    """Ignore any velune.toml above the test's temp dir.
+
+    find_config_path() walks up from cwd (git-style), so a real
+    ~/velune.toml on the developer's machine leaked into these tests
+    ("assert 'groq' is None").
+    """
+    from velune.providers import default_provider as _dp
+
+    real = _dp.find_config_path
+
+    def bounded(start=None):
+        found = real(start)
+        if found is not None and tmp_path.resolve() not in found.resolve().parents:
+            return None
+        return found
+
+    monkeypatch.setattr(_dp, "find_config_path", bounded)
+
+
 @pytest.fixture
 def mock_config_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

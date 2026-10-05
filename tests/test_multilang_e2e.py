@@ -360,8 +360,20 @@ async def test_agentic_fix_loop(lang, tmp_path):
 
     set_auto_accept(True)
     try:
+        from velune.permissions import ExecutionMode, PolicyState
+        from velune.permissions.boundary import Boundary
+        from velune.permissions.gate import PermissionGate
+        from velune.tools.base.tool import ToolCallContext
+
+        # Autonomous fixing = AUTO mode: the gate, not the approver, authorizes edits.
+        ctx = ToolCallContext(
+            run_id="e2e",
+            actor="test",
+            workspace=root,
+            gate=PermissionGate(PolicyState(mode=ExecutionMode.AUTO), Boundary(root)),
+        )
         runner = ToolLoopRunner(
-            ScriptedFixer(fixture, root), registry, approver=_allow_all, max_turns=6
+            ScriptedFixer(fixture, root), registry, approver=_allow_all, ctx=ctx, max_turns=6
         )
         result = await runner.run(
             InferenceRequest(

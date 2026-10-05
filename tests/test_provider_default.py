@@ -13,10 +13,32 @@ Two friction fixes:
 
 from __future__ import annotations
 
+import pytest
 import toml
 
 from velune.cli import guidance
 from velune.providers import default_provider
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_config_lookup(tmp_path, monkeypatch):
+    """Ignore any velune.toml above the test's temp dir.
+
+    find_config_path() walks up from cwd (git-style), so a real
+    ~/velune.toml on the developer's machine leaked into these tests
+    ("assert 'groq' is None").
+    """
+    from velune.providers import default_provider as _dp
+
+    real = _dp.find_config_path
+
+    def bounded(start=None):
+        found = real(start)
+        if found is not None and tmp_path.resolve() not in found.resolve().parents:
+            return None
+        return found
+
+    monkeypatch.setattr(_dp, "find_config_path", bounded)
 
 
 def test_first_provider_becomes_default(tmp_path, monkeypatch):

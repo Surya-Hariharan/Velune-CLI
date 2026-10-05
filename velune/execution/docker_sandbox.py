@@ -174,7 +174,12 @@ class DockerSandbox:
             self.start()
         self._require_started()
 
-        argv = spec.to_argv()
+        # Same command policy as the subprocess sandbox (allowlist, no inline
+        # interpreter code) — this path previously skipped validation entirely.
+        # The program is resolved by name inside the container, not on the
+        # host (a host path such as C:\...\python.exe is meaningless there).
+        spec.validate_command()
+        argv = [spec.executable, *spec.args]
         cmd_str = " ".join(argv)
         logger.debug("Docker exec: %s", cmd_str)
 

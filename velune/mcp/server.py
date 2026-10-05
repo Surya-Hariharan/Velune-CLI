@@ -228,13 +228,30 @@ class VeluneMCPServer:
 
     def _tool_context(self):
         """Build a scoped execution context for a registry tool call."""
+        from pathlib import Path
+
+        from velune.permissions import ExecutionMode, PolicyState
+        from velune.permissions.boundary import Boundary
+        from velune.permissions.gate import PermissionGate
         from velune.tools.base.tool import ToolCallContext
 
+        # External MCP clients can't be asked anything, so the gate has no
+        # ask callback: with mutations enabled by the operator they run like
+        # AUTO (still refusing high-risk and out-of-workspace actions, which
+        # need a human); otherwise every state change is refused.
+        workspace = Path(self.workspace_path) if self.workspace_path else Path.cwd()
+        gate = PermissionGate(
+            state=PolicyState(
+                mode=ExecutionMode.AUTO if self.allow_mutations else ExecutionMode.MANUAL
+            ),
+            boundary=Boundary(workspace),
+        )
         return ToolCallContext(
             run_id="mcp-server",
             actor="mcp-client",
             workspace=self.workspace_path,
             permissions=self._granted_permissions(),
+            gate=gate,
         )
 
     def _register_handlers(self) -> None:

@@ -10,8 +10,8 @@ explicit confirmation even in AUTO mode.
 from __future__ import annotations
 
 import re
-from enum import StrEnum
 
+from velune._compat import StrEnum
 from velune.tools.safety import ApprovalMode, classify_command
 
 

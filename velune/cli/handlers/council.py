@@ -440,7 +440,13 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
     file_writes = dict(resolved)
     from velune.execution.diff_preview import DiffDecision
 
-    decisions = await preview.preview_batch(file_writes, auto_accept=False)
+    # The edit set goes through the same execution-mode policy as tool calls:
+    # PLAN refuses it, AUTO applies it, MANUAL uses the batched diff review
+    # below as its approval step.
+    auto_accept = await _authorize_council_edits(repl, file_writes)
+    if auto_accept is None:
+        return
+    decisions = await preview.preview_batch(file_writes, auto_accept=auto_accept)
 
     accepted_paths: list[_Path] = []
     if repl._hunk_review_mode:
@@ -474,6 +480,36 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
     if committed:
         repl.console.print("[dim]Changes committed. Use [bold]/undo[/bold] to revert.[/dim]")
         await _show_edit_summary_panel(repl, accepted_paths, workspace)
+
+
+async def _authorize_council_edits(repl: VeluneREPL, file_writes: dict) -> bool | None:
+    """Policy decision for a council edit set.
+
+    Returns ``True`` to apply without the review prompt (allowed outright),
+    ``False`` to apply through the interactive diff review (needs approval),
+    or ``None`` when the policy refuses the edits (nothing is written).
+    """
+    from velune.cli.handlers.tool_chat import _ToolActivityUI, session_gate
+    from velune.permissions import Verdict, authorize
+    from velune.permissions.actions import ActionType
+    from velune.permissions.boundary import path_action
+
+    gate = session_gate(repl, _ToolActivityUI(repl))
+    actions = []
+    for path, content in file_writes.items():
+        if not content:
+            kind = ActionType.DELETE_FILE
+        elif path.exists():
+            kind = ActionType.MODIFY_FILE
+        else:
+            kind = ActionType.CREATE_FILE
+        actions.append(path_action(kind, path, gate.boundary, "council edit"))
+    decision = authorize(actions, gate.state)
+    gate._record("council_edits", actions, decision, decision.verdict.value)
+    if decision.verdict is Verdict.DENY:
+        repl.console.print(f"[yellow]Edits not applied:[/yellow] {decision.reason}")
+        return None
+    return decision.verdict is Verdict.ALLOW
 
 
 async def _auto_commit_edits(repl: VeluneREPL, paths: list, task: str, workspace) -> bool:

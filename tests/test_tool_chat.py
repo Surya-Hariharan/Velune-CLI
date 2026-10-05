@@ -28,7 +28,7 @@ from velune.core.types.inference import InferenceRequest, InferenceResponse, Too
 from velune.core.types.model import ModelDescriptor
 from velune.tools.base.registry import ToolRegistry
 from velune.tools.base.tool import BaseTool, ToolPermission
-from velune.tools.safety import ApprovalMode
+from velune.tools.safety import ApprovalMode  # noqa: F401
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -293,118 +293,127 @@ def _ui(repl) -> _ToolActivityUI:
     return _ToolActivityUI(repl)
 
 
-async def test_approver_auto_allows_readonly(tmp_path):
-    repl = _fake_repl(tmp_path, registry=_reg())
-    approver = _make_approver(repl, _ui(repl))
-    assert await approver("peek", {}, {ToolPermission.FILESYSTEM_READ})
-    assert await approver("blame", {}, {ToolPermission.GIT_READ})
-
-
-async def test_approver_block_mode_denies_everything_mutating(tmp_path):
-    repl = _fake_repl(tmp_path, registry=_reg())
-    repl._approval_mode = ApprovalMode.BLOCK
-    approver = _make_approver(repl, _ui(repl))
-    assert not await approver("write_file", {}, {ToolPermission.FILESYSTEM_WRITE})
-    assert not await approver(
-        "execute_command", {"command": "ls"}, {ToolPermission.TERMINAL_EXECUTE}
-    )
-    # Read-only still allowed even in block mode.
-    assert await approver("peek", {}, {ToolPermission.FILESYSTEM_READ})
-
-
-async def test_approver_blocks_dangerous_commands_without_prompting(tmp_path):
-    repl = _fake_repl(tmp_path, registry=_reg())
-    approver = _make_approver(repl, _ui(repl))
-    assert not await approver(
-        "execute_command", {"command": "rm -rf /"}, {ToolPermission.TERMINAL_EXECUTE}
-    )
-
-
-async def test_approver_safe_mode_autoruns_safe_commands(tmp_path):
-    repl = _fake_repl(tmp_path, registry=_reg())
-    repl._approval_mode = ApprovalMode.SAFE
-    approver = _make_approver(repl, _ui(repl))
-    assert await approver(
-        "execute_command", {"command": "git status"}, {ToolPermission.TERMINAL_EXECUTE}
-    )
-
-
-async def test_approver_honors_session_grants(tmp_path):
-    repl = _fake_repl(tmp_path, registry=_reg())
-    repl._tool_session_grants.add("write_file")
-    approver = _make_approver(repl, _ui(repl))
-    assert await approver("write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE})
-
-
-# ── Low-confidence gate ──────────────────────────────────────────────────────
+# ── Approval now flows through the session's permission gate ────────────────
 #
-# A mutating call that would otherwise skip the human check entirely (--yes,
-# a session "always allow" grant) must not do so when the turn's intent
-# classification was low-confidence. Non-interactive test stdin means the
-# forced prompt fails closed (denied) — that IS the assertion: the shortcut
-# was bypassed, not silently honored.
+# The approver only records the call; the decision is made by the gate from
+# the tool's described actions and the execution mode (velune.permissions).
+# These keep the guarantees the old approver tests protected.
 
 
-async def test_approver_low_confidence_forces_prompt_despite_auto_accept(tmp_path):
-    from velune.execution import diff_preview
+def _gate(repl, mode=None, intent_confidence=None):
+    from velune.cli.handlers.tool_chat import session_gate
+    from velune.permissions import ExecutionMode
+
+    repl._execution_mode = mode or ExecutionMode.MANUAL
+    return session_gate(repl, _ui(repl), intent_confidence=intent_confidence)
+
+
+async def _check(gate, tool, args):
+    from velune.permissions.gate import ActionDeniedError
+
+    try:
+        await gate.check(tool.get_name(), tool.describe_actions(args, gate.boundary))
+        return True
+    except ActionDeniedError:
+        return False
+
+
+def _exec_tool():
+    from velune.tools.terminal.execute import ExecuteCommand
+
+    return ExecuteCommand()
+
+
+def _write_tool(tmp_path):
+    from velune.tools.filesystem.write import WriteFile
+
+    return WriteFile(workspace=tmp_path, confirm=False)
+
+
+async def test_approver_records_call_and_defers_to_the_gate(tmp_path):
+    repl = _fake_repl(tmp_path, registry=_reg())
+    ui = _ui(repl)
+    approver = _make_approver(repl, ui)
+    assert await approver("write_file", {"file_path": "x"}, {ToolPermission.FILESYSTEM_WRITE})
+    assert ui.pending_args["write_file"] == {"file_path": "x"}
+
+
+async def test_readonly_tools_run_in_every_mode(tmp_path):
+    from velune.permissions import ExecutionMode
+    from velune.tools.filesystem.read import ReadFile
 
     repl = _fake_repl(tmp_path, registry=_reg())
-    diff_preview.configure(auto_accept=True)
-    try:
-        approver = _make_approver(repl, _ui(repl), intent_confidence=0.1)
-        allowed = await approver(
-            "write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE}
-        )
-    finally:
-        diff_preview.configure(auto_accept=False)
-
-    assert allowed is False  # forced prompt, no interactive stdin -> denied
+    for mode in ExecutionMode:
+        gate = _gate(repl, mode)
+        assert await _check(gate, ReadFile(workspace=tmp_path), {"file_path": "a.py"})
 
 
-async def test_approver_low_confidence_forces_prompt_despite_session_grant(tmp_path):
+async def test_plan_mode_denies_everything_mutating(tmp_path):
+    from velune.permissions import ExecutionMode
+
+    repl = _fake_repl(tmp_path, registry=_reg())
+    gate = _gate(repl, ExecutionMode.PLAN)
+    assert not await _check(gate, _write_tool(tmp_path), {"file_path": "x", "content": ""})
+    assert not await _check(gate, _exec_tool(), {"command": "pytest"})
+    # Read-only commands are still fine while planning.
+    assert await _check(gate, _exec_tool(), {"command": "git status"})
+
+
+async def test_dangerous_commands_are_refused_in_every_mode(tmp_path):
+    from velune.permissions import ExecutionMode
+
+    repl = _fake_repl(tmp_path, registry=_reg())
+    for mode in ExecutionMode:
+        gate = _gate(repl, mode)
+        assert not await _check(gate, _exec_tool(), {"command": "sudo rm -rf /"})
+
+
+async def test_auto_mode_runs_changes_without_prompting(tmp_path):
+    from velune.permissions import ExecutionMode
+
+    repl = _fake_repl(tmp_path, registry=_reg())
+    gate = _gate(repl, ExecutionMode.AUTO)
+    assert await _check(gate, _write_tool(tmp_path), {"file_path": "x", "content": ""})
+    assert await _check(gate, _exec_tool(), {"command": "pytest -q"})
+
+
+async def test_manual_mode_without_a_tty_denies_changes(tmp_path):
+    """Manual asks; with no interactive stdin nobody can say yes → denied."""
+    repl = _fake_repl(tmp_path, registry=_reg())
+    gate = _gate(repl)
+    assert not await _check(gate, _write_tool(tmp_path), {"file_path": "x", "content": ""})
+
+
+async def test_manual_mode_honors_session_grants(tmp_path):
     repl = _fake_repl(tmp_path, registry=_reg())
     repl._tool_session_grants.add("write_file")
-    approver = _make_approver(repl, _ui(repl), intent_confidence=0.1)
-
-    allowed = await approver("write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE})
-
-    assert allowed is False
+    gate = _gate(repl)
+    assert await _check(gate, _write_tool(tmp_path), {"file_path": "x", "content": ""})
 
 
-async def test_approver_high_confidence_still_honors_auto_accept(tmp_path):
-    from velune.execution import diff_preview
+async def test_low_confidence_forces_prompt_despite_session_grant(tmp_path):
+    repl = _fake_repl(tmp_path, registry=_reg())
+    repl._tool_session_grants.add("write_file")
+    gate = _gate(repl, intent_confidence=0.1)
+    # Forced prompt, no interactive stdin -> denied.
+    assert not await _check(gate, _write_tool(tmp_path), {"file_path": "x", "content": ""})
+
+
+async def test_high_risk_is_confirmed_even_in_auto(tmp_path):
+    from velune.permissions import ExecutionMode
 
     repl = _fake_repl(tmp_path, registry=_reg())
-    diff_preview.configure(auto_accept=True)
-    try:
-        approver = _make_approver(repl, _ui(repl), intent_confidence=0.9)
-        allowed = await approver(
-            "write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE}
-        )
-    finally:
-        diff_preview.configure(auto_accept=False)
-
-    assert allowed is True
+    gate = _gate(repl, ExecutionMode.AUTO)
+    # Needs confirmation; no tty -> denied rather than silently run.
+    assert not await _check(gate, _exec_tool(), {"command": "git reset --hard HEAD"})
 
 
-async def test_approver_no_confidence_signal_still_honors_auto_accept(tmp_path):
-    """intent_confidence=None (e.g. the /retry one-turn path) disables the gate."""
-    from velune.execution import diff_preview
+async def test_outside_workspace_is_confirmed_even_in_auto(tmp_path):
+    from velune.permissions import ExecutionMode
 
-    repl = _fake_repl(tmp_path, registry=_reg())
-    diff_preview.configure(auto_accept=True)
-    try:
-        approver = _make_approver(repl, _ui(repl))  # no intent_confidence passed
-        allowed = await approver(
-            "write_file", {"path": "x"}, {ToolPermission.FILESYSTEM_WRITE}
-        )
-    finally:
-        diff_preview.configure(auto_accept=False)
-
-    assert allowed is True
-
-
-async def test_approver_low_confidence_does_not_gate_readonly_calls(tmp_path):
-    repl = _fake_repl(tmp_path, registry=_reg())
-    approver = _make_approver(repl, _ui(repl), intent_confidence=0.0)
-    assert await approver("peek", {}, {ToolPermission.FILESYSTEM_READ})
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    repl = _fake_repl(ws, registry=_reg())
+    gate = _gate(repl, ExecutionMode.AUTO)
+    outside = str(tmp_path / "elsewhere" / "x.txt")
+    assert not await _check(gate, _write_tool(ws), {"file_path": outside, "content": ""})

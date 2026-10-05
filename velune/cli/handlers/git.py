@@ -141,6 +141,7 @@ async def cmd_hunk(repl: VeluneREPL, args: str) -> None:
 
 async def cmd_push(repl: VeluneREPL, args: str) -> None:
     """Push the current branch to origin."""
+    from velune.cli.handlers.tool_chat import run_user_command_tool
     from velune.tools.git.providers import GitPushTool
 
     force = "--force" in args or "-f" in args
@@ -150,7 +151,7 @@ async def cmd_push(repl: VeluneREPL, args: str) -> None:
     try:
         tool = GitPushTool(workspace=workspace)
         with repl.console.status("[cyan]Pushing branch to remote…[/cyan]"):
-            result = await tool.execute(force=force)
+            result = await run_user_command_tool(repl, tool, force=force)
         repl.console.print(f"[green]{result}[/green]")
     except Exception as exc:
         repl.console.print(f"[red]Push failed:[/red] {exc}")
@@ -163,6 +164,7 @@ async def cmd_pr(repl: VeluneREPL, args: str) -> None:
     """
     import shlex
 
+    from velune.cli.handlers.tool_chat import run_user_command_tool
     from velune.tools.git.providers import CreatePRTool, GitPushTool
 
     workspace_raw = repl.container.get("runtime.workspace")
@@ -196,7 +198,7 @@ async def cmd_pr(repl: VeluneREPL, args: str) -> None:
     try:
         push_tool = GitPushTool(workspace=workspace)
         with repl.console.status("[cyan]Pushing branch…[/cyan]"):
-            push_result = await push_tool.execute(set_upstream=True)
+            push_result = await run_user_command_tool(repl, push_tool, set_upstream=True)
         repl.console.print(f"[dim]{push_result}[/dim]")
     except Exception as exc:
         repl.console.print(
@@ -206,7 +208,7 @@ async def cmd_pr(repl: VeluneREPL, args: str) -> None:
     try:
         pr_tool = CreatePRTool(workspace=workspace)
         with repl.console.status("[cyan]Creating pull request…[/cyan]"):
-            pr = await pr_tool.execute(title=title, base=base, draft=draft)
+            pr = await run_user_command_tool(repl, pr_tool, title=title, base=base, draft=draft)
 
         badge = "[dim][DRAFT][/dim] " if pr.get("draft") else ""
         repl.console.print(
@@ -223,6 +225,7 @@ async def cmd_issue(repl: VeluneREPL, args: str) -> None:
 
     Usage: /issue <number>
     """
+    from velune.cli.handlers.tool_chat import run_user_command_tool
     from velune.tools.git.providers import GetIssueTool
 
     workspace_raw = repl.container.get("runtime.workspace")
@@ -239,7 +242,7 @@ async def cmd_issue(repl: VeluneREPL, args: str) -> None:
     try:
         tool = GetIssueTool(workspace=workspace)
         with repl.console.status(f"[cyan]Fetching issue #{issue_number}…[/cyan]"):
-            issue = await tool.execute(issue_number=issue_number)
+            issue = await run_user_command_tool(repl, tool, issue_number=issue_number)
 
         state_color = "green" if issue["state"] == "open" else "red"
         labels = "  ".join(f"[dim][{lbl}][/dim]" for lbl in issue.get("labels", []))

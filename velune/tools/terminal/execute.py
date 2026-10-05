@@ -41,7 +41,39 @@ class ExecuteCommand(BaseTool):
         return {ToolPermission.TERMINAL_EXECUTE}
 
     def get_description(self) -> str:
-        return "Execute a terminal command"
+        return (
+            "Execute a terminal command in the workspace (no shell: pipes, &&, and shell "
+            "builtins such as mkdir/del/dir are not available). Use the filesystem tools "
+            "(create_directory, delete_directory, move_path, write_file, delete_file) for "
+            "file and folder operations."
+        )
+
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType, Risk
+        from velune.permissions.commands import CommandClass, classify
+
+        command = str(args.get("command", ""))
+        directory = args.get("directory")
+        outside = False
+        if directory:
+            outside = not boundary.inside(boundary.resolve(directory))
+        klass, why = classify(command)
+        if klass is CommandClass.READ_ONLY:
+            return [Action(ActionType.READ, command, why, outside_workspace=outside)]
+        return [
+            Action(
+                ActionType.RUN_COMMAND,
+                command,
+                why,
+                risk={
+                    CommandClass.HIGH_RISK: Risk.HIGH,
+                    CommandClass.BLOCKED: Risk.HIGH,
+                }.get(klass, Risk.MEDIUM),
+                outside_workspace=outside,
+                blocked=klass is CommandClass.BLOCKED,
+                detail=str(directory) if directory else "",
+            )
+        ]
 
     async def execute(
         self,
@@ -68,7 +100,14 @@ class ExecuteCommand(BaseTool):
         if verdict.mode == ApprovalMode.BLOCK:
             raise PermissionError(f"Command refused — {verdict.reason}: {command!r}")
 
-        workspace = Path(directory or self._workspace_path or Path.cwd())
+        # The working directory is resolved against the session boundary — a
+        # model-supplied ``directory`` used to *become* the workspace, which let
+        # any command escape it. It may only be the workspace, a folder inside
+        # it, or a location the user granted for this task.
+        from velune.permissions.gate import resolve_tool_path
+
+        base = Path(self._workspace_path or Path.cwd())
+        workspace = resolve_tool_path(directory, base, label="directory") if directory else base
         sandbox = self._sandbox or SubprocessSandbox(workspace)
 
         try:

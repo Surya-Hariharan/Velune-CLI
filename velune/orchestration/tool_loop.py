@@ -490,6 +490,9 @@ class ToolLoopRunner:
             permissions=(base.permissions if base else set()) | permissions,
             hook_dispatcher=base.hook_dispatcher if base else None,
             session_id=base.session_id if base else "",
+            # The execution-mode gate must travel with every call; dropping it
+            # here would make every state change fail closed.
+            gate=base.gate if base else None,
         )
         tool.validate_input(call.arguments)
         return await authorize_and_execute(tool, ctx, **call.arguments)

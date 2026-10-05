@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from velune.execution.path_guard import resolve_in_workspace
+from velune.permissions.gate import resolve_tool_path
 from velune.tools.base.tool import BaseTool, ToolPermission
 from velune.tools.filesystem.ignore import load_ignore
 
@@ -22,9 +22,15 @@ class ReadFile(BaseTool):
     def get_description(self) -> str:
         return "Read the contents of a file"
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import ActionType
+        from velune.permissions.boundary import path_action
+
+        return [path_action(ActionType.READ, args.get("file_path", ""), boundary, "read file")]
+
     async def execute(self, file_path: str) -> str:
         """Read file contents."""
-        path = resolve_in_workspace(file_path, self.workspace, label="ReadFile")
+        path = resolve_tool_path(file_path, self.workspace, label="ReadFile")
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
@@ -60,9 +66,17 @@ class ReadDirectory(BaseTool):
     def get_description(self) -> str:
         return "List the contents of a directory"
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import ActionType
+        from velune.permissions.boundary import path_action
+
+        return [
+            path_action(ActionType.READ, args.get("directory_path", "."), boundary, "list folder")
+        ]
+
     async def execute(self, directory_path: str) -> list[str]:
         """List directory contents, excluding .veluneignore patterns."""
-        path = resolve_in_workspace(directory_path, self.workspace, label="ReadDirectory")
+        path = resolve_tool_path(directory_path, self.workspace, label="ReadDirectory")
         if not path.exists() or not path.is_dir():
             raise NotADirectoryError(f"Directory not found: {directory_path}")
 

@@ -255,6 +255,8 @@ async def run_tool_chat(
     )
 
     ui = _ToolActivityUI(repl)
+    gate = session_gate(repl, ui, intent_confidence=intent_confidence)
+    ctx.gate = gate
     runner = ToolLoopRunner(
         provider,
         registry,
@@ -267,7 +269,10 @@ async def run_tool_chat(
 
     try:
         async with repl._interrupts.foreground():
-            result = await runner.run(request)
+            try:
+                result = await runner.run(request)
+            finally:
+                gate.boundary.clear_grants()
     except asyncio.CancelledError:
         if not repl._interrupts.consume_user_cancelled():
             raise
@@ -362,51 +367,207 @@ def _auto_accept_enabled(repl: VeluneREPL) -> bool:
 _LOW_CONFIDENCE_THRESHOLD = 0.34
 
 
+def current_execution_mode(repl: VeluneREPL):
+    """The session's execution mode (MANUAL / PLAN / AUTO)."""
+    from velune.permissions import ExecutionMode
+
+    mode = getattr(repl, "_execution_mode", None)
+    return mode if isinstance(mode, ExecutionMode) else ExecutionMode.MANUAL
+
+
+def session_gate(repl: VeluneREPL, ui: _ToolActivityUI, intent_confidence: float | None = None):
+    """The REPL's permission gate, created once per session and refreshed per turn.
+
+    It keeps the session's "always allow this tool" grants
+    (``repl._tool_session_grants``) and is re-pointed at the current mode,
+    approval UI and audit sink on every turn.
+    """
+    from velune.permissions.boundary import Boundary
+    from velune.permissions.gate import PermissionGate
+    from velune.permissions.policy import PolicyState
+
+    gate = getattr(repl, "_permission_gate", None)
+    if gate is None:
+        workspace = None
+        try:
+            workspace = repl.container.get("runtime.workspace")
+        except Exception:
+            pass
+        gate = PermissionGate(
+            state=PolicyState(),
+            boundary=Boundary(Path(workspace) if workspace else Path.cwd()),
+            session_grants=repl._tool_session_grants,
+        )
+        repl._permission_gate = gate
+    gate.state.mode = current_execution_mode(repl)
+    plans = getattr(repl, "_plan_manager", None)
+    if plans is not None:
+        plans.apply_to(gate.state)
+    else:
+        gate.state.plans_dir = gate.boundary.workspace_root / ".velune" / "plans"
+
+    # A low-confidence intent classification means the request may have been
+    # misread: a session "always allow" grant must not skip the human check.
+    low_confidence = intent_confidence is not None and intent_confidence < _LOW_CONFIDENCE_THRESHOLD
+
+    async def ask(tool_name: str, decision: Any) -> Any:
+        return await _ask_decision(
+            repl,
+            ui,
+            tool_name,
+            decision,
+            reason=(
+                "This request looked ambiguous — confirming before it runs."
+                if low_confidence
+                else None
+            ),
+        )
+
+    gate.ask = ask
+    gate.audit = lambda record: ui._emit_trace("permission.decision", "", record)
+    gate.force_confirm = low_confidence
+    return gate
+
+
+async def run_user_command_tool(repl: VeluneREPL, tool: Any, **kwargs: Any) -> Any:
+    """Run a tool for a slash command the user typed (``/push``, ``/pr``, ``/issue``).
+
+    These used to call ``tool.execute()`` directly, skipping the permission
+    layer entirely. Typing the command is itself the approval for ordinary
+    actions (so they run as in AUTO), but high-risk ones — ``/push --force`` —
+    still get an explicit confirmation, and every decision is audited.
+    """
+    from velune.permissions import ExecutionMode
+    from velune.tools.base.tool import ToolCallContext, authorize_and_execute
+
+    ui = _ToolActivityUI(repl)
+    gate = session_gate(repl, ui)
+    gate.state.mode = ExecutionMode.AUTO  # user-initiated: the command is the approval
+    workspace = gate.boundary.workspace_root
+    ctx = ToolCallContext(
+        run_id=getattr(repl, "_session_id", "repl"),
+        actor="user-command",
+        workspace=workspace,
+        permissions=set(tool.get_required_permissions()),
+        gate=gate,
+    )
+    try:
+        return await authorize_and_execute(tool, ctx, **kwargs)
+    finally:
+        gate.state.mode = current_execution_mode(repl)
+
+
 def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI, intent_confidence: float | None = None):
-    from velune.orchestration.tool_loop import READONLY_PERMISSIONS
-    from velune.tools.safety import ApprovalMode, classify_command
+    """Tool-loop approver: records the call for the approval preview.
+
+    The decision itself is made by the session's permission gate, which
+    :func:`velune.tools.base.tool.authorize_and_execute` consults with the
+    tool's described actions, so it sees exact targets, the execution mode and
+    the workspace boundary. MCP tools are remote calls that never pass through
+    ``authorize_and_execute``, so they are decided here by the same gate.
+    """
 
     async def approver(name: str, arguments: dict[str, Any], permissions: set) -> bool:
-        if permissions and permissions <= READONLY_PERMISSIONS:
+        ui.pending_args[name] = arguments
+        if not _is_mcp_call(repl, name):
             return True
-        # BLOCK is checked before auto-accept: an explicit block is a stronger
-        # statement than a blanket --yes.
-        if repl._approval_mode is ApprovalMode.BLOCK:
-            ui.note(f"[red]✗[/red] {name} denied (approval mode: block)")
+        from velune.permissions.actions import Action, ActionType
+        from velune.permissions.gate import ActionDeniedError
+
+        gate = session_gate(repl, ui, intent_confidence=intent_confidence)
+        try:
+            await gate.check(name, [Action(ActionType.NETWORK, name, "MCP tool call")])
+        except ActionDeniedError as exc:
+            ui.note(f"[red]✗[/red] {exc}")
             return False
-        # IntentClassifier's confidence is the one signal in the input
-        # pipeline that says "this request may have been misread" — nothing
-        # previously acted on it. Gating every low-confidence turn would
-        # misfire often (the heuristic isn't tuned as an ambiguity detector),
-        # so this only forces a human check on the one case that actually
-        # matters: a mutating call that reached here — read-only calls
-        # already returned above — and was about to skip approval entirely
-        # via --yes, a session "always allow" grant, or safe-mode auto-run.
-        if intent_confidence is not None and intent_confidence < _LOW_CONFIDENCE_THRESHOLD:
-            return await _prompt_approval(
-                repl,
-                ui,
-                name,
-                arguments,
-                reason="This request looked ambiguous — confirming before it runs.",
-            )
-        # --yes / auto-accept. This was previously honoured only by the diff
-        # preview and confirm_destructive, so `velune --yes` still stopped to
-        # ask for approval on every single tool call.
-        if _auto_accept_enabled(repl):
-            return True
-        if name == "execute_command" and isinstance(arguments.get("command"), str):
-            verdict = classify_command(arguments["command"])
-            if verdict.mode is ApprovalMode.BLOCK:
-                ui.note(f"[red]✗[/red] {name} blocked: {verdict.reason}")
-                return False
-            if verdict.mode is ApprovalMode.SAFE and repl._approval_mode is ApprovalMode.SAFE:
-                return True
-        if name in repl._tool_session_grants:
-            return True
-        return await _prompt_approval(repl, ui, name, arguments)
+        return True
 
     return approver
+
+
+def _is_mcp_call(repl: VeluneREPL, name: str) -> bool:
+    try:
+        registry = repl.container.get("runtime.tool_registry")
+    except Exception:
+        registry = None
+    if registry is not None:
+        try:
+            if registry.get(name) is not None:
+                return False
+        except Exception:
+            pass
+    return getattr(repl, "_mcp_registry", None) is not None
+
+
+async def _ask_decision(
+    repl: VeluneREPL,
+    ui: _ToolActivityUI,
+    tool_name: str,
+    decision: Any,
+    reason: str | None = None,
+) -> Any:
+    """Resolve a policy ASK with the user: normal preview, high-risk, or outside-workspace."""
+    from velune.permissions.gate import Approval
+
+    if decision.outside_workspace or decision.high_risk or any(a.secret for a in decision.actions):
+        return await _prompt_sensitive(repl, ui, tool_name, decision)
+    arguments = ui.pending_args.get(tool_name, {})
+    allowed = await _prompt_approval(
+        repl, ui, tool_name, arguments, reason=reason or decision.reason, decision=decision
+    )
+    return Approval.ALLOW_ONCE if allowed else Approval.DENY
+
+
+async def _prompt_sensitive(
+    repl: VeluneREPL, ui: _ToolActivityUI, tool_name: str, decision: Any
+) -> Any:
+    """Separate, explicit confirmation for high-risk / outside-workspace / secret actions."""
+    from rich.panel import Panel
+
+    from velune.cli.interactive import CANCEL, Option, is_interactive_tty, single_select
+    from velune.permissions.gate import Approval
+
+    ui.pause_status()
+    outside = decision.outside_workspace
+    lines: list[str] = []
+    for action in decision.actions:
+        lines.append(f"[bold]{action.describe()}[/bold]")
+        if action.reason:
+            lines.append(f"  [dim]{action.reason}[/dim]")
+    if outside:
+        title = "[yellow]Access outside the workspace[/yellow]"
+        gate = getattr(repl, "_permission_gate", None)
+        if gate is not None:
+            lines.append("")
+            lines.append(f"[dim]Workspace: {gate.boundary.workspace_root}[/dim]")
+        options = [
+            Option(id="deny", label="Deny"),
+            Option(id="once", label="Allow once"),
+            Option(id="task", label="Allow for this task"),
+        ]
+    else:
+        title = "[red]⚠ High-risk operation[/red]"
+        options = [Option(id="deny", label="No"), Option(id="once", label="Yes — run it")]
+    repl.console.print(
+        Panel(
+            "\n".join(lines),
+            title=title,
+            border_style="yellow" if outside else "red",
+            padding=(0, 2),
+        )
+    )
+    if not is_interactive_tty():
+        return Approval.DENY
+    try:
+        answer = await single_select("Proceed?", options, subtitle=tool_name)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        _log.debug("Approval prompt unavailable (%s); denying %s", exc, tool_name)
+        return Approval.DENY
+    if answer is CANCEL or answer is None or answer == "deny":
+        return Approval.DENY
+    return Approval.ALLOW_TASK if answer == "task" else Approval.ALLOW_ONCE
 
 
 async def _prompt_approval(
@@ -415,6 +576,7 @@ async def _prompt_approval(
     name: str,
     arguments: dict[str, Any],
     reason: str | None = None,
+    decision: Any = None,
 ) -> bool:
     """Interactive y/n/a prompt. Fails closed when no interactive stdin.
 
@@ -528,6 +690,8 @@ class _ToolActivityUI:
     def __init__(self, repl: VeluneREPL) -> None:
         self._console = repl.console
         self._container = repl.container
+        # tool name → arguments of the call awaiting approval (preview source)
+        self.pending_args: dict[str, Any] = {}
         self._run_id = getattr(repl, "_session_id", "")
         # When a fullscreen UI owns the terminal, `Live`/`console.status()`
         # render nothing visible at all (force_interactive=False suppresses

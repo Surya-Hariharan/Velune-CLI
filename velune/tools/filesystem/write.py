@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from velune.execution.path_guard import resolve_in_workspace
+from velune.permissions.gate import resolve_tool_path
 from velune.tools.base.tool import BaseTool, ToolPermission
 
 if TYPE_CHECKING:
@@ -56,8 +56,16 @@ class WriteFile(_WriteToolBase):
     def get_description(self) -> str:
         return "Write content to a file (shows diff preview before writing)"
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import ActionType
+        from velune.permissions.boundary import path_action
+
+        target = boundary.resolve(args.get("file_path", ""))
+        kind = ActionType.MODIFY_FILE if target.exists() else ActionType.CREATE_FILE
+        return [path_action(kind, target, boundary, "write file contents")]
+
     async def execute(self, file_path: str, content: str) -> str:
-        path = resolve_in_workspace(file_path, self.workspace, label="WriteFile")
+        path = resolve_tool_path(file_path, self.workspace, label="WriteFile")
         if not self.confirm:
             from velune.execution.diff_preview import compute_file_diff, diff_stats
 
@@ -112,8 +120,16 @@ class CreateFile(_WriteToolBase):
     def get_description(self) -> str:
         return "Create an empty file (shows preview before creating)"
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import ActionType
+        from velune.permissions.boundary import path_action
+
+        return [
+            path_action(ActionType.CREATE_FILE, args.get("file_path", ""), boundary, "create file")
+        ]
+
     async def execute(self, file_path: str) -> str:
-        path = resolve_in_workspace(file_path, self.workspace, label="CreateFile")
+        path = resolve_tool_path(file_path, self.workspace, label="CreateFile")
 
         if not self.confirm:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,8 +171,22 @@ class DeleteFile(_WriteToolBase):
     def get_description(self) -> str:
         return "Delete a file (shows preview before deleting)"
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import ActionType, Risk
+        from velune.permissions.boundary import path_action
+
+        return [
+            path_action(
+                ActionType.DELETE_FILE,
+                args.get("file_path", ""),
+                boundary,
+                "delete file",
+                risk=Risk.MEDIUM,
+            )
+        ]
+
     async def execute(self, file_path: str) -> str:
-        path = resolve_in_workspace(file_path, self.workspace, label="DeleteFile")
+        path = resolve_tool_path(file_path, self.workspace, label="DeleteFile")
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 

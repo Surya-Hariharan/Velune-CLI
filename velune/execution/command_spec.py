@@ -191,6 +191,15 @@ class CommandSpec:
 
     def validate(self, allowed_executables: frozenset[str] | None = None) -> None:
         """Validate the executable basename against allowlists and system path boundaries."""
+        self.validate_command(allowed_executables)
+        self._validate_host_executable()
+
+    def validate_command(self, allowed_executables: frozenset[str] | None = None) -> None:
+        """Command policy only (allowlist + inline-code flags), independent of the host.
+
+        Used on its own by sandboxes that run the command somewhere other than
+        this machine (Docker), where host PATH resolution is meaningless.
+        """
         if allowed_executables is None:
             try:
                 from velune.kernel.config import ConfigLoader
@@ -220,6 +229,8 @@ class CommandSpec:
                 f"instead — inline code bypasses the workspace boundary."
             )
 
+    def _validate_host_executable(self) -> None:
+        """Resolve the executable on this host and reject untrusted (hijacked) paths."""
         exe_path = shutil.which(self.executable)
         if exe_path is None:
             raise SandboxError(f"Executable '{self.executable}' not found in PATH")

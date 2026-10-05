@@ -22,9 +22,9 @@ Blocked commands (``sudo``, disk formatting…) are denied in every mode.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 
+from velune._compat import StrEnum
 from velune.permissions.actions import Action, ActionType, Risk
 
 

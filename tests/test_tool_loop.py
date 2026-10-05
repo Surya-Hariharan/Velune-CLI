@@ -161,7 +161,41 @@ async def test_default_approver_denies_write_tools_without_executing():
     assert tool_msg["is_error"] is True
 
 
-async def test_custom_approver_can_grant_write():
+async def test_custom_approver_can_grant_write(tmp_path):
+    WriteTool.executed = False
+
+    async def allow_all(name, args, permissions):
+        return True
+
+    provider = FakeProvider(
+        [
+            _tool_response(ToolCall(id="c1", name="write_file", arguments={"path": "x"})),
+            _text_response("done"),
+        ]
+    )
+    from velune.permissions import ExecutionMode, PolicyState
+    from velune.permissions.boundary import Boundary
+    from velune.permissions.gate import PermissionGate
+    from velune.tools.base.tool import ToolCallContext
+
+    ctx = ToolCallContext(
+        run_id="t",
+        actor="test",
+        gate=PermissionGate(PolicyState(mode=ExecutionMode.AUTO), Boundary(tmp_path)),
+    )
+    runner = ToolLoopRunner(provider, _registry(WriteTool()), approver=allow_all, ctx=ctx)
+    result = await runner.run(InferenceRequest(model_id="fake", messages=[]))
+    assert WriteTool.executed is True
+    assert result.invocations[0].result == "written"
+
+
+async def test_approver_alone_cannot_authorize_a_write_without_a_gate():
+    """Regression: the execution-mode policy can't be bypassed by an approver.
+
+    An approver that says "yes" to everything used to be enough to run a
+    mutating tool. Now the action must also pass a permission gate; with none,
+    the call fails closed and the tool never runs.
+    """
     WriteTool.executed = False
 
     async def allow_all(name, args, permissions):
@@ -175,8 +209,9 @@ async def test_custom_approver_can_grant_write():
     )
     runner = ToolLoopRunner(provider, _registry(WriteTool()), approver=allow_all)
     result = await runner.run(InferenceRequest(model_id="fake", messages=[]))
-    assert WriteTool.executed is True
-    assert result.invocations[0].result == "written"
+    assert WriteTool.executed is False
+    assert result.invocations[0].error is True
+    assert "no permission gate" in result.invocations[0].result
 
 
 async def test_unknown_tool_reports_error_to_model():

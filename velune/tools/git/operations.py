@@ -65,6 +65,13 @@ class GitCommit(BaseTool):
     def get_description(self) -> str:
         return "Commit changes to git"
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType, Risk
+
+        return [
+            Action(ActionType.GIT_WRITE, "git", "create a git commit", Risk.LOW, detail=str(args))
+        ]
+
     async def execute(
         self,
         message: str,
@@ -112,6 +119,19 @@ class GitCheckout(BaseTool):
 
     def get_description(self) -> str:
         return "Checkout a git branch"
+
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType, Risk
+
+        return [
+            Action(
+                ActionType.GIT_WRITE,
+                "git",
+                "switch branch or restore files",
+                Risk.MEDIUM,
+                detail=str(args),
+            )
+        ]
 
     async def execute(
         self,

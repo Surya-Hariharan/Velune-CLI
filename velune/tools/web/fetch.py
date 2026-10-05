@@ -16,6 +16,11 @@ class WebFetch(BaseTool):
     def get_description(self) -> str:
         return "Fetch content from a URL"
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType
+
+        return [Action(ActionType.NETWORK, str(args.get("url", "")), "fetch a web page")]
+
     async def execute(
         self,
         url: str,

@@ -78,3 +78,30 @@ class Boundary:
 
     def clear_grants(self) -> None:
         self.extra_roots.clear()
+
+
+def path_action(
+    action_type,
+    raw: str | Path,
+    boundary: Boundary,
+    reason: str = "",
+    risk=None,
+    detail: str = "",
+):
+    """Build an :class:`Action` for a path argument, with boundary/secret flags set."""
+    from velune.permissions.actions import Action, Risk
+
+    resolved = boundary.resolve(raw)
+    secret = is_secret_path(resolved)
+    outside = not boundary.inside(resolved)
+    if risk is None:
+        risk = Risk.HIGH if secret else Risk.LOW
+    return Action(
+        action_type,
+        str(resolved),
+        reason=reason,
+        risk=risk,
+        outside_workspace=outside,
+        secret=secret,
+        detail=detail,
+    )

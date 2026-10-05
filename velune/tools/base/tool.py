@@ -37,6 +37,10 @@ class ToolCallContext:
     permissions: set[ToolPermission] = field(default_factory=set)
     hook_dispatcher: HookDispatcher | None = field(default=None)
     session_id: str = ""
+    # The execution-mode permission gate (velune.permissions.gate). Every
+    # action a tool proposes is checked against it; with no gate, any
+    # state-changing action is refused (fail closed).
+    gate: Any = field(default=None)
 
 
 class ToolBlockedError(RuntimeError):
@@ -140,6 +144,32 @@ class BaseTool(ABC):
         """Validate tool input before execution."""
         return None
 
+    def describe_actions(self, args: dict[str, Any], boundary: Any) -> list[Any]:
+        """Describe what this call would do, as :class:`velune.permissions.Action`s.
+
+        The permission gate decides on these *before* the tool runs. Tools
+        that change state override this with precise targets (the file, the
+        command). This default derives a conservative action from the declared
+        permissions, so a tool that forgets to override is still gated rather
+        than silently allowed.
+        """
+        from velune.permissions.actions import Action, ActionType, Risk
+
+        perms = self.get_required_permissions()
+        name = self.get_name()
+        actions: list[Any] = []
+        if ToolPermission.FILESYSTEM_WRITE in perms:
+            actions.append(Action(ActionType.MODIFY_FILE, f"<{name}>", f"{name} changes files"))
+        if ToolPermission.GIT_WRITE in perms:
+            actions.append(Action(ActionType.GIT_WRITE, f"<{name}>", f"{name} changes git state"))
+        if ToolPermission.TERMINAL_EXECUTE in perms:
+            actions.append(
+                Action(ActionType.RUN_COMMAND, f"<{name}>", f"{name} runs commands", Risk.MEDIUM)
+            )
+        if ToolPermission.NETWORK_ACCESS in perms:
+            actions.append(Action(ActionType.NETWORK, f"<{name}>", f"{name} uses the network"))
+        return actions or [Action(ActionType.READ, f"<{name}>", "read-only")]
+
 
 class ToolPermissionError(PermissionError):
     """Raised when a tool's required permissions are not granted by the context."""
@@ -174,4 +204,33 @@ async def authorize_and_execute(
     missing = required - granted
     if missing:
         raise ToolPermissionError(tool.get_name(), missing)
-    return await tool.guarded_execute(ctx, **kwargs)
+
+    # Execution-mode policy: the tool describes its actions, the gate decides
+    # (ALLOW / DENY / ASK the user) before anything runs.
+    from velune.permissions.boundary import Boundary
+    from velune.permissions.gate import (
+        ActionDeniedError,
+        reset_active_boundary,
+        set_active_boundary,
+    )
+
+    gate = ctx.gate if ctx is not None else None
+    if gate is not None:
+        boundary = gate.boundary
+    else:
+        workspace = (ctx.workspace if ctx is not None else None) or Path.cwd()
+        boundary = Boundary(Path(workspace))
+    actions = tool.describe_actions(dict(kwargs), boundary)
+    if gate is None:
+        if any(a.mutating or a.secret or a.outside_workspace for a in actions):
+            raise ActionDeniedError(
+                tool.get_name(), "no permission gate is active for this call (fail closed)"
+            )
+    else:
+        await gate.check(tool.get_name(), actions)
+
+    token = set_active_boundary(gate.boundary if gate is not None else None)
+    try:
+        return await tool.guarded_execute(ctx, **kwargs)
+    finally:
+        reset_active_boundary(token)

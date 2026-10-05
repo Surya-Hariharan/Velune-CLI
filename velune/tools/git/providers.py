@@ -164,6 +164,19 @@ class GitPushTool(BaseTool):
     def get_required_permissions(self) -> set[ToolPermission]:
         return {ToolPermission.GIT_WRITE, ToolPermission.NETWORK_ACCESS}
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType, Risk
+
+        force = bool(args.get("force"))
+        return [
+            Action(
+                ActionType.GIT_WRITE,
+                "git push" + (" --force" if force else ""),
+                "rewrites remote history" if force else "push the current branch",
+                Risk.HIGH if force else Risk.MEDIUM,
+            )
+        ]
+
     async def execute(
         self,
         branch: str | None = None,
@@ -245,6 +258,11 @@ class CreatePRTool(BaseTool):
 
     def get_required_permissions(self) -> set[ToolPermission]:
         return {ToolPermission.GIT_READ, ToolPermission.NETWORK_ACCESS}
+
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType
+
+        return [Action(ActionType.NETWORK, "create pull request", str(args.get("title", "")))]
 
     async def execute(
         self,
@@ -335,6 +353,13 @@ class GetIssueTool(BaseTool):
     def get_required_permissions(self) -> set[ToolPermission]:
         return {ToolPermission.NETWORK_ACCESS}
 
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType
+
+        return [
+            Action(ActionType.NETWORK, f"fetch issue #{args.get('issue_number')}", "read issue")
+        ]
+
     async def execute(
         self,
         issue_number: int,
@@ -394,6 +419,15 @@ class CommentIssueTool(BaseTool):
 
     def get_required_permissions(self) -> set[ToolPermission]:
         return {ToolPermission.NETWORK_ACCESS}
+
+    def describe_actions(self, args, boundary):
+        from velune.permissions.actions import Action, ActionType
+
+        return [
+            Action(
+                ActionType.NETWORK, f"comment on issue #{args.get('issue_number')}", "post comment"
+            )
+        ]
 
     async def execute(
         self,
