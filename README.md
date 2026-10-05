@@ -48,6 +48,7 @@ See [AUTHORS.md](AUTHORS.md), [GOVERNANCE.md](GOVERNANCE.md), and
 - [Commands](#commands)
 - [Architecture](#architecture)
 - [Memory system](#memory-system)
+- [Execution modes](#execution-modes)
 - [Session modes](#session-modes)
 - [MCP integration](#mcp-integration)
 - [Windows](#windows)
@@ -441,6 +442,38 @@ Velune CLI maintains five memory tiers across sessions:
 This means "fix the auth issue from yesterday" actually works — Velune CLI
 retrieves recent sessions, git changes, and related context to reconstruct
 intent without you explaining it again.
+
+---
+
+## Execution modes
+
+Velune can read, create, edit, move and delete files and folders and run
+commands in your project. **What it may do without asking depends on the
+execution mode.** Press **Shift+Tab** to cycle, or use the commands:
+
+| Mode | Command | Velune may… |
+| :--- | :--- | :--- |
+| **Manual** *(default)* | `/manual` | Read and analyze freely; **asks before every change**. Related changes are shown together for one approval. |
+| **Plan** | `/plan [task]` | Investigate and write a plan to `.velune/plans/<name>.md`, **changing nothing**. Revise it as often as you like; reply *approve* / *go ahead* to execute it. |
+| **Auto** | `/auto` | Create, edit and delete files and run commands **inside the project** without asking, iterating (edit → test → fix) until done. |
+
+In every mode Velune still asks before:
+
+- touching anything **outside the project folder** (allow once / for this task / deny);
+- **high-risk** operations: `git reset --hard`, `git clean`, force-push,
+  recursive deletes, global or system installs, environment/registry/firewall
+  changes;
+- reading or changing **secrets** (`.env`, keys, `~/.ssh`).
+
+`sudo`, disk formatting and similar commands never run. These rules are
+enforced in code at the tool layer, not by instructions to the model, and
+every decision is logged (`velune trace --type permission`). Start in a mode
+with `velune --mode manual|plan|auto`, or set the default in `velune.toml`:
+
+```toml
+[execution]
+mode = "manual"   # or "plan" / "auto"
+```
 
 ---
 

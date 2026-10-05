@@ -8,13 +8,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Execution modes: Manual, Plan and Auto** (`/manual`, `/plan`, `/auto`,
+  Shift+Tab, `velune --mode`, `[execution] mode`; the status bar shows the mode).
+  - **Manual** (default) reads freely and asks before every change. Related
+    changes are approved together.
+  - **Plan** writes a plan to `.velune/plans/<name>.md` (objective, findings,
+    changes, files affected, risks, rollback, order) and changes nothing. You can
+    revise it repeatedly; only an explicit approval executes it. Changes outside
+    the plan's files ask first, and the results are written back into the plan.
+  - **Auto** edits, creates, deletes and runs commands inside the project without
+    asking, and iterates until tests pass.
+  - **In every mode**, these always need confirmation: anything outside the
+    project, high-risk operations (`git reset --hard`, `git clean`, force-push,
+    recursive deletes, global installs, system changes), and secrets.
+  - Enforced at the tool layer; every decision is recorded (`velune trace --type permission`).
+- **Folder tools:** `create_directory`, `delete_directory`, `move_path`. These are
+  native Python, so they work on Windows, where `mkdir` through the command tool
+  could not.
+
 ### Fixed
 
+- **Every turn after a failed or denied tool call was rejected by Groq** ("rejected the request
+  as malformed (HTTP 400)"). Velune sent an internal `is_error` field that the OpenAI-style APIs
+  don't accept. It is now removed for those providers, and a 400 shows the provider's own reason.
+- `/push`, `/pr`, `/issue`, council edits and the MCP server no longer bypass approval. The command
+  tool's `directory` argument can no longer point outside the workspace. The Docker sandbox now
+  applies the same command allowlist.
+- Tool output is redacted for API keys and tokens before it reaches the model. An identical tool
+  call that already failed is not retried blindly.
 - **Command palette and `/` completion now match by name prefix.** Typing `/c` lists only the commands whose
   name starts with `c` (and `/co` narrows that further). Before, aliases and search keywords were matched
   loosely too, so `/co` returned 29 results led by `/index` (through its `/cog` alias) and `/m` pulled in
   `/roles` and `/pull`. Aliases and keywords still find a command when no name starts with what you typed,
   so `/anthropic` and `/login` still reach `/connect`.
+
+### Changed
+
+- `/approve` is now a legacy alias for the execution modes (ask → manual, safe → auto,
+  block → plan). `--yes` starts in Auto mode.
 
 ---
 
