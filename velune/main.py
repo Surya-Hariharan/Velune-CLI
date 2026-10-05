@@ -180,7 +180,7 @@ def main() -> None:
     # the known value-taking root options (``-w/--workspace``, ``-c/--config``)
     # so ``velune -w /some/path`` is correctly seen as the bare REPL, not a
     # subcommand. An unknown positional simply falls back to full registration.
-    value_opts = {"-w", "--workspace", "-c", "--config"}
+    value_opts = {"-w", "--workspace", "-c", "--config", "--mode"}
     subcommand = None
     skip_next = False
     for arg in argv:

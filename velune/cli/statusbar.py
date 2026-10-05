@@ -38,6 +38,8 @@ def status_bar_styles() -> dict[str, str]:
         "bottom-toolbar.key": f"bg:{bg} {design.FAINT}",
         "bottom-toolbar.model": f"bg:{bg} {design.MUTED}",
         "bottom-toolbar.mode": f"bg:{bg} {design.MUTED}",
+        "bottom-toolbar.exec-auto": f"bg:{bg} {design.WARN} bold",
+        "bottom-toolbar.exec-plan": f"bg:{bg} {design.ACCENT} bold",
         "bottom-toolbar.ok": f"bg:{bg} {design.MUTED}",
         "bottom-toolbar.ctx-ok": f"bg:{bg} {design.OK}",
         "bottom-toolbar.warn": f"bg:{bg} {design.WARN}",
@@ -56,6 +58,8 @@ _SEP = ("class:bottom-toolbar.key", " │ ")
 class StatusBarState:
     model_id: str | None = None
     mode_label: str = "NORMAL"
+    # Execution mode badge (MANUAL / ⏸ PLAN / ⏵⏵ AUTO); see cli/execution_modes.py.
+    execution_label: str | None = None
     profile_label: str | None = None  # kept for compat; no longer rendered
     context_pct: float = 0.0
     last_latency_ms: float | None = None
@@ -183,6 +187,16 @@ def render_status_bar(state: StatusBarState, width: int | None = None) -> Format
     core.append(_SEP)
     core.append(("class:bottom-toolbar.mode", state.mode_label))
     core.append(_SEP)
+    if state.execution_label:
+        style = (
+            "class:bottom-toolbar.exec-auto"
+            if "AUTO" in state.execution_label
+            else "class:bottom-toolbar.exec-plan"
+            if "PLAN" in state.execution_label
+            else "class:bottom-toolbar.mode"
+        )
+        core.append((style, state.execution_label))
+        core.append(_SEP)
 
     # Context usage with visual bar. Thresholds come from design.py so the
     # status bar, prompt badge, and /context command all agree.

@@ -98,7 +98,17 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
             False, "--json", help="Enable machine-readable JSON output mode"
         ),
         yes: bool = typer.Option(
-            False, "--yes", "-y", help="Auto-accept all file changes without prompting"
+            False,
+            "--yes",
+            "-y",
+            help="Start in AUTO execution mode (same as --mode auto)",
+        ),
+        mode: str | None = typer.Option(
+            None,
+            "--mode",
+            help="Execution mode: manual (ask before changes), plan (plan first, "
+            "change nothing until approved) or auto (change the workspace without "
+            "asking; high-risk still asks). Default: [execution] mode, else manual.",
         ),
         plain: bool = typer.Option(
             False,
@@ -181,6 +191,14 @@ def create_app(register: str | None = "__all__") -> typer.Typer:
             raise typer.Exit(1)
 
         runtime.container.register_instance("runtime.auto_accept", yes)
+        if mode is not None:
+            from velune.cli.execution_modes import parse_mode
+
+            if parse_mode(mode) is None or mode.lower() in {"ask", "safe", "block"}:
+                Console().print(f"[red]Unknown --mode {mode!r}.[/red] Use manual, plan or auto.")
+                raise typer.Exit(2)
+        if mode is not None or yes:
+            runtime.container.register_instance("runtime.execution_mode", (mode or "auto").lower())
 
         if yes and not json_mode:
             # --yes removes the per-call human approval gate (tool_chat.py's

@@ -416,6 +416,7 @@ def render_root_help() -> None:
         "\n[bold]Usage:[/bold] velune [OPTIONS] COMMAND [ARGS]...\n"
         "[bold]Options:[/bold] "
         "[cyan]--workspace/-w[/cyan]  [cyan]--config/-c[/cyan]  "
+        "[cyan]--mode manual|plan|auto[/cyan]  [cyan]--yes/-y[/cyan]  "
         "[cyan]--verbose/-v[/cyan]  [cyan]--version[/cyan]  [cyan]--help/-h[/cyan]\n"
     )
     for panel in PANEL_ORDER:

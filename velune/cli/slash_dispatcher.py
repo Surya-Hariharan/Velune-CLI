@@ -28,6 +28,10 @@ _log = logging.getLogger("velune.cli.slash_dispatcher")
 # and the completer share one source of truth. A test asserts every registered
 # command name appears here (no silent "General" fallback for built-ins).
 _BUILTIN_CATEGORIES: dict[str, str] = {
+    # Execution modes — who may change what
+    "manual": "Execution",
+    "plan": "Execution",
+    "auto": "Execution",
     # AI
     "run": "AI",
     "council": "AI",
@@ -74,7 +78,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     # Settings
     "settings": "Settings",
     "config": "Settings",
-    "approve": "Settings",
+    "approve": "Execution",
     "theme": "Settings",
     "crashreports": "Settings",
     # System
@@ -688,13 +692,46 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     )
     registry.register(
         SlashCommand(
+            name="manual",
+            aliases=[],
+            description="Manual mode: read freely, ask before every change",
+            usage="/manual",
+            handler=repl._cmd_manual,
+            examples=("/manual",),
+            search_terms=("execution mode", "ask before changes", "approval", "confirm edits"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="plan",
+            aliases=[],
+            description="Plan mode: write a plan to .velune/plans/, change nothing until you approve",
+            usage="/plan [task]",
+            handler=repl._cmd_plan,
+            examples=("/plan", "/plan add rate limiting to the login endpoint"),
+            search_terms=("execution mode", "planning", "plan first", "review before changes"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="auto",
+            aliases=[],
+            description="Auto mode: change the workspace without asking (high-risk still asks)",
+            usage="/auto",
+            handler=repl._cmd_auto,
+            examples=("/auto",),
+            search_terms=("execution mode", "autonomous", "agent", "auto-approve", "yolo"),
+        )
+    )
+    registry.register(
+        SlashCommand(
             name="approve",
             aliases=["approval"],
-            description="Set tool/command approval mode: safe | ask | block",
-            usage="/approve [safe|ask|block]",
+            description="Legacy: set the execution mode (ask→manual, safe→auto, block→plan)",
+            usage="/approve [ask|safe|block]",
             handler=repl._cmd_approve,
-            examples=("/approve safe", "/approve ask", "/approve block"),
-            search_terms=("permissions", "safety", "tool approval", "confirmation", "auto-approve"),
+            examples=("/approve ask", "/approve safe"),
+            search_terms=("permissions", "safety", "tool approval", "confirmation"),
         )
     )
     registry.register(

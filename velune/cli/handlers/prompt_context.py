@@ -22,7 +22,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from velune.cognition.intent import IntentClassifier, IntentType
 from velune.context.assembler import ContextAssembler
@@ -103,6 +103,7 @@ async def build_turn_context(
     # ── SYSTEM_PROMPT (always present, never trimmed) ────────────────────
     system_text = (
         f"Velune session — mode: {repl._mode_manager.current.value}, model: {model.model_id}."
+        + _execution_mode_instructions(repl, workspace)
     )
     chunks.append(
         ContextChunk(
@@ -538,3 +539,46 @@ def _wrap_workspace_content(repl: VeluneREPL, name: str, content: str) -> str:
         return firewall.wrap_workspace_content(name, content)
     except Exception:
         return content
+
+
+def _execution_mode_instructions(repl: Any, workspace: Path) -> str:
+    """Tell the model what the current execution mode lets it do.
+
+    Guidance only: what is actually allowed is enforced in code by the
+    permission gate at the tool layer, whatever the model decides to try.
+    """
+    from velune.permissions import ExecutionMode
+
+    mode = getattr(repl, "_execution_mode", None)
+    if not isinstance(mode, ExecutionMode):
+        return ""
+    common = (
+        f" Workspace: {workspace}. For files and folders use the filesystem tools "
+        "(write_file, create_directory, delete_directory, move_path, delete_file) rather "
+        "than shell commands; execute_command has no shell, so builtins such as mkdir, "
+        "del or pipes are unavailable."
+    )
+    plans = getattr(repl, "_plan_manager", None)
+    if mode is ExecutionMode.PLAN and not (plans is not None and plans.executing):
+        return (
+            "\nExecution mode: PLAN. Investigate with read-only tools, then write a plan "
+            "with the write_plan tool and stop. Do not change project files — those "
+            "tools are refused until the user approves the plan." + common
+        )
+    if mode is ExecutionMode.PLAN:
+        return (
+            "\nExecution mode: PLAN (executing the approved plan). Carry out the plan's "
+            "steps; changes outside the plan's files will require the user's approval." + common
+        )
+    if mode is ExecutionMode.AUTO:
+        return (
+            "\nExecution mode: AUTO. You may create, modify and delete files and run "
+            "commands inside the workspace without asking; work step by step, run the "
+            "tests, and fix failures before reporting. High-risk and outside-workspace "
+            "actions will still ask the user." + common
+        )
+    return (
+        "\nExecution mode: MANUAL. Read and analyze freely; every change you make with a "
+        "tool is shown to the user for approval first, so propose changes with the "
+        "tools rather than asking for permission in text." + common
+    )

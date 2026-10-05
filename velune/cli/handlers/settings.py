@@ -104,32 +104,33 @@ async def cmd_hooks(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_approve(repl: VeluneREPL, args: str) -> None:
-    """Set the tool/command approval mode for this session."""
-    from velune.tools.safety import ApprovalMode
+    """Legacy ``/approve``: maps onto the execution modes.
+
+    ask → MANUAL, safe → AUTO, block → PLAN. Prefer /manual /plan /auto.
+    """
+    from velune.cli.execution_modes import parse_mode, set_execution_mode
+    from velune.permissions import ExecutionMode
 
     sub = args.strip().lower()
+    current = getattr(repl, "_execution_mode", ExecutionMode.MANUAL)
     if not sub:
-        modes = ", ".join(m.value for m in ApprovalMode)
         repl.console.print(
-            f"[cyan]Current approval mode:[/cyan] [bold]{repl._approval_mode.value}[/bold]\n"
-            f"[dim]Usage: /approve [{modes}][/dim]\n"
-            f"\n"
-            f"  [bold]safe[/bold]   — known read-only commands run without prompting\n"
-            f"  [bold]ask[/bold]    — all tool/shell calls require confirmation  [dim](default)[/dim]\n"
-            f"  [bold]block[/bold]  — all shell tool calls are rejected"
+            f"[cyan]Execution mode:[/cyan] [bold]{current.label}[/bold]\n"
+            "[dim]/approve now sets the execution mode: ask → /manual, safe → /auto, "
+            "block → /plan. Shift+Tab cycles them.[/dim]"
         )
         return
-
-    try:
-        new_mode = ApprovalMode(sub)
-    except ValueError:
-        modes = " | ".join(m.value for m in ApprovalMode)
-        repl.console.print(f"[red]Unknown mode: {sub!r}[/red]  [dim]Choose: {modes}[/dim]")
+    if sub not in {"ask", "safe", "block"}:
+        repl.console.print(
+            f"[red]Unknown mode: {sub!r}[/red]  [dim]Choose: ask | safe | block[/dim]"
+        )
         return
-
-    repl._approval_mode = new_mode
-    style = {"safe": "green", "ask": "yellow", "block": "red"}.get(new_mode.value, "white")
-    repl.console.print(f"[{style}]Approval mode set to:[/{style}] [bold]{new_mode.value}[/bold]")
+    mode = parse_mode(sub)
+    assert mode is not None
+    set_execution_mode(repl, mode)
+    repl.console.print(
+        f"[dim]Tip: use /{mode.value} directly — /approve {sub} is kept for compatibility.[/dim]"
+    )
 
 
 #: Accessibility modifier names accepted by ``/theme``, with their aliases.

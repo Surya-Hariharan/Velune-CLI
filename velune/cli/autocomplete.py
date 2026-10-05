@@ -27,6 +27,7 @@ class CommandEntry:
 # not listed here are appended afterwards, alphabetically.
 CATEGORY_ORDER: list[str] = [
     "AI",
+    "Execution",
     "Providers",
     "Models",
     "Projects",

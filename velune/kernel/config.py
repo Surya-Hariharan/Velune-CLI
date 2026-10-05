@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import toml
 from pydantic import BaseModel, Field
@@ -90,6 +91,12 @@ class ExecutionConfig(BaseModel):
     native_tools: bool = True
     # Upper bound on model turns per prompt inside the tool loop.
     max_tool_turns: int = Field(default=10, ge=1, le=50)
+    # Default execution mode for new sessions: "manual" (ask before every
+    # change), "plan" (write a plan, change nothing until approved) or "auto"
+    # (change the workspace without asking; high-risk and outside-workspace
+    # actions still ask). Overridden per run by `velune --mode`; switch in the
+    # REPL with /manual /plan /auto or Shift+Tab.
+    mode: Literal["manual", "plan", "auto"] = "manual"
     allowed_executables: list[str] = Field(
         default_factory=lambda: [
             "python",

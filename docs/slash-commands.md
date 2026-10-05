@@ -1,7 +1,7 @@
 # Slash Commands
 
 *The full reference for everything you can type inside the Velune CLI REPL —
-52 commands across 11 categories.*
+55 commands across 12 categories.*
 
 For commands run in the terminal *before* the REPL starts (`velune run`,
 `velune doctor`, …), see the [README command table](../README.md#commands)
@@ -12,6 +12,7 @@ or run `velune --help`.
 ## Contents
 
 - [AI](#ai)
+- [Execution](#execution)
 - [Providers](#providers)
 - [Models](#models)
 - [Projects](#projects)
@@ -69,6 +70,45 @@ it runs.
 > have to think about it mid-task. Their names match `/mode`'s own
 > vocabulary (`/mode fast`, `/mode max`, `/mode normal`); `optimus`/`godly`
 > still work as aliases.
+
+---
+
+## Execution
+
+Who may change what. The execution mode decides whether Velune asks before
+changing your workspace; it is separate from the fast / normal / max modes
+above, which choose how hard the model thinks. Press **Shift+Tab** to cycle
+MANUAL → PLAN → AUTO; the status bar shows the current mode.
+
+| Command | Aliases | Usage | Description |
+| --- | --- | --- | --- |
+| `manual` | *(none)* | `/manual` | Manual mode: read freely, ask before every change |
+| `plan` | *(none)* | `/plan [task]` | Plan mode: write a plan to .velune/plans/, change nothing until you approve |
+| `auto` | *(none)* | `/auto` | Auto mode: change the workspace without asking (high-risk still asks) |
+| `approve` | `approval` | `/approve [ask\|safe\|block]` | Legacy: set the execution mode (ask→manual, safe→auto, block→plan) |
+
+> **MANUAL** (default) — Velune reads, searches and analyzes freely, and
+> shows you every change (files, folders, state-changing commands) for
+> approval first. Related changes are previewed together.
+>
+> **PLAN** — Velune investigates and writes a plan to
+> `.velune/plans/<name>.md` (objective, findings, proposed changes, files
+> affected, risks, rollback, execution order) and stops. Ask for changes as
+> often as you like — the plan is revised, nothing runs. Reply with an
+> explicit approval (*approve*, *go ahead*, *implement it*) to execute it;
+> anything outside the plan's file list asks again.
+>
+> **AUTO** — Velune creates, edits and deletes files and runs commands inside
+> the workspace without asking, iterating until the task is done.
+>
+> **In every mode**, these still need your explicit confirmation: anything
+> outside the workspace (allow once / for this task / deny), high-risk
+> operations (`git reset --hard`, `git clean`, force-push, recursive deletes,
+> system or global installs, environment/registry/firewall changes) and
+> reading or changing secrets (`.env`, keys, `~/.ssh`). Commands such as
+> `sudo` or disk formatting are never run. These rules are enforced in code
+> at the tool layer, not by instructions to the model. Start in a mode with
+> `velune --mode manual|plan|auto` or set `[execution] mode` in `velune.toml`.
 
 ---
 
@@ -215,13 +255,12 @@ Git and forge (GitHub/GitLab) integration, plus the execution sandbox.
 
 ## Settings
 
-Configuration and tool/command approval gating.
+Configuration and appearance.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `settings` | `setup` | `/settings` | Interactive settings dashboard (keyboard navigation) |
 | `config` | `cfg` | `/config` | Show current system configuration settings |
-| `approve` | `approval` | `/approve [safe\|ask\|block]` | Set tool/command approval mode: safe \| ask \| block |
 | `theme` | `appearance` | `/theme [theme-id\|colorblind\|motion] [on\|off]` | Switch the colour theme, or toggle an accessibility modifier |
 | `crashreports` | `crash-reports` | `/crashreports [on\|off]` | Show or toggle opt-in local crash reporting (off by default, never transmitted) |
 
@@ -239,10 +278,6 @@ Configuration and tool/command approval gating.
 > change. `/theme colorblind on` and `/theme motion off` still work exactly
 > as before.
 >
-> `/approve` controls how much Velune CLI can do without asking: `safe`
-> auto-runs read-only actions and prompts for writes/exec, `ask` prompts
-> for everything non-trivial, `block` requires explicit confirmation for
-> every tool call.
 
 ---
 

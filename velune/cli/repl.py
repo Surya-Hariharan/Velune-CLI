@@ -91,6 +91,12 @@ class VeluneREPL:
         from velune.tools.safety import ApprovalMode
 
         self._approval_mode: ApprovalMode = ApprovalMode.ASK
+        # Execution mode (MANUAL / PLAN / AUTO) — see velune/cli/execution_modes.py.
+        from velune.cli.execution_modes import initial_mode
+
+        self._execution_mode = initial_mode(
+            getattr(self.runtime, "container", None), getattr(self.runtime, "config", None)
+        )
         # Native tool-loop session state: models whose provider rejected the
         # tool payload (skip retrying every turn), and tools the user granted
         # "always allow" for this session.
@@ -357,6 +363,25 @@ class VeluneREPL:
                 if m.get("role") == "user" and m.get("content")
             ]
 
+        from prompt_toolkit.filters import Condition
+
+        @Condition
+        def _no_completion_menu() -> bool:
+            from prompt_toolkit.application.current import get_app
+
+            buf = get_app().current_buffer
+            return buf.complete_state is None
+
+        # Shift+Tab cycles the execution mode (MANUAL → PLAN → AUTO), as in
+        # Claude Code. Inside an open completion menu it keeps its usual
+        # "previous suggestion" meaning.
+        @kb.add("s-tab", filter=_no_completion_menu)
+        def _cycle_execution_mode(event) -> None:
+            from velune.cli.execution_modes import cycle_execution_mode
+
+            cycle_execution_mode(self)
+            event.app.invalidate()
+
         @kb.add("up")
         def _recall_up(event) -> None:
             buf = event.current_buffer
@@ -496,6 +521,12 @@ class VeluneREPL:
         self._status_state.exit_hint = self._interrupts.exit_hint_active
         self._status_state.model_id = self.active_model.model_id if self.active_model else None
         self._status_state.mode_label = self._mode_manager.current.value.upper()
+        from velune.cli.execution_modes import BADGES
+        from velune.permissions import ExecutionMode
+
+        self._status_state.execution_label = BADGES[
+            getattr(self, "_execution_mode", ExecutionMode.MANUAL)
+        ]
         self._status_state.context_pct = (
             self._context_tracker.percentage if self.active_model else 0.0
         )
@@ -1700,6 +1731,24 @@ class VeluneREPL:
         from velune.cli.handlers.settings import cmd_approve
 
         await cmd_approve(self, args)
+
+    async def _cmd_manual(self, args: str) -> None:
+        from velune.cli.handlers.execution_mode import cmd_set_mode
+        from velune.permissions import ExecutionMode
+
+        await cmd_set_mode(self, ExecutionMode.MANUAL, args)
+
+    async def _cmd_plan(self, args: str) -> None:
+        from velune.cli.handlers.execution_mode import cmd_set_mode
+        from velune.permissions import ExecutionMode
+
+        await cmd_set_mode(self, ExecutionMode.PLAN, args)
+
+    async def _cmd_auto(self, args: str) -> None:
+        from velune.cli.handlers.execution_mode import cmd_set_mode
+        from velune.permissions import ExecutionMode
+
+        await cmd_set_mode(self, ExecutionMode.AUTO, args)
 
     async def _cmd_doctor(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_doctor

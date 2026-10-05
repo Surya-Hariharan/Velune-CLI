@@ -343,26 +343,6 @@ async def run_tool_chat(
 # ── Approval UX ─────────────────────────────────────────────────────────────
 
 
-def _auto_accept_enabled(repl: VeluneREPL) -> bool:
-    """True when the user passed --yes (or auto-accept was set programmatically).
-
-    Both sources are consulted because ``app.py`` writes the flag to two places:
-    the container key ``runtime.auto_accept`` and the diff-preview module
-    global. Checking only one is how the tool loop came to ignore ``--yes``.
-    """
-    try:
-        if bool(repl.container.get("runtime.auto_accept")):
-            return True
-    except Exception:
-        pass
-    try:
-        from velune.execution.diff_preview import is_auto_accept
-
-        return is_auto_accept()
-    except Exception:
-        return False
-
-
 # Below one full keyword-signal hit (see IntentClassifier._score: hits/3,
 # capped at 1.0) — not the same as the 0.5 "no signal at all, default to
 # QUESTION" fallback in classify_with_confidence, which is a deliberate
