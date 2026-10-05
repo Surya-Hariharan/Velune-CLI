@@ -66,6 +66,11 @@ class Action:
     def mutating(self) -> bool:
         return self.action_type in MUTATING_TYPES
 
+    @property
+    def changes_state(self) -> bool:
+        """Anything other than reading — including writing a plan file."""
+        return self.mutating or self.action_type is ActionType.WRITE_PLAN
+
     def describe(self) -> str:
         """One-line, human-readable form for previews and the audit log."""
         label = self.action_type.value.replace("_", " ")

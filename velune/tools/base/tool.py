@@ -223,7 +223,7 @@ async def authorize_and_execute(
     actions = tool.describe_actions(dict(kwargs), boundary)
     call_boundary = None
     if gate is None:
-        if any(a.mutating or a.secret or a.outside_workspace for a in actions):
+        if any(a.changes_state or a.secret or a.outside_workspace for a in actions):
             raise ActionDeniedError(
                 tool.get_name(), "no permission gate is active for this call (fail closed)"
             )
