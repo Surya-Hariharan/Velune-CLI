@@ -41,8 +41,9 @@ listed where they differ.
 | 0.9.5 | 2026-07-08 | Resource Connector Framework |
 | 0.9.6 | 2026-07-18 | API-key lifecycle management, incremental repository cognition |
 | 0.9.7 | 2026-07-31 | Terminal zoom-lock investigation, REPL and packaging fixes |
+| 0.9.8 | 2026-10-05 | Install reliability: tested dependency floors, one-line installers, `velune doctor` rework |
 
-Commits after `v0.9.7` on `main` are unreleased (see the `[Unreleased]`
+Commits after `v0.9.8` on `main` are unreleased (see the `[Unreleased]`
 section of the CHANGELOG).
 
 ## Architecture and feature milestones
@@ -70,7 +71,9 @@ relevant code.
 - **0.9.6:** key-verification lifecycle, incremental repository cognition,
   and architectural convergence of the memory and context layers.
 - **0.9.7:** `velune doctor` terminal-capability reporting.
-- **After 0.9.7 (unreleased):** the optional Go launcher and Rust module (added in 0.9.4, never shipped in
+- **0.9.8:** installation reliability (empirically tested dependency floors for the core and the extras,
+  isolated one-line installers, a `velune doctor` that reports the environment and separates core from
+  optional problems). Also in this release: the optional Go launcher and Rust module (added in 0.9.4, never shipped in
   the PyPI package) were removed to keep the repository pure-Python; live model catalogs for OpenAI, Anthropic,
   Gemini and Groq (retired models drop out automatically); inline Markdown
   rendering of tables, charts and Mermaid diagrams in the REPL; SQLite

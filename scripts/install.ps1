@@ -9,7 +9,7 @@
 #
 # Environment overrides:
 #   VELUNE_PACKAGE         what to install (default: velune-cli; may be a version
-#                          spec like "velune-cli==0.9.7" or a local wheel path)
+#                          spec like "velune-cli==0.9.8" or a local wheel path)
 #   VELUNE_PYTHON          Python version for the environment (default: 3.12)
 #   VELUNE_NO_MODIFY_PATH  set to 1 to leave the user PATH untouched
 

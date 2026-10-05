@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+---
+
+## [0.9.8] - 2026-10-05
+
 ### Added
 
 - **One-line installers.** `scripts/install.sh` (macOS/Linux/WSL) and `scripts/install.ps1` (Windows) install
