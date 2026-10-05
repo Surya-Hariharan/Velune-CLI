@@ -226,11 +226,20 @@ class CommandPaletteModel:
             )
             scored = favorite_matches + recent_matches + rest_matches
         else:
+            # Prefix-first: typing "/c" must show the commands whose *name*
+            # starts with "c" — not everything with a "c" in an alias or a
+            # search keyword ("/m" used to surface /roles and /pull via the
+            # keywords "assign model" / "download model"). Aliases and keywords
+            # only take over when no name matches, which keeps "/anthropic"
+            # finding /connect.
+            q = query.lower()
+            name_hits = [c for c in self.commands if c.name.lower().startswith(q)]
+            candidates = name_hits or self.commands
             scored = [
                 PaletteMatch(
                     command=command, score=self._field_score(query, command), group=command.category
                 )
-                for command in self.commands
+                for command in candidates
             ]
             scored = [match for match in scored if match.score > 0]
 

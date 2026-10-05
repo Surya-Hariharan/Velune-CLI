@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Command palette and `/` completion now match by name prefix.** Typing `/c` lists only the commands whose
+  name starts with `c` (and `/co` narrows that further). Before, aliases and search keywords were matched
+  loosely too, so `/co` returned 29 results led by `/index` (through its `/cog` alias) and `/m` pulled in
+  `/roles` and `/pull`. Aliases and keywords still find a command when no name starts with what you typed,
+  so `/anthropic` and `/login` still reach `/connect`.
+
 ---
 
 ## [0.9.8] - 2026-10-05

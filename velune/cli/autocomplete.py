@@ -254,6 +254,14 @@ class SlashCompleter(Completer):
                 recency_rank = list(self._recent).index(entry.name)
             scored.append(_ScoredEntry(best, entry, matched_alias, recency_rank))
 
+        # Prefix-first, same rule as the command palette: if any command *name*
+        # starts with what was typed, offer only those (a fuzzy tail of
+        # substring/subsequence hits just buries them). Fuzzy matching still
+        # applies when nothing starts with the text, e.g. a typo or "/anthropic".
+        word_l = word.lower()
+        if word and any(s.entry.name.lower().startswith(word_l) for s in scored):
+            scored = [s for s in scored if s.entry.name.lower().startswith(word_l)]
+
         scored.sort(key=lambda s: s.sort_key)
         for item in scored[: self._max_results]:
             entry = item.entry
