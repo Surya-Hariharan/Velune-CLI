@@ -16,6 +16,7 @@ from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
 from velune.providers.adapters._http_errors import raise_typed_http_error
 from velune.providers.adapters._live_catalog import get_json, reconcile
+from velune.providers.adapters._messages import openai_messages
 from velune.providers.adapters._toolcalls import (
     OpenAIStreamToolAccumulator,
     attach_openai_tools,
@@ -178,7 +179,7 @@ class OpenAIProvider(ModelProvider):
         OpenAI-compatible providers (Groq, xAI, ...) subclass this adapter and
         keep the classic fields.
         """
-        payload: dict = {"model": request.model_id, "messages": request.messages}
+        payload: dict = {"model": request.model_id, "messages": openai_messages(request.messages)}
         if self.provider_id == "openai" and is_openai_reasoning_model(request.model_id):
             payload["max_completion_tokens"] = request.max_tokens
         else:
@@ -242,6 +243,9 @@ class OpenAIProvider(ModelProvider):
             attach_openai_tools(payload, request)
 
             async with self.client.stream("POST", "/chat/completions", json=payload) as response:
+                if response.status_code >= 400:
+                    # Read the error body so the typed error can say *why*.
+                    await response.aread()
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):

@@ -13,6 +13,7 @@ from velune.core.errors.provider import InferenceError, ProviderAuthenticationEr
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._messages import openai_messages
 from velune.providers.adapters._toolcalls import (
     OpenAIStreamToolAccumulator,
     attach_openai_tools,
@@ -108,7 +109,7 @@ class DeepSeekProvider(ModelProvider):
         try:
             payload = {
                 "model": request.model_id,
-                "messages": request.messages,
+                "messages": openai_messages(request.messages),
                 "temperature": request.temperature,
                 "max_tokens": request.max_tokens,
                 "top_p": request.top_p,
@@ -151,7 +152,7 @@ class DeepSeekProvider(ModelProvider):
         try:
             payload = {
                 "model": request.model_id,
-                "messages": request.messages,
+                "messages": openai_messages(request.messages),
                 "temperature": request.temperature,
                 "max_tokens": request.max_tokens,
                 "top_p": request.top_p,

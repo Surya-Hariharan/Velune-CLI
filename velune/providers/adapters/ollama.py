@@ -13,6 +13,7 @@ from velune.core.errors.provider import InferenceError, ProviderConnectionError
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
+from velune.providers.adapters._messages import openai_messages
 from velune.providers.adapters._toolcalls import parse_ollama_tool_calls
 from velune.providers.base import ModelProvider
 
@@ -152,7 +153,7 @@ class OllamaProvider(ModelProvider):
         try:
             payload = {
                 "model": request.model_id,
-                "messages": request.messages,
+                "messages": openai_messages(request.messages),
                 "stream": False,
                 "options": {
                     "temperature": request.temperature,
@@ -199,7 +200,7 @@ class OllamaProvider(ModelProvider):
         try:
             payload = {
                 "model": request.model_id,
-                "messages": request.messages,
+                "messages": openai_messages(request.messages),
                 "stream": True,
                 "options": {
                     "temperature": request.temperature,

@@ -40,6 +40,37 @@ def parse_retry_after(headers: httpx.Headers) -> float | None:
         return None
 
 
+def _error_detail(exc: httpx.HTTPError) -> str:
+    """The provider's own error message, if the response body was read.
+
+    Without it a 400 only says "malformed request", which hid the real cause
+    of Groq rejecting tool-error turns ("property 'is_error' is unsupported").
+    Streaming callers must ``await response.aread()`` before raising for this
+    to be available; an unread body yields "" rather than an exception.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return ""
+    try:
+        text = exc.response.text
+    except httpx.ResponseNotRead:
+        return ""
+    message = text
+    try:
+        import json
+
+        body = json.loads(text)
+        err = body.get("error") if isinstance(body, dict) else None
+        if isinstance(err, dict) and err.get("message"):
+            message = str(err["message"])
+        elif isinstance(err, str):
+            message = err
+    except ValueError:
+        pass
+    from velune.core.redaction import redact_secrets
+
+    return redact_secrets(" ".join(message.split()))[:300]
+
+
 def raise_typed_http_error(provider_label: str, exc: httpx.HTTPError, action: str) -> NoReturn:
     """Translate an httpx failure into the right typed provider error, then raise it.
 
@@ -75,7 +106,9 @@ def raise_typed_http_error(provider_label: str, exc: httpx.HTTPError, action: st
             f"renamed by the provider; this is not retried automatically."
         ) from exc
     if status in (400, 422):
+        detail = _error_detail(exc)
         raise InvalidRequestError(
             f"{provider_label} rejected the request as malformed (HTTP {status}) during {action}."
+            + (f" Provider said: {detail}" if detail else "")
         ) from exc
     raise InferenceError(f"{provider_label} {action} failed: {exc}") from exc
