@@ -27,8 +27,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Folder tools:** `create_directory`, `delete_directory`, `move_path`. These are
   native Python, so they work on Windows, where `mkdir` through the command tool
   could not.
+- **Math in responses is rendered in the terminal.** LaTeX that models write (`$x^2$`, `\( … \)`,
+  `$$ … $$`, `\[ … \]`, `\begin{bmatrix} … \end{bmatrix}`) now shows as readable Unicode:
+  - matrices of any size with tall brackets and aligned columns;
+  - stacked fractions, roots, and sums or limits with their bounds;
+  - sub- and superscripts, Greek letters and operators.
+
+  Inline math, including math inside table cells, renders on one line. A formula still streaming in
+  is laid out as it arrives, instead of flashing raw source.
+
+  Consoles that can't show Unicode get an ASCII version. A formula too wide for the terminal falls
+  back to one line, and one Velune can't parse is shown as written. Code blocks and inline code are
+  never touched. No new dependencies; turn it off with `[display] math_rendering = false`.
 
 ### Fixed
+
+- **LaTeX in answers was printed broken** (`[ A=\begin{bmatrix} 1 & 2 & 3\ 0 & …`). Markdown treated
+  `\[`, `\(` and `\\` as escapes and deleted the backslashes before anything could render the math.
+  The math is now taken out before Markdown parsing. `velune ask`, `velune run` and council agents
+  now use the same renderer as the REPL; they used to print responses as plain text.
 
 - **Every turn after a failed or denied tool call was rejected by Groq** ("rejected the request
   as malformed (HTTP 400)"). Velune sent an internal `is_error` field that the OpenAI-style APIs

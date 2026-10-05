@@ -159,8 +159,9 @@ class BaseCouncilAgent(ABC):
 
                     from rich.console import Console
                     from rich.live import Live
-                    from rich.markdown import Markdown
                     from rich.panel import Panel
+
+                    from velune.cli.rendering import CustomMarkdown
 
                     console = Console()
                     is_interactive = sys.stdout.isatty()
@@ -202,7 +203,7 @@ class BaseCouncilAgent(ABC):
                                         full_content.append(chunk.content)
                                         current_text = "".join(full_content)
                                         panel = Panel(
-                                            Markdown(current_text),
+                                            CustomMarkdown(current_text, streaming=True),
                                             title=panel_title,
                                             border_style=color,
                                             padding=(1, 2),

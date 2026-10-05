@@ -155,18 +155,25 @@ def tall_delim(char: str, height: int, baseline: int, ascii_only: bool) -> Box:
 
 
 def layout(node: Node, ascii_only: bool = False) -> Box:
-    return _L(node, ascii_only)
+    return _lay(node, ascii_only)
 
 
 def _lin(node: Node, a: bool) -> str:
     return linear.render(node, ascii_only=a)
 
 
-def _L(node: Node, a: bool) -> Box:
+def _lay(node: Node, a: bool) -> Box:
     if isinstance(node, (Sym, Raw, TextNode, Space)):
         return atom(linear._r(node, a))
     if isinstance(node, Row):
-        return hjoin([_L(item, a) for item in spaced(node.items)])
+        boxes: list[Box] = []
+        for item in spaced(node.items):
+            box = _lay(item, a)
+            # Two tall pieces side by side (a fraction then a matrix) need a gap.
+            if boxes and box.height > 1 and boxes[-1].height > 1:
+                boxes.append(atom(" "))
+            boxes.append(box)
+        return hjoin(boxes)
     if isinstance(node, Script):
         return _script(node, a)
     if isinstance(node, Frac):
@@ -176,7 +183,7 @@ def _L(node: Node, a: bool) -> Box:
     if isinstance(node, BigOp):
         return _bigop(node, a)
     if isinstance(node, Delim):
-        body = _L(node.body, a)
+        body = _lay(node.body, a)
         left = tall_delim(node.left, body.height, body.baseline, a)
         right = tall_delim(node.right, body.height, body.baseline, a)
         return hjoin([left, body, right])
@@ -190,8 +197,8 @@ def _L(node: Node, a: bool) -> Box:
 def _tight(node: Node, a: bool) -> Box:
     """Scripts and limits: no operator spacing (TeX sets them tight)."""
     if isinstance(node, Row):
-        return hjoin([_L(item, a) for item in node.items if not isinstance(item, Space)])
-    return _L(node, a)
+        return hjoin([_lay(item, a) for item in node.items if not isinstance(item, Space)])
+    return _lay(node, a)
 
 
 def _is_flat(box: Box) -> bool:
@@ -199,13 +206,13 @@ def _is_flat(box: Box) -> bool:
 
 
 def _script(node: Script, a: bool) -> Box:
-    base = _L(node.base, a)
+    base = _lay(node.base, a)
     sup = _tight(node.sup, a) if node.sup is not None else None
     sub = _tight(node.sub, a) if node.sub is not None else None
     # Prefer Unicode scripts on a single line when every piece fits.
     if _is_flat(base) and (sup is None or _is_flat(sup)) and (sub is None or _is_flat(sub)):
         flat = linear._r(node, a)
-        if "^" not in flat and "_" not in flat:
+        if a or ("^" not in flat and "_" not in flat):
             return atom(flat)
     # Otherwise raise/lower the scripts next to the base.
     width = max(sup.width if sup else 0, sub.width if sub else 0)
@@ -225,7 +232,7 @@ def _script(node: Script, a: bool) -> Box:
 
 
 def _frac(node: Frac, a: bool) -> Box:
-    num, den = _L(node.num, a), _L(node.den, a)
+    num, den = _lay(node.num, a), _lay(node.den, a)
     width = max(num.width, den.width) + (2 if node.rule else 0)
     rule = ("-" if a else "─") * width if node.rule else " " * width
     lines = [_pad(line, width, "center") for line in num.lines]
@@ -235,7 +242,7 @@ def _frac(node: Frac, a: bool) -> Box:
 
 
 def _sqrt(node: Sqrt, a: bool) -> Box:
-    body = _L(node.body, a)
+    body = _lay(node.body, a)
     index = linear.render(node.index, a) if node.index is not None else ""
     if a:
         inner = hjoin([atom("sqrt("), body, atom(")")])
@@ -283,13 +290,13 @@ def _cell_align(env: str, col: int, text: str, colspec: str) -> str:
 def _matrix(node: Matrix, a: bool) -> Box:
     if not node.rows:
         return atom("")
-    grid = [[_L(cell, a) for cell in row] for row in node.rows]
+    grid = [[_lay(cell, a) for cell in row] for row in node.rows]
     ncols = max(len(row) for row in grid)
     for row in grid:
         row.extend(atom("") for _ in range(ncols - len(row)))
     widths = [max(row[c].width for row in grid) for c in range(ncols)]
     aligned = node.env.startswith(("align", "split", "eqnarray"))
-    gap = "" if aligned else ("   " if node.env in ("cases", "dcases", "rcases") else "  ")
+    gap = " " if aligned else ("   " if node.env in ("cases", "dcases", "rcases") else "  ")
     tall = any(cell.height > 1 for row in grid for cell in row)
 
     lines: list[str] = []
@@ -301,8 +308,12 @@ def _matrix(node: Matrix, a: bool) -> Box:
             for c, cell in enumerate(row):
                 src = line_no - (base - cell.baseline)
                 text = cell.lines[src] if 0 <= src < cell.height else ""
-                align = _cell_align(node.env, c, linear._r(node.rows[r][c], a)
-                                    if c < len(node.rows[r]) else "", node.colspec)
+                align = _cell_align(
+                    node.env,
+                    c,
+                    linear._r(node.rows[r][c], a) if c < len(node.rows[r]) else "",
+                    node.colspec,
+                )
                 parts.append(_pad(text, widths[c], align))
             lines.append(gap.join(parts).rstrip())
         if tall and r < len(grid) - 1:

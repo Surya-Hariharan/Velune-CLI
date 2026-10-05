@@ -1,0 +1,18 @@
+Inline: x^2 + y^2 = z^2, alpha <= beta, and e^(-x).
+
+The quadratic formula:
+
+       -b +/- sqrt(b^2 - 4ac)
+  x = ------------------------
+                 2a
+
+A limit and an integral:
+
+        sin x                                1
+  lim  ------- = 1    integral_0^1 x^2 dx = ---
+  x->0    x                                  3
+
+Piecewise:
+
+  f(x) = / x^2   x >= 0
+         \ -x    otherwise

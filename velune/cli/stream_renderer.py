@@ -176,7 +176,7 @@ class StreamRenderer:
                                 if now - last_update >= self._MIN_UPDATE_INTERVAL:
                                     live.update(stream_buffer.get_renderable())
                                     last_update = now
-                        live.update(stream_buffer.get_renderable())
+                        live.update(stream_buffer.get_renderable(final=True))
 
                     self._status_state.last_latency_ms = stats.time_to_first_token_ms
                     self._status_state.last_tokens_per_sec = stats.tokens_per_second

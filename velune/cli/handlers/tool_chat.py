@@ -1025,7 +1025,7 @@ class _ToolActivityUI:
         if self._live is not None:
             try:
                 if self._stream_buffer is not None:
-                    self._live.update(self._stream_buffer.get_renderable())
+                    self._live.update(self._stream_buffer.get_renderable(final=True))
                 self._live.stop()
             except Exception:
                 pass

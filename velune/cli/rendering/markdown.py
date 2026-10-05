@@ -30,6 +30,12 @@ class CustomCodeBlock(CodeBlock):
         code = str(self.text).rstrip()
         lexer = (self.lexer_name or "").lower()
 
+        # Display math extracted by velune.cli.rendering.math.extract. Must run
+        # before the chart check: a rendered matrix is full of box glyphs.
+        if lexer in ("velune-math", "velune-math-pending"):
+            yield from _render_math_block(code, lexer, options)
+            return
+
         if lexer == "mermaid":
             from velune.cli.rendering.mermaid import render_mermaid
 
@@ -84,16 +90,94 @@ class CustomTableElement(TableElement):
         yield table
 
 
+def _render_math_block(code: str, lexer: str, options: ConsoleOptions) -> RenderResult:
+    """A display formula: 2D layout, or its readable source if it can't be parsed."""
+    from velune.cli.rendering.math import close_partial, render_display
+
+    width = max(10, options.max_width - 2)
+    if lexer == "velune-math-pending":
+        # Still streaming: lay out what has arrived (provisionally closed),
+        # dimmed — never flash raw TeX that is about to become a matrix.
+        partial = render_display(close_partial(code), width, options.ascii_only)
+        if not partial:
+            partial = ["…" if not options.ascii_only else "..."]
+        for line in partial:
+            yield Text("  " + line, style="dim", no_wrap=True, overflow="crop")
+        return
+    lines = render_display(code, width, options.ascii_only)
+    # Rich already separates block elements; no extra padding lines here.
+    if lines is None:
+        # Never a traceback: show the formula as written, dimmed.
+        yield Text("  " + " ".join(code.split()), style="dim")
+    elif len(lines) == 1:
+        yield Text("  " + lines[0])  # one line (inline form): may wrap
+    else:
+        for line in lines:
+            yield Text("  " + line, no_wrap=True, overflow="crop")
+
+
+def _prepare_math(markup: str, ascii_only: bool, streaming: bool = False) -> str:
+    """Run the math pre-pass; on any failure render the text as plain Markdown."""
+    from velune.cli.rendering import math as velune_math
+
+    if not velune_math.enabled():
+        return markup
+    try:
+        from velune.cli.rendering.math.extract import transform
+
+        return transform(markup, ascii_only, streaming=streaming)
+    except Exception:  # presentation must never break a response
+        return markup
+
+
 class CustomMarkdown(Markdown):
-    """Markdown renderer with terminal-friendly code blocks, tables and diagrams."""
+    """Markdown renderer with terminal-friendly code blocks, tables, diagrams and math.
+
+    LaTeX math is lifted out *before* Markdown parsing (whose backslash escapes
+    would otherwise destroy it) — see ``velune.cli.rendering.math.extract``.
+    Inline math is converted when the text is parsed, so a console that can't
+    show Unicode gets an ASCII variant built on first render.
+    """
 
     elements = Markdown.elements.copy()
     elements["fence"] = CustomCodeBlock
     elements["code_block"] = CustomCodeBlock
     elements["table_open"] = CustomTableElement
 
-    def __init__(self, markup: str, code_theme: str = "monokai", **kwargs) -> None:
-        super().__init__(markup, code_theme=code_theme, **kwargs)
+    def __init__(
+        self,
+        markup: str,
+        code_theme: str = "monokai",
+        *,
+        streaming: bool = False,
+        _ascii_math: bool = False,
+        **kwargs,
+    ) -> None:
+        # streaming=True: the response is still arriving, so a formula whose
+        # closing delimiter hasn't come yet renders as a quiet pending block.
+        self._raw_markup = markup
+        self._streaming = streaming
+        self._init_kwargs = dict(kwargs, code_theme=code_theme)
+        self._ascii_variant: CustomMarkdown | None = None
+        self._is_ascii = _ascii_math
+        self._prepared = _prepare_math(markup, _ascii_math, streaming)
+        super().__init__(self._prepared, code_theme=code_theme, **kwargs)
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        if options.ascii_only and not self._is_ascii:
+            if self._ascii_variant is None:
+                variant = CustomMarkdown(
+                    self._raw_markup,
+                    streaming=self._streaming,
+                    _ascii_math=True,
+                    **self._init_kwargs,
+                )
+                # Only switch when the ASCII form actually differs (has math).
+                self._ascii_variant = variant if variant._prepared != self._prepared else self
+            if self._ascii_variant is not self:
+                yield from self._ascii_variant.__rich_console__(console, options)
+                return
+        yield from super().__rich_console__(console, options)
 
 
 class MarkdownStreamBuffer:
@@ -145,9 +229,11 @@ class MarkdownStreamBuffer:
             content += "```"
         return content
 
-    def get_renderable(self) -> CustomMarkdown:
+    def get_renderable(self, *, final: bool = False) -> CustomMarkdown:
+        if final:
+            return CustomMarkdown(self._buffer)
         if self._cached is None:
-            self._cached = CustomMarkdown(self._stabilize(self._buffer))
+            self._cached = CustomMarkdown(self._stabilize(self._buffer), streaming=True)
         return self._cached
 
 

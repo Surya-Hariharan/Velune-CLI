@@ -175,9 +175,18 @@ async def _run_command_async(
                 f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"
                 "[bold green]Synthesized Output:[/bold green]\n"
             )
-            body.append(state.output or "Execution completed successfully.")
+            # The output is Markdown (often with math): render it, never as markup.
+            from rich.console import Group
+
+            from velune.cli.rendering import CustomMarkdown
+
+            output = CustomMarkdown(state.output or "Execution completed successfully.")
             console.print(
-                Panel(body, border_style="green", title="[bold green]Success Report[/bold green]")
+                Panel(
+                    Group(body, output),
+                    border_style="green",
+                    title="[bold green]Success Report[/bold green]",
+                )
             )
             _print_run_next_steps(success=True, run_id=str(state.run_id))
         else:

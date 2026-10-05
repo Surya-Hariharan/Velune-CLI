@@ -110,12 +110,14 @@ def _r(node: Node, a: bool) -> str:
             return f"{out}^{_wrap(sup)}"
         return out
     if isinstance(node, Delim):
+        if isinstance(node.body, Frac) and not node.body.rule:  # inom → C(n, k)
+            return _r(node.body, a)
         return f"{node.left}{_r(node.body, a)}{node.right}"
     if isinstance(node, Accent):
         body = _r(node.body, a)
         if not a and len(body) == 1:
             return body + node.uni
-        return f"{node.ascii}({body})" if len(body) > 1 or a else body + node.ascii
+        return f"{node.ascii}({body})"
     if isinstance(node, Matrix):
         return _matrix(node, a)
     return ""
@@ -127,7 +129,7 @@ def _matrix(node: Matrix, a: bool) -> str:
         parts = [" if ".join(c for c in row if c) if len(row) > 1 else row[0] for row in rows]
         return "{ " + "; ".join(parts) + " }"
     if node.env.startswith(("align", "gather", "split", "eqnarray")):
-        return "; ".join("".join(row) for row in rows)
+        return "; ".join(" ".join(c for c in row if c) for row in rows)
     body = "; ".join(" ".join(row) for row in rows)
     left, right = _ENV_BRACKETS.get(node.env, ("[", "]"))
     if a:

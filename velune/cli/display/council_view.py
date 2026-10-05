@@ -278,9 +278,11 @@ class CouncilDisplayView:
 
     def render_synthesized_response(self, text: str) -> None:
         """Display final walker walkthrough summary and accomplishments."""
+        from velune.cli.rendering import CustomMarkdown
+
         self.console.print(
             Panel(
-                Text(text, style="white"),
+                CustomMarkdown(text),
                 title=f"[bold {design.ACCENT}]Deliberated Walkthrough & Accomplishments[/bold {design.ACCENT}]",
                 border_style=design.ACCENT,
                 box=ROUNDED,

@@ -1213,7 +1213,7 @@ class FullscreenREPLUI:
         try:
             stabilized = MarkdownStreamBuffer._stabilize(text)
             line_fragments = render_to_fragments(
-                self.console, CustomMarkdown(stabilized), self._width()
+                self.console, CustomMarkdown(stabilized, streaming=not final), self._width()
             )
         except Exception:
             self._lines[start:] = []

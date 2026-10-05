@@ -88,6 +88,9 @@ def build_runtime(
 
     _design.set_colorblind_mode(bool(getattr(config.display, "colorblind_mode", False)))
     _design.set_reduced_motion(bool(getattr(config.display, "reduced_motion", False)))
+    from velune.cli.rendering import math as _math_rendering
+
+    _math_rendering.set_enabled(bool(getattr(config.display, "math_rendering", True)))
 
     container = ServiceContainer()
     lifecycle = LifecycleCoordinator()

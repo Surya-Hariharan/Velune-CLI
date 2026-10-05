@@ -13,6 +13,7 @@ inside code) before Markdown's backslash escapes can destroy it.
 from __future__ import annotations
 
 import logging
+import re
 from functools import lru_cache
 
 from velune.cli.rendering.math import layout as _layout
@@ -21,7 +22,14 @@ from velune.cli.rendering.math.tex import MathParseError, parse
 
 logger = logging.getLogger("velune.cli.rendering.math")
 
-__all__ = ["MathParseError", "render_display", "render_inline", "set_enabled", "enabled"]
+__all__ = [
+    "MathParseError",
+    "close_partial",
+    "render_display",
+    "render_inline",
+    "set_enabled",
+    "enabled",
+]
 
 _ENABLED = True
 
@@ -34,6 +42,37 @@ def set_enabled(value: bool) -> None:
 
 def enabled() -> bool:
     return _ENABLED
+
+
+_TRAILING_JUNK = re.compile(r"(\\(?:begin|end)\{[^}]*|\\[A-Za-z]*|\\\\|[&^_\s])$")
+_STRUCTURE = re.compile(r"\\[{}]|\\begin\{([^}]*)\}|\\end\{[^}]*\}|\\left\b|\\right\b|[{}]")
+
+
+def close_partial(tex: str) -> str:
+    """Provisionally complete a formula that is still streaming in.
+
+    Drops a half-typed trailing command (``\\begin{bmat``, ``\\fr``, a dangling
+    ``&`` or row break) and closes whatever groups, environments and
+    ``\\left`` delimiters are still open, so the part that *has* arrived can
+    be laid out. Purely cosmetic: the final render uses the real text.
+    """
+    prev = None
+    while prev != tex:
+        prev, tex = tex, _TRAILING_JUNK.sub("", tex)
+    stack: list[str] = []
+    for m in _STRUCTURE.finditer(tex):
+        tok = m.group(0)
+        if tok in ("\\{", "\\}"):
+            continue
+        if tok == "{":
+            stack.append("}")
+        elif tok == "\\left":
+            stack.append("\\right.")
+        elif m.group(1) is not None:
+            stack.append(f"\\end{{{m.group(1)}}}")
+        elif stack:  # "}", "\right" or "\end{…}" closes the innermost
+            stack.pop()
+    return tex + "".join(reversed(stack))
 
 
 @lru_cache(maxsize=512)

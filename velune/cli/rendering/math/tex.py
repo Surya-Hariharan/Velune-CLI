@@ -107,25 +107,106 @@ class Raw(Node):
 
 
 MATRIX_ENVS = frozenset(
-    {"matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "smallmatrix",
-     "cases", "dcases", "rcases", "aligned", "align", "align*", "gather", "gather*",
-     "gathered", "split", "array", "eqnarray", "eqnarray*", "alignat", "alignat*"}
+    {
+        "matrix",
+        "pmatrix",
+        "bmatrix",
+        "Bmatrix",
+        "vmatrix",
+        "Vmatrix",
+        "smallmatrix",
+        "cases",
+        "dcases",
+        "rcases",
+        "aligned",
+        "align",
+        "align*",
+        "gather",
+        "gather*",
+        "gathered",
+        "split",
+        "array",
+        "eqnarray",
+        "eqnarray*",
+        "alignat",
+        "alignat*",
+    }
 )
 
 _LITERAL_ESCAPES = {"{": "{", "}": "}", "%": "%", "$": "$", "_": "_", "&": "&", "#": "#", "|": "‖"}
-_SPACES = {",": 1, ":": 1, ";": 1, " ": 1, "quad": 2, "qquad": 4, "!": 0, "enspace": 1, "thinspace": 1}
+_SPACES = {
+    ",": 1,
+    ":": 1,
+    ";": 1,
+    " ": 1,
+    "quad": 2,
+    "qquad": 4,
+    "!": 0,
+    "enspace": 1,
+    "thinspace": 1,
+}
 _IGNORED = frozenset(
-    {"displaystyle", "textstyle", "scriptstyle", "limits", "nolimits", "nonumber",
-     "notag", "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr"}
+    {
+        "displaystyle",
+        "textstyle",
+        "scriptstyle",
+        "limits",
+        "nolimits",
+        "nonumber",
+        "notag",
+        # Table rules inside array/tabular: rows are already separated.
+        "hline",
+        "toprule",
+        "midrule",
+        "bottomrule",
+        "big",
+        "Big",
+        "bigg",
+        "Bigg",
+        "bigl",
+        "bigr",
+        "Bigl",
+        "Bigr",
+        "biggl",
+        "biggr",
+    }
 )
 _FONTS = frozenset(
-    {"mathrm", "mathbf", "mathit", "mathsf", "mathtt", "mathcal", "mathscr", "mathfrak",
-     "boldsymbol", "bm", "textbf", "textit", "textrm", "emph"}
+    {
+        "mathrm",
+        "mathbf",
+        "mathit",
+        "mathsf",
+        "mathtt",
+        "mathcal",
+        "mathscr",
+        "mathfrak",
+        "boldsymbol",
+        "bm",
+        "textbf",
+        "textit",
+        "textrm",
+        "emph",
+    }
 )
 _DELIM_COMMANDS = {
-    "langle": "⟨", "rangle": "⟩", "lvert": "|", "rvert": "|", "lVert": "‖", "rVert": "‖",
-    "vert": "|", "Vert": "‖", "lfloor": "⌊", "rfloor": "⌋", "lceil": "⌈", "rceil": "⌉",
-    "{": "{", "}": "}", "|": "‖", "lbrace": "{", "rbrace": "}",
+    "langle": "⟨",
+    "rangle": "⟩",
+    "lvert": "|",
+    "rvert": "|",
+    "lVert": "‖",
+    "rVert": "‖",
+    "vert": "|",
+    "Vert": "‖",
+    "lfloor": "⌊",
+    "rfloor": "⌋",
+    "lceil": "⌈",
+    "rceil": "⌉",
+    "{": "{",
+    "}": "}",
+    "|": "‖",
+    "lbrace": "{",
+    "rbrace": "}",
 }
 
 
@@ -262,6 +343,11 @@ class Parser:
         self.skip_space()
         if self.peek() == "{":
             return self.parse_group()
+        tok = self.peek()
+        if tok is not None and tok.isdigit():
+            # An unbraced argument is one token: \frac12 is 1 over 2, not 12.
+            self.pos += 1
+            return Sym(tok, tok, "num")
         atom = self.parse_atom()
         if atom is None:
             raise MathParseError("missing argument")
@@ -283,6 +369,16 @@ class Parser:
                     return "".join(parts)
             parts.append(tok)
 
+    def raw_arg(self) -> str:
+        """Verbatim argument: a {group}, or one token (TeX allows ``\\mathbb R``)."""
+        self.skip_space()
+        if self.peek() == "{":
+            return self.raw_group()
+        tok = self.next()
+        if tok in ("}", "&"):
+            raise MathParseError("missing argument")
+        return tok
+
     def parse_atom(self) -> Node | None:
         tok = self.next()
         if tok == " ":
@@ -302,13 +398,13 @@ class Parser:
         if tok in "+-*/":
             uni = {"-": "−", "*": "∗"}.get(tok, tok)
             return Sym(uni, tok, "bin")
-        if tok in "=<>":
+        if tok in "=<>:":  # ":" is a relation in TeX math (f : A → B)
             return Sym(tok, tok, "rel")
         if tok in "([":
             return Sym(tok, tok, "open")
         if tok in ")]":
             return Sym(tok, tok, "close")
-        if tok in ",;:!?":
+        if tok in ",;!?":
             return Sym(tok, tok, "punct")
         if tok in ("&",):
             raise MathParseError("'&' outside an environment")
@@ -322,6 +418,19 @@ class Parser:
             return Space(_SPACES[name])
         if name in _IGNORED:
             return None
+        if name in ("phantom", "hphantom", "vphantom"):
+            # Invisible alignment spacer; columns are aligned by layout anyway.
+            self.parse_arg()
+            return None
+        if name in ("smash", "boxed", "fbox", "underbrace", "overbrace"):
+            # Keep the content; the decoration has no terminal equivalent worth
+            # the noise (a highlighted answer reads fine without its box).
+            return self.parse_arg()
+        if name in ("label", "cline", "cmidrule"):
+            self.raw_arg()
+            return None
+        if name == "tag":
+            return TextNode(f"  ({self.raw_arg().strip()})")
         if name == "\\":
             raise MathParseError("'\\\\' outside an environment")
         if name in ("frac", "dfrac", "tfrac", "cfrac"):
@@ -344,11 +453,11 @@ class Parser:
         if name in symbols.FUNCTIONS:
             return Sym(name, name, "word")
         if name in ("operatorname", "operatorname*"):
-            return Sym(self.raw_group().strip(), "", "word")
+            return Sym(self.raw_arg().strip(), "", "word")
         if name in ("text", "textup", "textnormal", "mbox", "hbox"):
-            return TextNode(self.raw_group())
+            return TextNode(self.raw_arg())
         if name == "mathbb":
-            text = self.raw_group().strip()
+            text = self.raw_arg().strip()
             return Sym("".join(symbols.BLACKBOARD.get(c, c) for c in text), text, "ord")
         if name in _FONTS:
             return self.parse_arg()
@@ -369,7 +478,9 @@ class Parser:
                 return Sym("≠", "!=", "rel")
             return Row([Sym("¬", "not ", "ord"), nxt])
         if name in ("pmod",):
-            return Row([Space(1), Sym("(mod ", "(mod ", "ord"), self.parse_arg(), Sym(")", ")", "close")])
+            return Row(
+                [Space(1), Sym("(mod ", "(mod ", "ord"), self.parse_arg(), Sym(")", ")", "close")]
+            )
         if name in _DELIM_COMMANDS:
             ch = _DELIM_COMMANDS[name]
             kind = "open" if name.startswith("l") or ch in "⟨⌊⌈{" else "close"

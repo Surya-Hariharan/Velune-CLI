@@ -37,7 +37,9 @@ def spaced(items: list[Node]) -> list[Node]:
             else:
                 out.extend([Space(1), item, Space(1)])
         elif kind == "rel":
-            if prev_kind != "start":
+            if prev_kind == "rel" and out and isinstance(out[-1], Space) and out[-2] is prev:
+                out.pop()  # adjacent relations join: ":=", "<=" written as two tokens
+            elif prev_kind != "start":
                 out.append(Space(1))
             out.append(item)
             out.append(Space(1))

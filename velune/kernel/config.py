@@ -202,6 +202,9 @@ class DisplayConfig(BaseModel):
     # `FullscreenREPLUI._prompt_window_height` — and further content scrolls
     # inside the fixed viewport instead of growing it further.
     composer_max_lines: int = Field(default=8, ge=1)
+    # Renders LaTeX math in responses ($x^2$, \[ ... \], matrices) as Unicode
+    # text — see velune/cli/rendering/math/. False shows the raw source instead.
+    math_rendering: bool = True
 
 
 class ThemeConfig(BaseModel):
