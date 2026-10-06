@@ -51,7 +51,7 @@ it runs.
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `run` | `r` | `/run <task description>` | Execute a task through the Reasoning Council |
-| `council` | `c` | `/council <task description>` | Force full council tier regardless of task complexity |
+| `council` | `c` | `/council <task description>` | Force full council tier regardless of task complexity (slow, many model calls) |
 | `jobs` | `job` | `/jobs [task\|cognition\|shell] [cancel <id>]` | List background jobs (optionally filtered by kind) or cancel one |
 | `dashboard` | `dash`, `status` | `/dashboard` | Live system dashboard: session, state, jobs, alerts, health |
 | `fast` | `optimus`, `opt` | `/fast` | Speed mode — instant tier, compressed context, smallest model |

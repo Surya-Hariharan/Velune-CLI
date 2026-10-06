@@ -13,12 +13,17 @@ if TYPE_CHECKING:
 _log = logging.getLogger("velune.cli.handlers.council")
 
 
+def _mode_council_tier(repl: VeluneREPL) -> str | None:
+    """The tier the session mode forces (``/mode fast|max``); ``None`` in normal mode."""
+    return None if repl._mode_manager.is_normal() else repl._mode_manager.config.council_tier
+
+
 async def cmd_run(repl: VeluneREPL, args: str) -> None:
+    force_tier = _mode_council_tier(repl)
     if "--bg" in args:
         clean = args.replace("--bg", "").strip()
-        await _submit_background_job(repl, clean)
+        await _submit_background_job(repl, clean, force_tier=force_tier)
         return
-    force_tier = None if repl._mode_manager.is_normal() else repl._mode_manager.config.council_tier
     await execute_council_task(repl, args, force_tier=force_tier)
 
 
@@ -169,7 +174,9 @@ async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
                 uncancel_task(task)
 
 
-async def _submit_background_job(repl: VeluneREPL, task: str) -> None:
+async def _submit_background_job(
+    repl: VeluneREPL, task: str, force_tier: str | None = None
+) -> None:
     """Submit *task* as a fire-and-forget background council job."""
     if not task.strip():
         repl.console.print("[yellow]Usage: /run --bg <task>[/yellow]")
@@ -189,7 +196,7 @@ async def _submit_background_job(repl: VeluneREPL, task: str) -> None:
         try:
             orchestrator = repl.container.get("runtime.council_orchestrator")
             last_output: str | None = None
-            async for milestone in orchestrator.stream(task):
+            async for milestone in orchestrator.stream(task, council_tier=force_tier):
                 if hasattr(milestone, "phase") and milestone.phase:
                     repl._job_registry.update(job_id, current_phase=milestone.phase)
                 if hasattr(milestone, "message") and milestone.message:
@@ -317,7 +324,7 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
 
     try:
         async with repl._interrupts.foreground():
-            async for milestone in orchestrator.stream(task):
+            async for milestone in orchestrator.stream(task, council_tier=force_tier):
                 last_run_id = milestone.run_id
                 phase = milestone.phase or "council"
                 message = milestone.message

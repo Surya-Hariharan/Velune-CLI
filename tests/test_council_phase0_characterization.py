@@ -223,7 +223,6 @@ async def test_repl_does_not_store_a_failed_run():
 # ── Issue 1: tier forwarding ─────────────────────────────────────────────────
 
 
-@xfail("Issue 1: stream() has no council_tier parameter")
 async def test_stream_forwards_the_requested_tier(monkeypatch):
     orch, _ = make_orchestrator(monkeypatch)
     captured: dict = {}
@@ -238,7 +237,6 @@ async def test_stream_forwards_the_requested_tier(monkeypatch):
     assert captured.get("council_tier") == "full"
 
 
-@xfail("Issue 1: /council passes force_tier into a function that ignores it")
 async def test_council_command_forces_the_full_tier():
     from velune.cli.handlers.council import cmd_council
 

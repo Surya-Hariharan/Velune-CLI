@@ -23,7 +23,7 @@ from velune.cognition.budget import CouncilExecutionBudget
 from velune.cognition.council.base import CouncilAgentError, is_failure_text
 from velune.cognition.council.debate import calculate_max_debate_turns
 from velune.cognition.council.factory import CouncilAgentFactory
-from velune.cognition.council.tiers import CouncilTier, TierClassifier
+from velune.cognition.council.tiers import CouncilTier, TierClassifier, parse_tier
 from velune.cognition.style_resolver import StyleResolver
 from velune.core.trace import TracedLogger
 from velune.models.specializations import CouncilRole, ModelSpecializationMapper
@@ -236,8 +236,14 @@ class CouncilOrchestrator:
         ]
         return candidates
 
-    async def stream(self, prompt: str) -> AsyncIterator[StreamProgress]:
-        """Runs the Reasoning Council task execution and streams milestones."""
+    async def stream(
+        self, prompt: str, council_tier: str | None = None
+    ) -> AsyncIterator[StreamProgress]:
+        """Runs the Reasoning Council task execution and streams milestones.
+
+        ``council_tier`` (instant/minimal/standard/full) forces a tier instead of
+        classifying the task; hardware/config ceilings still apply and are announced.
+        """
         import uuid
 
         from velune.orchestration.schemas import (
@@ -410,6 +416,7 @@ class CouncilOrchestrator:
                     prompt=prompt,
                     repo_context=repo_context,
                     progress_callback=progress_callback,
+                    council_tier=council_tier,
                 )
                 final_summary = result.get("final_summary", "Execution completed successfully.")
                 status = ExecutionStatus.COMPLETED
@@ -670,6 +677,7 @@ class CouncilOrchestrator:
         )
         tier = self._resolve_tier(prompt, repo_context, council_tier)
         tier_str = tier.value
+        self._announce_tier_cap(council_tier, tier, progress_callback)
 
         # Establish the request-scoped correlation id here when no caller has
         # opened one, so every downstream provider call is attributable to this
@@ -699,6 +707,42 @@ class CouncilOrchestrator:
         finally:
             if ctx is not None:
                 ctx.__exit__(None, None, None)
+
+    def _announce_tier_cap(
+        self,
+        requested: str | None,
+        effective: CouncilTier,
+        progress_callback: Callable[[str], None] | None,
+    ) -> None:
+        """Say so when a forced tier was lowered by a ceiling or low-resource mode."""
+        if not requested or progress_callback is None:
+            return
+        try:
+            wanted = parse_tier(requested)
+        except ValueError:
+            return
+        if wanted is None or wanted == effective:
+            return
+        order = {
+            CouncilTier.INSTANT: 0,
+            CouncilTier.MINIMAL: 1,
+            CouncilTier.STANDARD: 2,
+            CouncilTier.FULL: 3,
+        }
+        if order[effective] > order[wanted]:
+            return  # a structural floor raised it; nothing was held back
+        classifier = self.tier_classifier
+        ceiling = getattr(classifier, "max_council_tier", None)
+        if ceiling and order.get(parse_tier(ceiling) or CouncilTier.FULL, 3) < order[wanted]:
+            reason = f"ceiling is {ceiling}"
+        elif getattr(classifier, "low_resource_mode", False):
+            reason = "low-resource mode"
+        else:
+            reason = "capped"
+        progress_callback(
+            f"[Council] Requested {wanted.value.upper()} tier, running "
+            f"{effective.value.upper()} ({reason})"
+        )
 
     async def _maybe_gate_cost(self, prompt: str, repo_context: str) -> None:
         """Prompt for confirmation when estimated cloud cost exceeds the configured threshold.

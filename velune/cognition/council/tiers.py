@@ -1,7 +1,10 @@
+import logging
 import re
 from typing import Any
 
 from velune._compat import StrEnum
+
+_logger = logging.getLogger("velune.cognition.council.tiers")
 
 
 class CouncilTier(StrEnum):
@@ -9,6 +12,22 @@ class CouncilTier(StrEnum):
     MINIMAL = "minimal"  # Planner + Coder, no Reviewer. Simple bug fixes on fast hardware.
     STANDARD = "standard"  # Coder + Reviewer. Small edits, bug fixes.
     FULL = "full"  # All agents. Architecture changes, multi-file edits.
+
+
+def parse_tier(value: str | None) -> CouncilTier | None:
+    """Parse a user-supplied tier name; ``None``/``auto`` mean "classify automatically".
+
+    Raises ``ValueError`` (naming the valid choices) for anything else, so a typo
+    is an error instead of a silent fall-through to automatic classification.
+    """
+    text = (value or "").strip().lower()
+    if text in ("", "auto"):
+        return None
+    try:
+        return CouncilTier(text)
+    except ValueError:
+        choices = ", ".join(tier.value for tier in CouncilTier)
+        raise ValueError(f"Unknown council tier {value!r}. Use one of: {choices}, auto.") from None
 
 
 # Intent categories (from velune.cognition.intent.IntentType) that pin a tier
@@ -68,7 +87,10 @@ def classify_task_tier(
             tier = CouncilTier(default_tier_override.lower())
             return _apply_ceiling(tier, max_council_tier)
         except ValueError:
-            pass
+            _logger.warning(
+                "Ignoring unknown council tier override %r; classifying automatically.",
+                default_tier_override,
+            )
 
     normalized = _normalize(prompt)
     word_count = len(normalized.split())

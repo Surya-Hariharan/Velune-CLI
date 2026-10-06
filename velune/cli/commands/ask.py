@@ -19,11 +19,25 @@ console = Console()
 ask_cmd = typer.Typer(help="Interactive prompt entry point")
 
 
+def _validate_council_tier(value: str | None) -> str | None:
+    """Reject unknown tier names instead of silently classifying automatically."""
+    from velune.cognition.council.tiers import parse_tier
+
+    try:
+        tier = parse_tier(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    return tier.value if tier else None
+
+
 def ask_command(
     ctx: typer.Context,
     prompt: str | None = typer.Argument(None, help="Question or task to route through Velune"),
     council_tier: str | None = typer.Option(
-        None, "--council-tier", help="Override council execution tier (instant, standard, full)"
+        None,
+        "--council-tier",
+        help="Override council execution tier (instant, minimal, standard, full, auto)",
+        callback=_validate_council_tier,
     ),
     explain_trace: bool = typer.Option(
         False,

@@ -463,7 +463,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="council",
             aliases=["c"],
-            description="Force full council tier regardless of task complexity",
+            description="Force full council tier regardless of task complexity (slow, many model calls)",
             usage="/council <task description>",
             handler=repl._cmd_council,
             examples=(
