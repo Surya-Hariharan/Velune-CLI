@@ -352,7 +352,6 @@ async def test_picker_offers_exactly_the_wired_roles(monkeypatch):
 # ── Issue 7: MCP council ─────────────────────────────────────────────────────
 
 
-@xfail("Issue 7: the MCP server cannot be given an orchestrator and calls a missing .run()")
 async def test_mcp_velune_ask_runs_the_real_council_api():
     from velune.mcp.server import VeluneMCPServer
 

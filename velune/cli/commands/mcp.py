@@ -56,6 +56,16 @@ def mcp_connect(
     submit(_connect_and_list())
 
 
+def _runtime_council_orchestrator(container):
+    """The runtime's council orchestrator, or ``None`` if the runtime has none."""
+    try:
+        if container.has("runtime.council_orchestrator"):
+            return container.get("runtime.council_orchestrator")
+    except Exception:
+        pass
+    return None
+
+
 @mcp_cmd.command("serve")
 def mcp_serve_subcmd(ctx: typer.Context) -> None:
     """Start Velune as an MCP server for Claude Desktop / VS Code."""
@@ -67,7 +77,9 @@ def mcp_serve_subcmd(ctx: typer.Context) -> None:
     tool_registry = container.get("runtime.tool_registry")
     from velune.mcp.server import VeluneMCPServer
 
-    server = VeluneMCPServer(tool_registry)
+    server = VeluneMCPServer(
+        tool_registry, council_orchestrator=_runtime_council_orchestrator(container)
+    )
 
     import logging
 
@@ -78,18 +90,4 @@ def mcp_serve_subcmd(ctx: typer.Context) -> None:
 
 def mcp_serve(ctx: typer.Context) -> None:
     """Start Velune as an MCP server for Claude Desktop / VS Code."""
-    cli_context = ctx.obj if isinstance(ctx.obj, CLIContext) else None
-    workspace = cli_context.workspace if cli_context else Path.cwd()
-    config_path = cli_context.config_path if cli_context else None
-
-    container = build_runtime(workspace, config_path=config_path).container
-    tool_registry = container.get("runtime.tool_registry")
-    from velune.mcp.server import VeluneMCPServer
-
-    server = VeluneMCPServer(tool_registry)
-
-    import logging
-
-    logging.getLogger("velune").setLevel(logging.WARNING)
-
-    submit(server.run_stdio())
+    mcp_serve_subcmd(ctx)

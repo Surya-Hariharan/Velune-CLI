@@ -38,6 +38,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("velune.mcp.server")
 
+COUNCIL_UNAVAILABLE = "Council not available - start the server with `velune mcp serve`"
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7777
 MAX_REQUEST_BYTES = 1 * 1024 * 1024  # 1 MB per request
@@ -127,6 +129,7 @@ class VeluneMCPServer:
         *,
         allow_mutations: bool = False,
         auth_token: str | None = None,
+        council_orchestrator: Any = None,
     ):
         self.tool_registry = tool_registry
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
@@ -156,7 +159,7 @@ class VeluneMCPServer:
         )
 
         # Lazy-load Velune components
-        self._council_orchestrator = None
+        self._council_orchestrator = council_orchestrator
         self._memory_manager = None
         self._repository_cognition = None
 
@@ -164,22 +167,32 @@ class VeluneMCPServer:
 
     @property
     def council_orchestrator(self):
-        """Lazy-load council orchestrator."""
-        if self._council_orchestrator is None:
-            try:
-                from velune.cognition.orchestrator import CouncilOrchestrator
-                from velune.models.specializations import ModelSpecializationMapper
-                from velune.providers.registry import ProviderRegistry
-
-                registry = ProviderRegistry()
-                mapper = ModelSpecializationMapper()
-                self._council_orchestrator = CouncilOrchestrator(
-                    provider_registry=registry,
-                    mapper=mapper,
-                )
-            except Exception as e:
-                logger.warning("Could not load council orchestrator: %s", e)
+        """The runtime's council orchestrator, if this server was given one."""
         return self._council_orchestrator
+
+    async def _run_council(self, task: str, repo_context: str) -> dict[str, Any]:
+        """Run the real council once.
+
+        Returns ``{"response", "confidence", "degraded"}`` on success and ``{"error"}`` when
+        the council is unavailable or produced no answer.
+        """
+        orchestrator = self.council_orchestrator
+        if orchestrator is None:
+            return {"error": COUNCIL_UNAVAILABLE}
+        from velune.cognition.budget import CouncilExecutionBudget
+
+        budget = CouncilExecutionBudget(max_wall_time_seconds=30, max_review_cycles=1)
+        result = await orchestrator.execute_task(task, repo_context, budget=budget)
+        if result.get("is_timeout"):
+            return {
+                "error": result.get("final_summary") or "The council could not produce an answer."
+            }
+        arbitration = result.get("arbitration") or {}
+        return {
+            "response": result.get("final_summary") or "No response",
+            "confidence": arbitration.get("overall_confidence"),
+            "degraded": bool(result.get("degraded")),
+        }
 
     @property
     def memory_manager(self):
@@ -448,30 +461,10 @@ class VeluneMCPServer:
             return {"error": str(e)}
 
         try:
-            if not self.council_orchestrator:
-                return {"error": "Council not available"}
-
-            from velune.cognition.budget import CouncilExecutionBudget
-
-            budget = CouncilExecutionBudget(
-                max_wall_time_seconds=30,
-                max_review_cycles=1,
-            )
-
-            repo_context = "Repository: " + str(workspace)
-            state = await self.council_orchestrator.run(
-                task=prompt,
-                retrieved_context=repo_context,
-                budget=budget,
-            )
-
-            response = (
-                state.pending_diffs[0].get("proposed", "")
-                if state.pending_diffs
-                else state.final_output or "No response"
-            )
-
-            return {"response": response, "model": "velune-council"}
+            outcome = await self._run_council(prompt, "Repository: " + str(workspace))
+            if "error" in outcome:
+                return outcome
+            return {**outcome, "model": "velune-council"}
         except Exception as e:
             logger.error("velune_ask failed: %s", e)
             return {"error": str(e)}
@@ -683,30 +676,18 @@ class VeluneMCPServer:
                 task_parts.append(text)
         task = "\n".join(task_parts) or "Respond helpfully."
 
-        if not self.council_orchestrator:
-            return {
-                "role": "assistant",
-                "content": {"type": "text", "text": "Council not available."},
-                "model": "velune-council",
-                "stopReason": "error",
-            }
         try:
-            from velune.cognition.budget import CouncilExecutionBudget
-
-            budget = CouncilExecutionBudget(max_wall_time_seconds=30, max_review_cycles=1)
-            state = await self.council_orchestrator.run(
-                task=task,
-                retrieved_context="",
-                budget=budget,
-            )
-            response = (
-                state.pending_diffs[0].get("proposed", "")
-                if state.pending_diffs
-                else state.final_output or "No response"
-            )
+            outcome = await self._run_council(task, "")
+            if "error" in outcome:
+                return {
+                    "role": "assistant",
+                    "content": {"type": "text", "text": outcome["error"]},
+                    "model": "velune-council",
+                    "stopReason": "error",
+                }
             return {
                 "role": "assistant",
-                "content": {"type": "text", "text": response},
+                "content": {"type": "text", "text": outcome["response"]},
                 "model": "velune-council",
                 "stopReason": "endTurn",
             }
