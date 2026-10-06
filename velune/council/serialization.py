@@ -22,7 +22,7 @@ FLOAT_PLACES = 4
 class Contract(BaseModel):
     """Frozen, strict base for everything the core defines."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     # Field names that vary between otherwise identical runs (timings). Excluded from the
     # canonical form and the digest; kept by ``full_json`` for audit.

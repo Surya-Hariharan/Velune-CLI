@@ -77,6 +77,10 @@ class NodeType(StrEnum):
     DEBATE = "debate"
     ARBITRATION = "arbitration"
     SYNTHESIS = "synthesis"
+    # Stages of the domain-neutral council core (velune.council); R2/R4/R5 reuse the members above.
+    FRAMING = "framing"
+    PERSPECTIVES = "perspectives"
+    REVISION = "revision"
 
 
 @dataclass

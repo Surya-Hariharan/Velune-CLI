@@ -18,7 +18,7 @@ Identifier = Annotated[str, StringConstraints(min_length=1, max_length=64, patte
 
 class EvidenceItem(Contract):
     id: Identifier
-    text: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
     source: Annotated[str, StringConstraints(max_length=200)] = ""
 
 
@@ -41,7 +41,9 @@ class CouncilSettings(Contract):
 class CouncilRequest(Contract):
     schema_version: Literal[1] = SCHEMA_VERSION
     request_id: Identifier
-    question: Annotated[str, StringConstraints(min_length=1, max_length=8000)]
+    question: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8000)
+    ]
     profile_id: Identifier = "general"
     depth: Depth = Depth.STANDARD
     context: Annotated[str, StringConstraints(max_length=16000)] = ""

@@ -21,6 +21,17 @@ if TYPE_CHECKING:
     from velune.providers.registry import ProviderRegistry
 
 
+def fallback_settings(config: Any) -> tuple[tuple[str, ...], bool]:
+    """Per-seat fallback settings from ``config.providers`` (none without a config)."""
+    providers = getattr(config, "providers", None)
+    if providers is None:
+        return (), False
+    raw = getattr(providers, "fallback_providers", None) or []
+    ids = tuple(p for p in raw if isinstance(p, str))
+    allow = getattr(providers, "allow_cloud_fallback_from_local", False) is True
+    return ids, allow
+
+
 class CouncilAgentFactory:
     """Centralized factory to construct specialized Reasoning Council agents, caching role mappings per run."""
 
@@ -58,7 +69,7 @@ class CouncilAgentFactory:
         else:
             self._mappings_cache.clear()
 
-    def _fallbacks_for(
+    def fallbacks_for(
         self, role: CouncilRole, primary: ModelDescriptor
     ) -> list[tuple[Any, ModelDescriptor]]:
         """(provider, model) alternates for a seat, from the mapper's deterministic chain."""
@@ -86,7 +97,7 @@ class CouncilAgentFactory:
 
     def _finish(self, agent: Any, role: CouncilRole, model: ModelDescriptor) -> Any:
         agent.live_lock = self.live_lock
-        agent._fallback_providers = self._fallbacks_for(role, model)
+        agent._fallback_providers = self.fallbacks_for(role, model)
         return agent
 
     def create_planner(self, run_id: str) -> PlannerAgent:

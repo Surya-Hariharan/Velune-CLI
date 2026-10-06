@@ -28,10 +28,10 @@ Slug = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
 ClaimId = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2,3}-\d{1,3}$")]
 
 
-Text80 = Annotated[str, StringConstraints(min_length=1, max_length=80)]
-Text240 = Annotated[str, StringConstraints(min_length=1, max_length=240)]
-Text400 = Annotated[str, StringConstraints(min_length=1, max_length=400)]
-Text600 = Annotated[str, StringConstraints(min_length=1, max_length=600)]
+Text80 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+Text240 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
+Text400 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)]
+Text600 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=600)]
 MaybeText240 = Annotated[str, StringConstraints(max_length=240)]
 
 

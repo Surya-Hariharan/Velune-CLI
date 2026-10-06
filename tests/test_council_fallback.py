@@ -15,10 +15,9 @@ from tests.council_fakes import (
     make_orchestrator,
 )
 from velune.cognition.council.base import CouncilAgentError
-from velune.cognition.council.factory import CouncilAgentFactory
+from velune.cognition.council.factory import CouncilAgentFactory, fallback_settings
 from velune.cognition.council.reviewer import ReviewerAgent
 from velune.cognition.execution_trace import CallReason, current_trace, trace_request
-from velune.cognition.orchestrator import _fallback_settings
 from velune.core.errors.provider import (
     InferenceError,
     ProviderAuthenticationError,
@@ -293,17 +292,17 @@ def test_provider_config_defaults_keep_cloud_fallback_off():
 def test_fallback_settings_read_the_provider_config():
     config = VeluneConfig()
     config.providers.fallback_providers = ["p2", "p3"]
-    assert _fallback_settings(config) == (("p2", "p3"), False)
+    assert fallback_settings(config) == (("p2", "p3"), False)
     config.providers.allow_cloud_fallback_from_local = True
-    assert _fallback_settings(config) == (("p2", "p3"), True)
+    assert fallback_settings(config) == (("p2", "p3"), True)
 
 
 def test_fallback_settings_without_a_config_mean_no_fallback():
-    assert _fallback_settings(None) == ((), False)
+    assert fallback_settings(None) == ((), False)
 
 
 def test_fallback_settings_ignore_mock_configs():
-    assert _fallback_settings(MagicMock()) == ((), False)
+    assert fallback_settings(MagicMock()) == ((), False)
 
 
 # ── orchestrator ─────────────────────────────────────────────────────────────

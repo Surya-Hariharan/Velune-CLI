@@ -22,7 +22,7 @@ from velune.cognition.architecture import ArchitectureCognitionAgent
 from velune.cognition.budget import CouncilExecutionBudget
 from velune.cognition.council.base import CouncilAgentError, is_failure_text
 from velune.cognition.council.debate import calculate_max_debate_turns
-from velune.cognition.council.factory import CouncilAgentFactory
+from velune.cognition.council.factory import CouncilAgentFactory, fallback_settings
 from velune.cognition.council.tiers import CouncilTier, TierClassifier, parse_tier
 from velune.cognition.style_resolver import StyleResolver
 from velune.core.trace import TracedLogger
@@ -32,17 +32,6 @@ from velune.providers.registry import ProviderRegistry
 from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
 logger = TracedLogger("velune.cognition.orchestrator")
-
-
-def _fallback_settings(config: Any) -> tuple[tuple[str, ...], bool]:
-    """Per-seat fallback settings from ``config.providers`` (none without a config)."""
-    providers = getattr(config, "providers", None)
-    if providers is None:
-        return (), False
-    raw = getattr(providers, "fallback_providers", None) or []
-    ids = tuple(p for p in raw if isinstance(p, str))
-    allow = getattr(providers, "allow_cloud_fallback_from_local", False) is True
-    return ids, allow
 
 
 class CouncilOrchestrator:
@@ -95,7 +84,7 @@ class CouncilOrchestrator:
         self.scheduler = CouncilScheduler()
 
         # Extracted Subsystems
-        fallback_ids, allow_cloud_fallback = _fallback_settings(config)
+        fallback_ids, allow_cloud_fallback = fallback_settings(config)
         self.agent_factory = CouncilAgentFactory(
             provider_registry=self.provider_registry,
             mapper=self.mapper,
