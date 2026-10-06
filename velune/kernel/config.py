@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import toml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -266,6 +267,24 @@ class CognitionConfig(BaseModel):
 
     max_council_tier: str = "full"  # instant, minimal, standard, full
     default_tier_override: str = "auto"  # auto, instant, minimal, standard, full
+    # Which council engine programmatic callers may construct. "legacy" is today's coding
+    # pipeline and the default. "deliberative" is the experimental domain-neutral engine in
+    # velune.council; it is explicit opt-in and, so far, is reachable only through
+    # velune.council.adapters.engine (no CLI, REPL or MCP command uses it). An unknown value
+    # falls back to "legacy" with a warning rather than failing config load.
+    council_engine: str = "legacy"
+
+    @field_validator("council_engine", mode="before")
+    @classmethod
+    def _normalize_council_engine(cls, value: object) -> str:
+        text = str(value).strip().lower() if value is not None else ""
+        if text in ("legacy", "deliberative"):
+            return text
+        logging.getLogger("velune.kernel.config").warning(
+            "Unknown cognition.council_engine %r (use 'legacy' or 'deliberative'); using 'legacy'.",
+            value,
+        )
+        return "legacy"
 
 
 class ResourceEntry(BaseModel):

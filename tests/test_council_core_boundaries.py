@@ -108,7 +108,7 @@ def test_expected_modules_exist():
         "serialization",
         "trace",
     } <= names
-    assert {p.stem for p in ADAPTER_FILES} == {"__init__", "runtime", "legacy"}
+    assert {p.stem for p in ADAPTER_FILES} == {"__init__", "runtime", "legacy", "prompts", "engine"}
 
 
 @pytest.mark.parametrize("path", CORE_FILES, ids=lambda p: p.name)
@@ -152,12 +152,14 @@ def test_runtime_adapter_never_reaches_authority_bearing_packages():
         "velune.cli",
         "velune.mcp",
     )
-    for module, line in imports_of(ADAPTERS / "runtime.py"):
-        assert not under(module, banned), f"runtime.py:{line} imports {module}"
+    for name in ("runtime.py", "prompts.py", "engine.py"):
+        for module, line in imports_of(ADAPTERS / name):
+            assert not under(module, banned), f"{name}:{line} imports {module}"
 
 
 def test_only_the_runtime_adapter_touches_the_provider_stack():
-    for path in [*CORE_FILES, ADAPTERS / "__init__.py", ADAPTERS / "legacy.py"]:
+    light = ["__init__.py", "legacy.py", "prompts.py", "engine.py"]
+    for path in [*CORE_FILES, *(ADAPTERS / name for name in light)]:
         for module, line in imports_of(path):
             assert not under(module, FORBIDDEN_VELUNE), f"{path.name}:{line} imports {module}"
 

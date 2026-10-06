@@ -29,10 +29,13 @@ from velune.council.domain import (
     SeatKind,
     StageId,
 )
+from velune.council.frame import FrameStage
+from velune.council.perspectives import PerspectiveStage
 from velune.council.ports import (
     AsyncioScheduler,
     Clock,
     IdSource,
+    PromptSource,
     Scheduler,
     SeatCall,
     SeatInvoker,
@@ -45,6 +48,7 @@ from velune.council.profiles import (
     SeatSpec,
     default_registry,
 )
+from velune.council.report import frame_of, perspectives_of
 from velune.council.request import (
     CouncilRequest,
     CouncilSettings,
@@ -62,6 +66,7 @@ from velune.council.results import (
 from velune.council.runner import CouncilCancelled, StagedCouncilRunner
 from velune.council.serialization import canonical_json, digest
 from velune.council.stages import (
+    EXPLORATION_PLAN,
     STAGE_CONTRACTS,
     Stage,
     StageContract,
@@ -72,6 +77,7 @@ from velune.council.stages import (
 from velune.council.state import StageContext, StageView, VisibilityViolation
 
 __all__ = [
+    "EXPLORATION_PLAN",
     "GENERAL_PROFILE",
     "STAGE_CONTRACTS",
     "ArbitrationResult",
@@ -90,10 +96,13 @@ __all__ = [
     "Depth",
     "EvidenceItem",
     "Frame",
+    "FrameStage",
     "IdSource",
     "OutcomeStatus",
     "Perspective",
+    "PerspectiveStage",
     "ProfileRegistry",
+    "PromptSource",
     "QuorumRule",
     "ReadScope",
     "ResponseRequirements",
@@ -122,4 +131,6 @@ __all__ = [
     "canonical_json",
     "default_registry",
     "digest",
+    "frame_of",
+    "perspectives_of",
 ]
