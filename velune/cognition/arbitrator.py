@@ -7,6 +7,13 @@ from typing import Any
 
 logger = logging.getLogger("velune.cognition.arbitrator")
 
+# A judge that timed out, errored or returned unparseable output abstains. Its
+# silence is not agreement, so confidence is capped (and a human is asked) in
+# proportion to how much of the review is missing.
+UNAVAILABLE_CONFIDENCE_CAP = 0.60  # any judge unavailable
+MAJORITY_UNAVAILABLE_CONFIDENCE_CAP = 0.40  # reviewer, or at least half the judges, unavailable
+NO_REVIEW_CONFIDENCE_CAP = 0.30  # every judge unavailable
+
 
 class ArbitrationResult:
     """Result of council deliberation arbitration."""
@@ -74,9 +81,44 @@ class CouncilArbitrator:
         critic_weights: dict[str, float] | None = None,
         shi: float | None = None,
         candidates: list[str] | None = None,
+        unavailable_seats: list[str] | None = None,
     ) -> ArbitrationResult:
         """Arbitrate the deliberations of the planner, coder, reviewer, challenger, and specialized critics."""
         logger.info("Council Arbitrator analyzing agent deliberations...")
+
+        from velune.cognition.consensus import is_usable
+
+        # Judges that abstained are excluded from every computation below and
+        # reported instead of being read as approvals.
+        seats = [
+            ("reviewer", reviewer_report),
+            ("challenger", challenger_report),
+            ("scalability", scalability_report),
+            ("security", security_report),
+            ("performance", performance_report),
+            ("maintainability", maintainability_report),
+        ]
+        expected_judges = sum(1 for _, report in seats if report is not None)
+        unavailable: list[str] = [
+            name for name, report in seats if report is not None and not is_usable(report)
+        ]
+        for name in unavailable_seats or []:
+            if name not in unavailable:
+                unavailable.append(name)
+        unavailable_bases = {name.split("(")[0] for name in unavailable}
+        expected_judges = max(expected_judges, len(unavailable_bases))
+        if reviewer_report is not None and not is_usable(reviewer_report):
+            reviewer_report = None
+        if challenger_report is not None and not is_usable(challenger_report):
+            challenger_report = None
+        if scalability_report is not None and not is_usable(scalability_report):
+            scalability_report = None
+        if security_report is not None and not is_usable(security_report):
+            security_report = None
+        if performance_report is not None and not is_usable(performance_report):
+            performance_report = None
+        if maintainability_report is not None and not is_usable(maintainability_report):
+            maintainability_report = None
 
         winning_claims: list[str] = []
         flags: list[str] = []
@@ -157,7 +199,9 @@ class CouncilArbitrator:
             winning_claims.append("Coder solution is syntactically sound and logical.")
             if critic_reports:
                 winning_claims.append(
-                    "All specialized critics approved the proposed implementation."
+                    "Available specialized critics approved the proposed implementation."
+                    if unavailable
+                    else "All specialized critics approved the proposed implementation."
                 )
         elif not all_passed and challenger_severity > 0.6:
             flags.append("CRITICAL_BUGS_DETECTED")
@@ -190,6 +234,18 @@ class CouncilArbitrator:
 
         # 4. Assess if we need to escalate to the user
         requires_human_review = has_critical_failures or overall_confidence < confidence_threshold
+
+        if unavailable:
+            flags.extend(f"JUDGE_UNAVAILABLE:{name}" for name in unavailable)
+            cap = UNAVAILABLE_CONFIDENCE_CAP
+            if "reviewer" in unavailable_bases or len(unavailable_bases) * 2 >= expected_judges:
+                cap = min(cap, MAJORITY_UNAVAILABLE_CONFIDENCE_CAP)
+                requires_human_review = True
+            if len(unavailable_bases) >= expected_judges:
+                flags.append("NO_REVIEW")
+                cap = min(cap, NO_REVIEW_CONFIDENCE_CAP)
+                requires_human_review = True
+            overall_confidence = min(overall_confidence, cap)
 
         # Compile synthesis guidance
         synthesis_instructions = "Consolidate the code patch and resolve the following:\n"

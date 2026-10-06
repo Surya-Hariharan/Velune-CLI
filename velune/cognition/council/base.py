@@ -19,6 +19,29 @@ logger = TracedLogger("velune.cognition.council.base")
 
 import asyncio
 
+# Text a non-strict ``deliberate`` returns in place of a real answer when the
+# call fails. Anything that consumes agent text must treat these as failures.
+AGENT_FAILURE_PREFIXES = ("Deliberation failure inside agent", "[Agent ")
+
+
+def is_failure_text(text: str | None) -> bool:
+    """True for empty output or one of the failure sentinels above."""
+    return not text or not text.strip() or text.startswith(AGENT_FAILURE_PREFIXES)
+
+
+class CouncilAgentError(Exception):
+    """A council seat produced no usable output (raised by ``deliberate(strict=True)``).
+
+    ``kind`` is one of ``timeout``, ``provider``, ``auth`` or ``empty``.
+    """
+
+    def __init__(self, kind: str, role: str, detail: str, seat: str | None = None) -> None:
+        super().__init__(f"{seat or role}: {kind}: {detail}")
+        self.kind = kind
+        self.role = role
+        self.seat = seat or role
+        self.detail = detail
+
 
 class BaseCouncilAgent(ABC):
     """Base interface for specialized deliberation models within the Reasoning Council."""
@@ -60,12 +83,18 @@ class BaseCouncilAgent(ABC):
         temperature: float | None = None,
         max_tokens: int | None = None,
         top_p: float | None = None,
+        strict: bool = False,
     ) -> str:
         """Runs the deliberation round using the assigned LLM model provider.
 
         When ``temperature``/``top_p``/``max_tokens`` are left as ``None`` they are
         resolved from this role's :class:`RoleSamplingProfile`, so each council
         seat samples with its own named profile instead of a shared literal.
+
+        With ``strict=False`` (legacy) a failure is returned as a sentinel
+        string; with ``strict=True`` a timeout, an exhausted provider error or
+        an empty answer raises :class:`CouncilAgentError` so it can never be
+        mistaken for the seat's answer.
         """
         import asyncio
 
@@ -232,6 +261,11 @@ class BaseCouncilAgent(ABC):
                     self._cache_manager.record(response.metadata)
                     content = response.content
 
+                if strict and not (content or "").strip():
+                    raise CouncilAgentError(
+                        "empty", self.role.value, "the model returned no text", self.seat_name
+                    )
+
                 elapsed = time.perf_counter() - start
                 logger.info(
                     "Agent %s completed in %.1fs (%d chars)", self.role.value, elapsed, len(content)
@@ -245,7 +279,18 @@ class BaseCouncilAgent(ABC):
                 logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)
                 if _call is not None:
                     _call.finish("timeout", error_type="TimeoutError")
+                if strict:
+                    raise CouncilAgentError(
+                        "timeout",
+                        self.role.value,
+                        f"timed out after {timeout:.0f}s",
+                        self.seat_name,
+                    ) from None
                 return f"[Agent {self.role.value} timed out — using empty response]"
+            except CouncilAgentError:
+                if _call is not None:
+                    _call.finish("error", error_type="CouncilAgentError")
+                raise
             except Exception as e:
                 if _call is not None:
                     _call.finish("error", error_type=type(e).__name__)
@@ -303,6 +348,13 @@ class BaseCouncilAgent(ABC):
                             fb_model.provider_id,
                             str(fb_exc)[:300],
                         )
+                if strict:
+                    from velune.core.errors.provider import ProviderAuthenticationError
+
+                    kind = "auth" if isinstance(e, ProviderAuthenticationError) else "provider"
+                    raise CouncilAgentError(
+                        kind, self.role.value, str(e)[:300], self.seat_name
+                    ) from e
                 return f"Deliberation failure inside agent {self.role.value}: {e}"
 
     @staticmethod
@@ -335,7 +387,18 @@ class BaseCouncilAgent(ABC):
         """Runs deliberation and parses the output into a strongly-typed Pydantic model."""
         from pydantic import ValidationError
 
-        raw = await self.deliberate(context_history, temperature, max_tokens, top_p)
+        degrade = getattr(response_type, "degraded", None)
+        try:
+            raw = await self.deliberate(
+                context_history, temperature, max_tokens, top_p, strict=True
+            )
+        except CouncilAgentError as exc:
+            # The seat abstains. Never substitute default field values: those
+            # used to read as "passed" and counted as an approval.
+            logger.error("Agent %s unavailable (%s): %s", self.role.value, exc.kind, exc.detail)
+            if degrade is None:
+                raise
+            return degrade("unavailable", f"{exc.kind}: {exc.detail}")
         cleaned = raw.strip()
         for prefix in ("```json", "```"):
             if cleaned.startswith(prefix):
@@ -350,7 +413,6 @@ class BaseCouncilAgent(ABC):
             logger.error(
                 "Agent %s returned unparseable response: %s\nRaw: %s", self.role.value, e, raw[:200]
             )
-            try:
-                return response_type.model_construct(parse_error=str(e))
-            except Exception:
-                raise
+            if degrade is not None:
+                return degrade("unparseable", str(e))
+            return response_type.model_construct(parse_error=str(e))

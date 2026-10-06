@@ -225,6 +225,8 @@ async def _ask_with_runtime(
                     "challenger_report": _dump(council_res["challenger_report"]),
                     "arbitration": arbitration,
                     "final_summary": final_summary,
+                    "degraded": council_res.get("degraded", False),
+                    "degradation_reasons": council_res.get("degradation_reasons", []),
                 },
                 default=str,
             )
@@ -247,6 +249,16 @@ async def _ask_with_runtime(
 
         display.render_step_header("Council Synthesizer")
         display.render_synthesized_response(final_summary)
+
+        if council_res.get("degraded"):
+            from rich.text import Text
+
+            console.print(
+                Text(
+                    "Degraded: " + "; ".join(council_res.get("degradation_reasons", [])),
+                    style="dim",
+                )
+            )
 
         from velune.cli import guidance, ui
 

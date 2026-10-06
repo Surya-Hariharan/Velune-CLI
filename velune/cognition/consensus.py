@@ -30,6 +30,15 @@ def _attr(report: Any, key: str, default: Any) -> Any:
     return getattr(report, key, default)
 
 
+def is_usable(report: Any) -> bool:
+    """True when *report* exists and its seat delivered a verdict.
+
+    A seat that timed out, errored or returned unparseable output abstains
+    (``status != "ok"``); it must not count towards agreement or pass rate.
+    """
+    return report is not None and _attr(report, "status", "ok") == "ok"
+
+
 @dataclass(frozen=True)
 class AgreementSignals:
     """Measured signals describing how much the judges agreed.
@@ -100,18 +109,22 @@ def measure_agreement(
     passed_flags: list[bool] = []
 
     # Reviewer contributes its confidence_rating and pass flag.
-    if reviewer_report is not None:
+    if is_usable(reviewer_report):
         scores.append(float(_attr(reviewer_report, "confidence_rating", 0.5)))
         passed_flags.append(bool(_attr(reviewer_report, "passed", True)))
 
     # Each specialized critic contributes its score and pass flag.
     for report in critic_reports:
-        if report is None:
+        if not is_usable(report):
             continue
         scores.append(float(_attr(report, "score", 0.9)))
         passed_flags.append(bool(_attr(report, "passed", True)))
 
-    challenger_severity = float(_attr(challenger_report, "severity_rating", 0.0))
+    challenger_severity = (
+        float(_attr(challenger_report, "severity_rating", 0.0))
+        if is_usable(challenger_report)
+        else 0.0
+    )
 
     n_judges = len(scores)
     score_mean = sum(scores) / n_judges if n_judges else 0.5

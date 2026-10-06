@@ -387,17 +387,43 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
         return
 
     if last_run_id:
+        from rich.text import Text
+
+        from velune.orchestration.schemas import ExecutionStatus
+
         state = orchestrator.get_state(last_run_id)
+        if state and state.status == ExecutionStatus.FAILED:
+            # No answer was produced: show it as a failure, and keep it out of
+            # the conversation history (it is not an assistant answer).
+            repl.console.print()
+            repl.console.print(
+                Panel(
+                    Text(state.error or state.output or "The council could not produce an answer."),
+                    title="[bold red]Council Failed[/bold red]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            return
         if state and state.output:
+            degraded = bool(state.validation_issues)
             repl.console.print()
             repl.console.print(
                 Panel(
                     state.output,
-                    title="[bold cyan]Council Result[/bold cyan]",
-                    border_style="cyan",
+                    title=(
+                        "[bold yellow]Council Result (degraded)[/bold yellow]"
+                        if degraded
+                        else "[bold cyan]Council Result[/bold cyan]"
+                    ),
+                    border_style="yellow" if degraded else "cyan",
                     padding=(1, 2),
                 )
             )
+            if degraded:
+                repl.console.print(
+                    Text("Degraded: " + "; ".join(state.validation_issues), style="dim")
+                )
             repl._conversation.append({"role": "user", "content": f"/run {task}"})
             repl._conversation.append({"role": "assistant", "content": state.output})
 

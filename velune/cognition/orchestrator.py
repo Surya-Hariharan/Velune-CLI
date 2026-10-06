@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 from velune.cognition.arbitrator import CouncilArbitrator
 from velune.cognition.architecture import ArchitectureCognitionAgent
 from velune.cognition.budget import CouncilExecutionBudget
+from velune.cognition.council.base import CouncilAgentError, is_failure_text
 from velune.cognition.council.debate import calculate_max_debate_turns
 from velune.cognition.council.factory import CouncilAgentFactory
 from velune.cognition.council.tiers import CouncilTier, TierClassifier
@@ -212,6 +213,7 @@ class CouncilOrchestrator:
                         style_profile=style_profile,
                         format_instructions=format_instructions,
                         temperature=temp,
+                        strict=True,
                     )
 
             return CouncilJob(name=f"coder#{idx}", provider_id=provider_id, run=_run)
@@ -230,10 +232,7 @@ class CouncilOrchestrator:
         candidates = [
             r.value
             for r in results
-            if r.ok
-            and isinstance(r.value, str)
-            and r.value
-            and not r.value.startswith(("Deliberation failure inside agent", "[Agent "))
+            if r.ok and isinstance(r.value, str) and r.value and not is_failure_text(r.value)
         ]
         return candidates
 
@@ -395,6 +394,7 @@ class CouncilOrchestrator:
 
         async def run_execution():
             coder_proposal: str | None = None
+            degradation_reasons: list[str] = []
             try:
                 # Retry ownership sits at exactly one layer: the provider.
                 # `RetryingProvider` (wired in at ProviderRegistry.get) already
@@ -416,6 +416,12 @@ class CouncilOrchestrator:
                 error = None
                 task_plan = result.get("task_plan")
                 coder_proposal = result.get("coder_proposal")
+                degradation_reasons = list(result.get("degradation_reasons") or [])
+                if result.get("is_timeout"):
+                    # No answer was produced (wall-clock limit or every agent
+                    # failed): that is a failure, not a result.
+                    status = ExecutionStatus.FAILED
+                    error = final_summary
             except asyncio.CancelledError:
                 logger.info("Reasoning Council execution was cancelled.")
                 status = ExecutionStatus.FAILED
@@ -451,6 +457,7 @@ class CouncilOrchestrator:
                 coder_proposal=coder_proposal,
                 error=error,
                 task_plan=task_plan,
+                validation_issues=degradation_reasons,
             )
             self._states[run_id] = state
             queue.put_nowait(None)  # Sentinel
@@ -1143,6 +1150,8 @@ class CouncilOrchestrator:
                     "challenger_report": None,
                     "arbitration": arbitration_dict,
                     "final_summary": coder_proposal,
+                    "degraded": False,
+                    "degradation_reasons": [],
                 }
 
             # 3. Review / Critique Phase
@@ -1245,44 +1254,72 @@ class CouncilOrchestrator:
             with trace_node(NodeType.REVIEW, f"review ({len(jobs)} judging seat(s))"):
                 job_results = {r.name: r for r in await self.scheduler.run(jobs)}
 
-            reviewer_result = job_results["reviewer"]
-            if reviewer_result.ok:
-                reviewer_report = reviewer_result.value
-            else:
-                logger.error("Reviewer failed: %s", reviewer_result.error)
-                reviewer_report.critical_issues = ["Reviewer unavailable"]
+            def _verdict(key: str, message_type, placeholder):
+                """The seat's real report, or an *abstaining* one if the call failed.
 
-            def _pick(key: str, default):
+                A judge that errored or timed out is never read as a pass: the
+                degraded message has ``usable=False`` and every consumer below
+                (objections, debate, arbitration) checks that.
+                """
                 r = job_results.get(key)
                 if r is None:
-                    return default
+                    return placeholder  # seat is not part of this run
                 if not r.ok:
-                    logger.error("%s critic failed: %s", key, r.error)
-                    return default
+                    logger.error("%s judge failed (%s): %s", key, r.status, r.error)
+                    return message_type.degraded("unavailable", f"{r.status}: {r.error}")
                 return r.value
 
-            challenger_report = _pick("challenger", challenger_report)
-            scalability_report = _pick("scalability", scalability_report)
-            security_report = _pick("security", security_report)
-            performance_report = _pick("performance", performance_report)
-            maintainability_report = _pick("maintainability", maintainability_report)
+            reviewer_report = _verdict("reviewer", ReviewerMessage, reviewer_report)
+            challenger_report = _verdict("challenger", ChallengerMessage, challenger_report)
+            scalability_report = _verdict("scalability", CriticMessage, scalability_report)
+            security_report = _verdict("security", CriticMessage, security_report)
+            performance_report = _verdict("performance", CriticMessage, performance_report)
+            maintainability_report = _verdict(
+                "maintainability", CriticMessage, maintainability_report
+            )
+
+            def _judged_reports() -> dict[str, Any]:
+                """Reports of the judging seats that are part of this run."""
+                reports: dict[str, Any] = {"reviewer": reviewer_report}
+                for name, seat, report in (
+                    ("challenger", challenger, challenger_report),
+                    ("scalability", scalability_critic, scalability_report),
+                    ("security", security_critic, security_report),
+                    ("performance", performance_critic, performance_report),
+                    ("maintainability", maintainability_critic, maintainability_report),
+                ):
+                    if seat is not None:
+                        reports[name] = report
+                return reports
+
+            def _collect_objections(*, include_challenger: bool) -> list[str]:
+                """Objections from judges that delivered a verdict (abstaining ones raise none)."""
+                reports = _judged_reports()
+                found: list[str] = []
+                reviewer = reports["reviewer"]
+                if reviewer.usable and not reviewer.passed:
+                    found.append(f"Reviewer: {reviewer.critical_issues}")
+                for name, label in (
+                    ("scalability", "Scalability Critic"),
+                    ("security", "Security Critic"),
+                    ("performance", "Performance Critic"),
+                    ("maintainability", "Maintainability Critic"),
+                ):
+                    report = reports.get(name)
+                    if report is not None and report.usable and not report.passed:
+                        found.append(f"{label}: {report.issues}")
+                if include_challenger:
+                    report = reports.get("challenger")
+                    if report is not None and report.usable and report.severity_rating > 0.6:
+                        found.append(
+                            f"Challenger (Severity: {report.severity_rating}): {report.failure_vectors}"
+                        )
+                return found
+
+            unavailable_seats = [name for name, rep in _judged_reports().items() if not rep.usable]
 
             # 4. Debate Phase
-            objections = []
-            if not reviewer_report.passed:
-                objections.append(f"Reviewer: {reviewer_report.critical_issues}")
-            if not scalability_report.passed:
-                objections.append(f"Scalability Critic: {scalability_report.issues}")
-            if not security_report.passed:
-                objections.append(f"Security Critic: {security_report.issues}")
-            if not performance_report.passed:
-                objections.append(f"Performance Critic: {performance_report.issues}")
-            if not maintainability_report.passed:
-                objections.append(f"Maintainability Critic: {maintainability_report.issues}")
-            if challenger_report.severity_rating > 0.6:
-                objections.append(
-                    f"Challenger (Severity: {challenger_report.severity_rating}): {challenger_report.failure_vectors}"
-                )
+            objections = _collect_objections(include_challenger=True)
 
             low_resource = (
                 self.config and self.config.execution.low_resource_mode
@@ -1296,9 +1333,13 @@ class CouncilOrchestrator:
             if objections and contract.max_debate_turns > 0 and not low_resource:
                 if contract.critic_seats:
                     all_critic_reports = {
-                        "security": security_report,
-                        "scalability": scalability_report,
-                        "challenger": challenger_report,
+                        name: report
+                        for name, report in (
+                            ("security", security_report),
+                            ("scalability", scalability_report),
+                            ("challenger", challenger_report),
+                        )
+                        if report.usable
                     }
                     max_debate_turns = calculate_max_debate_turns(
                         initial_objections=objections,
@@ -1357,6 +1398,7 @@ class CouncilOrchestrator:
 
                         objections_text = "\n".join([f"- {obj}" for obj in objections])
                         refine_prompt = (
+                            f"YOUR PREVIOUS PROPOSAL:\n{refined_proposal}\n\n"
                             f"The Reasoning Council has raised the following objections to your previous proposal:\n"
                             f"{objections_text}\n\n"
                             f"Please rewrite and refine the proposed code to resolve ALL of these objections completely while satisfying the original task."
@@ -1376,6 +1418,7 @@ class CouncilOrchestrator:
                                         plan_context=f"Debate Refinement (Turn {debate_turn}):\n{refine_prompt}",
                                         style_profile=style_profile,
                                         format_instructions=_coder_format_instructions,
+                                        strict=True,
                                     ),
                                     timeout=budget.coder_timeout_seconds,
                                 )
@@ -1384,6 +1427,16 @@ class CouncilOrchestrator:
                                 "[COUNCIL - DEBATE] Coder timed out on turn %d after %ds; stopping debate.",
                                 debate_turn,
                                 budget.coder_timeout_seconds,
+                            )
+                            break
+                        except CouncilAgentError as exc:
+                            # A failed revision never replaces the proposal: keep the
+                            # last real one and stop debating.
+                            logger.error(
+                                "[COUNCIL - DEBATE] Coder revision failed on turn %d (%s); "
+                                "keeping the previous proposal.",
+                                debate_turn,
+                                exc.kind,
                             )
                             break
 
@@ -1401,7 +1454,7 @@ class CouncilOrchestrator:
                             attributes the repeat to reviewer feedback rather
                             than leaving it as a bare second call.
                             """
-                            if agent is None or report.passed:
+                            if agent is None or report.passed or not report.usable:
                                 return
 
                             async def _run(_agent=agent, _rp=rp):
@@ -1443,26 +1496,21 @@ class CouncilOrchestrator:
 
                         if re_jobs:
                             re_job_results = await self.scheduler.run(re_jobs)
+                            # A re-judge that fails abstains: it can never confirm the
+                            # revision, so its earlier objection stays outstanding.
                             re_results = []
+                            rejudge_unavailable: list[str] = []
+                            re_names: list[str] = []
                             for name, jr in zip(re_critics, re_job_results, strict=False):
-                                if jr.ok:
-                                    res = jr.value
-                                elif name == "reviewer":
-                                    res = ReviewerMessage(
-                                        passed=True,
-                                        confidence_rating=0.5,
-                                        critical_issues=["Reviewer unavailable during refinement"],
-                                    )
-                                else:
-                                    res = CriticMessage(
-                                        passed=True,
-                                        issues=[f"{name} unavailable during refinement"],
-                                        score=0.9,
-                                        rationale="",
-                                    )
+                                res = jr.value if jr.ok else None
+                                if res is None or not res.usable:
+                                    logger.error("%s could not re-review the revision", name)
+                                    rejudge_unavailable.append(name)
+                                    continue
+                                re_names.append(name)
                                 re_results.append(res)
 
-                            for name, res in zip(re_critics, re_results, strict=False):
+                            for name, res in zip(re_names, re_results, strict=False):
                                 if name == "reviewer":
                                     reviewer_report = res
                                 elif name == "scalability":
@@ -1474,8 +1522,8 @@ class CouncilOrchestrator:
                                 elif name == "maintainability":
                                     maintainability_report = res
 
-                            all_passed_with_high_score = True
-                            for name, res in zip(re_critics, re_results, strict=False):
+                            all_passed_with_high_score = not rejudge_unavailable
+                            for name, res in zip(re_names, re_results, strict=False):
                                 score = (
                                     res.confidence_rating
                                     if name == "reviewer"
@@ -1491,22 +1539,16 @@ class CouncilOrchestrator:
                                 converged = True
                                 break
 
-                            new_objections = []
-                            for name, res in zip(re_critics, re_results, strict=False):
-                                if not res.passed:
-                                    if name == "reviewer":
-                                        new_objections.append(f"Reviewer: {res.critical_issues}")
-                                    elif name == "scalability":
-                                        new_objections.append(f"Scalability Critic: {res.issues}")
-                                    elif name == "security":
-                                        new_objections.append(f"Security Critic: {res.issues}")
-                                    elif name == "performance":
-                                        new_objections.append(f"Performance Critic: {res.issues}")
-                                    elif name == "maintainability":
-                                        new_objections.append(
-                                            f"Maintainability Critic: {res.issues}"
-                                        )
-                            objections = new_objections
+                            # Re-judged seats now hold their fresh reports; a seat that
+                            # could not re-judge keeps the failing report it had.
+                            objections = _collect_objections(include_challenger=False)
+                            if rejudge_unavailable:
+                                unavailable_seats.extend(
+                                    f"{name}(re-review)" for name in rejudge_unavailable
+                                )
+                                coder_proposal = refined_proposal
+                                converged = False
+                                break
                         else:
                             objections = []
 
@@ -1558,7 +1600,12 @@ class CouncilOrchestrator:
                 maintainability_report=(maintainability_report if maintainability_critic else None),
                 shi=shi,
                 candidates=candidate_pool,
+                unavailable_seats=unavailable_seats,
             )
+
+            degradation_reasons: list[str] = [
+                f"judge_unavailable:{name}" for name in unavailable_seats
+            ]
 
             # 6. Synthesis Phase
             logger.info("Council Phase: Synthesis")
@@ -1587,11 +1634,16 @@ class CouncilOrchestrator:
                         plan=coder_proposal,
                         audit_reports=audit_reports,
                         context=repo_context,
+                        confidence=arbitration.overall_confidence,
+                        flags=arbitration.flags,
+                        requires_human_review=arbitration.requires_human_review,
+                        synthesis_instructions=arbitration.synthesis_instructions,
                     )
-                if final_summary.startswith("Deliberation failure inside agent"):
-                    raise ValueError(final_summary)
+                if is_failure_text(final_summary):
+                    raise ValueError(final_summary or "the synthesizer returned no text")
             except Exception as e:
                 logger.error("Synthesizer failed: %s. Using default fallback summary.", e)
+                degradation_reasons.append(f"synthesizer_unavailable: {e}")
                 final_summary = (
                     f"# Council Deliberation Report (Degraded Mode)\n\n"
                     f"The Lead Synthesizer was unavailable due to an unexpected offline model or network issue ({e}).\n"
@@ -1731,4 +1783,6 @@ class CouncilOrchestrator:
                 "final_summary": final_summary,
                 "execution_trace": (request_trace.to_dict() if request_trace is not None else None),
                 "contract_verdict": contract_verdict,
+                "degraded": bool(degradation_reasons),
+                "degradation_reasons": degradation_reasons,
             }

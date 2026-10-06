@@ -35,6 +35,7 @@ class CoderAgent(BaseCouncilAgent):
         style_profile: dict[str, Any] | None = None,
         format_instructions: str = "",
         temperature: float | None = None,
+        strict: bool = False,
     ) -> str:
         """Emits concrete code implementations aligned with codebase styling conventions.
 
@@ -81,4 +82,4 @@ class CoderAgent(BaseCouncilAgent):
             }
         ]
 
-        return await self.deliberate(user_messages, temperature=temperature)
+        return await self.deliberate(user_messages, temperature=temperature, strict=strict)

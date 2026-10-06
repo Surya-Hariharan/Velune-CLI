@@ -117,6 +117,20 @@ class CouncilDisplayView:
             )
         )
 
+    def _abstained(self, report: Any, seat: str) -> bool:
+        """Print a notice and return True if *seat* delivered no verdict."""
+        status = (
+            report.get("status", "ok")
+            if isinstance(report, dict)
+            else getattr(report, "status", "ok")
+        )
+        if status == "ok":
+            return False
+        self.console.print(
+            f"[{design.WARN}]{seat} {status} - no verdict was produced; it is not counted as an approval.[/{design.WARN}]"
+        )
+        return True
+
     def render_reviewer_report(self, report: Any) -> None:
         """Render the Reviewer's static audit, showing passed status and critical issues."""
         if report is None:
@@ -127,6 +141,8 @@ class CouncilDisplayView:
             self.console.print(
                 f"[{design.MUTED}]Reviewer did not run for this tier/request.[/{design.MUTED}]"
             )
+            return
+        if self._abstained(report, "Reviewer"):
             return
         if isinstance(report, dict):
             passed = report.get("passed", True)
@@ -177,6 +193,8 @@ class CouncilDisplayView:
             self.console.print(
                 f"[{design.MUTED}]Challenger did not run for this tier/request.[/{design.MUTED}]"
             )
+            return
+        if self._abstained(report, "Challenger"):
             return
         if isinstance(report, dict):
             severity = report.get("severity_rating", 0.0)

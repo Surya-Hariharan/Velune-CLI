@@ -64,7 +64,6 @@ async def test_healthy_full_run_uses_all_judges(monkeypatch):
 # ── Issue 2: failed judges are not approvals ─────────────────────────────────
 
 
-@xfail("Issue 2: a reviewer that errors is currently counted as an approval")
 async def test_failed_reviewer_is_not_an_approval(monkeypatch):
     def responder(seat, request):
         if seat == "reviewer":
@@ -78,7 +77,6 @@ async def test_failed_reviewer_is_not_an_approval(monkeypatch):
     assert any(f.startswith("JUDGE_UNAVAILABLE") for f in arbitration["flags"])
 
 
-@xfail("Issue 2: a critic that errors is currently counted as an approval")
 async def test_failed_critic_is_not_an_approval(monkeypatch):
     def responder(seat, request):
         if seat == "security":
@@ -91,7 +89,6 @@ async def test_failed_critic_is_not_an_approval(monkeypatch):
     assert any(f.startswith("JUDGE_UNAVAILABLE") and "security" in f for f in flags)
 
 
-@xfail("Issue 2: a failed debate revision currently overwrites the proposal with failure text")
 async def test_failed_debate_revision_keeps_previous_proposal(monkeypatch):
     state = {"coder": 0, "reviewer": 0}
 
@@ -112,7 +109,6 @@ async def test_failed_debate_revision_keeps_previous_proposal(monkeypatch):
 # ── Issue 3: synthesizer failure / hard failure are not successful answers ───
 
 
-@xfail("Issue 3: a synthesizer timeout is currently returned as the final answer")
 async def test_synthesizer_timeout_is_not_the_final_answer(monkeypatch):
     def responder(seat, request):
         if seat == "synthesizer":
@@ -122,8 +118,9 @@ async def test_synthesizer_timeout_is_not_the_final_answer(monkeypatch):
     orch, _ = make_orchestrator(monkeypatch, responder)
     result = await orch.execute_task("explain it", "ctx", council_tier="standard")
     assert result.get("degraded") is True
-    assert "timed out" not in result["final_summary"]
-    assert "[Agent" not in result["final_summary"]
+    assert result["final_summary"].startswith("# Council Deliberation Report (Degraded Mode)")
+    assert "using empty response" not in result["final_summary"]
+    assert not result["final_summary"].startswith("[Agent")
 
 
 def _stream_state_for(orch, monkeypatch, result):
@@ -149,7 +146,6 @@ async def test_healthy_result_is_completed(monkeypatch):
     assert state.status == ExecutionStatus.COMPLETED
 
 
-@xfail("Issue 3: an is_timeout / all-agents-failed result is currently marked COMPLETED")
 async def test_hard_failure_result_is_marked_failed(monkeypatch):
     orch, _ = make_orchestrator(monkeypatch)
     state = await _stream_state_for(orch, monkeypatch, orch._build_timeout_result("task"))
@@ -214,7 +210,6 @@ async def test_repl_stores_a_healthy_council_answer():
     assert repl._conversation[-1]["content"] == "the answer"
 
 
-@xfail("Issue 3: a FAILED run is currently printed as a result and stored in the conversation")
 async def test_repl_does_not_store_a_failed_run():
     from velune.cli.handlers.council import execute_council_task
 
