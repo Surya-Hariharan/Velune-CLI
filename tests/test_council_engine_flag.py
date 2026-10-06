@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import velune.cognition.prompts as prompts_pkg
 from tests.council_fakes import FakeMapper, FakeProviderRegistry, make_orchestrator
 from tests.council_scripted import PERSPECTIVE_SEATS
 from tests.council_wire import ScriptedProvider, runtime_invoker
@@ -231,6 +232,7 @@ def test_library_prompts_follow_the_premium_layer_for_wording(monkeypatch):
     fake = types.ModuleType("velune.cognition.prompts._premium")
     fake.PROMPTS = {"council.general.skeptic": "PREMIUM SKEPTIC"}
     monkeypatch.setitem(sys.modules, "velune.cognition.prompts._premium", fake)
+    monkeypatch.setattr(prompts_pkg, "_premium", fake, raising=False)  # a real one may be cached
     monkeypatch.setenv("VELUNE_PROMPT_LAYER", "premium")
     reset_prompt_layer()
     try:

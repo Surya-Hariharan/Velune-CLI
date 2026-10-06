@@ -6,6 +6,7 @@ import hashlib
 
 import pytest
 
+import velune.cognition.prompts as prompts_pkg
 from velune.cognition.prompts import (
     _baseline,
     _deliberation,
@@ -140,6 +141,7 @@ def test_the_premium_layer_may_refine_wording(monkeypatch):
     fake = types.ModuleType("velune.cognition.prompts._premium")
     fake.PROMPTS = {"council.general.analyst": "PREMIUM ANALYST WORDING"}
     monkeypatch.setitem(sys.modules, "velune.cognition.prompts._premium", fake)
+    monkeypatch.setattr(prompts_pkg, "_premium", fake, raising=False)  # a real one may be cached
     monkeypatch.setenv("VELUNE_PROMPT_LAYER", "premium")
     reset_prompt_layer()
     assert get_deliberation_prompt("council.general.analyst") == "PREMIUM ANALYST WORDING"
