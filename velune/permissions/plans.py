@@ -158,6 +158,35 @@ class PlanManager:
             self.status = WAITING
         self.files = parse_files_affected(text)
 
+    def record_new(self, path: Path) -> None:
+        """Track a plan written this turn. Whatever Status it claims, it is unapproved."""
+        text = path.read_text(encoding="utf-8")
+        if parse_status(text) != WAITING:
+            path.write_text(set_status(text, WAITING), encoding="utf-8")
+        self.record(path)
+
+    def suspend(self) -> bool:
+        """Pause an executing plan: it needs a fresh approval to run again.
+
+        Called when the user leaves PLAN mode mid-execution, so a stale
+        EXECUTING status can never keep (or later regain) write access.
+        """
+        if not self.executing:
+            return False
+        assert self.active is not None
+        text = self.active.read_text(encoding="utf-8")
+        self.active.write_text(set_status(text, WAITING), encoding="utf-8")
+        self.record(self.active)
+        return True
+
+    def state_label(self) -> str | None:
+        """Short phrase for the status bar, or None when no plan is pending."""
+        if self.waiting:
+            return "awaiting approval"
+        if self.executing:
+            return "executing"
+        return None
+
     def approve(self) -> None:
         assert self.active is not None
         text = self.active.read_text(encoding="utf-8")

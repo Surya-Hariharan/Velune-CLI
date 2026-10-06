@@ -141,18 +141,13 @@ def after_turn(repl: VeluneREPL, assistant_text: str) -> None:
     if written is None:
         return
     revised = pm.active is not None and written == pm.active
-    pm.record(written)
+    pm.record_new(written)
     counts = pm.summary()
-    lines = [
-        f"[bold]Plan {'updated' if revised else 'created'}:[/bold] {_rel(pm, written)}",
-        "",
-        "The plan contains:",
-        f"  • {counts['modify']} file(s) to modify",
-        f"  • {counts['create']} file(s) to create",
-        f"  • {counts['delete']} file(s) to delete",
-        f"  • {counts['tests']} test file(s)",
-        "",
-        "[dim]Reply [bold]approve[/bold] (or 'go ahead') to execute it, or describe "
-        "changes to revise it.[/dim]",
-    ]
-    repl.console.print("\n".join(lines))
+    verb = "updated" if revised else "created"
+    repl.console.print(
+        f"[bold]Plan {verb}:[/bold] {_rel(pm, written)}\n"
+        f"  Modify {counts['modify']} · Create {counts['create']} · "
+        f"Delete {counts['delete']} · Tests {counts['tests']}\n\n"
+        "[bold]Waiting for approval.[/bold] "
+        "[dim]Reply [bold]approve[/bold] to execute, or describe changes to revise.[/dim]"
+    )

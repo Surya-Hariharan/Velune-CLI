@@ -57,6 +57,10 @@ class ExecuteCommand(BaseTool):
         outside = False
         if directory:
             outside = not boundary.inside(boundary.resolve(directory))
+        if not outside:
+            from velune.permissions.boundary import command_paths_outside
+
+            outside = bool(command_paths_outside(command, boundary))
         klass, why = classify(command)
         if klass is CommandClass.READ_ONLY:
             return [Action(ActionType.READ, command, why, outside_workspace=outside)]

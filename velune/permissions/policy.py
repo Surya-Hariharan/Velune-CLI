@@ -12,8 +12,14 @@ MANUAL          allow  ask                               ask         ask
 PLAN            allow  deny (plan files only)            deny        deny
 PLAN executing  allow  allow if in approved plan, else   ask         ask
                        ask (scope change)
-AUTO            allow  allow                             ask         ask
+AUTO            allow  allow                             ask         changes: deny
+                                                                     reads: ask
 ==============  =====  ================================  ==========  =================
+
+AUTO never changes anything outside the workspace (and the roots the user
+granted for this task): the user is not watching each step, so there is no
+prompt to approve it with. To work elsewhere, switch to MANUAL and grant the
+location there.
 
 Secret files (``.env``, keys, ``~/.ssh``) are high-risk even to *read*.
 Blocked commands (``sudo``, disk formatting…) are denied in every mode.
@@ -127,6 +133,12 @@ def _decide_one(action: Action, state: PolicyState) -> tuple[Verdict, str]:
             Verdict.DENY,
             "plan mode: no changes are made while planning — record this step in the "
             "plan with write_plan; it runs after the user approves the plan",
+        )
+    if state.mode is ExecutionMode.AUTO and action.outside_workspace:
+        return (
+            Verdict.DENY,
+            "auto mode never changes anything outside the workspace — switch to MANUAL "
+            "(Shift+Tab) to approve this location yourself",
         )
     if action.secret:
         return Verdict.ASK, "changes a credentials/secret file"

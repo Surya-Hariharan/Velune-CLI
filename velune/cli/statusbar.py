@@ -19,6 +19,7 @@ Removed vs. previous version:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from prompt_toolkit.formatted_text import FormattedText
@@ -40,6 +41,7 @@ def status_bar_styles() -> dict[str, str]:
         "bottom-toolbar.mode": f"bg:{bg} {design.MUTED}",
         "bottom-toolbar.exec-auto": f"bg:{bg} {design.WARN} bold",
         "bottom-toolbar.exec-plan": f"bg:{bg} {design.ACCENT} bold",
+        "bottom-toolbar.exec-manual": f"bg:{bg} {design.OK} bold",
         "bottom-toolbar.ok": f"bg:{bg} {design.MUTED}",
         "bottom-toolbar.ctx-ok": f"bg:{bg} {design.OK}",
         "bottom-toolbar.warn": f"bg:{bg} {design.WARN}",
@@ -60,6 +62,9 @@ class StatusBarState:
     mode_label: str = "NORMAL"
     # Execution mode badge (MANUAL / ⏸ PLAN / ⏵⏵ AUTO); see cli/execution_modes.py.
     execution_label: str | None = None
+    # Brief confirmation after Shift+Tab; shown until the monotonic deadline.
+    mode_notice: str | None = None
+    mode_notice_until: float = 0.0
     profile_label: str | None = None  # kept for compat; no longer rendered
     context_pct: float = 0.0
     last_latency_ms: float | None = None
@@ -193,7 +198,7 @@ def render_status_bar(state: StatusBarState, width: int | None = None) -> Format
             if "AUTO" in state.execution_label
             else "class:bottom-toolbar.exec-plan"
             if "PLAN" in state.execution_label
-            else "class:bottom-toolbar.mode"
+            else "class:bottom-toolbar.exec-manual"
         )
         core.append((style, state.execution_label))
         core.append(_SEP)
@@ -226,6 +231,9 @@ def render_status_bar(state: StatusBarState, width: int | None = None) -> Format
 
     # --- Optional segments, priority order (highest first) --------------------
     optional_groups: list[list[tuple[str, str]]] = []
+
+    if state.mode_notice and time.monotonic() < state.mode_notice_until:
+        optional_groups.append([_SEP, ("class:bottom-toolbar.hint", state.mode_notice)])
 
     if state.git_branch and state.git_branch not in ("non-git", "unknown"):
         optional_groups.append([_SEP, ("class:bottom-toolbar.project", state.git_branch)])

@@ -196,7 +196,8 @@ def test_turn_flow_new_plan_then_revision_then_approval(tmp_path):
     (plans / "rate-limit.md").write_text(PLAN)
     plan_flow.after_turn(repl, "Plan written.")
     out = repl.output.getvalue()
-    assert "Plan created" in out and "1 file(s) to modify" in out and "approve" in out
+    assert "Plan created" in out and "Modify 1" in out and "approve" in out
+    assert "Waiting for approval." in out
 
     # 2. Not an approval: it's a revision; the plan keeps waiting.
     instruction = plan_flow.before_turn(repl, "don't modify config.py")

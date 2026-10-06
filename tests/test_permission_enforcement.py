@@ -144,17 +144,38 @@ async def test_outside_workspace_needs_a_grant_and_then_works(tmp_path):
 
     with pytest.raises(ActionDeniedError):
         await authorize_and_execute(
-            tool, _ctx(ws, ExecutionMode.AUTO, deny), file_path=target, content="x"
+            tool, _ctx(ws, ExecutionMode.MANUAL, deny), file_path=target, content="x"
         )
     assert not Path(target).exists()
 
     async def allow_task(tool_name, decision):
         return Approval.ALLOW_TASK
 
-    ctx = _ctx(ws, ExecutionMode.AUTO, allow_task)
+    ctx = _ctx(ws, ExecutionMode.MANUAL, allow_task)
     await authorize_and_execute(tool, ctx, file_path=target, content="x")
     assert Path(target).read_text() == "x"
     assert ctx.gate.boundary.inside(Path(target).resolve())  # granted for the task
+
+
+async def test_auto_never_writes_outside_the_workspace_even_if_asked_nicely(tmp_path):
+    from velune.tools.filesystem.write import WriteFile
+
+    ws, outside = tmp_path / "ws", tmp_path / "Desktop"
+    ws.mkdir()
+    outside.mkdir()
+    target = str(outside / "note.txt")
+
+    async def would_allow(tool_name, decision):
+        raise AssertionError("AUTO must refuse without asking")
+
+    with pytest.raises(ActionDeniedError):
+        await authorize_and_execute(
+            WriteFile(workspace=ws, confirm=False),
+            _ctx(ws, ExecutionMode.AUTO, would_allow),
+            file_path=target,
+            content="x",
+        )
+    assert not Path(target).exists()
 
 
 async def test_command_directory_outside_workspace_is_not_trusted(tmp_path):

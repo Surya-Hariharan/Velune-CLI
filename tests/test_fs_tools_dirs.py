@@ -68,7 +68,7 @@ async def test_plan_mode_never_creates_folders(tmp_path):
     assert not (tmp_path / "x").exists()
 
 
-async def test_folder_outside_workspace_asks_even_in_auto(tmp_path):
+async def test_folder_outside_workspace_is_refused_in_auto_and_asked_in_manual(tmp_path):
     ws, desktop = tmp_path / "ws", tmp_path / "Desktop"
     ws.mkdir()
     desktop.mkdir()
@@ -83,7 +83,13 @@ async def test_folder_outside_workspace_asks_even_in_auto(tmp_path):
         seen.append(decision)
         return Approval.ALLOW_ONCE
 
-    await authorize_and_execute(CreateDirectory(ws), _ctx(ws, ask=allow_once), path=target)
+    # AUTO refuses even when someone could answer; MANUAL asks.
+    with pytest.raises(ActionDeniedError):
+        await authorize_and_execute(CreateDirectory(ws), _ctx(ws, ask=allow_once), path=target)
+    assert not seen
+
+    manual = _ctx(ws, mode=ExecutionMode.MANUAL, ask=allow_once)
+    await authorize_and_execute(CreateDirectory(ws), manual, path=target)
     assert Path(target).is_dir()
     assert seen and seen[0].outside_workspace
 
@@ -163,23 +169,23 @@ async def test_allow_once_does_not_persist_but_allow_for_task_does(tmp_path):
     ws, desktop = tmp_path / "ws", tmp_path / "Desktop"
     ws.mkdir()
     desktop.mkdir()
-    asked = []
+    outside_flags: list[bool] = []
 
-    async def answer_with(choice):
+    def answer_with(choice):
         async def ask(tool_name, decision):
-            asked.append(choice)
+            outside_flags.append(decision.outside_workspace)
             return choice
 
         return ask
 
-    ctx = _ctx(ws, ask=await answer_with(Approval.ALLOW_ONCE))
+    ctx = _ctx(ws, mode=ExecutionMode.MANUAL, ask=answer_with(Approval.ALLOW_ONCE))
     await authorize_and_execute(CreateDirectory(ws), ctx, path=str(desktop / "one"))
     await authorize_and_execute(CreateDirectory(ws), ctx, path=str(desktop / "one" / "two"))
-    assert len(asked) == 2  # "once" really is once: asked again
+    assert outside_flags == [True, True]  # "once" really is once: still outside the next time
 
-    asked.clear()
-    ctx = _ctx(ws, ask=await answer_with(Approval.ALLOW_TASK))
+    outside_flags.clear()
+    ctx = _ctx(ws, mode=ExecutionMode.MANUAL, ask=answer_with(Approval.ALLOW_TASK))
     await authorize_and_execute(CreateDirectory(ws), ctx, path=str(desktop / "proj"))
     await authorize_and_execute(CreateDirectory(ws), ctx, path=str(desktop / "proj" / "sub"))
-    assert len(asked) == 1  # granted for the task: not asked again
+    assert outside_flags == [True, False]  # granted for the task: no longer "outside"
     assert (desktop / "proj" / "sub").is_dir()

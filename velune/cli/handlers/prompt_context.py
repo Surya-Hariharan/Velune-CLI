@@ -556,10 +556,19 @@ def _execution_mode_instructions(repl: Any, workspace: Path) -> str:
         f" Workspace: {workspace}. For files and folders use the filesystem tools "
         "(write_file, create_directory, delete_directory, move_path, delete_file) rather "
         "than shell commands; execute_command has no shell, so builtins such as mkdir, "
-        "del or pipes are unavailable. If the user asks for a location outside the "
-        "workspace, still call the tool with the full path: Velune asks the user to allow "
-        "it — never refuse or tell them to do it themselves."
+        "del or pipes are unavailable."
     )
+    if mode is ExecutionMode.AUTO:
+        common += (
+            " Outside the workspace nothing may be changed in AUTO: if the user wants that, "
+            "tell them to switch to MANUAL (Shift+Tab) and ask again."
+        )
+    else:
+        common += (
+            " If the user asks for a location outside the workspace, still call the tool "
+            "with the full path: Velune asks the user to allow it — never refuse or tell "
+            "them to do it themselves."
+        )
     plans = getattr(repl, "_plan_manager", None)
     if mode is ExecutionMode.PLAN and not (plans is not None and plans.executing):
         return (
@@ -576,8 +585,8 @@ def _execution_mode_instructions(repl: Any, workspace: Path) -> str:
         return (
             "\nExecution mode: AUTO. You may create, modify and delete files and run "
             "commands inside the workspace without asking; work step by step, run the "
-            "tests, and fix failures before reporting. High-risk and outside-workspace "
-            "actions will still ask the user." + common
+            "tests, and fix failures before reporting. High-risk actions will still ask the "
+            "user." + common
         )
     return (
         "\nExecution mode: MANUAL. Read and analyze freely; every change you make with a "

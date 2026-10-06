@@ -10,6 +10,9 @@ turns into an explicit question (allow once / for this task / deny).
 from __future__ import annotations
 
 import fnmatch
+import os
+import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -113,3 +116,47 @@ def path_action(
         secret=secret,
         detail=detail,
     )
+
+
+_DRIVE_OR_HOME = re.compile(r"^(~|[A-Za-z]:[\\/])")
+_PARENT_SEGMENT = re.compile(r"(^|[\\/])\.\.([\\/]|$)")
+
+
+def _path_like(token: str) -> bool:
+    if "://" in token:
+        return False
+    if _DRIVE_OR_HOME.match(token) or _PARENT_SEGMENT.search(token):
+        return True
+    if token.startswith("\\"):
+        return True
+    if token.startswith("/"):
+        # On Windows a lone "/x" is a switch (dir /s, robocopy /MIR), not a path.
+        return os.name != "nt" or token.count("/") > 1
+    return False
+
+
+def command_paths_outside(command: str, boundary: Boundary) -> list[Path]:
+    """Paths named in a command line that lie outside the boundary.
+
+    The first token (the executable) is skipped; ``--opt=value`` is checked by
+    its value. Best effort: it catches what a command *names*, not what a
+    program decides to touch on its own.
+    """
+    try:
+        tokens = shlex.split(command, posix=os.name != "nt")
+    except ValueError:
+        tokens = command.split()
+    outside: list[Path] = []
+    for raw in tokens[1:]:
+        token = raw.strip("\"'")
+        if token.startswith("-") and "=" in token:
+            token = token.split("=", 1)[1].strip("\"'")
+        if not token or not _path_like(token):
+            continue
+        try:
+            resolved = boundary.resolve(token)
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if not boundary.inside(resolved):
+            outside.append(resolved)
+    return outside

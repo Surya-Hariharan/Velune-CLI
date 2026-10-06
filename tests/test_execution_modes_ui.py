@@ -76,8 +76,8 @@ def test_switching_announces_what_changed_and_updates_gate_and_badge():
     set_execution_mode(repl, ExecutionMode.AUTO)
     text = repl.output.getvalue()
     assert "MANUAL → AUTO" in text
-    assert "Workspace boundary remains active" in text
-    assert "High-risk operations still require confirmation" in text
+    assert "Nothing outside the workspace is changed" in text
+    assert "High-risk commands, secret files and network access still ask" in text
     assert repl._execution_mode is ExecutionMode.AUTO
     assert repl._permission_gate.state.mode is ExecutionMode.AUTO
     assert repl._status_state.execution_label == BADGES[ExecutionMode.AUTO]

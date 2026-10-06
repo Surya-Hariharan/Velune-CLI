@@ -521,12 +521,9 @@ class VeluneREPL:
         self._status_state.exit_hint = self._interrupts.exit_hint_active
         self._status_state.model_id = self.active_model.model_id if self.active_model else None
         self._status_state.mode_label = self._mode_manager.current.value.upper()
-        from velune.cli.execution_modes import BADGES
-        from velune.permissions import ExecutionMode
+        from velune.cli.execution_modes import mode_badge
 
-        self._status_state.execution_label = BADGES[
-            getattr(self, "_execution_mode", ExecutionMode.MANUAL)
-        ]
+        self._status_state.execution_label = mode_badge(self)
         self._status_state.context_pct = (
             self._context_tracker.percentage if self.active_model else 0.0
         )

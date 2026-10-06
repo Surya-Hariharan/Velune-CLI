@@ -96,9 +96,28 @@ def test_auto_still_confirms_high_risk():
     assert decision.high_risk
 
 
-def test_auto_still_confirms_outside_the_workspace():
-    outside = Action(ActionType.CREATE_DIRECTORY, "C:/Users/me/Desktop/x", outside_workspace=True)
+@pytest.mark.parametrize("kind", WRITES)
+def test_auto_refuses_changes_outside_the_workspace(kind):
+    outside = Action(kind, "C:/Users/me/Desktop/x", outside_workspace=True)
     decision = decide([outside], _state(ExecutionMode.AUTO))
+    assert decision.verdict is Verdict.DENY
+    assert "MANUAL" in decision.reason
+
+
+def test_auto_refuses_outside_even_when_a_batch_mixes_in_allowed_actions():
+    inside = _act(ActionType.MODIFY_FILE)
+    outside = Action(ActionType.DELETE_FILE, "C:/elsewhere/x", outside_workspace=True)
+    assert decide([inside, outside], _state(ExecutionMode.AUTO)).verdict is Verdict.DENY
+
+
+def test_auto_reading_outside_the_workspace_still_asks():
+    read = Action(ActionType.READ, "C:/elsewhere/notes.txt", outside_workspace=True)
+    assert decide([read], _state(ExecutionMode.AUTO)).verdict is Verdict.ASK
+
+
+def test_manual_still_asks_about_outside_the_workspace():
+    outside = Action(ActionType.CREATE_DIRECTORY, "C:/Users/me/Desktop/x", outside_workspace=True)
+    decision = decide([outside], _state(ExecutionMode.MANUAL))
     assert decision.verdict is Verdict.ASK
     assert decision.outside_workspace
 

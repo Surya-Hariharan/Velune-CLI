@@ -24,6 +24,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
     project, high-risk operations (`git reset --hard`, `git clean`, force-push,
     recursive deletes, global installs, system changes), and secrets.
   - Enforced at the tool layer; every decision is recorded (`velune trace --type permission`).
+- **Execution modes hardened.**
+  - **Plan approval can't be bypassed by switching modes.** Leaving Plan mode pauses
+    a running plan (it needs a fresh approval to continue), a plan the model wrote
+    is always treated as unapproved whatever its Status line says, and a stale
+    "executing" plan can no longer unlock writes during the next planning turn.
+  - **Auto has a strict workspace boundary.** It refuses any change outside the
+    project (previously it asked), including commands whose arguments name a path
+    outside it (`../x`, absolute paths). Locations granted in Manual don't carry
+    into Auto. High-risk operations and secrets still ask.
+  - **Pending plan state is explicit.** The status bar shows `⏸ PLAN · awaiting
+    approval`, `⏸ PLAN · executing`, or `· plan pending` in the other modes; the
+    plan summary ends with "Waiting for approval."; all three modes have a badge
+    glyph; Shift+Tab briefly confirms the new mode in the status bar.
 - **Folder tools:** `create_directory`, `delete_directory`, `move_path`. These are
   native Python, so they work on Windows, where `mkdir` through the command tool
   could not.

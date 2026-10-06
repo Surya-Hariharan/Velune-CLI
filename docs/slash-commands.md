@@ -81,7 +81,9 @@ it runs.
 Who may change what. The execution mode decides whether Velune asks before
 changing your workspace; it is separate from the fast / normal / max modes
 above, which choose how hard the model thinks. Press **Shift+Tab** to cycle
-MANUAL → PLAN → AUTO; the status bar shows the current mode.
+MANUAL → PLAN → AUTO; the status bar shows the current mode (● MANUAL, ⏸ PLAN,
+⏵⏵ AUTO) and briefly confirms each switch. While a plan is pending the badge says so,
+e.g. `⏸ PLAN · awaiting approval`.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
@@ -96,22 +98,31 @@ MANUAL → PLAN → AUTO; the status bar shows the current mode.
 >
 > **PLAN** — Velune investigates and writes a plan to
 > `.velune/plans/<name>.md` (objective, findings, proposed changes, files
-> affected, risks, rollback, execution order) and stops. Ask for changes as
-> often as you like — the plan is revised, nothing runs. Reply with an
-> explicit approval (*approve*, *go ahead*, *implement it*) to execute it;
-> anything outside the plan's file list asks again.
+> affected, risks, rollback, execution order) and stops with *Waiting for
+> approval.* Ask for changes as often as you like — the plan is revised,
+> nothing runs. Reply with an explicit approval (*approve*, *go ahead*,
+> *implement it*) to execute it; anything outside the plan's file list asks
+> again. Approval only counts in PLAN mode, and only for the plan it was given
+> to: leaving PLAN mode pauses a running plan (it needs a fresh approval to
+> continue), and a plan that is still waiting stays unapproved however you
+> switch modes.
 >
 > **AUTO** — Velune creates, edits and deletes files and runs commands inside
-> the workspace without asking, iterating until the task is done.
+> the workspace without asking, iterating until the task is done. It never
+> changes anything outside the workspace — switch to MANUAL to allow a
+> location. Locations you allowed earlier in MANUAL do not carry into AUTO.
 >
-> **In every mode**, these still need your explicit confirmation: anything
-> outside the workspace (allow once / for this task / deny), high-risk
-> operations (`git reset --hard`, `git clean`, force-push, recursive deletes,
-> system or global installs, environment/registry/firewall changes) and
-> reading or changing secrets (`.env`, keys, `~/.ssh`). Commands such as
-> `sudo` or disk formatting are never run. These rules are enforced in code
-> at the tool layer, not by instructions to the model. Start in a mode with
-> `velune --mode manual|plan|auto` or set `[execution] mode` in `velune.toml`.
+> **Still confirmed in every mode:** high-risk operations (`git reset --hard`,
+> `git clean`, force-push, recursive deletes, system or global installs,
+> environment/registry/firewall changes) and reading or changing secrets
+> (`.env`, keys, `~/.ssh`). In MANUAL and PLAN, anything outside the
+> workspace also asks (allow once / for this task / deny); in AUTO reading
+> outside it asks and changing it is refused. A command that names a path
+> outside the workspace (`../x`, an absolute path) counts as outside.
+> Commands such as `sudo` or disk formatting are never run. These rules are
+> enforced in code at the tool layer, not by instructions to the model. Start
+> in a mode with `velune --mode manual|plan|auto` or set `[execution] mode`
+> in `velune.toml`.
 
 ---
 
