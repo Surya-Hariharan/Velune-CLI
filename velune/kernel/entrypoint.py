@@ -29,6 +29,33 @@ def _install_uvloop() -> None:
         pass
 
 
+def _is_executor_shutdown_race(context: dict[str, Any]) -> bool:
+    exc = context.get("exception")
+    return isinstance(exc, RuntimeError) and "Executor shutdown has been called" in str(exc)
+
+
+async def _with_shutdown_race_guard(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run *coro*, muting prompt_toolkit's exit-time executor race on Windows.
+
+    Its Win32 input watcher can fire one last ``run_in_executor`` after
+    ``asyncio.run`` has shut the default executor down, which asyncio reports
+    as a traceback on an otherwise clean exit. Only that error is swallowed.
+    """
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+
+    def _handler(lp: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        if _is_executor_shutdown_race(context):
+            _logger.debug("Ignored executor-shutdown race at exit: %s", context.get("message"))
+        elif previous is not None:
+            previous(lp, context)
+        else:
+            lp.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
+    return await coro
+
+
 def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
     """Run *coro* to completion from a **synchronous** call site.
 
@@ -49,7 +76,7 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
         )
     _install_uvloop()
     try:
-        return asyncio.run(coro)
+        return asyncio.run(_with_shutdown_race_guard(coro))
     except KeyboardInterrupt:
         raise
     except SystemExit:
