@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from velune.council.contracts import Claim
+from velune.council.contracts import Artifact, Claim
 from velune.council.domain import ArtifactKind, ReadScope, StageId
 from velune.council.ports import (
     AssignmentSource,
@@ -186,6 +186,7 @@ class CouncilState:
     trace: TraceLog
     store: ArtifactStore = field(default_factory=ArtifactStore)
     stage_results: list[StageResult] = field(default_factory=list)
+    artifacts: list[Artifact] = field(default_factory=list)
     answer: str | None = None
     deterministic_fallback_used: bool = False
 
