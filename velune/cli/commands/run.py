@@ -96,7 +96,7 @@ async def _run_command_async(
         )
         # 4. Stream Multi-Agent Council Deliberation & Execution Graph
         console.print(
-            "[bold magenta]Streaming LangGraph stateful execution & checkpoint pipeline...[/bold magenta]\n"
+            "[bold magenta]Running the Reasoning Council and checkpointed execution pipeline...[/bold magenta]\n"
         )
 
     # --- Pre-operation cost estimation gate ---

@@ -62,6 +62,12 @@ Velune CLI-native tools (`velune_ask`, `velune_search_memory`,
 `velune_get_symbols`, `velune_estimate_blast_radius`) are always available
 regardless of this flag; they're read-only by construction.
 
+`velune_ask` (and `sampling/createMessage`) runs the real Reasoning Council
+through the server's own runtime, so the server has to be started with
+`velune mcp serve`. It uses a 30-second wall-clock budget and a single review
+cycle, and returns `response`, `confidence` and `degraded` — or an `error` if
+the council timed out or every agent failed. It only analyses; it never applies edits.
+
 The server also enforces:
 
 - A **token-bucket rate limiter** (`RateLimiter`, 60 calls/minute by

@@ -61,10 +61,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `/roles` and `/pull`. Aliases and keywords still find a command when no name starts with what you typed,
   so `/anthropic` and `/login` still reach `/connect`.
 
+- **Council runs no longer treat failures as success.** A judge (reviewer, challenger or critic) that
+  timed out, errored or answered with something unparseable used to count as an approval, and a
+  synthesizer timeout was shown as the answer. Such judges now abstain: they are named in the
+  arbitration flags (`JUDGE_UNAVAILABLE:<seat>`, `NO_REVIEW`) and cap confidence (0.60 when one judge
+  is missing; 0.40 plus a human-review request when the reviewer or half the judges are missing; 0.30
+  when none ran). A synthesizer failure produces the degraded report instead of an error string, a failed
+  debate revision keeps the previous proposal, a judge that cannot re-review does not confirm a
+  revision, and runs that produced no answer are failures in the REPL rather than stored answers.
+  Degraded results are labelled (`ask --json` reports `degraded`). The debate revision now sees the
+  proposal it is revising, and the synthesizer is told the council's confidence and flags.
+- **`/council` and `/mode fast|max` now force the council tier they promise.** The tier was dropped
+  before it reached the orchestrator, so `/council` ("force full") classified the task like any other.
+  A forced tier that a hardware or config ceiling (or low-resource mode) lowers is announced, and
+  `ask --council-tier` rejects unknown names. `/council` is slow and makes many model calls.
+- **`/mode fast` now really skips the critics.** "Critics: disabled" was only printed. The Challenger
+  and the four specialised critics are skipped (the Reviewer stays), including for `/council`.
+- **A council seat whose provider fails can fall back to another model.** The mechanism existed but was
+  never given any providers, and it was skipped on timeouts. Fallbacks follow
+  `providers.fallback_providers` in order and are announced as `[Fallback]`. Because a prompt can
+  contain your code, a local model never falls back to a cloud model unless you set
+  `providers.allow_cloud_fallback_from_local = true`.
+- **`/roles` now offers, applies and reports exactly the roles that work.** It listed eight roles but
+  the council uses five: the picker hid `challenger` and `synthesizer`, offered the inert `embedding`,
+  silently dropped `architect`, `security` and `embedding`, and one unknown entry in
+  `council_roles.json` discarded every saved assignment. Assigning a role with no effect is now
+  rejected with guidance; saved entries without effect are reported and kept; an assigned model that is
+  not available is announced and shown as unavailable; the stored provider is honoured; and the saved
+  assignments apply to `ask`, `chat`, `run` and the MCP server, not only the REPL. `velune doctor`
+  shows what is really in force.
+- **MCP `velune_ask` and sampling now run the real council.** They always answered "Council not
+  available": the server built its own orchestrator with a missing argument and then called a method
+  that does not exist. `velune mcp serve` now hands the server its runtime orchestrator; results carry
+  `confidence` and `degraded`, and a timeout or total agent failure is reported as an error.
+
 ### Changed
 
 - `/approve` is now a legacy alias for the execution modes (ask → manual, safe → auto,
   block → plan). `--yes` starts in Auto mode.
+- **Premium council prompts are now opt-in.** The git-ignored `_premium.py` prompt layer used to override
+  the committed prompts whenever the file existed, so the same version behaved differently on a
+  developer machine, in CI and from PyPI. It now loads only with `VELUNE_PROMPT_LAYER=premium`
+  (a missing or malformed layer warns and falls back to the committed prompts). `velune doctor` shows
+  the active layer and council traces record it. Set the variable to keep using a local premium file.
 
 ---
 

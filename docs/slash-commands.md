@@ -63,13 +63,16 @@ it runs.
 > `/run` routes through `TierClassifier`, which picks `INSTANT`, `MINIMAL`,
 > `STANDARD`, or `FULL` council depth based on the task and how many files
 > in the repo depend on whatever you mention. `/council` skips
-> classification and always runs the full
-> Planner → Coder → Reviewer → Challenger → Synthesizer pipeline. `/fast`,
-> `/max`, and `/normal` are user-facing presets over that same
-> `CouncilTier` system — they pin the tier and context budget so you don't
-> have to think about it mid-task. Their names match `/mode`'s own
-> vocabulary (`/mode fast`, `/mode max`, `/mode normal`); `optimus`/`godly`
-> still work as aliases.
+> classification and runs the full council (Planner, Coder samples,
+> Reviewer, Challenger, four specialised critics, Synthesizer) — slow, and
+> many model calls. `/fast`, `/max`, and `/normal` are user-facing presets
+> over that same `CouncilTier` system — they pin the tier and context budget
+> so you don't have to think about it mid-task. `/fast` also skips the
+> Challenger and the specialised critics (the Reviewer stays), for every
+> council command including `/council`. A forced tier that your hardware or
+> `cognition.max_council_tier` lowers is announced rather than silently
+> downgraded. Their names match `/mode`'s own vocabulary (`/mode fast`,
+> `/mode max`, `/mode normal`); `optimus`/`godly` still work as aliases.
 
 ---
 
@@ -153,6 +156,13 @@ council assignment.
 | `delete` | `remove`, `rm` | `/delete <model-id>` | Delete a locally installed Ollama model |
 | `roles` | `councilmodel`, `cm` | `/roles [show\|reset]` | Assign specific models to each Reasoning Council agent role |
 | `bench` | `b` | `/bench [run]` | View or run empirical model capability benchmarks |
+
+> `/roles` assigns models to the five roles a council run uses: `planner`,
+> `coder`, `reviewer`, `challenger` and `synthesizer`. Assignments apply to
+> every command that runs the council, not only the REPL. An assigned model
+> that is not available falls back to automatic routing and says so. Saved
+> entries for names with no effect (`architect`, `security`, `embedding`) are
+> ignored with a notice and left in the file.
 
 ---
 
