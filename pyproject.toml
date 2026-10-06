@@ -219,6 +219,7 @@ addopts = "-q"
 markers = [
     "integration: end-to-end tests that touch real subsystems (deselect with -m 'not integration')",
     "slow: long-running tests (deselect with -m 'not slow')",
+    "live: opt-in tests that call a real provider; they run only with VELUNE_LIVE_TESTS=1",
 ]
 
 [tool.black]

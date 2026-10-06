@@ -156,3 +156,44 @@ def test_the_digest_is_stable_and_tracks_wording(monkeypatch):
     changed["council.general.analyst"] += " changed"
     monkeypatch.setattr(_deliberation, "PROMPTS", changed)
     assert deliberation_digest() != first
+
+
+def _limit(text: str, pattern: str) -> int:
+    import re
+
+    found = re.search(pattern, text)
+    assert found, pattern
+    return int(found.group(1))
+
+
+def test_the_word_limits_the_prompts_state_fit_inside_the_contract_caps():
+    """Models count words, not characters: the stated word limits must never exceed the char caps."""
+    from velune.council.drafts import FrameDraft, PerspectiveDraft
+
+    shared = _deliberation.PROMPTS["council.general.shared"]
+    moderator = _deliberation.PROMPTS["council.general.moderator"]
+    persp = PerspectiveDraft.model_json_schema()
+    frame = FrameDraft.model_json_schema()
+    chars_per_word = 7  # conservative: English prose averages about 6 including the space
+    assert (
+        _limit(shared, r'"position" to at most (\d+) words') * chars_per_word
+        <= (persp["properties"]["position"]["maxLength"])
+    )
+    assert (
+        _limit(shared, r'"rationale" to at most (\d+) words') * chars_per_word
+        <= (persp["properties"]["rationale"]["maxLength"])
+    )
+    claim_cap = persp["$defs"]["ClaimDraft"]["properties"]["text"]["maxLength"]
+    assert (
+        _limit(shared, r'claim "text" and "support" to at most (\d+) words') * chars_per_word
+        <= claim_cap
+    )
+    assert _limit(shared, r"other list item to at most (\d+) words") * chars_per_word <= 240
+    assert (
+        _limit(moderator, r"question_restated to at most (\d+) words") * chars_per_word
+        <= (frame["properties"]["question_restated"]["maxLength"])
+    )
+    assert (
+        _limit(moderator, r"every dimension to at most (\d+) words") * chars_per_word
+        <= (frame["properties"]["dimensions"]["items"]["maxLength"])
+    )

@@ -86,6 +86,7 @@ def repair_messages(
         "Your previous reply was rejected: "
         + "; ".join(errors)
         + ". Reply again with exactly one JSON object that matches the schema, and nothing else."
+        + " Shorten any text that exceeds a length limit."
     )
     return (
         *original,
