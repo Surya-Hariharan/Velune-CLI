@@ -181,6 +181,7 @@ def _all_checks() -> list:
         _check_session_cost,
         _check_memory_health,
         _check_council_roles,
+        _check_prompt_layer,
         _check_terminal_zoom_lock,
     ]
 
@@ -1439,6 +1440,24 @@ def _check_council_roles() -> dict:
         }
 
 
+def _check_prompt_layer() -> dict:
+    """Which council/chat prompt layer is live, so behaviour is explainable per machine."""
+    from velune.cognition.prompts import PROMPT_LAYER_ENV, active_layer
+
+    info = active_layer()
+    message = f"{info.name} ({info.digest})"
+    if info.requested == "premium" and info.name != "premium":
+        return {
+            "name": "Prompt Layer",
+            "status": "warn",
+            "message": f"{message} - premium was requested ({PROMPT_LAYER_ENV}=premium) "
+            "but no usable premium prompts were found",
+        }
+    if info.name == "baseline" and info.premium_available:
+        message += f"; a local premium layer exists - enable it with {PROMPT_LAYER_ENV}=premium"
+    return {"name": "Prompt Layer", "status": "ok", "message": message}
+
+
 def _check_terminal_zoom_lock() -> dict:
     """Report whether this session's terminal emulator can be asked to stop
     handling its own font-zoom shortcuts (Ctrl +/-/0, Ctrl+scroll, ...).
@@ -1477,6 +1496,7 @@ def _render_results(results: list, out: Console | None = None) -> None:
         "velune.toml Config File": "Storage",
         "Memory Subsystem": "Storage",
         "Council Role Assignments": "Council",
+        "Prompt Layer": "Council",
         "OpenAI API Key": "Security",
         "Anthropic API Key": "Security",
         "Groq": "Security",

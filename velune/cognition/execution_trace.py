@@ -148,6 +148,8 @@ class RequestTrace:
         self.started_at = time.time()
         self.tier: str | None = None
         self.contract_summary: str = ""
+        # Which prompt layer produced this request's prompts: '<layer> <digest>'.
+        self.prompt_layer: str = ""
         self.calls: list[ProviderCall] = []
         self.nodes: list[ExecutionNode] = []
         self._root = ExecutionNode(
@@ -235,6 +237,8 @@ class RequestTrace:
         ]
         if self.contract_summary:
             lines.append(f"  contract: {self.contract_summary}")
+        if self.prompt_layer:
+            lines.append(f"  prompt layer: {self.prompt_layer}")
 
         children: dict[str | None, list[ExecutionNode]] = {}
         for node in self.nodes:
@@ -274,6 +278,7 @@ class RequestTrace:
             "request_id": self.request_id,
             "tier": self.tier,
             "contract": self.contract_summary,
+            "prompt_layer": self.prompt_layer,
             "total_provider_calls": len(self.calls),
             "calls_by_seat": self.calls_by_seat(),
             "unexplained_calls": [c.call_id for c in self.unexplained_calls()],

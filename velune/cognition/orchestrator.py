@@ -940,6 +940,13 @@ class CouncilOrchestrator:
         if request_trace is not None:
             request_trace.tier = tier.value
             request_trace.contract_summary = contract.summary()
+            try:
+                from velune.cognition.prompts import active_layer
+
+                _layer = active_layer()
+                request_trace.prompt_layer = f"{_layer.name} {_layer.digest}"
+            except Exception:
+                pass
 
         with TraceContext(run_id=run_id):
             logger.info(
