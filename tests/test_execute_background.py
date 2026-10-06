@@ -20,6 +20,12 @@ from velune.tools.safety import ApprovalMode
 from velune.tools.terminal.execute import ExecuteCommand
 
 
+def _say(tmp_path, text):
+    """Portable stand-in for `echo`, which is a shell builtin on Windows."""
+    (tmp_path / "say.py").write_text(f"print({text!r})\n", encoding="utf-8")
+    return "python say.py"
+
+
 def _make_tool(tmp_path, job_registry=None):
     sandbox = SubprocessSandbox(tmp_path)
     return ExecuteCommand(
@@ -52,7 +58,9 @@ async def test_background_job_progresses_to_completed_with_a_result_preview(tmp_
     registry = JobRegistry()
     tool = _make_tool(tmp_path, registry)
 
-    result = await tool.execute("echo background-hello", directory=str(tmp_path), background=True)
+    result = await tool.execute(
+        _say(tmp_path, "background-hello"), directory=str(tmp_path), background=True
+    )
     job_id = result["job_id"]
 
     job = registry.get(job_id)
@@ -69,7 +77,7 @@ async def test_background_job_appears_in_all_jobs(tmp_path):
     registry = JobRegistry()
     tool = _make_tool(tmp_path, registry)
 
-    result = await tool.execute("echo hi", directory=str(tmp_path), background=True)
+    result = await tool.execute(_say(tmp_path, "hi"), directory=str(tmp_path), background=True)
     job = registry.get(result["job_id"])
     await asyncio.wait_for(job.task, timeout=10)
 
@@ -123,14 +131,14 @@ async def test_background_without_a_job_registry_raises_a_clear_error(tmp_path):
     tool = _make_tool(tmp_path, job_registry=None)
 
     with pytest.raises(RuntimeError, match="job registry"):
-        await tool.execute("echo hi", directory=str(tmp_path), background=True)
+        await tool.execute(_say(tmp_path, "hi"), directory=str(tmp_path), background=True)
 
 
 async def test_foreground_execution_is_unaffected_by_the_background_param(tmp_path):
     """background=False (the default) must behave exactly as before."""
     tool = _make_tool(tmp_path, job_registry=None)
 
-    result = await tool.execute("echo still-synchronous", directory=str(tmp_path))
+    result = await tool.execute(_say(tmp_path, "still-synchronous"), directory=str(tmp_path))
 
     assert result["exit_code"] == 0
     assert "still-synchronous" in result["stdout"]

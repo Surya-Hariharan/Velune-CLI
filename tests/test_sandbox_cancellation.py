@@ -142,7 +142,8 @@ def test_cancel_event_actually_terminates_the_os_process(tmp_path):
 def test_no_cancel_event_behaves_exactly_as_before(tmp_path):
     """cancel_event is optional — omitting it must not change existing behavior."""
     sandbox = SubprocessSandbox(tmp_path)
-    spec = CommandSpec.from_string("echo hello", cwd=tmp_path, timeout=10.0)
+    (tmp_path / "say.py").write_text("print('hello')\n", encoding="utf-8")
+    spec = CommandSpec.from_string("python say.py", cwd=tmp_path, timeout=10.0)
 
     result = sandbox.execute(spec)
 
@@ -168,7 +169,8 @@ async def test_execute_command_registers_and_unregisters_its_cancel_event(tmp_pa
 
     monkeypatch.setattr(cancellation, "register", _spying_register)
 
-    result = await tool.execute("echo hi", directory=str(tmp_path))
+    (tmp_path / "say.py").write_text("print('hi')\n", encoding="utf-8")
+    result = await tool.execute("python say.py", directory=str(tmp_path))
 
     assert result["exit_code"] == 0
     assert seen_during, "execute() never registered a cancel event"
