@@ -20,7 +20,12 @@ from velune.council.ports import (
     SeatInvoker,
 )
 from velune.council.profiles import RoleProfile
-from velune.council.request import CouncilRequest, CouncilSettings, EvidenceItem
+from velune.council.request import (
+    CouncilRequest,
+    CouncilSettings,
+    EvidenceItem,
+    ResponseRequirements,
+)
 from velune.council.results import StageResult
 from velune.council.serialization import Contract
 from velune.council.stages import StageContract, StageOutput, VisibilityPolicy
@@ -105,6 +110,10 @@ class StageView:
     def context(self) -> str:
         self._require(ArtifactKind.QUESTION)
         return self._request.context
+
+    def requirements(self) -> ResponseRequirements:
+        self._require(ArtifactKind.QUESTION)
+        return self._request.response
 
     def evidence(self) -> tuple[EvidenceItem, ...]:
         self._require(ArtifactKind.EVIDENCE)

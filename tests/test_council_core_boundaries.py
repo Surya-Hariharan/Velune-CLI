@@ -325,7 +325,8 @@ def test_no_prompt_text_lives_in_the_core():
 
     for profile in BUILTIN_PROFILES:
         for seat in profile.all_seats:
-            assert seat.prompt_key is None
+            assert seat.prompt_key is None or seat.prompt_key.startswith("council.general.")
+            assert seat.prompt_key is None or len(seat.prompt_key) < 64  # a key, never text
             assert len(seat.objective) <= 200
     prompts_dir = COUNCIL / "prompts"
     assert not prompts_dir.exists()

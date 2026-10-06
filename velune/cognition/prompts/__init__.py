@@ -35,7 +35,7 @@ import os
 import sys
 from dataclasses import dataclass
 
-from velune.cognition.prompts import _baseline
+from velune.cognition.prompts import _baseline, _deliberation
 
 logger = logging.getLogger("velune.cognition.prompts")
 
@@ -137,6 +137,29 @@ def get_prompt(key: str) -> str:
         ) from exc
 
 
+def get_deliberation_prompt(key: str) -> str:
+    """Resolve a deliberative-council prompt (premium override, else the committed text).
+
+    These live in ``_deliberation`` rather than ``_baseline`` so :func:`active_layer` and the
+    legacy council prompts are unaffected. An unknown key raises, never an empty prompt.
+    """
+    _, overrides, _ = _resolve()
+    if key in overrides:
+        return overrides[key]
+    try:
+        return _deliberation.PROMPTS[key]
+    except KeyError as exc:
+        raise KeyError(
+            f"Unknown deliberation prompt key {key!r}. Known keys: {sorted(_deliberation.PROMPTS)}"
+        ) from exc
+
+
+def deliberation_digest() -> str:
+    """Short hash of the resolved deliberation prompts, for run records."""
+    parts = [f"{key}|{get_deliberation_prompt(key)}" for key in sorted(_deliberation.PROMPTS)]
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
 def is_premium_active() -> bool:
     """Whether the premium layer was requested and loaded."""
     return _resolve()[0] == "premium"
@@ -177,6 +200,8 @@ __all__ = [
     "PROMPT_LAYER_ENV",
     "PromptLayerInfo",
     "active_layer",
+    "deliberation_digest",
+    "get_deliberation_prompt",
     "get_prompt",
     "is_premium_active",
     "reset_prompt_layer",

@@ -49,7 +49,9 @@ class SeatSpec(BaseModel):
     objective: str = Field(min_length=1, max_length=200)
     claim_prefix: str  # prefix of the ids of the claims this seat authors, e.g. "AN"
     routing_role: RoutingRole
-    prompt_key: str | None = None  # always None until prompts exist
+    # Lookup key into the prompt library (never prompt text itself). ``None`` where no stage
+    # prompts that seat yet.
+    prompt_key: str | None = None
 
     @model_validator(mode="after")
     def _check(self) -> SeatSpec:
@@ -192,6 +194,23 @@ SYNTHESIZER = SeatSpec(
 )
 
 
+GENERAL_PROMPT_NAMESPACE = "council.general"
+
+
+def _with_prompt_keys(profile: RoleProfile, namespace: str) -> RoleProfile:
+    """Point the seats a stage actually prompts (perspectives and moderator) at the prompt library."""
+
+    def keyed(spec: SeatSpec) -> SeatSpec:
+        return spec.model_copy(update={"prompt_key": f"{namespace}.{spec.id}"})
+
+    return profile.model_copy(
+        update={
+            "perspective_seats": tuple(keyed(s) for s in profile.perspective_seats),
+            "moderator": keyed(profile.moderator),
+        }
+    )
+
+
 def _seat(seat_id: str, name: str, prefix: str, role: RoutingRole, objective: str) -> SeatSpec:
     return SeatSpec(
         id=seat_id,
@@ -205,7 +224,7 @@ def _seat(seat_id: str, name: str, prefix: str, role: RoutingRole, objective: st
 
 # ── GENERAL: the first domain, runnable once stages exist ───────────────────
 
-GENERAL_PROFILE = RoleProfile(
+_GENERAL_DATA = RoleProfile(
     id="general",
     domain=CouncilDomain.GENERAL,
     perspective_seats=(
@@ -263,6 +282,8 @@ GENERAL_PROFILE = RoleProfile(
     runnable=True,
     default_quorum=QuorumRule(min_ok=3, require_any_of=("skeptic", "fact_checker")),
 )
+
+GENERAL_PROFILE = _with_prompt_keys(_GENERAL_DATA, GENERAL_PROMPT_NAMESPACE)
 
 # ── declared domains: validated data only, not runnable ──────────────────────
 # Seat names are provisional; their job here is to prove the engine has no domain branches.

@@ -67,6 +67,15 @@ class IdSource(Protocol):
 
 
 @runtime_checkable
+class PromptSource(Protocol):
+    """Static prompt text for a seat. The core only assembles it; it never holds the wording."""
+
+    def shared_prompt(self) -> str: ...
+
+    def role_prompt(self, seat_id: str, stage: StageId) -> str: ...
+
+
+@runtime_checkable
 class AssignmentSource(Protocol):
     """Names which authors a viewer is assigned to read (the review graph, a later phase)."""
 

@@ -89,7 +89,14 @@ def test_general_claim_prefixes_and_routing_hints():
     hints = {s.id: s.routing_role for s in GENERAL_PROFILE.all_seats}
     assert hints["skeptic"] is RoutingRole.CHALLENGER
     assert hints["synthesizer"] is RoutingRole.SYNTHESIZER
-    assert all(s.prompt_key is None for s in GENERAL_PROFILE.all_seats)
+    keys = {s.id: s.prompt_key for s in GENERAL_PROFILE.all_seats}
+    # only the seats a stage prompts point at the prompt library; never prompt text itself
+    assert keys["analyst"] == "council.general.analyst"
+    assert keys["moderator"] == "council.general.moderator"
+    assert keys["arbitrator"] is None and keys["synthesizer"] is None
+    for profile in BUILTIN_PROFILES:
+        if profile is not GENERAL_PROFILE:
+            assert all(s.prompt_key is None for s in profile.all_seats)
 
 
 @pytest.mark.parametrize("profile", BUILTIN_PROFILES, ids=lambda p: p.id)
