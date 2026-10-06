@@ -9,7 +9,6 @@ from velune.council.domain import (
     STAGE_ORDER,
     CouncilDomain,
     QuorumRule,
-    RoutingRole,
     SeatKind,
     StageId,
 )
@@ -19,6 +18,7 @@ from velune.council.profiles import (
     ProfileNotRunnable,
     ProfileRegistry,
     RoleProfile,
+    RoutingRole,
     SeatSpec,
     UnknownProfile,
     default_registry,

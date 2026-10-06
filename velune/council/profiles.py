@@ -12,10 +12,27 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from velune.council.domain import CouncilDomain, QuorumRule, RoutingRole, SeatKind
+from velune._compat import StrEnum
+from velune.council.domain import CouncilDomain, QuorumRule, SeatKind
 
 _SLUG = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 _PREFIX = re.compile(r"^[A-Z]{2,3}$")
+
+
+class RoutingRole(StrEnum):
+    """Names of the existing model-routing slots a seat borrows (see the runtime adapter).
+
+    Mirrors the values of ``velune.models.specializations.CouncilRole`` without importing
+    it, so the core stays free of the provider stack. The adapter tests assert the two
+    stay in step. A stopgap until seats are routed by capability.
+    """
+
+    PLANNER = "planner"
+    CODER = "coder"
+    REVIEWER = "reviewer"
+    CHALLENGER = "challenger"
+    SYNTHESIZER = "synthesizer"
+
 
 MIN_PERSPECTIVES = 3
 MAX_PERSPECTIVES = 7

@@ -30,21 +30,6 @@ class SeatKind(StrEnum):
     SYNTHESIZER = "synthesizer"
 
 
-class RoutingRole(StrEnum):
-    """Names of the existing model-routing slots a seat borrows (see the runtime adapter).
-
-    Mirrors the values of ``velune.models.specializations.CouncilRole`` without importing
-    it, so the core stays free of the provider stack. The adapter tests assert the two
-    stay in step. A stopgap until seats are routed by capability.
-    """
-
-    PLANNER = "planner"
-    CODER = "coder"
-    REVIEWER = "reviewer"
-    CHALLENGER = "challenger"
-    SYNTHESIZER = "synthesizer"
-
-
 class StageId(StrEnum):
     """The six stages of the deliberation protocol, R0-R5, in order."""
 

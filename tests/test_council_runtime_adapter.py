@@ -23,9 +23,9 @@ from velune.council.adapters.runtime import (
     RequestTraceSink,
     RuntimeSeatInvoker,
 )
-from velune.council.domain import RoutingRole, SeatKind, StageId
+from velune.council.domain import SeatKind, StageId
 from velune.council.ports import SeatCall, SeatInvoker, SeatMessage
-from velune.council.profiles import GENERAL_PROFILE, default_registry
+from velune.council.profiles import GENERAL_PROFILE, RoutingRole, default_registry
 from velune.council.request import CouncilRequest
 from velune.council.results import OutcomeStatus, SeatStatus
 from velune.council.runner import StagedCouncilRunner
