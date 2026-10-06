@@ -33,7 +33,7 @@ Composition rationale (derived from the existing design, not invented):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from velune.cognition.council.tiers import CouncilTier
 
@@ -129,6 +129,19 @@ class TierContract:
         judges = len([s for s in self.required_seats if s not in (SEAT_PLANNER, SEAT_CODER)])
         return self.min_provider_calls + self.max_debate_turns * (1 + judges)
 
+    def without_critics(self) -> TierContract:
+        """This contract minus the Challenger and the four specialised critics.
+
+        The Reviewer stays: it is the tier's quality gate. Used when a run is started
+        with critics disabled, so the trace is checked against what was actually allowed.
+        """
+        dropped = (SEAT_CHALLENGER, *ALL_CRITIC_SEATS)
+        return replace(
+            self,
+            required_seats=tuple(s for s in self.required_seats if s not in dropped),
+            optional_seats=tuple(s for s in self.optional_seats if s not in dropped),
+        )
+
     def summary(self) -> str:
         return (
             f"{self.tier.value}: seats={'+'.join(self.required_seats)} "
@@ -216,7 +229,9 @@ class ContractVerdict:
         return "\n".join(lines)
 
 
-def verify_trace_against_contract(trace, tier: CouncilTier) -> ContractVerdict:
+def verify_trace_against_contract(
+    trace, tier: CouncilTier, contract: TierContract | None = None
+) -> ContractVerdict:
     """Check a :class:`~velune.cognition.execution_trace.RequestTrace` against *tier*'s contract.
 
     Retries and fallbacks are excluded from the deliberation count: they are
@@ -226,7 +241,7 @@ def verify_trace_against_contract(trace, tier: CouncilTier) -> ContractVerdict:
     """
     from velune.cognition.execution_trace import CallReason
 
-    contract = contract_for(tier)
+    contract = contract or contract_for(tier)
     verdict = ContractVerdict(tier=tier, total_calls=len(trace.calls))
 
     deliberations = [

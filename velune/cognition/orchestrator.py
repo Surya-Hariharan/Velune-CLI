@@ -237,12 +237,17 @@ class CouncilOrchestrator:
         return candidates
 
     async def stream(
-        self, prompt: str, council_tier: str | None = None
+        self,
+        prompt: str,
+        council_tier: str | None = None,
+        *,
+        disable_critics: bool = False,
     ) -> AsyncIterator[StreamProgress]:
         """Runs the Reasoning Council task execution and streams milestones.
 
         ``council_tier`` (instant/minimal/standard/full) forces a tier instead of
         classifying the task; hardware/config ceilings still apply and are announced.
+        ``disable_critics`` skips the Challenger and specialised critics for this run.
         """
         import uuid
 
@@ -417,6 +422,14 @@ class CouncilOrchestrator:
                     repo_context=repo_context,
                     progress_callback=progress_callback,
                     council_tier=council_tier,
+                    budget=(
+                        CouncilExecutionBudget(
+                            max_wall_time_seconds=int(self.max_wall_time_seconds),
+                            disable_critics=True,
+                        )
+                        if disable_critics
+                        else None
+                    ),
                 )
                 final_summary = result.get("final_summary", "Execution completed successfully.")
                 status = ExecutionStatus.COMPLETED
@@ -899,11 +912,18 @@ class CouncilOrchestrator:
 
         tier_level = {"instant": 1, "minimal": 2, "standard": 3, "full": 4}[tier.value]
         contract = contract_for(tier)
+        budget = budget or CouncilExecutionBudget()
+        if budget.disable_critics:
+            reduced = contract.without_critics()
+            if reduced != contract and progress_callback is not None:
+                progress_callback(
+                    "[Council] Challenger and specialised critics disabled for this run"
+                )
+            contract = reduced
         request_trace = current_trace()
         if request_trace is not None:
             request_trace.tier = tier.value
             request_trace.contract_summary = contract.summary()
-        budget = budget or CouncilExecutionBudget()
 
         with TraceContext(run_id=run_id):
             logger.info(
@@ -1795,7 +1815,7 @@ class CouncilOrchestrator:
             if request_trace is not None:
                 from velune.cognition.council.contracts import verify_trace_against_contract
 
-                verdict = verify_trace_against_contract(request_trace, tier)
+                verdict = verify_trace_against_contract(request_trace, tier, contract)
                 contract_verdict = {
                     "ok": verdict.ok,
                     "total_calls": verdict.total_calls,

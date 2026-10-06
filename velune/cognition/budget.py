@@ -32,6 +32,9 @@ class CouncilExecutionBudget:
     planner_timeout_seconds: int = 30
     coder_timeout_seconds: int = 60
     reviewer_timeout_seconds: int = 30
+    # Skip the Challenger and the four specialised critics (the Reviewer, the
+    # tier's quality gate, always stays). Set by session modes that advertise it.
+    disable_critics: bool = False
 
     @classmethod
     def from_session_mode(cls, mode: SessionMode) -> CouncilExecutionBudget:

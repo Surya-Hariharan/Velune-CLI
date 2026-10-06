@@ -248,7 +248,6 @@ async def test_council_command_forces_the_full_tier():
 # ── Issue 5: disable_critics ─────────────────────────────────────────────────
 
 
-@xfail("Issue 5: CouncilExecutionBudget has no disable_critics and nothing honours it")
 async def test_disable_critics_skips_challenger_and_critics(monkeypatch):
     orch, provider = make_orchestrator(monkeypatch)
     await orch.execute_task(
