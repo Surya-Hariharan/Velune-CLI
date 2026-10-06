@@ -29,10 +29,19 @@ class CouncilAgentFactory:
         provider_registry: ProviderRegistry,
         mapper: ModelSpecializationMapper,
         live_lock: Any | None = None,
+        *,
+        fallback_provider_ids: tuple[str, ...] | list[str] = (),
+        allow_cloud_fallback_from_local: bool = False,
+        max_fallbacks: int = 2,
     ) -> None:
         self.provider_registry = provider_registry
         self.mapper = mapper
         self.live_lock = live_lock
+        # Per-seat fallback: providers the user allows as alternates, in preference order.
+        # Empty (the default) means a failed seat is simply unavailable.
+        self.fallback_provider_ids = tuple(fallback_provider_ids)
+        self.allow_cloud_fallback_from_local = allow_cloud_fallback_from_local
+        self.max_fallbacks = max_fallbacks
         # Cache of resolved role mappings by run_id
         self._mappings_cache: dict[str, dict[CouncilRole, ModelDescriptor]] = {}
 
@@ -49,6 +58,37 @@ class CouncilAgentFactory:
         else:
             self._mappings_cache.clear()
 
+    def _fallbacks_for(
+        self, role: CouncilRole, primary: ModelDescriptor
+    ) -> list[tuple[Any, ModelDescriptor]]:
+        """(provider, model) alternates for a seat, from the mapper's deterministic chain."""
+        chain_for = getattr(self.mapper, "fallback_chain", None)
+        if chain_for is None or not self.fallback_provider_ids:
+            return []
+        usable = {
+            pid
+            for pid in self.fallback_provider_ids
+            if self.provider_registry.check_provider_available(pid)
+        }
+        pairs: list[tuple[Any, ModelDescriptor]] = []
+        for model in chain_for(
+            role,
+            primary,
+            allowed_provider_ids=self.fallback_provider_ids,
+            usable_provider_ids=usable,
+            max_n=self.max_fallbacks,
+            allow_local_to_cloud=self.allow_cloud_fallback_from_local,
+        ):
+            provider = self.provider_registry.get(model.provider_id)
+            if provider is not None:
+                pairs.append((provider, model))
+        return pairs
+
+    def _finish(self, agent: Any, role: CouncilRole, model: ModelDescriptor) -> Any:
+        agent.live_lock = self.live_lock
+        agent._fallback_providers = self._fallbacks_for(role, model)
+        return agent
+
     def create_planner(self, run_id: str) -> PlannerAgent:
         roles = self.get_role_mapping(run_id)
         model = roles[CouncilRole.PLANNER]
@@ -56,8 +96,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.PLANNER, model)
 
     def create_coder(self, run_id: str) -> CoderAgent:
         roles = self.get_role_mapping(run_id)
@@ -66,8 +105,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.CODER, model)
 
     def create_reviewer(self, run_id: str) -> ReviewerAgent:
         roles = self.get_role_mapping(run_id)
@@ -76,8 +114,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.REVIEWER, model)
 
     def create_challenger(self, run_id: str) -> ChallengerAgent:
         roles = self.get_role_mapping(run_id)
@@ -86,8 +123,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.CHALLENGER, model)
 
     def create_synthesizer(self, run_id: str) -> SynthesizerAgent:
         roles = self.get_role_mapping(run_id)
@@ -96,8 +132,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.SYNTHESIZER, model)
 
     def create_scalability_critic(self, run_id: str) -> ScalabilityCritic:
         roles = self.get_role_mapping(run_id)
@@ -106,8 +141,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.CHALLENGER, model)
 
     def create_security_critic(self, run_id: str) -> SecurityCritic:
         roles = self.get_role_mapping(run_id)
@@ -116,8 +150,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.REVIEWER, model)
 
     def create_performance_critic(self, run_id: str) -> PerformanceCritic:
         roles = self.get_role_mapping(run_id)
@@ -126,8 +159,7 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.REVIEWER, model)
 
     def create_maintainability_critic(self, run_id: str) -> MaintainabilityCritic:
         roles = self.get_role_mapping(run_id)
@@ -136,5 +168,4 @@ class CouncilAgentFactory:
             model=model,
             provider=self.provider_registry.get_or_raise(model.provider_id),
         )
-        agent.live_lock = self.live_lock
-        return agent
+        return self._finish(agent, CouncilRole.REVIEWER, model)

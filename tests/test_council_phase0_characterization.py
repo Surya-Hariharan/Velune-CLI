@@ -265,7 +265,6 @@ async def test_disable_critics_skips_challenger_and_critics(monkeypatch):
 # ── Issue 4: deterministic per-agent fallback ────────────────────────────────
 
 
-@xfail("Issue 4: agents are never given fallback providers, so a downed seat is just lost")
 async def test_reviewer_falls_back_to_the_configured_provider(monkeypatch):
     from velune.core.errors.provider import ProviderConnectionError
     from velune.kernel.config import VeluneConfig

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC
+from collections.abc import Callable
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -71,6 +72,9 @@ class BaseCouncilAgent(ABC):
         self._fallback_providers: list[tuple[ModelProvider, ModelDescriptor]] = (
             fallback_providers or []
         )
+        # Called as (seat, from_model, to_model) when a fallback answers; the
+        # orchestrator points it at the progress stream.
+        self.on_fallback: Callable[[str, str, str], None] | None = None
         # Cache manager — one per agent instance so fingerprint history is
         # preserved across consecutive deliberations within the same run.
         from velune.context.cache.manager import make_cache_manager
@@ -146,7 +150,6 @@ class BaseCouncilAgent(ABC):
             import time
 
             from velune.cognition.execution_trace import (
-                CallReason,
                 current_reason,
                 current_trace,
             )
@@ -279,6 +282,11 @@ class BaseCouncilAgent(ABC):
                 logger.error("Agent %s timed out after %.0fs", self.role.value, timeout)
                 if _call is not None:
                     _call.finish("timeout", error_type="TimeoutError")
+                fallback = await self._try_fallbacks(
+                    messages, temperature, max_tokens, top_p, timeout, _trace, _call
+                )
+                if fallback is not None:
+                    return fallback
                 if strict:
                     raise CouncilAgentError(
                         "timeout",
@@ -297,57 +305,11 @@ class BaseCouncilAgent(ABC):
                 self._note_provider_failure(self.provider.provider_id, e)
                 logger.error("deliberation failed for agent %s: %s", self.role.value, str(e)[:300])
                 # Attempt fallback providers before giving up.
-                for fb_index, (fb_provider, fb_model) in enumerate(
-                    self._fallback_providers, start=1
-                ):
-                    _fb_call = None
-                    if _trace is not None:
-                        _fb_call = _trace.open_call(
-                            seat=self.seat_name,
-                            component=type(self).__name__,
-                            provider=fb_model.provider_id,
-                            model=fb_model.model_id,
-                            purpose=f"{self.seat_name}.deliberate",
-                            reason=CallReason.FALLBACK,
-                            attempt=fb_index + 1,
-                            streaming=False,
-                            parent_call_id=_call.call_id if _call else None,
-                        )
-                    try:
-                        logger.info(
-                            "Agent %s retrying with fallback provider %s/%s",
-                            self.role.value,
-                            fb_model.provider_id,
-                            fb_model.model_id,
-                        )
-                        fb_request = InferenceRequest(
-                            model_id=fb_model.model_id,
-                            messages=messages,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                            top_p=top_p,
-                        )
-                        fb_response = await asyncio.wait_for(
-                            fb_provider.infer(fb_request),
-                            timeout=timeout,
-                        )
-                        logger.info(
-                            "Agent %s fallback succeeded via %s",
-                            self.role.value,
-                            fb_model.provider_id,
-                        )
-                        if _fb_call is not None:
-                            _fb_call.finish("ok")
-                        return fb_response.content
-                    except Exception as fb_exc:
-                        if _fb_call is not None:
-                            _fb_call.finish("error", error_type=type(fb_exc).__name__)
-                        self._note_provider_failure(fb_model.provider_id, fb_exc)
-                        logger.warning(
-                            "Fallback provider %s also failed: %s",
-                            fb_model.provider_id,
-                            str(fb_exc)[:300],
-                        )
+                fallback = await self._try_fallbacks(
+                    messages, temperature, max_tokens, top_p, timeout, _trace, _call
+                )
+                if fallback is not None:
+                    return fallback
                 if strict:
                     from velune.core.errors.provider import ProviderAuthenticationError
 
@@ -356,6 +318,81 @@ class BaseCouncilAgent(ABC):
                         kind, self.role.value, str(e)[:300], self.seat_name
                     ) from e
                 return f"Deliberation failure inside agent {self.role.value}: {e}"
+
+    async def _try_fallbacks(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int | None,
+        top_p: float,
+        timeout: float,
+        trace,
+        primary_call,
+    ) -> str | None:
+        """Try this seat's fallback (provider, model) pairs in order; the first usable answer wins.
+
+        The chain is fixed when the agent is built (see
+        ``ModelSpecializationMapper.fallback_chain``), so the order is deterministic.
+        Returns ``None`` when there is no fallback or every alternate failed.
+        """
+        from velune.cognition.execution_trace import CallReason
+
+        for fb_index, (fb_provider, fb_model) in enumerate(self._fallback_providers, start=1):
+            fb_call = None
+            if trace is not None:
+                fb_call = trace.open_call(
+                    seat=self.seat_name,
+                    component=type(self).__name__,
+                    provider=fb_model.provider_id,
+                    model=fb_model.model_id,
+                    purpose=f"{self.seat_name}.deliberate",
+                    reason=CallReason.FALLBACK,
+                    attempt=fb_index + 1,
+                    streaming=False,
+                    parent_call_id=primary_call.call_id if primary_call else None,
+                )
+            try:
+                logger.info(
+                    "Agent %s retrying with fallback provider %s/%s",
+                    self.role.value,
+                    fb_model.provider_id,
+                    fb_model.model_id,
+                )
+                fb_request = InferenceRequest(
+                    model_id=fb_model.model_id,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    top_p=top_p,
+                )
+                fb_response = await asyncio.wait_for(
+                    fb_provider.infer(fb_request),
+                    timeout=timeout,
+                )
+                if not (fb_response.content or "").strip():
+                    raise ValueError("the fallback model returned no text")
+                logger.info(
+                    "Agent %s fallback succeeded via %s", self.role.value, fb_model.provider_id
+                )
+                if fb_call is not None:
+                    fb_call.finish("ok")
+                if self.on_fallback is not None:
+                    self.on_fallback(
+                        self.seat_name,
+                        f"{self.provider.provider_id}/{self.model.model_id}",
+                        f"{fb_model.provider_id}/{fb_model.model_id}",
+                    )
+                return fb_response.content
+            except Exception as fb_exc:
+                if fb_call is not None:
+                    fb_call.finish("error", error_type=type(fb_exc).__name__)
+                self._note_provider_failure(fb_model.provider_id, fb_exc)
+                logger.warning(
+                    "Fallback provider %s also failed: %s",
+                    fb_model.provider_id,
+                    str(fb_exc)[:300],
+                )
+        return None
 
     @staticmethod
     def _note_provider_failure(provider_id: str, exc: Exception) -> None:

@@ -134,6 +134,14 @@ class ProvidersConfig(BaseModel):
 
     default_provider: str = "openai"
     fallback_providers: list[str] = Field(default_factory=lambda: ["anthropic", "ollama"])
+    allow_cloud_fallback_from_local: bool = Field(
+        default=False,
+        description=(
+            "Let a council seat whose local model failed fall back to a cloud model from "
+            "'fallback_providers'. Off by default: it would send the seat's prompt (which can "
+            "contain repository code) to a cloud provider."
+        ),
+    )
     cost_threshold_usd: float = Field(
         default=0.01,
         description="Prompt for confirmation before cloud calls estimated to cost more than this (USD). Set to 0 to always ask.",

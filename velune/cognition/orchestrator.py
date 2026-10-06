@@ -34,6 +34,17 @@ from velune.telemetry.cognition import CognitivePerformanceAnalytics
 logger = TracedLogger("velune.cognition.orchestrator")
 
 
+def _fallback_settings(config: Any) -> tuple[tuple[str, ...], bool]:
+    """Per-seat fallback settings from ``config.providers`` (none without a config)."""
+    providers = getattr(config, "providers", None)
+    if providers is None:
+        return (), False
+    raw = getattr(providers, "fallback_providers", None) or []
+    ids = tuple(p for p in raw if isinstance(p, str))
+    allow = getattr(providers, "allow_cloud_fallback_from_local", False) is True
+    return ids, allow
+
+
 class CouncilOrchestrator:
     """Manages model mappings and runs the multi-agent Reasoning Council debate graph."""
 
@@ -84,8 +95,13 @@ class CouncilOrchestrator:
         self.scheduler = CouncilScheduler()
 
         # Extracted Subsystems
+        fallback_ids, allow_cloud_fallback = _fallback_settings(config)
         self.agent_factory = CouncilAgentFactory(
-            provider_registry=self.provider_registry, mapper=self.mapper, live_lock=self._live_lock
+            provider_registry=self.provider_registry,
+            mapper=self.mapper,
+            live_lock=self._live_lock,
+            fallback_provider_ids=fallback_ids,
+            allow_cloud_fallback_from_local=allow_cloud_fallback,
         )
         self.style_resolver = StyleResolver(lineage_memory=self.lineage_memory)
 
@@ -1006,6 +1022,24 @@ class CouncilOrchestrator:
                 if contract.activates(SEAT_MAINTAINABILITY)
                 else None
             )
+
+            def _announce_fallback(seat: str, from_model: str, to_model: str) -> None:
+                if progress_callback is not None:
+                    progress_callback(f"[Fallback] {seat}: {from_model} -> {to_model}")
+
+            for _seat_agent in (
+                coder,
+                planner,
+                reviewer,
+                synthesizer,
+                challenger,
+                scalability_critic,
+                security_critic,
+                performance_critic,
+                maintainability_critic,
+            ):
+                if _seat_agent is not None:
+                    _seat_agent.on_fallback = _announce_fallback
 
             # Emit model assignment event so the REPL can show which model handles each role.
             try:

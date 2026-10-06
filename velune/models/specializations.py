@@ -32,6 +32,16 @@ ROLE_CONTEXT_REQUIREMENTS = {
 }
 
 
+# (scorer task category, latency preference) per role — the same routing map_roles uses.
+ROLE_ROUTING: dict[CouncilRole, tuple[str, str]] = {
+    CouncilRole.PLANNER: ("planning", "medium"),
+    CouncilRole.CODER: ("coding", "medium"),
+    CouncilRole.REVIEWER: ("reasoning", "slow"),
+    CouncilRole.CHALLENGER: ("reasoning", "medium"),
+    CouncilRole.SYNTHESIZER: ("summarization", "fast"),
+}
+
+
 class ModelSpecializationMapper:
     """Intelligent mapper that assigns discovered models to council roles based on scoring and role-specific context bounds."""
 
@@ -154,6 +164,69 @@ class ModelSpecializationMapper:
                 assignments[role] = descriptor
 
         return assignments
+
+    def fallback_chain(
+        self,
+        role: CouncilRole,
+        primary: ModelDescriptor,
+        *,
+        allowed_provider_ids: list[str] | tuple[str, ...],
+        usable_provider_ids: set[str] | None = None,
+        max_n: int = 2,
+        allow_local_to_cloud: bool = False,
+    ) -> list[ModelDescriptor]:
+        """Alternate models for *role* if *primary* fails, in a fixed order.
+
+        A pure function of its arguments and the registry contents: the same inputs give
+        the same chain whatever order models were discovered in. Providers are taken in
+        the order of *allowed_provider_ids* (the user's preference), never the primary's
+        own provider, and only if usable. Per provider the best-scoring model for the
+        role wins, ties broken by model id. A local primary never falls back to a cloud
+        model unless *allow_local_to_cloud* is set.
+        """
+        if max_n <= 0 or not allowed_provider_ids:
+            return []
+        category, latency = ROLE_ROUTING[role]
+        models = self.registry.list_all()
+        chain: list[ModelDescriptor] = []
+        seen = {primary.provider_id}
+        skipped_cloud: list[str] = []
+        for provider_id in allowed_provider_ids:
+            if provider_id in seen:
+                continue
+            seen.add(provider_id)
+            if usable_provider_ids is not None and provider_id not in usable_provider_ids:
+                continue
+            candidates = sorted(
+                (m for m in models if m.provider_id == provider_id), key=lambda m: m.model_id
+            )
+            if primary.is_local and not allow_local_to_cloud:
+                local_only = [m for m in candidates if m.is_local]
+                if candidates and not local_only:
+                    skipped_cloud.append(provider_id)
+                candidates = local_only
+            if not candidates:
+                continue
+            best = self._select_best_model(
+                models=candidates,
+                role_category=category,
+                required_tokens=ROLE_CONTEXT_REQUIREMENTS[role],
+                latency_requirement=latency,
+                local_preferred=primary.is_local,
+            )
+            if best is not None:
+                chain.append(best)
+            if len(chain) >= max_n:
+                break
+        if skipped_cloud and not chain:
+            logger.info(
+                "No fallback for %s: %s are cloud providers and the primary %s is local "
+                "(providers.allow_cloud_fallback_from_local is off).",
+                role.value,
+                ", ".join(skipped_cloud),
+                primary.model_id,
+            )
+        return chain
 
     def _select_best_model(
         self,
