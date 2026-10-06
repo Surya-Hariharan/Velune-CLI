@@ -1378,6 +1378,13 @@ def _check_council_roles() -> dict:
         from velune.models.specializations import CouncilRole, ModelSpecializationMapper
 
         mapper = ModelSpecializationMapper(ModelCapabilityRegistry())
+        override_report = None
+        try:
+            from velune.orchestration.role_assignments import apply_persisted_role_overrides
+
+            override_report = apply_persisted_role_overrides(mapper)
+        except Exception:
+            pass
         try:
             role_map = mapper.map_roles()
         except Exception as exc:
@@ -1387,6 +1394,7 @@ def _check_council_roles() -> dict:
                 "message": f"Role mapping unavailable (no providers discovered): {exc}",
             }
 
+        missed = [m.split("=")[0] for m in mapper.override_misses]
         roles_covered = [r.value for r in CouncilRole if r in role_map]
         roles_missing = [r.value for r in CouncilRole if r not in role_map]
 
@@ -1401,8 +1409,22 @@ def _check_council_roles() -> dict:
             }
 
         role_summary = "  ".join(
-            f"{r.value}→{role_map[r].model_id.split('/')[-1]}" for r in CouncilRole if r in role_map
+            f"{r.value}→{role_map[r].model_id.split('/')[-1]}"
+            + (" (assigned)" if r in mapper.overrides and r.value not in missed else "")
+            for r in CouncilRole
+            if r in role_map
         )
+        if missed:
+            role_summary += f"  |  assigned but unavailable: {', '.join(missed)}"
+        if override_report is not None and override_report.ignored:
+            return {
+                "name": "Council Role Assignments",
+                "status": "warn",
+                "message": (
+                    f"{role_summary}  |  saved role(s) with no effect: "
+                    + ", ".join(sorted(override_report.ignored))
+                ),
+            }
         return {
             "name": "Council Role Assignments",
             "status": "ok",

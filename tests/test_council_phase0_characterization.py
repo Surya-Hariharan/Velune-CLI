@@ -303,7 +303,6 @@ async def test_reviewer_falls_back_to_the_configured_provider(monkeypatch):
 # ── Issue 6: /roles ──────────────────────────────────────────────────────────
 
 
-@xfail("Issue 6: inert roles (embedding/architect/security) can still be assigned")
 def test_inert_roles_cannot_be_assigned():
     from velune.orchestration.role_assignments import CouncilRoleMap
 
@@ -313,7 +312,6 @@ def test_inert_roles_cannot_be_assigned():
             role_map.assign(role, "m", "p")
 
 
-@xfail("Issue 6: one unknown role in the file silently discards every saved assignment")
 def test_one_bad_entry_does_not_discard_the_rest(tmp_path):
     import json
 
@@ -333,7 +331,6 @@ def test_one_bad_entry_does_not_discard_the_rest(tmp_path):
     assert loaded.get("coder") is not None
 
 
-@xfail("Issue 6: the picker offers inert 'embedding' and hides the wired challenger/synthesizer")
 async def test_picker_offers_exactly_the_wired_roles(monkeypatch):
     from velune.cli import councilmodel_ui
     from velune.cli.interactive import CANCEL

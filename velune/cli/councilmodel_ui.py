@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from velune.cli.interactive import BACK, CANCEL, Option, single_select
 from velune.orchestration.role_assignments import (
-    COUNCIL_ROLES,
+    EFFECTIVE_ROLES,
     ROLE_DESCRIPTIONS,
     CouncilRoleMap,
 )
@@ -15,10 +15,6 @@ if TYPE_CHECKING:
     from rich.console import Console
 
     from velune.core.types.model import ModelDescriptor
-
-# Roles not yet wired into the orchestrator — excluded from the picker.
-# `/roles show` still lists every role, including these, for visibility.
-_DISABLED_ROLES = {"architect", "security", "challenger", "synthesizer"}
 
 _CLEAR = "\x00clear"
 
@@ -34,9 +30,7 @@ async def run_councilmodel_ui(
     """
     # ── Stage 1: Role selection ────────────────────────────────────────
     role_options = []
-    for role in COUNCIL_ROLES:
-        if role in _DISABLED_ROLES:
-            continue
+    for role in EFFECTIVE_ROLES:
         desc = ROLE_DESCRIPTIONS.get(role, "")
         current = role_map.get(role)
         meta = f"{desc}   currently: {current.model_id}" if current else desc

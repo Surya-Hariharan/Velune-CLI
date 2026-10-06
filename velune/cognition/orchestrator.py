@@ -1043,6 +1043,12 @@ class CouncilOrchestrator:
 
             # Emit model assignment event so the REPL can show which model handles each role.
             try:
+                for _miss in list(getattr(self.mapper, "override_misses", None) or []):
+                    if progress_callback is not None:
+                        progress_callback(
+                            f"[Model Assignment] assigned model {_miss} is unavailable; "
+                            "using automatic routing"
+                        )
                 _role_map = self.agent_factory.get_role_mapping(run_id)
                 _assignment_str = "  |  ".join(
                     f"{_role.value}: {_desc.model_id}" for _role, _desc in _role_map.items()

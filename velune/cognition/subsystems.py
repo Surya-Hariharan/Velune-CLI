@@ -1,3 +1,5 @@
+import logging
+
 from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 
@@ -14,6 +16,14 @@ def _create_council_orchestrator(env: RuntimeEnvironment):
     provider_registry = env.container.get("runtime.provider_registry")
     model_registry = env.container.get("runtime.model_registry")
     model_specialization = ModelSpecializationMapper(model_registry)
+    try:
+        from velune.orchestration.role_assignments import apply_persisted_role_overrides
+
+        apply_persisted_role_overrides(model_specialization)
+    except Exception as exc:  # never block startup on a bad assignments file
+        logging.getLogger("velune.cognition.subsystems").warning(
+            "Could not apply saved council role assignments: %s", exc
+        )
     sqlite_manager = (
         env.container.get("runtime.sqlite_manager")
         if env.container.has("runtime.sqlite_manager")

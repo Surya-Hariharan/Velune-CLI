@@ -55,6 +55,12 @@ class ModelSpecializationMapper:
         self.scorer = scorer or ModelScorer()
         self.profiler = profiler or ModelProfiler()
         self.overrides: dict[CouncilRole, str] = {}
+        # Provider of an assigned model, when known (disambiguates one model id on two
+        # providers). Roles assigned without one resolve by model id alone.
+        self.override_providers: dict[CouncilRole, str] = {}
+        # 'role=model' for every assigned model the registry could not resolve during
+        # the latest map_roles() call; those roles fell back to automatic routing.
+        self.override_misses: list[str] = []
 
     def map_roles(
         self,
@@ -158,10 +164,18 @@ class ModelSpecializationMapper:
                     assignments[role] = default_model
 
         # Apply explicitly assigned overrides
+        self.override_misses = []
         for role, overridden_model_id in self.overrides.items():
-            descriptor = self.registry.get(overridden_model_id)
+            descriptor = self.registry.get(overridden_model_id, self.override_providers.get(role))
             if descriptor:
                 assignments[role] = descriptor
+            else:
+                self.override_misses.append(f"{role.value}={overridden_model_id}")
+                logger.warning(
+                    "Assigned model %r for role %s is not available; using automatic routing.",
+                    overridden_model_id,
+                    role.value,
+                )
 
         return assignments
 
