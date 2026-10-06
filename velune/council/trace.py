@@ -26,6 +26,11 @@ class TraceEventKind(StrEnum):
     CONTRACT_VIOLATION = "contract_violation"
     CANCELLED = "cancelled"
     RUN_FINISHED = "run_finished"
+    # Deliberative stages (R0/R1). Details carry field paths or type names only, never text.
+    SEAT_REPAIR = "seat_repair"
+    SEAT_FALLBACK = "seat_fallback"
+    FRAME_FALLBACK = "frame_fallback"
+    SEAT_ERROR = "seat_error"
 
 
 class CouncilTraceEvent(Contract):

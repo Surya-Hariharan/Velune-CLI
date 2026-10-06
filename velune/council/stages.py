@@ -7,7 +7,7 @@ contract rather than a convention: R1 declares no perspective reads at all.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import Field, model_validator
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from velune.council.state import StageContext
 
 __all__ = [
+    "EXPLORATION_PLAN",
     "STAGE_CONTRACTS",
     "QuorumRule",
     "ReadRule",
@@ -40,6 +41,7 @@ __all__ = [
     "StageOutput",
     "StagePlan",
     "VisibilityPolicy",
+    "validate_plan",
 ]
 
 
@@ -204,6 +206,22 @@ class StagePlan:
         if depth is Depth.QUICK:
             return tuple(s for s in STAGE_ORDER if s not in cls._SKIPPED_WHEN_QUICK)
         return STAGE_ORDER
+
+
+# The Phase 2A partial plan: frame and perspectives only. It ends before arbitration and synthesis,
+# so a run over it produces evidence (a frame and perspectives) and never an answer.
+EXPLORATION_PLAN: tuple[StageId, ...] = (StageId.FRAME, StageId.PERSPECTIVES)
+
+
+def validate_plan(plan: Sequence[StageId]) -> tuple[StageId, ...]:
+    """A plan must be non-empty and an ordered subsequence of the protocol stages."""
+    stages = tuple(plan)
+    if not stages:
+        raise ValueError("a stage plan cannot be empty")
+    positions = [STAGE_ORDER.index(stage) for stage in stages]
+    if positions != sorted(set(positions)):
+        raise ValueError("a stage plan must list protocol stages in order, without repeats")
+    return stages
 
 
 class VisibilityPolicy:

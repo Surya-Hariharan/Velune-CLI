@@ -43,6 +43,7 @@ from velune.council.stages import (
     StageOutput,
     StagePlan,
     VisibilityPolicy,
+    validate_plan,
 )
 from velune.council.state import CouncilState, StageContext, StageView
 from velune.council.trace import TraceEventKind, TraceLog
@@ -103,8 +104,10 @@ class StagedCouncilRunner:
             indexed[stage_id] = stage
         return indexed
 
-    async def run(self, request: CouncilRequest) -> CouncilOutcome:
-        """Run the plan for ``request.depth``. Raises ``CouncilCancelled`` if cancelled.
+    async def run(
+        self, request: CouncilRequest, *, plan: Sequence[StageId] | None = None
+    ) -> CouncilOutcome:
+        """Run ``plan`` (default: the plan for ``request.depth``). Raises ``CouncilCancelled`` if cancelled.
 
         An unknown or non-runnable profile raises before anything starts: that is a caller error,
         not a run failure.
@@ -117,13 +120,18 @@ class StagedCouncilRunner:
             run_id=self._ids.next_id("run"),
             trace=trace,
         )
-        trace.emit(TraceEventKind.RUN_STARTED, detail=state.run_id)
-        plan = StagePlan.for_depth(request.depth)
+        stages_planned = (
+            validate_plan(plan) if plan is not None else StagePlan.for_depth(request.depth)
+        )
+        trace.emit(
+            TraceEventKind.RUN_STARTED,
+            detail=f"{state.run_id} plan={','.join(s.value for s in stages_planned)}",
+        )
         started = self._clock.monotonic()
         current: StageId | None = None
         try:
             failed_stage: StageId | None = None
-            for index, stage_id in enumerate(plan):
+            for index, stage_id in enumerate(stages_planned):
                 current = stage_id
                 if failed_stage is not None:
                     reason = f"upstream_failed:{failed_stage.value}"
@@ -135,7 +143,7 @@ class StagedCouncilRunner:
                     )
                     continue
                 remaining = request.settings.wall_budget_s - (self._clock.monotonic() - started)
-                result = await self._run_stage(state, plan[index:], remaining)
+                result = await self._run_stage(state, stages_planned[index:], remaining)
                 state.stage_results.append(result)
                 if result.status is StageStatus.FAILED:
                     failed_stage = stage_id
