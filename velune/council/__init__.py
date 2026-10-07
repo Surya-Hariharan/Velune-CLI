@@ -51,7 +51,14 @@ from velune.council.profiles import (
     SeatSpec,
     default_registry,
 )
-from velune.council.report import frame_of, perspectives_of
+from velune.council.report import (
+    FinalPosition,
+    critiques_of,
+    final_positions,
+    frame_of,
+    perspectives_of,
+    revisions_of,
+)
 from velune.council.request import (
     CouncilRequest,
     CouncilSettings,
@@ -66,9 +73,12 @@ from velune.council.results import (
     StageResult,
     StageStatus,
 )
+from velune.council.review import ReviewStage
+from velune.council.revision import RevisionStage
 from velune.council.runner import CouncilCancelled, StagedCouncilRunner
 from velune.council.serialization import canonical_json, digest
 from velune.council.stages import (
+    DELIBERATION_PLAN,
     EXPLORATION_PLAN,
     STAGE_CONTRACTS,
     Stage,
@@ -81,6 +91,7 @@ from velune.council.state import StageContext, StageView, VisibilityViolation
 from velune.council.topology import ProfileAssignments
 
 __all__ = [
+    "DELIBERATION_PLAN",
     "EXPLORATION_PLAN",
     "GENERAL_PROFILE",
     "STAGE_CONTRACTS",
@@ -101,6 +112,7 @@ __all__ = [
     "Depth",
     "DigestAssignmentSource",
     "EvidenceItem",
+    "FinalPosition",
     "Frame",
     "FrameStage",
     "IdSource",
@@ -112,6 +124,8 @@ __all__ = [
     "PromptSource",
     "QuorumRule",
     "ReadScope",
+    "ReviewStage",
+    "RevisionStage",
     "ResponseRequirements",
     "Revision",
     "ReviewAssignment",
@@ -137,8 +151,11 @@ __all__ = [
     "VisibilityPolicy",
     "VisibilityViolation",
     "canonical_json",
+    "critiques_of",
     "default_registry",
     "digest",
+    "final_positions",
     "frame_of",
     "perspectives_of",
+    "revisions_of",
 ]

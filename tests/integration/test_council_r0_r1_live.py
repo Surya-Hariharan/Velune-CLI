@@ -83,3 +83,62 @@ async def test_live_explore_produces_typed_independent_perspectives(tmp_path, mo
         assert trace.unexplained_calls() == []
     finally:
         await lifecycle.shutdown()
+
+
+async def test_live_deliberate_reviews_and_revises_without_an_answer(tmp_path, monkeypatch):
+    monkeypatch.setenv("VELUNE_COGNITION__COUNCIL_ENGINE", "deliberative")
+
+    from velune.cognition.execution_trace import trace_request
+    from velune.core.runtime import build_runtime
+    from velune.council.adapters.engine import DeliberativeEngine
+    from velune.council.report import (
+        critiques_of,
+        final_positions,
+        perspectives_of,
+        revisions_of,
+    )
+    from velune.council.results import OutcomeStatus
+
+    runtime = build_runtime(tmp_path)
+    container = runtime.container
+    lifecycle = container.get("runtime.lifecycle")
+    await lifecycle.startup()
+    try:
+        await container.get("runtime.model_registry").refresh()
+        engine = DeliberativeEngine.create(container, runtime.config)
+        with trace_request("live-smoke-r3") as trace:
+            outcome = await engine.deliberate(QUESTION)
+
+        assert outcome.answer is None and outcome.artifacts == ()
+        assert outcome.status in (
+            OutcomeStatus.COMPLETED,
+            OutcomeStatus.DEGRADED,
+            OutcomeStatus.FAILED,
+        )
+        perspectives = perspectives_of(outcome)
+        critiques = critiques_of(outcome)
+        revisions = revisions_of(outcome)
+        for target, items in critiques.items():
+            assert all(c.target_seat == target and c.reviewer_seat != target for c in items)
+        for seat, revision in revisions.items():
+            assert revision.seat_id == seat and seat in perspectives
+            original = {c.id for c in perspectives[seat].claims}
+            assert {c.id for c in revision.claims if c.id in original} <= original
+        positions = final_positions(outcome)
+        print(
+            "\nlive R0-R3:",
+            outcome.status.value,
+            "perspectives",
+            len(perspectives),
+            "critique targets",
+            len(critiques),
+            "revisions",
+            len(revisions),
+            "unrevised",
+            sorted(s for s, p in positions.items() if not p.revised),
+            "calls",
+            len(trace.calls),
+        )
+        assert trace.unexplained_calls() == []
+    finally:
+        await lifecycle.shutdown()

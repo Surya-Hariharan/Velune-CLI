@@ -1,14 +1,14 @@
-"""The explicit-opt-in entry point to the deliberative engine (Phase 2A: frame + perspectives).
+"""The explicit-opt-in entry point to the deliberative engine (frame, perspectives, review, revision).
 
 Nothing in Velune calls this module. It is reachable only by code that asks for it, and
 ``DeliberativeEngine.create`` refuses unless ``cognition.council_engine`` is ``"deliberative"``
 (default ``"legacy"``; env ``VELUNE_COGNITION__COUNCIL_ENGINE``). ``/council``, ``/run``, ``ask`` and
 MCP are unchanged whether the flag is on or off.
 
-An exploration run is evidence, not an answer. It runs only the frame and perspectives stages, so
-its outcome has ``answer=None`` even when it succeeds: read the frame and perspectives through
-``velune.council.report`` and never present the outcome to a user as an answer. There is no
-arbitration or synthesis yet.
+Two runs exist, and neither produces an answer. ``explore`` runs the frame and perspectives stages;
+``deliberate`` adds cross review and revision. Both outcomes have ``answer=None`` even when they
+succeed: read the frame, perspectives, critiques and revisions through ``velune.council.report`` and
+never present an outcome to a user as an answer. There is no arbitration or synthesis yet.
 """
 
 from __future__ import annotations
@@ -37,8 +37,11 @@ from velune.council.request import (
     ResponseRequirements,
 )
 from velune.council.results import CouncilOutcome
+from velune.council.review import ReviewStage
+from velune.council.revision import RevisionStage
 from velune.council.runner import StagedCouncilRunner
-from velune.council.stages import EXPLORATION_PLAN
+from velune.council.stages import DELIBERATION_PLAN, EXPLORATION_PLAN
+from velune.council.topology import ProfileAssignments
 
 ENGINE_LEGACY = "legacy"
 ENGINE_DELIBERATIVE = "deliberative"
@@ -135,16 +138,50 @@ class DeliberativeEngine:
         request = self.build_request(
             question, context=context, evidence=evidence, response=response, settings=settings
         )
-        run_id = self._ids.next_id("explore")
+        stages = [FrameStage(self._prompts, self._screen), PerspectiveStage(self._prompts)]
+        return await self._run(request, stages, EXPLORATION_PLAN, "explore")
+
+    async def deliberate(
+        self,
+        question: str,
+        *,
+        context: str = "",
+        evidence: Sequence[EvidenceItem] = (),
+        response: ResponseRequirements | None = None,
+        settings: CouncilSettings | None = None,
+    ) -> CouncilOutcome:
+        """Frame, gather independent perspectives, cross-review them, and let each seat revise.
+
+        Every output another seat will read (the frame, each perspective, each reviewer's critiques)
+        is screened before it is committed. The outcome has no answer; read it with
+        ``velune.council.report``. Raises ``CouncilCancelled`` (carrying the partial outcome) if
+        cancelled.
+        """
+        request = self.build_request(
+            question, context=context, evidence=evidence, response=response, settings=settings
+        )
+        stages = [
+            FrameStage(self._prompts, self._screen),
+            PerspectiveStage(self._prompts, self._screen),
+            ReviewStage(self._prompts, self._screen),
+            RevisionStage(self._prompts),
+        ]
+        return await self._run(request, stages, DELIBERATION_PLAN, "deliberate")
+
+    async def _run(
+        self, request: CouncilRequest, stages: Sequence[Any], plan: Sequence[Any], label: str
+    ) -> CouncilOutcome:
+        run_id = self._ids.next_id(label)
         runner = StagedCouncilRunner(
             registry=self._registry,
-            stages=[FrameStage(self._prompts, self._screen), PerspectiveStage(self._prompts)],
+            stages=stages,
             invoker=self._invoker_factory(self._profile, run_id),
             clock=SystemClock(),
             ids=self._ids,
             trace_sink=RequestTraceSink(),
+            assignments=ProfileAssignments(self._profile),
         )
         if current_trace() is not None:
-            return await runner.run(request, plan=EXPLORATION_PLAN)
+            return await runner.run(request, plan=plan)
         with trace_request(request.request_id):
-            return await runner.run(request, plan=EXPLORATION_PLAN)
+            return await runner.run(request, plan=plan)

@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from velune.council.state import StageContext
 
 __all__ = [
+    "DELIBERATION_PLAN",
     "EXPLORATION_PLAN",
     "STAGE_CONTRACTS",
     "QuorumRule",
@@ -211,6 +212,16 @@ class StagePlan:
 # The Phase 2A partial plan: frame and perspectives only. It ends before arbitration and synthesis,
 # so a run over it produces evidence (a frame and perspectives) and never an answer.
 EXPLORATION_PLAN: tuple[StageId, ...] = (StageId.FRAME, StageId.PERSPECTIVES)
+
+# The Phase 2B partial plan: the exploration plan plus cross review and revision. It still ends before
+# arbitration and synthesis, so a run over it yields a validated record of what each seat first said,
+# what its reviewers objected to and how it revised, and never an answer.
+DELIBERATION_PLAN: tuple[StageId, ...] = (
+    StageId.FRAME,
+    StageId.PERSPECTIVES,
+    StageId.REVIEW,
+    StageId.REVISION,
+)
 
 
 def validate_plan(plan: Sequence[StageId]) -> tuple[StageId, ...]:
