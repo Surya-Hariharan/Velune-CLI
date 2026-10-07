@@ -76,6 +76,17 @@ class PromptSource(Protocol):
 
 
 @runtime_checkable
+class ContentScreen(Protocol):
+    """Judges text a stage is about to send onward. The core holds no safety rules of its own.
+
+    ``False`` means the text must not reach a model. The runtime adapter binds this to the
+    cognitive firewall; with no screen supplied a stage behaves as if everything is allowed.
+    """
+
+    def allows(self, text: str) -> bool: ...
+
+
+@runtime_checkable
 class AssignmentSource(Protocol):
     """Names which authors a viewer is assigned to read (the review graph, a later phase)."""
 

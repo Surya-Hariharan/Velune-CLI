@@ -90,13 +90,14 @@ def exploration_runner(
     prompts: Any = None,
     stages: Any = None,
     sink: Any = None,
+    screen: Any = None,
     clock: Callable[[], Any] = FakeClock,
     **kw: Any,
 ) -> StagedCouncilRunner:
     source = prompts or StaticPrompts()
     return StagedCouncilRunner(
         registry=default_registry(),
-        stages=stages or [FrameStage(source), PerspectiveStage(source)],
+        stages=stages or [FrameStage(source, screen), PerspectiveStage(source)],
         invoker=invoker,
         clock=clock(),
         ids=CounterIds(),

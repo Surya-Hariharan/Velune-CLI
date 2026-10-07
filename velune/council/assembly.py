@@ -83,6 +83,15 @@ def _frame_block(frame: Frame) -> str:
     return f"<frame>{neutralize(json.dumps(fields, sort_keys=True, separators=(',', ':')))}</frame>"
 
 
+def render_frame_context(view: StageView, frame: Frame) -> str:
+    """The text an R1 seat would receive for this frame, minus the evidence R0 may not read.
+
+    Used to screen a Moderator-authored frame before it is committed: the request blocks followed
+    by the same ``<frame>`` block ``build_perspective_call`` appends.
+    """
+    return "\n".join([*_request_blocks(view), _frame_block(frame)])
+
+
 def build_frame_call(
     *,
     view: StageView,

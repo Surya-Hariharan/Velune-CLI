@@ -20,6 +20,7 @@ from velune.cognition.execution_trace import current_trace, trace_request
 from velune.cognition.prompts import deliberation_digest
 from velune.council.adapters.prompts import LibraryPrompts
 from velune.council.adapters.runtime import (
+    FirewallScreen,
     RequestTraceSink,
     RuntimeSeatInvoker,
     SystemClock,
@@ -27,7 +28,7 @@ from velune.council.adapters.runtime import (
 )
 from velune.council.frame import FrameStage
 from velune.council.perspectives import PerspectiveStage
-from velune.council.ports import IdSource, PromptSource, SeatInvoker
+from velune.council.ports import ContentScreen, IdSource, PromptSource, SeatInvoker
 from velune.council.profiles import GENERAL_PROFILE, ProfileRegistry, RoleProfile, default_registry
 from velune.council.request import (
     CouncilRequest,
@@ -70,12 +71,14 @@ class DeliberativeEngine:
         profile: RoleProfile = GENERAL_PROFILE,
         registry: ProfileRegistry | None = None,
         ids: IdSource | None = None,
+        screen: ContentScreen | None = None,
     ) -> None:
         self._invoker_factory = invoker_factory
         self._profile = profile
         self._registry = registry or default_registry()
         self._prompts = prompts or LibraryPrompts(profile)
         self._ids = ids or UuidIds()
+        self._screen = screen if screen is not None else FirewallScreen()
 
     @classmethod
     def create(
@@ -135,7 +138,7 @@ class DeliberativeEngine:
         run_id = self._ids.next_id("explore")
         runner = StagedCouncilRunner(
             registry=self._registry,
-            stages=[FrameStage(self._prompts), PerspectiveStage(self._prompts)],
+            stages=[FrameStage(self._prompts, self._screen), PerspectiveStage(self._prompts)],
             invoker=self._invoker_factory(self._profile, run_id),
             clock=SystemClock(),
             ids=self._ids,

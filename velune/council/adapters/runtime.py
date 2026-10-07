@@ -190,6 +190,22 @@ class RuntimeSeatInvoker:
         )
 
 
+class FirewallScreen:
+    """``ContentScreen`` over the cognitive firewall, using the scan ``deliberate()`` itself runs.
+
+    The text is judged as one user message, which is how the model-bound request carries it, so a
+    frame refused here is exactly one the provider path would have blocked.
+    """
+
+    def __init__(self) -> None:
+        from velune.cognition.firewall import CognitiveFirewall
+
+        self._firewall = CognitiveFirewall()
+
+    def allows(self, text: str) -> bool:
+        return bool(self._firewall.scan_conversation([{"role": "user", "content": text}]))
+
+
 class RequestTraceSink:
     """Projects core trace events onto the active ``RequestTrace`` (one node per stage).
 
