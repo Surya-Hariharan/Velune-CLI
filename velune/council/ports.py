@@ -94,6 +94,17 @@ class AssignmentSource(Protocol):
 
 
 @runtime_checkable
+class DigestAssignmentSource(AssignmentSource, Protocol):
+    """An assignment source that also scopes which authors a viewer may read as a claims digest.
+
+    ``None`` means no restriction for that stage and viewer (the Synthesizer's digest of everyone);
+    a tuple restricts the digest to exactly those authors, so an empty tuple grants nothing.
+    """
+
+    def digest_authors(self, stage: StageId, viewer: str) -> tuple[str, ...] | None: ...
+
+
+@runtime_checkable
 class Scheduler(Protocol):
     async def run(
         self,

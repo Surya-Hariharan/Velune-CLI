@@ -16,6 +16,7 @@ from velune.council.contracts import Artifact, Claim
 from velune.council.domain import ArtifactKind, ReadScope, StageId
 from velune.council.ports import (
     AssignmentSource,
+    DigestAssignmentSource,
     Scheduler,
     SeatInvoker,
 )
@@ -155,12 +156,21 @@ class StageView:
             raise VisibilityViolation(
                 f"stage {self._stage.value} has no digest access to {kind.value} artifacts"
             )
+        allowed = self._digest_authors()
         out: list[ClaimDigest] = []
         for item in self._store.all(kind):
+            if allowed is not None and item.author not in allowed:
+                continue
             claims = getattr(item.payload, "claims", None)
             if claims:
                 out.append(ClaimDigest(author=item.author, claims=tuple(claims)))
         return tuple(out)
+
+    def _digest_authors(self) -> tuple[str, ...] | None:
+        """Authors a digest may cover for this viewer, or ``None`` for no restriction."""
+        if isinstance(self._assignments, DigestAssignmentSource):
+            return self._assignments.digest_authors(self._stage, self._viewer)
+        return None
 
     def _author_permitted(self, scopes: list[ReadScope], author: str) -> bool:
         for scope in scopes:

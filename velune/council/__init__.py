@@ -35,6 +35,7 @@ from velune.council.ports import (
     AsyncioScheduler,
     Clock,
     ContentScreen,
+    DigestAssignmentSource,
     IdSource,
     PromptSource,
     Scheduler,
@@ -45,6 +46,7 @@ from velune.council.ports import (
 from velune.council.profiles import (
     GENERAL_PROFILE,
     ProfileRegistry,
+    ReviewAssignment,
     RoleProfile,
     SeatSpec,
     default_registry,
@@ -76,6 +78,7 @@ from velune.council.stages import (
     VisibilityPolicy,
 )
 from velune.council.state import StageContext, StageView, VisibilityViolation
+from velune.council.topology import ProfileAssignments
 
 __all__ = [
     "EXPLORATION_PLAN",
@@ -96,6 +99,7 @@ __all__ = [
     "Criticality",
     "Critique",
     "Depth",
+    "DigestAssignmentSource",
     "EvidenceItem",
     "Frame",
     "FrameStage",
@@ -104,11 +108,13 @@ __all__ = [
     "Perspective",
     "PerspectiveStage",
     "ProfileRegistry",
+    "ProfileAssignments",
     "PromptSource",
     "QuorumRule",
     "ReadScope",
     "ResponseRequirements",
     "Revision",
+    "ReviewAssignment",
     "RoleProfile",
     "Scheduler",
     "SeatCall",

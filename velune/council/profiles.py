@@ -62,6 +62,24 @@ class SeatSpec(BaseModel):
         return self
 
 
+class ReviewAssignment(BaseModel):
+    """Who one seat reviews in R2: peers read in full, and peers audited through a claims digest.
+
+    Data, not behaviour. The stages and the assignment source only read it, so a profile for
+    another domain brings its own graph.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reviewer: str
+    full: tuple[str, ...] = ()
+    digest: tuple[str, ...] = ()
+
+    @property
+    def targets(self) -> tuple[str, ...]:
+        return self.full + self.digest
+
+
 class RoleProfile(BaseModel):
     """A domain's seats. Perspective seats and orchestration seats are separate fields."""
 
@@ -77,6 +95,14 @@ class RoleProfile(BaseModel):
     problem_types: tuple[str, ...] = ("other",)
     runnable: bool = False
     default_quorum: QuorumRule
+    review_graph: tuple[ReviewAssignment, ...] = ()
+
+    def review_for(self, seat_id: str) -> ReviewAssignment | None:
+        """What ``seat_id`` reviews in R2, or ``None`` if it reviews nobody."""
+        for item in self.review_graph:
+            if item.reviewer == seat_id:
+                return item
+        return None
 
     @property
     def orchestration_seats(self) -> tuple[SeatSpec, ...]:
@@ -126,6 +152,21 @@ class RoleProfile(BaseModel):
             raise ValueError("quorum require_any_of must name perspective seats")
         if self.default_quorum.min_ok > len(self.perspective_seats):
             raise ValueError("quorum min_ok exceeds the number of perspective seats")
+        reviewers: set[str] = set()
+        for item in self.review_graph:
+            if item.reviewer not in perspective_ids:
+                raise ValueError(
+                    f"review graph reviewer {item.reviewer!r} is not a perspective seat"
+                )
+            if item.reviewer in reviewers:
+                raise ValueError(f"review graph lists reviewer {item.reviewer!r} twice")
+            reviewers.add(item.reviewer)
+            if len(set(item.targets)) != len(item.targets):
+                raise ValueError(f"{item.reviewer!r} reviews a seat more than once")
+            if item.reviewer in item.targets:
+                raise ValueError(f"{item.reviewer!r} cannot review itself")
+            if not set(item.targets) <= perspective_ids:
+                raise ValueError(f"{item.reviewer!r} reviews a seat that is not a perspective seat")
         return self
 
 
@@ -281,6 +322,18 @@ _GENERAL_DATA = RoleProfile(
     ),
     runnable=True,
     default_quorum=QuorumRule(min_ok=3, require_any_of=("skeptic", "fact_checker")),
+    # Structured selective review: four seats read two role-opposed peers in full and the Fact
+    # Checker audits all four through a claims digest. Analyst and Practicalist therefore lean on
+    # the Fact Checker's digest review for their second reviewer.
+    review_graph=(
+        ReviewAssignment(reviewer="analyst", full=("skeptic", "fact_checker")),
+        ReviewAssignment(reviewer="skeptic", full=("analyst", "creative")),
+        ReviewAssignment(reviewer="creative", full=("skeptic", "practicalist")),
+        ReviewAssignment(
+            reviewer="fact_checker", digest=("analyst", "skeptic", "creative", "practicalist")
+        ),
+        ReviewAssignment(reviewer="practicalist", full=("creative", "fact_checker")),
+    ),
 )
 
 GENERAL_PROFILE = _with_prompt_keys(_GENERAL_DATA, GENERAL_PROMPT_NAMESPACE)
