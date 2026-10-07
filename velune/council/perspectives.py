@@ -15,12 +15,12 @@ from __future__ import annotations
 from typing import Any
 
 from velune.council.assembly import build_perspective_call
-from velune.council.domain import ArtifactKind, SeatKind, StageId
+from velune.council.domain import ArtifactKind, StageId
 from velune.council.drafts import PerspectiveDraft, perspective_from_draft
 from velune.council.ports import PromptSource
 from velune.council.profiles import SeatSpec
-from velune.council.results import SeatResult, SeatStatus
-from velune.council.seatflow import call_and_parse, note_fallback
+from velune.council.results import SeatResult
+from velune.council.seatflow import call_and_parse, note_fallback, run_seat_jobs
 from velune.council.stages import STAGE_CONTRACTS, StageArtifact, StageOutput
 from velune.council.state import StageContext
 from velune.council.trace import TraceEventKind
@@ -64,26 +64,12 @@ class PerspectiveStage:
 
             return go
 
-        outputs = await ctx.scheduler.run(
-            [job(seat) for seat in seats], max_concurrency=ctx.settings.max_concurrency
-        )
-        results: list[SeatResult[Any]] = []
-        for seat, output in zip(seats, outputs, strict=True):
-            if isinstance(output, SeatResult):
-                results.append(output)
-                continue
+        def bug(seat: SeatSpec, exc: Exception) -> None:
             # A bug inside a seat's job is a visible typed failure, never a swallowed success.
-            kind = type(output).__name__
-            events[seat.id].append((TraceEventKind.SEAT_ERROR, {"detail": kind}))
-            results.append(
-                SeatResult.failure(
-                    seat_id=seat.id,
-                    kind=SeatKind.PERSPECTIVE,
-                    stage=StageId.PERSPECTIVES,
-                    status=SeatStatus.PROVIDER_ERROR,
-                    message=f"internal_error:{kind}",
-                )
-            )
+            events[seat.id].append((TraceEventKind.SEAT_ERROR, {"detail": type(exc).__name__}))
+
+        # Finished seats are kept even if the stage deadline passes before the rest finish.
+        results, notes = await run_seat_jobs(ctx, seats, job, on_error=bug)
         for seat in seats:  # profile order, whatever order the seats actually ran in
             for kind, fields in events[seat.id]:
                 ctx.emit(kind, seat=seat.id, **fields)
@@ -93,4 +79,4 @@ class PerspectiveStage:
             for r in results
             if r.ok
         )
-        return StageOutput(seat_results=tuple(results), artifacts=artifacts)
+        return StageOutput(seat_results=tuple(results), artifacts=artifacts, degradations=notes)

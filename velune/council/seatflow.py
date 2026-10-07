@@ -13,8 +13,9 @@ Provider retry and model fallback are not handled here: they live behind the ``S
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, TypeVar
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from velune.cognition.execution_trace import CallReason
 from velune.council.parsing import DraftParseError, parse_and_convert, repair_messages
@@ -22,6 +23,10 @@ from velune.council.ports import SeatCall, SeatInvoker
 from velune.council.results import SeatResult, SeatStatus
 from velune.council.serialization import Contract
 from velune.council.trace import TraceEventKind
+
+if TYPE_CHECKING:
+    from velune.council.profiles import SeatSpec
+    from velune.council.state import StageContext
 
 D = TypeVar("D", bound=Contract)
 
@@ -117,6 +122,85 @@ async def call_and_parse(
         fallback_used=used_fallback,
         elapsed_ms=elapsed,
     )
+
+
+DEADLINE_MARGIN_S = 5.0
+DEADLINE_MARGIN_SHARE = 0.10
+STAGE_DEADLINE = "stage_deadline"
+
+
+def deadline_for(allowance_s: float) -> float:
+    """The helper's own deadline: the stage allowance less a margin, so it fires before the runner's."""
+    return allowance_s - min(DEADLINE_MARGIN_S, allowance_s * DEADLINE_MARGIN_SHARE)
+
+
+async def run_seat_jobs(
+    ctx: StageContext,
+    seats: Sequence[SeatSpec],
+    make_job: Callable[[SeatSpec], Callable[[], Awaitable[SeatResult[Any]]]],
+    *,
+    on_error: Callable[[SeatSpec, Exception], None] | None = None,
+) -> tuple[list[SeatResult[Any]], tuple[str, ...]]:
+    """Run one job per seat through the scheduler, keeping what finished if the stage runs out of time.
+
+    Each job records its result the moment it completes, so when the internal deadline (just before
+    the runner's stage timeout) fires, every seat that already delivered is kept and every other
+    seat becomes a ``timeout`` absence with no payload. A job that raises becomes a typed
+    ``provider_error`` at once, so it is never relabelled ``timeout`` because a sibling ran late.
+    Cancellation is not a timeout: ``CancelledError`` propagates and the scheduler cancels the rest.
+
+    Returns the results in seat order and the degradation notes (``stage_deadline`` if it fired).
+    """
+    done: dict[str, SeatResult[Any]] = {}
+
+    def wrap(seat: SeatSpec) -> Callable[[], Awaitable[SeatResult[Any]]]:
+        job = make_job(seat)
+
+        async def run() -> SeatResult[Any]:
+            try:
+                result = await job()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if on_error is not None:
+                    on_error(seat, exc)
+                result = SeatResult.failure(
+                    seat_id=seat.id,
+                    kind=seat.kind,
+                    stage=ctx.contract.stage,
+                    status=SeatStatus.PROVIDER_ERROR,
+                    message=f"internal_error:{type(exc).__name__}",
+                )
+            done[seat.id] = result
+            return result
+
+        return run
+
+    notes: tuple[str, ...] = ()
+    try:
+        await asyncio.wait_for(
+            ctx.scheduler.run(
+                [wrap(seat) for seat in seats], max_concurrency=ctx.settings.max_concurrency
+            ),
+            timeout=deadline_for(ctx.timeout_s),
+        )
+    except asyncio.TimeoutError:
+        notes = (STAGE_DEADLINE,)
+    results: list[SeatResult[Any]] = []
+    for seat in seats:
+        found = done.get(seat.id)
+        results.append(
+            found
+            if found is not None
+            else SeatResult.failure(
+                seat_id=seat.id,
+                kind=seat.kind,
+                stage=ctx.contract.stage,
+                status=SeatStatus.TIMEOUT,
+                message="the stage deadline passed before this seat finished",
+            )
+        )
+    return results, notes
 
 
 def note_fallback(result: SeatResult[Any], emit: Emit) -> None:
