@@ -76,6 +76,42 @@ def valid_perspective_json(seat_id: str, tag: str = "", /, **overrides: object) 
     return json.dumps(body)
 
 
+def claim_ids_of(seat_id: str, count: int = 3) -> frozenset[str]:
+    """The ids ``valid_perspective_json`` yields for ``seat_id`` (core-assigned by position)."""
+    prefix = GENERAL_PROFILE.seat(seat_id).claim_prefix
+    return frozenset(f"{prefix}-{n}" for n in range(1, count + 1))
+
+
+def valid_review_json(
+    reviewer: str, targets: tuple[str, ...] | list[str], tag: str = "", /, **overrides: object
+) -> str:
+    """A valid R2 reply from ``reviewer`` covering ``targets``, citing each target's own claim ids."""
+    reviews = []
+    for target in targets:
+        mark = sentinel(f"{reviewer}-on-{target}", tag)
+        prefix = GENERAL_PROFILE.seat(target).claim_prefix
+        reviews.append(
+            {
+                "target": target,
+                "steelman": f"{mark} best point",
+                "agreements": [f"{prefix}-2"],
+                "disagreements": [
+                    {
+                        "claim_id": f"{prefix}-1",
+                        "objection": f"{mark} objection",
+                        "kind": "unsupported",
+                        "severity": "major",
+                        "suggested_resolution": f"{mark} resolution",
+                    }
+                ],
+                "confidence": 0.6,
+            }
+        )
+    body: dict = {"reviews": reviews}
+    body.update(overrides)
+    return json.dumps(body)
+
+
 def make_request(**kw) -> CouncilRequest:
     base = {"request_id": "req-1", "question": "Which database should we pick?"}
     base.update(kw)
