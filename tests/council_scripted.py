@@ -173,3 +173,59 @@ def review_reply(tag: str = ""):
         return valid_review_json(call.seat_id, targets_in(call), tag)
 
     return reply
+
+
+REQUIRED_TAG = re.compile(r"<required_responses>(.*?)</required_responses>")
+
+
+def required_in(call) -> list[dict]:
+    """The objections a recorded revision call says must be answered."""
+    system = next(m.content for m in call.messages if m.role == "system")
+    return json.loads(REQUIRED_TAG.search(system).group(1))
+
+
+def valid_revision_json(seat_id: str, required: list[dict], tag: str = "", /, **overrides) -> str:
+    """A revising reply: accepts every required objection and edits the seat's first claim."""
+    prefix = GENERAL_PROFILE.seat(seat_id).claim_prefix
+    mark = sentinel(f"{seat_id}-revised", tag)
+    body: dict = {
+        "responses": [
+            {**item, "decision": "accept", "note": f"{mark} accepted {item['reviewer']}"}
+            for item in required
+        ],
+        "edits": [
+            {
+                "op": "modify",
+                "claim_id": f"{prefix}-1",
+                "text": f"{mark} revised first claim",
+                "reason": f"{mark} reason",
+                "caused_by": [required[0]],
+            }
+        ],
+        "confidence": 0.5,
+        "remaining_uncertainties": [f"{mark} still unknown"],
+    }
+    body.update(overrides)
+    return json.dumps(body)
+
+
+def revision_reply(tag: str = "", **overrides):
+    """A script entry answering any revision call with a valid revising reply."""
+
+    def reply(call) -> str:
+        return valid_revision_json(call.seat_id, required_in(call), tag, **overrides)
+
+    return reply
+
+
+def reaffirming_reply(tag: str = ""):
+    """A script entry that rejects every objection and changes nothing."""
+
+    def reply(call) -> str:
+        mark = sentinel(f"{call.seat_id}-kept", tag)
+        responses = [
+            {**item, "decision": "reject", "note": f"{mark} rejected"} for item in required_in(call)
+        ]
+        return json.dumps({"responses": responses})
+
+    return reply

@@ -28,6 +28,8 @@ KEYS = (
     "council.general.practicalist",
     "council.general.shared.review",
     "council.general.mode.review",
+    "council.general.shared.revision",
+    "council.general.mode.revision",
     "council.general.lens.analyst",
     "council.general.lens.skeptic",
     "council.general.lens.creative",

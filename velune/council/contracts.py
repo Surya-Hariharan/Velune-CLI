@@ -224,6 +224,8 @@ class Revision(Contract):
     changes: tuple[Change, ...] = ()
     accepted: tuple[CritiqueResponse, ...] = ()
     rejected: tuple[CritiqueResponse, ...] = ()
+    # Objections the seat could neither accept nor reject for lack of evidence.
+    deferred: tuple[CritiqueResponse, ...] = ()
     revised_position: Text400
     claims: tuple[Claim, ...] = Field(min_length=1, max_length=8)
     revised_confidence: Confidence

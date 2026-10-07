@@ -24,6 +24,7 @@ from velune.council.drafts import FrameDraft, PerspectiveDraft, fallback_frame
 from velune.council.ports import PromptSource, SeatCall, SeatMessage
 from velune.council.profiles import RoleProfile, SeatSpec
 from velune.council.reviewdrafts import ReviewReplyDraft
+from velune.council.revisiondrafts import RevisionDraft, required_responses
 from velune.council.serialization import canonical_json
 from velune.council.state import ClaimDigest, StageView
 
@@ -304,4 +305,71 @@ def render_critique_context(view: StageView, critiques: Sequence[tuple[SeatSpec,
     """What R3 would send onward for these critiques, for screening before they are committed."""
     return "\n".join(
         [*_request_blocks(view), *(render_critique(spec, item) for spec, item in critiques)]
+    )
+
+
+# ── R3: a seat's revision request ───────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RevisionMaterial:
+    """A seat's own R1 perspective and the critiques addressed to it, both read through its own view.
+
+    ``critiques`` are in profile order of the reviewer, which fixes how objections are numbered.
+    """
+
+    own: Perspective
+    critiques: tuple[tuple[SeatSpec, Critique], ...]
+
+    @property
+    def reviewed(self) -> tuple[tuple[str, Critique], ...]:
+        return tuple((spec.id, critique) for spec, critique in self.critiques)
+
+
+def build_revision_call(
+    *,
+    view: StageView,
+    seat: SeatSpec,
+    material: RevisionMaterial,
+    prompts: PromptSource,
+    timeout_s: float,
+) -> SeatCall:
+    """The R3 request for one seat: the shared request, its own R1 perspective, its own critiques.
+
+    Critiques addressed to anyone else, other seats' perspectives and revisions, and later stages are
+    not inputs; the stage hands over only what the seat's own view granted.
+    """
+    required = [
+        {"reviewer": reviewer, "objection": number}
+        for reviewer, number in required_responses(material.reviewed)
+    ]
+    system = _system(
+        prompts.shared_prompt(StageId.REVISION),
+        prompts.role_prompt(seat.id, StageId.REVISION),
+        [
+            _seat_block(seat),
+            f'<stage id="{StageId.REVISION.value}"/>',
+            f"<required_responses>{_compact(required)}</required_responses>",
+        ],
+        RevisionDraft,
+    )
+    blocks = _request_blocks(view)
+    for item in view.evidence():
+        source = f' source="{neutralize(item.source)}"' if item.source else ""
+        blocks.append(
+            f'<evidence id="{neutralize(item.id)}"{source}>{neutralize(item.text)}</evidence>'
+        )
+    blocks.append(_frame_block(frame_for(view)))
+    blocks.append(render_own_perspective(material.own))
+    blocks.extend(render_critique(spec, critique) for spec, critique in material.critiques)
+    return SeatCall(
+        seat_id=seat.id,
+        kind=seat.kind,
+        stage=StageId.REVISION,
+        messages=(
+            SeatMessage(role="system", content=system),
+            SeatMessage(role="user", content="\n".join(blocks)),
+        ),
+        reason=CallReason.REVISION,
+        timeout_s=timeout_s,
     )

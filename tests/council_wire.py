@@ -18,6 +18,7 @@ from tests.council_scripted import (
     StaticPrompts,
     make_request,
     review_reply,
+    revision_reply,
     valid_frame_json,
     valid_perspective_json,
 )
@@ -28,6 +29,7 @@ from velune.council.frame import FrameStage
 from velune.council.perspectives import PerspectiveStage
 from velune.council.profiles import GENERAL_PROFILE, default_registry
 from velune.council.review import ReviewStage
+from velune.council.revision import RevisionStage
 from velune.council.runner import StagedCouncilRunner
 from velune.council.stages import EXPLORATION_PLAN
 from velune.council.topology import ProfileAssignments
@@ -35,6 +37,7 @@ from velune.council.topology import ProfileAssignments
 SEAT_TAG = re.compile(r'<seat id="([a-z_]+)">')
 STAGE_TAG = re.compile(r'<stage id="([a-z_]+)"/>')
 UP_TO_REVIEW = (StageId.FRAME, StageId.PERSPECTIVES, StageId.REVIEW)
+UP_TO_REVISION = (*UP_TO_REVIEW, StageId.REVISION)
 
 
 def _system_of(request: Any) -> str:
@@ -92,6 +95,8 @@ class ScriptedProvider(FakeProvider):
             return valid_frame_json(question_restated=f"FRAME-{self.tag or 'base'} restated")
         if stage == "review":
             return review_reply(self.review_tag)(_ShimCall(seat, request))
+        if stage == "revision":
+            return revision_reply(self.tag)(_ShimCall(seat, request))
         return valid_perspective_json(seat, self.tag)
 
     def requests_for(self, seat: str, stage: str | None = None) -> list[Any]:
@@ -120,6 +125,15 @@ def wire_review_reply(tag: str = ""):
 
     def reply(request: Any) -> str:
         return review_reply(tag)(_ShimCall(seat_in(request), request))
+
+    return reply
+
+
+def wire_revision_reply(tag: str = "", **overrides: Any):
+    """A ``ScriptedProvider`` script entry answering a revision request with a valid reply."""
+
+    def reply(request: Any) -> str:
+        return revision_reply(tag, **overrides)(_ShimCall(seat_in(request), request))
 
     return reply
 
@@ -179,6 +193,7 @@ def deliberation_runner(
             FrameStage(source, screen),
             PerspectiveStage(source, screen),
             ReviewStage(source, screen),
+            RevisionStage(source),
         ],
         invoker=invoker,
         clock=clock(),
