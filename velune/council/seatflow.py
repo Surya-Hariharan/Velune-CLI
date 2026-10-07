@@ -203,6 +203,53 @@ async def run_seat_jobs(
     return results, notes
 
 
+class SeatEvents:
+    """Trace events raised inside parallel seat jobs, flushed afterwards in seat order.
+
+    Jobs run in whatever order the scheduler picks; flushing in seat order makes the trace the same
+    at any concurrency.
+    """
+
+    def __init__(self, seats: Sequence[SeatSpec]) -> None:
+        self._events: dict[str, list[tuple[TraceEventKind, dict[str, Any]]]] = {
+            seat.id: [] for seat in seats
+        }
+
+    def emitter(self, seat: SeatSpec) -> Emit:
+        def emit(kind: TraceEventKind, **fields: Any) -> None:
+            fields.pop("seat", None)  # the flush attributes events to the seat
+            self._events[seat.id].append((kind, fields))
+
+        return emit
+
+    def record_error(self, seat: SeatSpec, exc: Exception) -> None:
+        self._events[seat.id].append((TraceEventKind.SEAT_ERROR, {"detail": type(exc).__name__}))
+
+    def flush(self, ctx: StageContext, seats: Sequence[SeatSpec]) -> None:
+        for seat in seats:
+            for kind, fields in self._events[seat.id]:
+                ctx.emit(kind, seat=seat.id, **fields)
+
+
+def refuse(result: SeatResult[Any], why: str) -> SeatResult[Any]:
+    """Turn a delivered result the content screen refused into a ``blocked`` absence.
+
+    The payload is dropped (a seat that did not deliver carries none); the seat's model identity,
+    attempts and timing are kept so the record still says what ran.
+    """
+    return SeatResult.failure(
+        seat_id=result.seat_id,
+        kind=result.kind,
+        stage=result.stage,
+        status=SeatStatus.BLOCKED,
+        message=why,
+        model=result.model,
+        attempts=result.attempts,
+        fallback_used=result.fallback_used,
+        elapsed_ms=result.elapsed_ms,
+    )
+
+
 def note_fallback(result: SeatResult[Any], emit: Emit) -> None:
     """Record that a different model answered. This is information, not degradation."""
     if result.fallback_used and result.model is not None:

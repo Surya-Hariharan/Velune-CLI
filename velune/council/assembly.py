@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from velune.cognition.execution_trace import CallReason
-from velune.council.contracts import Frame, Perspective
+from velune.council.contracts import Critique, Frame, Perspective
 from velune.council.domain import ArtifactKind, StageId
 from velune.council.drafts import FrameDraft, PerspectiveDraft, fallback_frame
 from velune.council.ports import PromptSource, SeatCall, SeatMessage
@@ -269,4 +269,39 @@ def build_review_call(
         ),
         reason=CallReason.REVIEW,
         timeout_s=timeout_s,
+    )
+
+
+def render_perspective_context(view: StageView, spec: SeatSpec, perspective: Perspective) -> str:
+    """What R2 would send onward for a delivered perspective, for screening before it is committed."""
+    return "\n".join(
+        [
+            *_request_blocks(view),
+            _frame_block(frame_for(view)),
+            render_peer_perspective(spec, perspective),
+        ]
+    )
+
+
+_CRITIQUE_BOOKKEEPING = ("reviewer_seat", "target_seat", "schema_version")
+_CRITIQUE_FIELDS = ("steelman", "agreements", "disagreements", "no_material_issues", "confidence")
+
+
+def render_critique(reviewer: SeatSpec, critique: Critique) -> str:
+    """A critique as its target sees it: objections numbered from 1 so a revision can cite them."""
+    fields = json.loads(canonical_json(critique))
+    body = {name: fields[name] for name in _CRITIQUE_FIELDS}
+    body["disagreements"] = [
+        {"n": index, **item} for index, item in enumerate(body["disagreements"], start=1)
+    ]
+    return (
+        f'<critique from="{reviewer.id}" role="{neutralize(reviewer.display_name)}">'
+        f"{neutralize(_compact(body))}</critique>"
+    )
+
+
+def render_critique_context(view: StageView, critiques: Sequence[tuple[SeatSpec, Critique]]) -> str:
+    """What R3 would send onward for these critiques, for screening before they are committed."""
+    return "\n".join(
+        [*_request_blocks(view), *(render_critique(spec, item) for spec, item in critiques)]
     )

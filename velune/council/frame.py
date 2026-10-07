@@ -17,8 +17,7 @@ from velune.council.assembly import build_frame_call, render_frame_context
 from velune.council.domain import ArtifactKind, StageId
 from velune.council.drafts import FrameDraft, fallback_frame, frame_from_draft
 from velune.council.ports import ContentScreen, PromptSource
-from velune.council.results import SeatResult, SeatStatus
-from velune.council.seatflow import call_and_parse, note_fallback
+from velune.council.seatflow import call_and_parse, note_fallback, refuse
 from velune.council.stages import STAGE_CONTRACTS, StageArtifact, StageOutput
 from velune.council.state import StageContext
 from velune.council.trace import TraceEventKind
@@ -56,17 +55,7 @@ class FrameStage:
             # The frame is model output that every R1 seat would be sent. If the screen refuses
             # it, the Moderator is treated as blocked and the hostile frame is never committed.
             if not self._screen.allows(render_frame_context(view, result.payload)):
-                result = SeatResult.failure(
-                    seat_id=result.seat_id,
-                    kind=result.kind,
-                    stage=result.stage,
-                    status=SeatStatus.BLOCKED,
-                    message="the frame was refused by the content screen",
-                    model=result.model,
-                    attempts=result.attempts,
-                    fallback_used=result.fallback_used,
-                    elapsed_ms=result.elapsed_ms,
-                )
+                result = refuse(result, "the frame was refused by the content screen")
         if result.ok:
             payload = result.payload
             stand_in = False

@@ -8,41 +8,43 @@ stage ends, so concurrency cannot leak either.
 A seat that did not deliver contributes a typed failure and no artifact. Nothing is substituted for
 it. Trace events raised inside a seat's job are buffered and flushed in profile order so the trace
 is the same however the seats were scheduled.
+
+With a ``ContentScreen`` each delivered perspective is also checked as R2 would render it for a
+reviewer, before it is committed. A refused perspective is a ``blocked`` absence, so one hostile
+perspective cannot block the reviewers who would have read it.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from velune.council.assembly import build_perspective_call
+from velune.council.assembly import build_perspective_call, render_perspective_context
 from velune.council.domain import ArtifactKind, StageId
 from velune.council.drafts import PerspectiveDraft, perspective_from_draft
-from velune.council.ports import PromptSource
+from velune.council.ports import ContentScreen, PromptSource
 from velune.council.profiles import SeatSpec
 from velune.council.results import SeatResult
-from velune.council.seatflow import call_and_parse, note_fallback, run_seat_jobs
+from velune.council.seatflow import SeatEvents, call_and_parse, note_fallback, refuse, run_seat_jobs
 from velune.council.stages import STAGE_CONTRACTS, StageArtifact, StageOutput
 from velune.council.state import StageContext
-from velune.council.trace import TraceEventKind
 
 
 class PerspectiveStage:
     contract = STAGE_CONTRACTS[StageId.PERSPECTIVES]
 
-    def __init__(self, prompts: PromptSource) -> None:
+    def __init__(self, prompts: PromptSource, screen: ContentScreen | None = None) -> None:
         self._prompts = prompts
+        self._screen = screen
 
     def _seats(self, ctx: StageContext) -> tuple[SeatSpec, ...]:
         return ctx.profile.perspective_seats
 
     async def run(self, ctx: StageContext) -> StageOutput:
         seats = self._seats(ctx)
-        events: dict[str, list[tuple[TraceEventKind, dict[str, Any]]]] = {s.id: [] for s in seats}
+        events = SeatEvents(seats)
 
         def job(seat: SeatSpec):
-            def buffer(kind: TraceEventKind, **fields: Any) -> None:
-                fields.pop("seat", None)  # the flush below attributes events to the seat
-                events[seat.id].append((kind, fields))
+            buffer = events.emitter(seat)
 
             async def go() -> SeatResult[Any]:
                 view = ctx.view_for(seat.id)
@@ -60,20 +62,17 @@ class PerspectiveStage:
                     emit=buffer,
                 )
                 note_fallback(result, buffer)
+                if result.ok and self._screen is not None:
+                    text = render_perspective_context(view, seat, result.payload)
+                    if not self._screen.allows(text):
+                        result = refuse(result, "the perspective was refused by the content screen")
                 return result
 
             return go
 
-        def bug(seat: SeatSpec, exc: Exception) -> None:
-            # A bug inside a seat's job is a visible typed failure, never a swallowed success.
-            events[seat.id].append((TraceEventKind.SEAT_ERROR, {"detail": type(exc).__name__}))
-
         # Finished seats are kept even if the stage deadline passes before the rest finish.
-        results, notes = await run_seat_jobs(ctx, seats, job, on_error=bug)
-        for seat in seats:  # profile order, whatever order the seats actually ran in
-            for kind, fields in events[seat.id]:
-                ctx.emit(kind, seat=seat.id, **fields)
-
+        results, notes = await run_seat_jobs(ctx, seats, job, on_error=events.record_error)
+        events.flush(ctx, seats)
         artifacts = tuple(
             StageArtifact(kind=ArtifactKind.PERSPECTIVE, author=r.seat_id, payload=r.payload)
             for r in results

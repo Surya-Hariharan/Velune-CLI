@@ -8,6 +8,7 @@ embed a per-seat sentinel so tests can look for contamination in the messages ac
 from __future__ import annotations
 
 import json
+import re
 
 from velune.cognition.prompts._deliberation import PROMPTS
 from velune.council.contracts import Frame
@@ -154,3 +155,21 @@ def store_with_frame(frame: Frame) -> ArtifactStore:
         )
     )
     return store
+
+
+TARGETS_TAG = re.compile(r"<targets>(.*?)</targets>")
+
+
+def targets_in(call) -> list[str]:
+    """The targets a recorded review call asked for (read from its system prompt)."""
+    system = next(m.content for m in call.messages if m.role == "system")
+    return TARGETS_TAG.search(system).group(1).split(", ")
+
+
+def review_reply(tag: str = ""):
+    """A script entry answering any review call with a valid reply for exactly its targets."""
+
+    def reply(call) -> str:
+        return valid_review_json(call.seat_id, targets_in(call), tag)
+
+    return reply
