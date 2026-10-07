@@ -23,10 +23,18 @@ PERSPECTIVE_SEATS = tuple(s.id for s in GENERAL_PROFILE.perspective_seats)
 class StaticPrompts:
     """``PromptSource`` over the committed deliberation prompts (no premium layer, no I/O)."""
 
-    def shared_prompt(self) -> str:
-        return PROMPTS["council.general.shared"]
+    def shared_prompt(self, stage: StageId) -> str:
+        return PROMPTS.get(
+            f"council.general.shared.{stage.value}", PROMPTS["council.general.shared"]
+        )
 
     def role_prompt(self, seat_id: str, stage: StageId) -> str:
+        if stage in (StageId.REVIEW, StageId.REVISION):
+            return (
+                PROMPTS[f"council.general.lens.{seat_id}"]
+                + "\n\n"
+                + PROMPTS[f"council.general.mode.{stage.value}"]
+            )
         return PROMPTS[f"council.general.{seat_id}"]
 
 

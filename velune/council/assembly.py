@@ -13,16 +13,19 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from velune.council.contracts import Frame
+from velune.cognition.execution_trace import CallReason
+from velune.council.contracts import Frame, Perspective
 from velune.council.domain import ArtifactKind, StageId
 from velune.council.drafts import FrameDraft, PerspectiveDraft, fallback_frame
 from velune.council.ports import PromptSource, SeatCall, SeatMessage
 from velune.council.profiles import RoleProfile, SeatSpec
+from velune.council.reviewdrafts import ReviewReplyDraft
 from velune.council.serialization import canonical_json
-from velune.council.state import StageView
+from velune.council.state import ClaimDigest, StageView
 
 
 def neutralize(text: str) -> str:
@@ -103,7 +106,7 @@ def build_frame_call(
     spec = profile.moderator
     vocabulary = ", ".join(profile.problem_types)
     system = _system(
-        prompts.shared_prompt(),
+        prompts.shared_prompt(StageId.FRAME),
         prompts.role_prompt(spec.id, StageId.FRAME),
         [_seat_block(spec), f"<problem_types>{neutralize(vocabulary)}</problem_types>"],
         FrameDraft,
@@ -129,7 +132,7 @@ def build_perspective_call(
 ) -> SeatCall:
     """The R1 request for one seat: the request, identical evidence, the typed frame, its own spec."""
     system = _system(
-        prompts.shared_prompt(),
+        prompts.shared_prompt(StageId.PERSPECTIVES),
         prompts.role_prompt(seat.id, StageId.PERSPECTIVES),
         [_seat_block(seat)],
         PerspectiveDraft,
@@ -149,5 +152,121 @@ def build_perspective_call(
             SeatMessage(role="system", content=system),
             SeatMessage(role="user", content="\n".join(blocks)),
         ),
+        timeout_s=timeout_s,
+    )
+
+
+# ── R2: a reviewer's request ────────────────────────────────────────────────
+
+_PERSPECTIVE_BOOKKEEPING = ("seat_id", "schema_version")
+_DIGEST_FIELDS = ("id", "text", "status", "support")
+
+
+@dataclass(frozen=True)
+class ReviewMaterial:
+    """Everything a reviewer may be shown, as the stage gathered it from the reviewer's own view.
+
+    ``order`` is the profile's perspective-seat order, which fixes the order peers are shown in. A
+    peer that did not deliver is simply not here.
+    """
+
+    own: Perspective
+    order: tuple[str, ...]
+    full: tuple[tuple[SeatSpec, Perspective], ...] = ()
+    digests: tuple[tuple[SeatSpec, ClaimDigest], ...] = ()
+
+    @property
+    def targets(self) -> tuple[SeatSpec, ...]:
+        specs = (*(spec for spec, _ in self.full), *(spec for spec, _ in self.digests))
+        return tuple(sorted(specs, key=lambda spec: self.order.index(spec.id)))
+
+    def shown_claim_ids(self) -> dict[str, frozenset[str]]:
+        """Target seat -> the claim ids this reviewer was shown for it."""
+        shown = {spec.id: frozenset(c.id for c in p.claims) for spec, p in self.full}
+        shown.update({spec.id: frozenset(c.id for c in d.claims) for spec, d in self.digests})
+        return shown
+
+
+def _perspective_fields(perspective: Perspective) -> dict:
+    fields = json.loads(canonical_json(perspective))
+    for bookkeeping in _PERSPECTIVE_BOOKKEEPING:
+        fields.pop(bookkeeping, None)
+    return fields
+
+
+def _compact(fields: object) -> str:
+    return json.dumps(fields, sort_keys=True, separators=(",", ":"))
+
+
+def render_own_perspective(perspective: Perspective) -> str:
+    return f"<own_perspective>{neutralize(_compact(_perspective_fields(perspective)))}</own_perspective>"
+
+
+def render_peer_perspective(spec: SeatSpec, perspective: Perspective) -> str:
+    """A peer's full perspective, as a reviewer or as the screen sees it."""
+    body = neutralize(_compact(_perspective_fields(perspective)))
+    return f'<peer seat="{spec.id}" role="{neutralize(spec.display_name)}">{body}</peer>'
+
+
+def render_peer_claims(spec: SeatSpec, digest: ClaimDigest) -> str:
+    """A peer's claims only: id, text, label and support. No position, rationale or confidence."""
+    rows = []
+    for claim in digest.claims:
+        fields = json.loads(canonical_json(claim))
+        rows.append({name: fields[name] for name in _DIGEST_FIELDS})
+    body = neutralize(_compact(rows))
+    return (
+        f'<peer_claims seat="{spec.id}" role="{neutralize(spec.display_name)}">{body}</peer_claims>'
+    )
+
+
+def build_review_call(
+    *,
+    view: StageView,
+    seat: SeatSpec,
+    material: ReviewMaterial,
+    prompts: PromptSource,
+    timeout_s: float,
+) -> SeatCall:
+    """The R2 request for one reviewer: the shared request, its own view, and only its assigned peers.
+
+    Everything comes from the reviewer's ``StageView`` and the material the stage gathered through
+    it. Other reviewers' critiques, unassigned peers and later stages are not inputs.
+    """
+    targets = material.targets
+    system = _system(
+        prompts.shared_prompt(StageId.REVIEW),
+        prompts.role_prompt(seat.id, StageId.REVIEW),
+        [
+            _seat_block(seat),
+            f'<stage id="{StageId.REVIEW.value}"/>',
+            f"<targets>{', '.join(spec.id for spec in targets)}</targets>",
+        ],
+        ReviewReplyDraft,
+    )
+    blocks = _request_blocks(view)
+    for item in view.evidence():
+        source = f' source="{neutralize(item.source)}"' if item.source else ""
+        blocks.append(
+            f'<evidence id="{neutralize(item.id)}"{source}>{neutralize(item.text)}</evidence>'
+        )
+    blocks.append(_frame_block(frame_for(view)))
+    blocks.append(render_own_perspective(material.own))
+    full = {spec.id: (spec, perspective) for spec, perspective in material.full}
+    digests = {spec.id: (spec, digest) for spec, digest in material.digests}
+    for spec in targets:
+        if spec.id in full:
+            blocks.append(render_peer_perspective(*full[spec.id]))
+        else:
+            blocks.append(render_peer_claims(*digests[spec.id]))
+    return SeatCall(
+        seat_id=seat.id,
+        kind=seat.kind,
+        stage=StageId.REVIEW,
+        messages=(
+            SeatMessage(role="system", content=system),
+            SeatMessage(role="user", content="\n".join(blocks)),
+        ),
+        reason=CallReason.REVIEW,
         timeout_s=timeout_s,
     )

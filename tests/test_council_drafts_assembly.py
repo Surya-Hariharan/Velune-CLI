@@ -338,7 +338,7 @@ def test_assembly_is_deterministic():
 def test_each_seat_gets_its_own_role_text_and_the_shared_rules():
     systems = {seat: seat_call(seat).messages[0].content for seat in PERSPECTIVE_SEATS}
     assert len(set(systems.values())) == len(PERSPECTIVE_SEATS)
-    shared = PROMPTS.shared_prompt().strip()
+    shared = PROMPTS.shared_prompt(StageId.PERSPECTIVES).strip()
     for seat, system in systems.items():
         assert system.startswith(shared)
         assert PROMPTS.role_prompt(seat, StageId.PERSPECTIVES).strip() in system

@@ -26,6 +26,13 @@ KEYS = (
     "council.general.creative",
     "council.general.fact_checker",
     "council.general.practicalist",
+    "council.general.shared.review",
+    "council.general.mode.review",
+    "council.general.lens.analyst",
+    "council.general.lens.skeptic",
+    "council.general.lens.creative",
+    "council.general.lens.fact_checker",
+    "council.general.lens.practicalist",
 )
 FORBIDDEN_PHRASES = (
     "step by step",

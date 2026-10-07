@@ -217,7 +217,7 @@ def test_library_prompts_serve_the_committed_text_and_refuse_unprompted_seats():
     from velune.cognition.prompts._deliberation import PROMPTS
 
     prompts = LibraryPrompts(GENERAL_PROFILE)
-    assert prompts.shared_prompt() == PROMPTS["council.general.shared"]
+    assert prompts.shared_prompt(StageId.PERSPECTIVES) == PROMPTS["council.general.shared"]
     for seat in ("moderator", *PERSPECTIVE_SEATS):
         assert prompts.role_prompt(seat, StageId.PERSPECTIVES) == PROMPTS[f"council.general.{seat}"]
     with pytest.raises(KeyError):

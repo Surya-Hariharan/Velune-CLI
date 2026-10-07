@@ -58,7 +58,8 @@ class CallReason(StrEnum):
 
     PRIMARY = "primary"  # the seat's first, contract-sanctioned execution
     SELF_CONSISTENCY = "self_consistency"  # extra Coder sample in the diverge round
-    REVISION = "revision"  # re-execution driven by critic feedback (debate)
+    REVIEW = "review"  # a council seat reviewing its peers' work (R2 of the deliberative council)
+    REVISION = "revision"  # re-execution driven by critic feedback (debate, council R3)
     RETRY = "retry"  # same request re-sent after a transient failure
     FALLBACK = "fallback"  # re-sent to a *different* provider after failure
     VALIDATION_FAILURE = "validation_failure"  # output failed schema validation
