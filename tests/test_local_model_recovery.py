@@ -495,3 +495,171 @@ def test_registration_round_trips_every_field(tmp_path):
     assert loaded.metadata == {"context_length": 32768}
     assert loaded.last_error == "gone" and loaded.last_error_kind == "storage_unavailable"
     assert "Reconnect the drive" in loaded.next_action()
+
+
+# ---------------------------------------------------------------------------
+# Wrong paths, hostile files, and the cost of recovery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["nonexistent", "plain_file"])
+async def test_relocating_to_a_wrong_path_keeps_the_old_registration(env, monkeypatch, kind):
+    from velune.cli.handlers.model_local import cmd_model_relocate
+
+    registry = make_registry(env, monkeypatch)
+    await registry.refresh()
+    registry.remember_local(registry.get(MODEL, "ollama"))
+    before = env.local.get("ollama", MODEL)
+
+    if kind == "nonexistent":
+        target = env.tmp / "typo" / "models"
+    else:
+        target = env.tmp / "notes.txt"
+        target.write_text("not a model store", encoding="utf-8")
+
+    repl = fake_repl(registry)
+    await cmd_model_relocate(repl, f"{MODEL} {target}")
+
+    after = env.local.get("ollama", MODEL)
+    assert after.source_path == before.source_path == str(env.ssd)
+    assert after.source_kind == before.source_kind
+    assert repl.console.export_text().strip(), "the user must be told why nothing changed"
+
+
+async def test_recovery_does_not_scan_the_blob_store(env, monkeypatch):
+    """Replugging a drive re-checks a few known paths; it never walks the blobs."""
+    import os
+
+    registry = make_registry(env, monkeypatch)
+    await registry.refresh()
+    registry.remember_local(registry.get(MODEL, "ollama"))
+    for i in range(300):  # stand-in for a store with thousands of layers
+        (env.ssd / "blobs" / f"sha256-{i:064x}").write_bytes(b"x")
+    blobs = (env.ssd / "blobs").resolve()
+
+    touched: list[str] = []
+
+    def _watch(real):
+        def wrapper(*args, **kwargs):
+            target = args[0] if args else kwargs.get("path", ".")
+            try:
+                if Path(os.fspath(target)).resolve().is_relative_to(blobs):
+                    touched.append(os.fspath(target))
+            except (OSError, ValueError):
+                pass
+            return real(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(os, "scandir", _watch(os.scandir))
+    monkeypatch.setattr(os, "walk", _watch(os.walk))
+    real_iterdir, real_rglob = Path.iterdir, Path.rglob
+    monkeypatch.setattr(
+        Path,
+        "iterdir",
+        lambda self: (touched.append(str(self)) if self == blobs else None) or real_iterdir(self),
+    )
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda self, pattern: (
+            (touched.append(str(self)) if self == blobs else None) or real_rglob(self, pattern)
+        ),
+    )
+
+    unplug(env)
+    await registry.refresh()
+    assert not is_available(registry.get(MODEL, "ollama"))
+    replug(env)
+    await registry.refresh()
+    assert is_available(registry.get(MODEL, "ollama"))
+
+    assert touched == []
+    list(blobs.iterdir())  # the watcher is live: a real scan of the blobs would have been seen
+    assert touched
+
+
+def test_a_header_that_claims_more_strings_than_the_file_holds_is_rejected_at_once(tmp_path):
+    import time
+
+    def s(x: str) -> bytes:
+        raw = x.encode()
+        return struct.pack("<Q", len(raw)) + raw
+
+    evil = tmp_path / "evil.gguf"
+    evil.write_bytes(
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", 1)
+        + s("tokenizer.ggml.tokens")
+        + struct.pack("<I", 9)
+        + struct.pack("<I", 8)
+        + struct.pack("<Q", 2**40)
+        + b"\x00" * 1024
+    )
+    started = time.perf_counter()
+    assert inspect_path(evil).kind is PathKind.UNSUPPORTED
+    assert time.perf_counter() - started < 1.0
+
+
+def test_inspecting_a_slow_header_stops_at_its_time_budget(tmp_path, monkeypatch):
+    from velune.providers import local_import
+
+    def s(x: str) -> bytes:
+        raw = x.encode()
+        return struct.pack("<Q", len(raw)) + raw
+
+    slow = tmp_path / "slow.gguf"
+    count = 200_000  # fits in the file, so only the time budget can stop it
+    slow.write_bytes(
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", 1)
+        + s("tokenizer.ggml.tokens")
+        + struct.pack("<I", 9)
+        + struct.pack("<I", 8)
+        + struct.pack("<Q", count)
+        + b"\x00" * (8 * count)
+    )
+    monkeypatch.setattr(local_import, "_GGUF_TIME_BUDGET_SECONDS", -1.0)
+    with pytest.raises(ValueError, match="too long"):
+        read_gguf_metadata(slow)
+    assert inspect_path(slow).kind is PathKind.UNSUPPORTED
+
+
+def test_empty_and_directory_gguf_names_are_unsupported_not_crashes(tmp_path):
+    empty = tmp_path / "empty.gguf"
+    empty.write_bytes(b"")
+    assert inspect_path(empty).kind is PathKind.UNSUPPORTED
+
+    (tmp_path / "dir.gguf").mkdir()  # a folder named like a model file
+    assert inspect_path(tmp_path / "dir.gguf").kind is not PathKind.GGUF_FILE
+
+    assert inspect_path(tmp_path / "model.onnx").kind is PathKind.MISSING
+    onnx = tmp_path / "model.onnx"
+    onnx.write_bytes(b"\x08\x07")
+    assert inspect_path(onnx).kind is PathKind.UNSUPPORTED
+
+
+def test_hashing_a_large_model_file_does_not_hold_it_in_memory(tmp_path):
+    import tracemalloc
+
+    from velune.providers.local_import import _sha256
+
+    big = tmp_path / "big.gguf"
+    with open(big, "wb") as fh:
+        fh.write(b"GGUF")
+        for _ in range(48):  # 48 MiB, written in pieces so the test itself stays small
+            fh.write(b"\x00" * (1024 * 1024))
+
+    tracemalloc.start()
+    try:
+        digest = _sha256(big)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert len(digest) == 64
+    assert peak < 16 * 1024 * 1024, f"hashing peaked at {peak / 1e6:.1f} MB for a 48 MB file"

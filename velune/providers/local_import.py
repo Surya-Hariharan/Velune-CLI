@@ -31,6 +31,7 @@ import json
 import os
 import re
 import struct
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,9 @@ GGUF_MAGIC = b"GGUF"
 _MAX_DIR_ENTRIES = 2000
 _MAX_GGUF_HEADER_BYTES = 64 * 1024 * 1024
 _MAX_GGUF_KV = 4096
+# A legitimate tokenizer array is a few hundred thousand entries and skips in well
+# under a second; a crafted one can be millions of empty strings.
+_GGUF_TIME_BUDGET_SECONDS = 3.0
 _MAX_CONFIG_BYTES = 1024 * 1024
 _HASH_CHUNK = 4 * 1024 * 1024
 
@@ -146,6 +150,14 @@ class _Reader:
     def __init__(self, fh, budget: int) -> None:
         self._fh = fh
         self._budget = budget
+        self._deadline = time.monotonic() + _GGUF_TIME_BUDGET_SECONDS
+
+    def remaining(self) -> int:
+        return self._budget - self._fh.tell()
+
+    def check_time(self) -> None:
+        if time.monotonic() > self._deadline:
+            raise ValueError("GGUF header took too long to inspect")
 
     def read(self, n: int) -> bytes:
         if n < 0 or self._fh.tell() + n > self._budget:
@@ -182,7 +194,13 @@ def _read_value(r: _Reader, vtype: int, length_fmt: str, *, keep: bool):
         if item_type in _GGUF_SCALARS:
             r.skip(struct.calcsize(_GGUF_SCALARS[item_type]) * count)
         elif item_type == _GGUF_STRING:
-            for _ in range(count):
+            # Every element carries at least its length prefix, so a count that
+            # cannot fit in what is left is a lie, not a big vocabulary.
+            if count * struct.calcsize(length_fmt) > r.remaining():
+                raise ValueError("GGUF string array is longer than the header allows")
+            for index in range(count):
+                if index & 0xFFFF == 0:
+                    r.check_time()
                 r.skip(r.unpack(length_fmt))
         else:
             raise ValueError(f"unsupported GGUF array type {item_type}")
