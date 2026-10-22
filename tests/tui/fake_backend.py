@@ -19,6 +19,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FAKE_KEY = "sk-velune-test-0000000000000000FAKE"
+#: A key containing this marker gets HTTP 503 from every cloud route — a
+#: provider outage, which must save the key unverified rather than reject it.
+OUTAGE_MARKER = "OUTAGE"
 MODEL = "fake-model:latest"
 
 LONG_REPLY = " ".join(f"word{i}" for i in range(400))
@@ -69,6 +72,14 @@ class _Handler(BaseHTTPRequestHandler):
             (method, self.path, self.headers.get("X-Velune-Orig-Host", ""))
         )
 
+    def do_HEAD(self) -> None:
+        # Real Ollama answers HEAD / with 200 ("Ollama is running"); discovery
+        # uses it as its liveness check.
+        self._record("HEAD")
+        self.send_response(200 if self.path.split("?")[0] == "/" else 404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self) -> None:
         self._record("GET")
         p = self.path.split("?")[0]
@@ -77,7 +88,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif p.startswith("/api/version"):
             self._json({"version": "0.0.0-fake"})
         elif p.endswith("/models"):
-            if not self._authorized():
+            if OUTAGE_MARKER in self.headers.get("Authorization", ""):
+                self._json({"error": {"message": "upstream unavailable"}}, 503)
+            elif not self._authorized():
                 self._json(
                     {"error": {"message": "Invalid API key", "type": "invalid_request_error"}}, 401
                 )

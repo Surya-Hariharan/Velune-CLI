@@ -44,7 +44,14 @@ SCHEMA = 1
 # so column positions to its right are deterministic only because the dynamic
 # values sit at the end of their rows; rows that were masked skip style checks.
 MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = (
-    ("path", re.compile(r"(?:~|[A-Za-z]:)?[/\\][^\s]*(?:[Tt]emp|tmp)[^\s]*"), "<PATH>"),
+    # A temp path, or an absolute path the UI truncated with "…" before its
+    # temp segment came into view (narrow terminals; the sandbox home means
+    # the workspace no longer abbreviates to "~\...").
+    (
+        "path",
+        re.compile(r"(?:~|[A-Za-z]:)?[/\\][^\s]*(?:(?:[Tt]emp|tmp)[^\s]*|…)"),
+        "<PATH>",
+    ),
     ("version", re.compile(r"\bv\d+\.\d+\.\d+[\w.\-+]*"), "<VERSION>"),
     ("tokens", re.compile(r"\d[\d,]* tokens(?: · ~?\$[\d.]+)?"), "<N> tokens"),
     ("ctx", re.compile(r"\d+/\d+k"), "<CTX>"),

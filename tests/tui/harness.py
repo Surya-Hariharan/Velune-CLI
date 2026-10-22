@@ -80,6 +80,7 @@ class TermSession:
         workdir: Path,
         extra_env: dict[str, str] | None = None,
         argv: list[str] | None = None,
+        ollama: bool = False,
     ) -> None:
         self.rows, self.cols = rows, cols
         self.screen = pyte.Screen(cols, rows)
@@ -92,8 +93,15 @@ class TermSession:
             for k, v in os.environ.items()
             if not k.endswith("_API_KEY") and k not in ("HF_TOKEN", "NO_COLOR")
         }
+        # ~/.velune holds the model cache, active model, model locations and
+        # local-model registrations; point the home directory into the sandbox
+        # too, so a journey can never read or write the developer's real ones.
+        home = sandbox / "home"
+        home.mkdir(parents=True, exist_ok=True)
         env.update(
             {
+                "HOME": str(home),
+                "USERPROFILE": str(home),
                 "VELUNE_TUI_SANDBOX": str(sandbox),
                 "VELUNE_DATA_HOME": str(sandbox / "data"),
                 "VELUNE_MASTER_PASSPHRASE": "tui-test-passphrase",
@@ -102,8 +110,14 @@ class TermSession:
                 "PYTHONUTF8": "1",
             }
         )
+        # Velune now honours OLLAMA_HOST everywhere (setup, liveness, discovery,
+        # chat), so pointing it at the fake backend makes Ollama "running" —
+        # a different starting state from the fresh, nothing-configured user
+        # the baselines record. A local Ollama is therefore opt-in
+        # (``ollama=True``); otherwise it points at a closed loopback port, so a
+        # developer's real Ollama on :11434 can't leak into a journey either.
+        env["OLLAMA_HOST"] = backend.host if (backend is not None and ollama) else "127.0.0.1:9"
         if backend is not None:
-            env["OLLAMA_HOST"] = backend.host
             env["VELUNE_TUI_FAKE_HOST"] = backend.host
         env.update(extra_env or {})
         cmd = [sys.executable, str(Path(__file__).parent / "_launcher.py"), *(argv or [])]
@@ -220,7 +234,12 @@ class TermSession:
         def _col(c: str) -> str | None:
             if c == "default":
                 return None
-            return f"#{c}" if re.fullmatch(r"[0-9a-fA-F]{6}", c) else c
+            if re.fullmatch(r"[0-9a-fA-F]{6}", c):
+                return f"#{c}"
+            # pyte names the 16 ANSI colours its own way ("brown" for 33,
+            # "brightred" for 91); translate to Rich's names.
+            c = {"brown": "yellow", "brightbrown": "bright_yellow"}.get(c, c)
+            return f"bright_{c[6:]}" if c.startswith("bright") and "_" not in c else c
 
         con = Console(
             record=True,

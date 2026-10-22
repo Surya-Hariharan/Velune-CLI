@@ -27,26 +27,44 @@ def _isolate() -> None:
 
     platformdirs.user_config_dir = _fake_config_dir
 
+    import json
+
     import keyring
     from keyring.backend import KeyringBackend
 
-    class _MemoryKeyring(KeyringBackend):
+    keyring_file = root / "keyring.json"
+
+    class _SandboxKeyring(KeyringBackend):
+        """Stands in for the OS keyring, persisted inside the sandbox.
+
+        A real keyring outlives the process; an in-memory one handed every
+        launch a new master key, so a relaunch could never read what the
+        previous launch saved. Persisting it is what lets a journey restart
+        the CLI and check that a saved key is still there.
+        """
+
         priority = 99  # type: ignore[assignment]
 
-        def __init__(self) -> None:
-            super().__init__()
-            self._store: dict[tuple[str, str], str] = {}
+        def _load(self) -> dict[str, str]:
+            try:
+                return json.loads(keyring_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {}
 
         def get_password(self, service, username):
-            return self._store.get((service, username))
+            return self._load().get(f"{service}\x00{username}")
 
         def set_password(self, service, username, password):
-            self._store[(service, username)] = password
+            data = self._load()
+            data[f"{service}\x00{username}"] = password
+            keyring_file.write_text(json.dumps(data), encoding="utf-8")
 
         def delete_password(self, service, username):
-            self._store.pop((service, username), None)
+            data = self._load()
+            data.pop(f"{service}\x00{username}", None)
+            keyring_file.write_text(json.dumps(data), encoding="utf-8")
 
-    keyring.set_keyring(_MemoryKeyring())
+    keyring.set_keyring(_SandboxKeyring())
 
     # Reroute every non-loopback httpx request to the local fake backend, so a
     # "Groq"/"OpenAI" call can never leave the machine. The original host is
