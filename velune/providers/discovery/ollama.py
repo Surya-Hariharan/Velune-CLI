@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 
 import httpx
 
@@ -32,14 +31,10 @@ logger = logging.getLogger("velune.providers.discovery.ollama")
 
 
 def _base_url() -> str:
-    """Resolve the Ollama API base URL, honouring ``OLLAMA_HOST``."""
-    host = os.environ.get("OLLAMA_HOST", "").strip()
-    if not host:
-        return "http://localhost:11434"
-    # OLLAMA_HOST may be "host:port", "http://host:port", or just a host.
-    if host.startswith(("http://", "https://")):
-        return host.rstrip("/")
-    return f"http://{host}"
+    """Resolve the Ollama API base URL (config override, ``OLLAMA_HOST``, default)."""
+    from velune.providers.endpoints import ollama_base_url
+
+    return ollama_base_url()
 
 
 class OllamaDiscovery:
@@ -49,6 +44,8 @@ class OllamaDiscovery:
         self.provider_id = "ollama"
         self.base_url = _base_url()
         self.gpu_detector = GPUDetector()
+        #: Why the daemon could not be listed on the last discover() (None = it was).
+        self.last_error: str | None = None
 
     @classmethod
     async def is_running(cls, base_url: str | None = None) -> bool:
@@ -62,17 +59,52 @@ class OllamaDiscovery:
             return False
 
     async def discover(self) -> list[ModelDescriptor]:
-        """Discover Ollama models, merging the API and the on-disk stores."""
+        """Discover Ollama models, merging the API and the on-disk stores.
+
+        Sets :attr:`last_error` when the daemon could not be listed, so the
+        registry keeps (rather than drops) models it knew about but cannot see
+        right now — a stopped daemon is not a deleted model.
+        """
+        # Re-resolve per scan: the discoverer outlives OLLAMA_HOST/config changes.
+        self.base_url = _base_url()
+        self.last_error = None
         gpu_info = self.gpu_detector.detect()
 
         daemon_up = await self.is_running(self.base_url)
         api_models: list[ModelDescriptor] = []
         if daemon_up:
             api_models = await self._discover_api(gpu_info)
+        else:
+            self.last_error = f"Ollama server is not reachable at {self.base_url}"
+
+        stored_index = self._stored_index()
+        for model in api_models:
+            stored = stored_index.get(model.model_id)
+            if stored is not None:
+                model.metadata["root"] = str(stored.root)
 
         api_names = {m.model_id for m in api_models}
-        fs_models = self._discover_filesystem(api_names, daemon_up, gpu_info)
+        fs_models = self._discover_filesystem(api_names, daemon_up, gpu_info, stored_index)
         return api_models + fs_models
+
+    @staticmethod
+    def _stored_index() -> dict:
+        """``{model name: OllamaStoredModel}`` across every reachable store root."""
+        from velune.providers.ollama_locations import OllamaLocationRegistry
+
+        index: dict = {}
+        try:
+            stores = OllamaLocationRegistry().active_stores()
+        except Exception as exc:
+            logger.debug("Filesystem model discovery skipped: %s", exc)
+            return index
+        for store in stores:
+            try:
+                for stored in store.list_models():
+                    index.setdefault(stored.name, stored)
+            except OSError as exc:  # drive vanished mid-scan
+                logger.debug("Model store %s became unreadable: %s", store.root, exc)
+        return index
 
     # ------------------------------------------------------------------
     # API source (authoritative — servable)
@@ -100,6 +132,7 @@ class OllamaDiscovery:
                     models.append(descriptor)
         except Exception as e:
             logger.debug("Ollama API discovery failed: %s", e)
+            self.last_error = f"Ollama model listing failed at {self.base_url}: {type(e).__name__}"
         return models
 
     async def _get_model_details(self, model_name: str) -> dict:
@@ -123,26 +156,20 @@ class OllamaDiscovery:
     # ------------------------------------------------------------------
 
     def _discover_filesystem(
-        self, api_names: set[str], daemon_up: bool, gpu_info: dict
+        self,
+        api_names: set[str],
+        daemon_up: bool,
+        gpu_info: dict,
+        stored_index: dict | None = None,
     ) -> list[ModelDescriptor]:
         """Find on-disk models the API didn't return, flagged for servability."""
-        from velune.providers.ollama_locations import OllamaLocationRegistry
-
-        try:
-            stores = OllamaLocationRegistry().active_stores()
-        except Exception as exc:
-            logger.debug("Filesystem model discovery skipped: %s", exc)
-            return []
-
-        out: list[ModelDescriptor] = []
-        seen: set[str] = set(api_names)
-        for store in stores:
-            for stored in store.list_models():
-                if stored.name in seen:
-                    continue  # already served by the daemon (authoritative)
-                seen.add(stored.name)
-                out.append(self._descriptor_from_store(stored, daemon_up, gpu_info))
-        return out
+        if stored_index is None:
+            stored_index = self._stored_index()
+        return [
+            self._descriptor_from_store(stored, daemon_up, gpu_info)
+            for name, stored in stored_index.items()
+            if name not in api_names  # the daemon's view is authoritative
+        ]
 
     def _descriptor_from_store(self, stored, daemon_up: bool, gpu_info: dict) -> ModelDescriptor:
         from velune.providers.ollama_store import OllamaStoredModel

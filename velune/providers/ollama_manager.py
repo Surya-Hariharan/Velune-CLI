@@ -12,15 +12,10 @@ from rich.text import Text
 
 
 def _ollama_base() -> str:
-    """Resolve the Ollama base URL, honouring ``OLLAMA_HOST``."""
-    import os
+    """Resolve the Ollama base URL (config override, ``OLLAMA_HOST``, default)."""
+    from velune.providers.endpoints import ollama_base_url
 
-    host = os.environ.get("OLLAMA_HOST", "").strip()
-    if not host:
-        return "http://localhost:11434"
-    if host.startswith(("http://", "https://")):
-        return host.rstrip("/")
-    return f"http://{host}"
+    return ollama_base_url()
 
 
 OLLAMA_BASE = _ollama_base()
@@ -107,14 +102,14 @@ class OllamaManager:
 
     async def is_running(self) -> bool:
         try:
-            r = await self._client.get(f"{OLLAMA_BASE}/api/tags", timeout=2.0)
+            r = await self._client.get(f"{_ollama_base()}/api/tags", timeout=2.0)
             return r.status_code == 200
         except Exception:
             return False
 
     async def list_local_models(self) -> list[str]:
         try:
-            r = await self._client.get(f"{OLLAMA_BASE}/api/tags", timeout=5.0)
+            r = await self._client.get(f"{_ollama_base()}/api/tags", timeout=5.0)
             if r.status_code == 200:
                 return [m["name"] for m in r.json().get("models", [])]
             return []
@@ -134,7 +129,7 @@ class OllamaManager:
             try:
                 async with self._client.stream(
                     "POST",
-                    f"{OLLAMA_BASE}/api/pull",
+                    f"{_ollama_base()}/api/pull",
                     json={"name": model_id, "stream": True},
                     timeout=None,  # model downloads can take many minutes
                 ) as response:
@@ -198,7 +193,7 @@ class OllamaManager:
     async def delete_model(self, model_id: str) -> bool:
         try:
             r = await self._client.delete(
-                f"{OLLAMA_BASE}/api/delete",
+                f"{_ollama_base()}/api/delete",
                 json={"name": model_id},
             )
             return r.status_code == 200

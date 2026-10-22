@@ -233,7 +233,9 @@ def _suggest_provider() -> str:
     try:
         import httpx
 
-        r = httpx.get("http://localhost:11434/api/tags", timeout=2)
+        from velune.providers.endpoints import ollama_base_url
+
+        r = httpx.get(f"{ollama_base_url()}/api/tags", timeout=2)
         if r.status_code == 200:
             return "ollama"
     except Exception:

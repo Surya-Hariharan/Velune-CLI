@@ -27,18 +27,13 @@ class OllamaProvider(ModelProvider):
     SUPPORTS_STREAMING_TOOL_CALLS = True
 
     def __init__(self, base_url: str | None = None) -> None:
-        # Honour OLLAMA_HOST when no explicit URL is configured, so a daemon on
-        # a non-default host/port (or a relocated setup) works out of the box.
+        # With no explicit URL, use the shared resolver (config override,
+        # OLLAMA_HOST, default) so chat talks to the same daemon that discovery,
+        # validation and the liveness probe check.
         if base_url is None:
-            import os
+            from velune.providers.endpoints import ollama_base_url
 
-            host = os.environ.get("OLLAMA_HOST", "").strip()
-            if not host:
-                base_url = "http://localhost:11434"
-            elif host.startswith(("http://", "https://")):
-                base_url = host.rstrip("/")
-            else:
-                base_url = f"http://{host}"
+            base_url = ollama_base_url()
         self._base_url = base_url
         self.client: httpx.AsyncClient | None = None
         self._capabilities = ProviderCapabilities(

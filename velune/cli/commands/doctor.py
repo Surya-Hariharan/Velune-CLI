@@ -612,26 +612,31 @@ def _check_core_dependencies() -> dict:
 def _check_ollama_connectivity() -> dict:
     import httpx
 
+    from velune.providers.endpoints import ollama_base_url
+
+    base = ollama_base_url()  # OLLAMA_HOST / config aware, same as chat
     try:
-        httpx.get("http://localhost:11434/api/tags", timeout=3.0)
+        httpx.get(f"{base}/api/tags", timeout=3.0)
         return {
             "name": "Ollama Connectivity",
             "status": "ok",
-            "message": "Connected successfully to http://localhost:11434.",
+            "message": f"Connected successfully to {base}.",
         }
     except Exception:
         return {
             "name": "Ollama Connectivity",
             "status": "warn",
-            "message": "Could not connect to Ollama at http://localhost:11434.",
+            "message": f"Could not connect to Ollama at {base}.",
         }
 
 
 def _check_ollama_models() -> dict:
     import httpx
 
+    from velune.providers.endpoints import ollama_base_url
+
     try:
-        r = httpx.get("http://localhost:11434/api/tags", timeout=3.0)
+        r = httpx.get(f"{ollama_base_url()}/api/tags", timeout=3.0)
         models = r.json().get("models", [])
         if models:
             model_names = [m.get("name") for m in models]
@@ -675,8 +680,10 @@ def _check_memory_embedding() -> dict:
     embedding_provider_id = "ollama"
     embedding_model_id = "nomic-embed-text"
 
+    from velune.providers.endpoints import ollama_base_url
+
     try:
-        httpx.get("http://localhost:11434/api/tags", timeout=3.0)
+        httpx.get(f"{ollama_base_url()}/api/tags", timeout=3.0)
         return {
             "name": "Memory Embedding Provider",
             "status": "ok",
