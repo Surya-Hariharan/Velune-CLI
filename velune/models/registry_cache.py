@@ -39,7 +39,6 @@ _LOCAL_PROVIDER_PREFIXES = (
     "vllm",
     "tgi",
     "localai",
-    "nvidia_nim_local",
 )
 
 
@@ -200,4 +199,9 @@ class ModelRegistryCache:
             capabilities = ModelCapabilityProfile()
 
         raw["capabilities"] = capabilities
+        if raw.get("provider_id"):
+            from velune.providers.catalog import canonical_provider_id
+
+            # Models cached by older versions as "nvidia_nim" route to "nvidia".
+            raw["provider_id"] = canonical_provider_id(raw["provider_id"])
         return ModelDescriptor(**raw)

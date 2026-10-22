@@ -66,7 +66,9 @@ def load_active_model(path: Path | None = None) -> ModelPref | None:
         provider_id = data.get("provider_id")
         model_id = data.get("model_id")
         if provider_id and model_id:
-            return ModelPref(provider_id=provider_id, model_id=model_id)
+            from velune.providers.catalog import canonical_provider_id
+
+            return ModelPref(provider_id=canonical_provider_id(provider_id), model_id=model_id)
     except Exception as exc:
         _log.warning("Could not load active model preference: %s", exc)
     return None

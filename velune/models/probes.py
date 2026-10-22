@@ -183,10 +183,14 @@ class FastProbe:
                 temperature=0.0,
                 max_tokens=5,
             )
-            response = await asyncio.wait_for(
+            await asyncio.wait_for(
                 provider.infer(req),
                 timeout=self.TIMEOUT,
             )
-            return bool(response.content.strip())
+            # A completed call is a responsive model. Reasoning models (o-series,
+            # gpt-5, deepseek-r1) can spend a 5-token budget on hidden reasoning
+            # and return empty content; treating that as "not responding" marked
+            # working models offline.
+            return True
         except Exception:
             return False
