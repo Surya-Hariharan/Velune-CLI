@@ -88,22 +88,33 @@ ANTHROPIC_MODELS: list[ModelDescriptor] = [
 ]
 
 
+_MAX_LISTING_PAGES = 20
+
+
 async def fetch_live_models(api_key: str | None, base_url: str) -> dict[str, int | None] | None:
-    """Return ``{model_id: max_input_tokens}`` from ``GET /v1/models``, or None on failure."""
+    """Return ``{model_id: max_input_tokens}`` from ``GET /v1/models``, or None on failure.
+
+    Follows ``has_more``/``last_id`` pagination: an account or gateway that
+    caps the page size used to get a silently truncated model list.
+    """
     if not api_key:
         return None
-    data = await get_json(
-        f"{base_url}/v1/models",
-        {"x-api-key": api_key, "anthropic-version": _ANTHROPIC_VERSION},
-        params={"limit": 1000},
-    )
-    if not isinstance(data, dict):
-        return None
-    return {
-        m["id"]: m.get("max_input_tokens")
-        for m in data.get("data", [])
-        if isinstance(m, dict) and "id" in m
-    }
+    headers = {"x-api-key": api_key, "anthropic-version": _ANTHROPIC_VERSION}
+    models: dict[str, int | None] = {}
+    params: dict = {"limit": 1000}
+    for _ in range(_MAX_LISTING_PAGES):
+        data = await get_json(f"{base_url}/v1/models", headers, params=params)
+        if not isinstance(data, dict):
+            # A failure on a later page still leaves a usable partial list.
+            return models or None
+        for m in data.get("data", []):
+            if isinstance(m, dict) and "id" in m:
+                models[m["id"]] = m.get("max_input_tokens")
+        last_id = data.get("last_id")
+        if not data.get("has_more") or not last_id:
+            break
+        params = {"limit": 1000, "after_id": last_id}
+    return models
 
 
 async def discover_anthropic_models(
@@ -307,7 +318,6 @@ class AnthropicProvider(ModelProvider):
                 "model": request.model_id,
                 "max_tokens": request.max_tokens or 4096,
                 "temperature": request.temperature,
-                "top_p": request.top_p,
                 "messages": cache_payload["messages"],
             }
             if "system" in cache_payload:
@@ -325,10 +335,17 @@ class AnthropicProvider(ModelProvider):
                 "messages": anth_messages,
                 "max_tokens": request.max_tokens or 4096,
                 "temperature": request.temperature,
-                "top_p": request.top_p,
             }
             if system_prompt:
                 payload["system"] = system_prompt
+
+        # top_p defaults to 1.0 (nucleus sampling off), which is what the API
+        # does when it is omitted. Sending it anyway made every request specify
+        # both temperature and top_p, which newer Claude models reject with a
+        # 400 — so a listed, selectable model failed every call. Only an
+        # explicitly narrowed top_p is sent.
+        if request.top_p is not None and request.top_p < 1.0:
+            payload["top_p"] = request.top_p
 
         if request.stop_sequences:
             payload["stop_sequences"] = request.stop_sequences

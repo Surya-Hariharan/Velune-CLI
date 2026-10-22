@@ -7,13 +7,20 @@ the API reports it, their context window; the curated entries add what the API
 doesn't provide (capability scores, cost, speed tier).
 
 Offline, with a bad key, or on any HTTP error, callers get the curated catalog
-unchanged — discovery never gets worse than the static list.
+unchanged — discovery never gets worse than the static list. That fallback must
+not be *presented* as the live list, though: :func:`last_listing_failure`
+reports why the last :func:`get_json` in the current task failed, so a
+discoverer can flag its result as a fallback and say why (403, timeout, …)
+instead of showing two curated models as if they were everything the key can
+use.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -26,18 +33,76 @@ LiveModels = dict[str, "int | None"]
 """``{model_id: context_window_or_None}`` as reported by a provider."""
 
 
+@dataclass(frozen=True, slots=True)
+class ListingFailure:
+    """Why a live model listing failed — no secrets, safe to show."""
+
+    status: int | None
+    reason: str
+
+    def describe(self) -> str:
+        if self.status == 401:
+            return "HTTP 401 — authentication failed"
+        if self.status == 403:
+            return "HTTP 403 — access denied or insufficient permissions"
+        if self.status == 404:
+            return "HTTP 404 — listing endpoint not found; check the base URL"
+        if self.status == 429:
+            return "HTTP 429 — rate limit reached"
+        if self.status is not None and self.status >= 500:
+            return f"HTTP {self.status} — provider temporarily unavailable"
+        if self.status is not None:
+            return f"HTTP {self.status}"
+        return self.reason
+
+
+_last_failure: ContextVar[ListingFailure | None] = ContextVar("_last_listing_failure", default=None)
+
+
+def last_listing_failure() -> ListingFailure | None:
+    """The failure of the most recent :func:`get_json` in this task, if it failed."""
+    return _last_failure.get()
+
+
 async def get_json(
     url: str, headers: dict[str, str], *, params: dict[str, Any] | None = None, timeout: float = 8.0
 ) -> Any | None:
-    """GET *url* and return decoded JSON, or None on any failure (logged at debug)."""
+    """GET *url* and return decoded JSON, or None on any failure (see :func:`last_listing_failure`)."""
+    _last_failure.set(None)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(url, headers=headers, params=params)
             resp.raise_for_status()
             return resp.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.debug("Live model listing failed for %s (using curated catalog): %s", url, exc)
-        return None
+    except httpx.HTTPStatusError as exc:
+        failure = ListingFailure(exc.response.status_code, f"HTTP {exc.response.status_code}")
+    except httpx.TimeoutException:
+        failure = ListingFailure(None, "connection timed out")
+    except httpx.HTTPError as exc:
+        failure = ListingFailure(None, f"could not connect ({type(exc).__name__})")
+    except ValueError:
+        failure = ListingFailure(None, "unreadable response")
+    _last_failure.set(failure)
+    logger.debug(
+        "Live model listing failed for %s (using curated catalog): %s", url, failure.reason
+    )
+    return None
+
+
+def as_fallback(
+    models: list[ModelDescriptor], failure: ListingFailure | None
+) -> list[ModelDescriptor]:
+    """Copies of *models* flagged as the curated fallback, not a live listing."""
+    reason = failure.describe() if failure else "no response"
+    out = []
+    for m in models:
+        copy = m.model_copy(deep=True)
+        copy.metadata["catalog_source"] = "fallback"
+        copy.metadata["listing_error"] = reason
+        if "fallback" not in copy.tags:
+            copy.tags.append("fallback")
+        out.append(copy)
+    return out
 
 
 def default_descriptor(

@@ -137,29 +137,31 @@ def test_nvidia_nim_discoverer_id_matches_keystore_id():
     assert NVIDIANIMDiscovery().provider_id == "nvidia"
 
 
-def test_nvidia_is_always_run_so_local_containers_are_found_without_a_key():
-    """A local NIM container needs no cloud key — the discoverer must not be
-    gated behind has_key(), or a key-less local setup would never be found."""
-    assert "nvidia" in _LOCAL_PROVIDERS
+def test_nvidia_discovery_is_key_gated_like_other_cloud_providers():
+    """The NIM discoverer is hosted-only now; self-hosted NIM containers are
+    OpenAI-compatible servers found by OpenAICompatDiscovery."""
+    assert "nvidia" not in _LOCAL_PROVIDERS
 
 
 @pytest.mark.asyncio
-async def test_scan_provider_nvidia_matches_by_catalog_id(monkeypatch):
-    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
-    scanner = ModelDiscoveryScanner()
-    # Should not raise, and should actually reach the discoverer (network call
-    # inside it may fail in a sandboxed test run — that's fine, discover()
-    # swallows it — the point is scan_provider finds the discoverer at all).
-    models = await scanner.scan_provider("nvidia")
-    assert isinstance(models, list)
+async def test_scan_provider_nvidia_matches_by_catalog_id(monkeypatch, tmp_path):
+    from tests.http_fakes import install_mock_transport, isolate_keystore, refuse_all
+
+    isolate_keystore(monkeypatch, tmp_path)
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-key-000000000000")
+    install_mock_transport(monkeypatch, refuse_all)  # never reach NVIDIA
+    report = await ModelDiscoveryScanner().scan_provider_detailed("nvidia")
+    # The discoverer was found and ran; its failure is reported, not swallowed.
+    assert report.models == []
+    assert "nvidia" in report.failed
 
 
-def test_model_descriptor_provider_ids_are_unaffected_by_the_rename():
-    """Per-model tagging ("nvidia_nim" / "nvidia_nim_local") is independent of
-    the discoverer's own gating id and must not have changed."""
-    import inspect
-
+def test_model_descriptors_are_tagged_with_the_routable_provider_id():
+    """Regression: per-model ids were "nvidia_nim"/"nvidia_nim_local", which no
+    adapter, catalog entry or keystore record used — the models were listed
+    but could not be selected or routed."""
     from velune.providers.discovery.nvidia_nim import NVIDIANIMDiscovery
 
-    source = inspect.getsource(NVIDIANIMDiscovery._build_descriptor)
-    assert '"nvidia_nim" if not is_local else "nvidia_nim_local"' in source
+    model = NVIDIANIMDiscovery()._build_descriptor({"id": "meta/llama-3.3-70b-instruct"})
+    assert model is not None and model.provider_id == "nvidia"
+    assert NVIDIANIMDiscovery()._build_descriptor({"id": "nvidia/nv-embedqa-e5-v5"}) is None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 
 from velune.core.types.model import ModelDescriptor
 
@@ -28,14 +29,25 @@ _LOCAL_PROVIDERS: frozenset[str] = frozenset(
         "tgi",
         "localai",
         "docker",
-        "nvidia_nim_local",
-        # "nvidia" (NVIDIANIMDiscovery) is a hybrid: a local NIM container needs
-        # no key at all, and the cloud half self-gates on get_key("nvidia")
-        # internally. Always running it (like docker/ollama) is what lets a
-        # local-only NIM container get discovered with no NVIDIA key configured.
-        "nvidia",
+        # "nvidia" is deliberately absent: NVIDIANIMDiscovery is hosted-only and
+        # gated on a key like every other cloud provider. Self-hosted NIM
+        # containers are OpenAI-compatible servers and come from
+        # OpenAICompatDiscovery.
     }
 )
+
+
+@dataclass
+class ScanReport:
+    """What one discovery pass found, and how much of it can be trusted."""
+
+    models: list[ModelDescriptor] = field(default_factory=list)
+    #: Provider ids whose listing succeeded: their model set is authoritative.
+    refreshed: set[str] = field(default_factory=set)
+    #: Provider id -> why its listing failed (keep the last known models).
+    failed: dict[str, str] = field(default_factory=dict)
+    #: Discoverers not run (no key configured).
+    skipped: set[str] = field(default_factory=set)
 
 
 class ModelDiscoveryScanner:
@@ -116,20 +128,50 @@ class ModelDiscoveryScanner:
 
     async def _collect(self, discoverer) -> list[ModelDescriptor]:
         """Run a single discoverer, returning [] on any failure."""
+        models, _error = await self._collect_with_status(discoverer)
+        return models
+
+    async def _collect_with_status(self, discoverer) -> tuple[list[ModelDescriptor], str | None]:
+        """Run a discoverer; return its models and why it could not list, if it couldn't.
+
+        A discoverer reports a failed listing either by raising or by setting
+        ``last_error`` (the ones that fall back to a curated list do the latter,
+        so the fallback is not mistaken for what the provider actually serves).
+        """
         try:
-            return await discoverer.discover()
+            models = await discoverer.discover()
         except Exception as e:
             logger.debug("Discovery failed for %s: %s", discoverer.provider_id, e)
-            return []
+            return [], f"{type(e).__name__}: {e}"[:200]
+        return models, getattr(discoverer, "last_error", None)
+
+    @staticmethod
+    def _covered_ids(discoverer, models: list[ModelDescriptor]) -> set[str]:
+        """Provider ids whose model list this discoverer is the source for."""
+        return (
+            {discoverer.provider_id}
+            | set(getattr(discoverer, "covers", ()))
+            | {m.provider_id for m in models}
+        )
 
     async def scan_all(self) -> list[ModelDescriptor]:
         """Scan all providers for models in parallel."""
+        return (await self.scan_all_detailed()).models
+
+    async def scan_all_detailed(self) -> ScanReport:
+        """Scan every provider and report, per provider, whether listing worked.
+
+        :class:`ScanReport` lets the registry tell "the provider no longer
+        serves this model" (refreshed, model absent) from "we could not ask"
+        (failed: offline, timeout, daemon down, drive unplugged). Only the
+        former may remove a model; the latter keeps the last known list.
+        """
         # Gate server-dependent local providers on reachability. Ollama is NOT
         # gated here: its discoverer also reads on-disk manifest stores, so it
         # must run even when the daemon is down (to surface models on external
         # drives or an offline daemon) — it returns [] cheaply if nothing exists.
-        # Docker and NIM discoverers return [] cheaply when nothing is running,
-        # so they are also not pre-checked.
+        # Docker discovery returns [] cheaply when nothing is running, so it is
+        # also not pre-checked.
         from velune.providers.discovery.lmstudio import LMStudioDiscovery
         from velune.providers.discovery.openai_compat import OpenAICompatDiscovery
 
@@ -138,21 +180,38 @@ class ModelDiscoveryScanner:
             OpenAICompatDiscovery.is_running(),
         )
 
-        tasks = []
+        report = ScanReport()
+        running = []
         for d in self.discoverers:
             if d.provider_id == "lmstudio" and not lmstudio_ok:
+                report.failed["lmstudio"] = "LM Studio server is not running"
                 continue
             if d.provider_id == "openai-compat" and not openai_compat_ok:
+                for pid in self._covered_ids(d, []):
+                    report.failed[pid] = "No OpenAI-compatible server is responding"
                 continue
             if self._should_run(d):
-                tasks.append(self._collect(d))
+                running.append(d)
+            else:
+                report.skipped.add(d.provider_id)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(
+            *(self._collect_with_status(d) for d in running), return_exceptions=True
+        )
 
         all_models: list[ModelDescriptor] = []
-        for result in results:
-            if isinstance(result, list):
-                all_models.extend(result)
+        for d, result in zip(running, results, strict=True):
+            if isinstance(result, BaseException):
+                models, error = [], f"{type(result).__name__}: {result}"[:200]
+            else:
+                models, error = result
+            all_models.extend(models)
+            for pid in self._covered_ids(d, models):
+                if error:
+                    report.failed[pid] = error
+                else:
+                    report.refreshed.add(pid)
+        report.models = all_models
 
         # Summary log
         counts: dict[str, int] = {
@@ -160,7 +219,7 @@ class ModelDiscoveryScanner:
             "ollama": 0,
             "lmstudio": 0,
             "docker": 0,
-            "nvidia_nim": 0,
+            "nvidia": 0,
             "cloud": 0,
         }
         for m in all_models:
@@ -177,15 +236,33 @@ class ModelDiscoveryScanner:
             counts["ollama"],
             counts["lmstudio"],
             counts["docker"],
-            counts["nvidia_nim"],
+            counts["nvidia"],
             counts["cloud"],
         )
+        if report.failed:
+            logger.info(
+                "Discovery could not list: %s",
+                "; ".join(f"{pid} ({why})" for pid, why in sorted(report.failed.items())),
+            )
 
-        return all_models
+        return report
 
     async def scan_provider(self, provider_id: str) -> list[ModelDescriptor]:
         """Scan a specific provider by ID."""
+        return (await self.scan_provider_detailed(provider_id)).models
+
+    async def scan_provider_detailed(self, provider_id: str) -> ScanReport:
+        """Scan one provider, reporting whether its listing actually succeeded."""
+        report = ScanReport()
         for discoverer in self.discoverers:
             if discoverer.provider_id == provider_id:
-                return await self._collect(discoverer)
-        return []
+                models, error = await self._collect_with_status(discoverer)
+                report.models = models
+                for pid in self._covered_ids(discoverer, models):
+                    if error:
+                        report.failed[pid] = error
+                    else:
+                        report.refreshed.add(pid)
+                return report
+        report.skipped.add(provider_id)
+        return report

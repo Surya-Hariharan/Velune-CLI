@@ -49,20 +49,41 @@ _CONTEXT_WINDOWS = (
     ("gpt-4o", 128000),
     ("chatgpt-4o", 128000),
     ("gpt-4-turbo", 128000),
+    ("gpt-4.5", 128000),
+    ("gpt-4-1106", 128000),
+    ("gpt-4-0125", 128000),
+    ("gpt-4-vision", 128000),
     ("gpt-4-32k", 32768),
     ("gpt-4", 8192),
 )
 
 
+# Served only by the Responses API (/v1/responses). This adapter speaks
+# /chat/completions, so listing them gave users models that fail on first use.
+_RESPONSES_ONLY_MARKERS = ("-pro", "deep-research", "codex")
+
+
 def is_openai_chat_model(model_id: str) -> bool:
-    """True for chat-completions models; False for audio/image/embedding/etc."""
+    """True for chat-completions models; False for audio/image/embedding/etc.
+
+    Fine-tuned chat models (``ft:gpt-4o-mini:org::id``) are judged by their base
+    model, so an account's own fine-tunes are listed too.
+    """
     mid = model_id.lower()
-    return bool(_CHAT_PREFIX.match(mid)) and not any(m in mid for m in _NON_CHAT_MARKERS)
+    if mid.startswith("ft:"):
+        mid = mid[3:]
+    return (
+        bool(_CHAT_PREFIX.match(mid))
+        and not any(m in mid for m in _NON_CHAT_MARKERS)
+        and not any(m in mid for m in _RESPONSES_ONLY_MARKERS)
+    )
 
 
 def openai_context_window(model_id: str) -> int:
     """Best-known context window (the /models endpoint doesn't report one)."""
     mid = model_id.lower()
+    if mid.startswith("ft:"):
+        mid = mid[3:]
     for prefix, window in _CONTEXT_WINDOWS:
         if mid.startswith(prefix):
             return window

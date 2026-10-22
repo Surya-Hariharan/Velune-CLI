@@ -75,11 +75,15 @@ class ProviderRegistry:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _resolve_base_url(self, configured: str | None, default: str, *, provider_id: str) -> str:
+    def _resolve_base_url(
+        self, configured: str | None, default: str, *, provider_id: str, keyless: bool = False
+    ) -> str:
         """Resolve a provider base URL under trust + egress policy.
 
         Project-supplied overrides are honored only in a trusted workspace, and
-        every resulting URL must satisfy :func:`base_url_is_safe`.
+        every resulting URL must satisfy :func:`base_url_is_safe` — except that a
+        *keyless* provider (Ollama) may use plain ``http`` to a LAN host: the
+        https rule exists to keep API keys off the wire, and there is none.
         """
         override = (configured or "").strip()
         candidate = override or default
@@ -92,7 +96,10 @@ class ProviderRegistry:
             )
             candidate = default
 
-        if not base_url_is_safe(candidate):
+        safe = base_url_is_safe(candidate) or (
+            keyless and urlparse(candidate).scheme in ("http", "https")
+        )
+        if not safe:
             logger.warning(
                 "Rejected unsafe base_url %r for '%s' (must be https, or http to "
                 "loopback); falling back to the built-in default.",
@@ -112,6 +119,16 @@ class ProviderRegistry:
             module = importlib.import_module(module_path)
             provider_class = getattr(module, class_name)
             return provider_class(**kwargs)
+
+        return factory
+
+    @staticmethod
+    def _ollama_factory() -> Callable[[], ModelProvider]:
+        def factory() -> ModelProvider:
+            from velune.providers.adapters.ollama import OllamaProvider
+            from velune.providers.endpoints import ollama_base_url
+
+            return OllamaProvider(base_url=ollama_base_url())
 
         return factory
 
@@ -141,17 +158,21 @@ class ProviderRegistry:
         cfg = self._config
 
         # ── Local / self-hosted ────────────────────────────────────────
-        ollama_url = self._resolve_base_url(
-            cfg.ollama.base_url if cfg and cfg.ollama else None,
-            "http://localhost:11434",
-            provider_id="ollama",
+        from velune.providers import endpoints
+
+        # The config default is "http://localhost:11434", indistinguishable from
+        # "not set", so only a differing value counts as an override. It is
+        # published to the shared resolver; the adapter reads the resolver at
+        # build time so OLLAMA_HOST applies to chat too, not only discovery.
+        endpoints.configure_ollama_url(
+            self._resolve_base_url(
+                cfg.ollama.base_url if cfg and cfg.ollama else None,
+                endpoints.DEFAULT_OLLAMA_URL,
+                provider_id="ollama",
+                keyless=True,
+            )
         )
-        self.register_factory(
-            "ollama",
-            self._provider_factory(
-                "velune.providers.adapters.ollama", "OllamaProvider", base_url=ollama_url
-            ),
-        )
+        self.register_factory("ollama", self._ollama_factory())
 
         lmstudio_url = self._resolve_base_url(
             cfg.lmstudio.base_url if cfg and cfg.lmstudio else None,
@@ -190,6 +211,10 @@ class ProviderRegistry:
             "https://api.openai.com/v1",
             provider_id="openai",
         )
+        # Published so key validation and model discovery use the same endpoint
+        # as inference (a gateway key is rejected by the vendor's own /models).
+        endpoints.configure_base_url("openai", openai_url)
+        openai_url = endpoints.provider_base_url("openai")
         self.register_factory(
             "openai",
             self._keyed_factory(
@@ -202,6 +227,8 @@ class ProviderRegistry:
             "https://api.anthropic.com",
             provider_id="anthropic",
         )
+        endpoints.configure_base_url("anthropic", anthropic_url)
+        anthropic_url = endpoints.provider_base_url("anthropic")
         self.register_factory(
             "anthropic",
             self._keyed_factory(
@@ -340,7 +367,9 @@ class ProviderRegistry:
         process, so a successful login had no effect until restart.
         """
         from velune.providers import keystore
+        from velune.providers.catalog import canonical_provider_id
 
+        name = canonical_provider_id(name)
         revision = keystore.key_revision(name)
         if name in self._providers:
             # Only factory-built adapters can be rebuilt. An instance handed to
@@ -390,9 +419,10 @@ class ProviderRegistry:
 
     def check_provider_available(self, provider_id: str) -> bool:
         """Return True if *provider_id* has an API key configured in keystore."""
+        from velune.providers.catalog import canonical_provider_id
         from velune.providers.keystore import has_key
 
-        return has_key(provider_id)
+        return has_key(canonical_provider_id(provider_id))
 
     def list_available_providers(self) -> list[str]:
         """Return registered cloud providers that have a key configured."""

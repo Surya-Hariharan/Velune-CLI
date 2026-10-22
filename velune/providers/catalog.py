@@ -155,8 +155,8 @@ _PROVIDERS: tuple[ProviderMeta, ...] = (
         description="Optimized inference on NVIDIA hardware — enterprise AI at scale.",
         requires_key=True,
         free_tier=False,
-        key_label="NVIDIA API key",
-        get_key_url="https://build.nvidia.com/",
+        key_label="NVIDIA API key (starts with nvapi-)",
+        get_key_url="https://build.nvidia.com/settings/api-keys",
         env_var=PROVIDER_ENV_VARS.get("nvidia"),
     ),
     ProviderMeta(
@@ -228,8 +228,23 @@ _BY_ID: dict[str, ProviderMeta] = {p.id: p for p in _PROVIDERS}
 RECOMMENDED_FREE_START: tuple[str, ...] = ("ollama", "groq", "google")
 
 
+# Provider ids that older Velune versions stamped on discovered models but that
+# no adapter, catalog entry or keystore record uses. Applied when loading a
+# saved registry cache or active-model preference so a model discovered by an
+# old version resolves to the provider that actually serves it.
+_LEGACY_PROVIDER_IDS: dict[str, str] = {
+    "nvidia_nim": "nvidia",
+    "nvidia_nim_local": "openai-compat",
+}
+
+
+def canonical_provider_id(provider_id: str) -> str:
+    """Map a legacy provider id to the one the registry routes on."""
+    return _LEGACY_PROVIDER_IDS.get(provider_id, provider_id)
+
+
 def get(provider_id: str) -> ProviderMeta | None:
-    return _BY_ID.get(provider_id)
+    return _BY_ID.get(canonical_provider_id(provider_id))
 
 
 def list_providers_alphabetical() -> list[ProviderMeta]:

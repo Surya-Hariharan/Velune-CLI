@@ -80,6 +80,10 @@ async def _fingerprint(client: httpx.AsyncClient, base_url: str) -> tuple[str, s
 class OpenAICompatDiscovery:
     """Discovers models from generic OpenAI-compatible local servers."""
 
+    #: Every provider id this discoverer can assign (see _FINGERPRINT_PROBES),
+    #: so a failed scan keeps all of them rather than only "openai-compat".
+    covers = ("openai-compat", *(probe[3] for probe in _FINGERPRINT_PROBES))
+
     def __init__(self) -> None:
         self.provider_id = "openai-compat"
 
