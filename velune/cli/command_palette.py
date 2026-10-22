@@ -435,6 +435,11 @@ class CommandPalette:
         def _run(event) -> None:
             command = self._selected()
             if command is None:
+                # Zero matches: hand the text to the REPL as typed so it reports
+                # "Unknown command" and clears the composer, instead of
+                # swallowing Enter and leaving a dead "No matching commands".
+                self._dismissed_text = None
+                event.current_buffer.validate_and_handle()
                 return
             event.current_buffer.text = f"/{command.name}"
             event.current_buffer.cursor_position = len(event.current_buffer.text)
