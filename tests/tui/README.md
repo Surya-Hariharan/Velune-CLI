@@ -24,12 +24,13 @@ Without a PTY backend the tests skip rather than fail.
 | Piece | Role |
 |---|---|
 | `harness.py` | `TermSession`: spawns the CLI under ConPTY/PTY, a reader thread feeds a `pyte` emulator; `wait_for`, `type`, `key`, `resize`, `settle`, `snapshot` |
-| `_launcher.py` | Child entry point. Redirects `platformdirs` config dir and swaps the OS keyring for an in-memory one **before** importing velune, and reroutes every non-loopback `httpx` request to the fake backend. No app code is modified |
-| `fake_backend.py` | Local HTTP server: Ollama routes + OpenAI-shaped routes. `FAKE_KEY` is the only bearer it accepts; replies are chosen by markers in the prompt (`LONGREPLY`, `MULTILINE`) |
+| `_launcher.py` | Child entry point. Redirects `platformdirs` config dir and swaps the OS keyring for one persisted in the sandbox (`keyring.json`, so a relaunch can read what the last launch saved, like a real keyring) **before** importing velune, and reroutes every non-loopback `httpx` request to the fake backend. No app code is modified |
+| `fake_backend.py` | Local HTTP server: Ollama routes (incl. `HEAD /`) + OpenAI-shaped routes. `FAKE_KEY` is the only bearer it accepts; a bearer containing `OUTAGE` gets HTTP 503; replies are chosen by markers in the prompt (`LONGREPLY`, `MULTILINE`) |
 | `flows.py` | Reusable journeys: skip onboarding, `/connect`, ask, wait for idle |
 | `frames.py` | Normalized cell-level frame capture, baselines, and row/column/attribute diffs |
 | `baselines/*.json` | Approved reference frames (the only fixtures stored in the repo) |
 | `test_journeys.py` | Behavior journeys: prompts, slash commands, `/connect`, navigation, exit |
+| `test_recovery_journeys.py` | Restart persistence of a saved key, a provider outage that saves the key unverified, and a local model on a custom `OLLAMA_HOST` that goes offline (prompt kept, reason shown) and comes back with no setup |
 | `test_visual.py` | Baseline comparisons and popup-geometry checks on the real REPL |
 | `test_frames.py` | Self-tests proving the comparator fails on a changed glyph/style/cursor/size |
 
@@ -37,8 +38,16 @@ Without a PTY backend the tests skip rather than fail.
 
 * `FAKE_KEY` is `sk-velune-test-…FAKE`; it can never authenticate anywhere.
 * Provider `*_API_KEY` env vars are stripped from the child environment.
-* The child gets a throwaway sandbox for config, data, and keyring; the real
-  Credential Manager / `%LOCALAPPDATA%\Velune` are never touched.
+* The child gets a throwaway sandbox for config, data, keyring **and home**
+  (`HOME`/`USERPROFILE` → `sandbox/home`, so `~/.velune` — model cache, active
+  model, model locations, local-model registrations, onboarding progress — is
+  the sandbox's); the real Credential Manager / `%LOCALAPPDATA%\Velune` /
+  `~/.velune` are never touched. `launch()` reuses the sandbox within a test,
+  so a second `launch()` is a restart.
+* `OLLAMA_HOST` points at a closed loopback port unless a journey asks for the
+  fake Ollama with `launch(ollama=True)`; Velune honours `OLLAMA_HOST`
+  everywhere, so a live one changes the first-run state the baselines record,
+  and a developer's real Ollama on `:11434` can't leak into a run.
 * Cloud calls are rerouted to `127.0.0.1`; the fake backend records the original
   host (`X-Velune-Orig-Host`) and tests assert nothing else was contacted.
 * `snapshot()` redacts key-shaped strings, and a test scans every artifact for
@@ -93,12 +102,6 @@ Open an SVG in a browser, or render it with Edge/Chrome headless, to look at it.
 * Real terminals differ (fonts, glyph widths, true-color support). This proves
   behavior under ConPTY + a VT emulator; it does not replace a look in Windows
   Terminal, iTerm2, etc. for pixel-level judgments.
-* Ollama is only partly `OLLAMA_HOST`-aware: the chat adapter, discovery and
-  `ollama_manager` honor it, but the credential validator the wizard and
-  `/connect` use (`providers/validation.py`) and the liveness probe
-  `keystore.is_ollama_live` hardcode `localhost:11434`. Wizard-driven local-model
-  setup therefore cannot be pointed at the fake; chat journeys connect a cloud
-  provider through `/connect` instead. (Reported, not changed.)
 * These are frames reconstructed from the PTY byte stream through `pyte`, not
   screenshots of a real Windows Terminal session.
 * POSIX support (`ptyprocess`) is implemented but has only been exercised on

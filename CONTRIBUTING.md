@@ -117,6 +117,12 @@ pyright velune/
 pytest tests/ --cov=velune --cov-report=term-missing -q
 ```
 
+Real-terminal (PTY) journeys live in `tests/tui` (`pytest tests/tui`, about 5 minutes; see
+`tests/tui/README.md`); skip them in the fast loop with `pytest -m "not tui"`. Tests must never
+touch real credentials or providers: use `tests/http_fakes.py` (`install_mock_transport`,
+`isolate_keystore`) and `tests/fake_ollama.py` (a loopback Ollama stand-in) rather than the network.
+Format only the files you change (`ruff format <files>`), not whole directories.
+
 All of `ruff check`, `ruff format --check`, `pyright`, and `pytest` must
 pass before a PR will be merged — see the `lint` and `test` jobs in
 `.github/workflows` for exactly what CI runs.
@@ -256,6 +262,14 @@ PROVIDER_COSTS: dict[str, dict[str, float]] = {
 ```
 
 ### Step 7 — Write tests
+
+A key saved in the credential store beats an environment variable, so a test that only sets
+`NEBULA_API_KEY` can pick up a developer's real saved key. Isolate the store first
+(`tests.http_fakes.isolate_keystore(monkeypatch, tmp_path)`) and route HTTP through
+`install_mock_transport`. A discoverer must read its key inside `discover()`, set `last_error` when the
+listing fails (never return a curated list as if it were live), and tag models with a registered
+`provider_id`. The validator should classify HTTP via the shared helpers so a 403/timeout/5xx is never
+reported as an invalid key.
 
 There's no single canonical `test_providers.py` — provider tests are split
 across `tests/test_provider_manager.py`, `tests/test_provider_default.py`,

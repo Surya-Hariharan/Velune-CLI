@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **Local-model recovery.** Local models you activate or register are remembered in
+  `~/.velune/local_models.json` (endpoint, storage path, last known metadata, availability, last
+  failure) and are never dropped because a drive or server is unavailable. They stay listed as
+  unavailable with the reason (storage path missing, server unreachable, timeout, model missing,
+  not served) and a next step; a message sent to an unavailable model is not sent and stays in the
+  composer. Reconnecting the same drive restores the model with no setup.
+  - New `/model recheck [id]`, `/model relocate <id> <path>` and `/model register <path>`
+    (Ollama store in place; `.gguf` file or safetensors folder imported into Ollama after a
+    size-stating confirmation, then verified).
+- **Key source reporting.** `/model status` and `velune provider test` show whether the saved key or
+  an environment variable is in use. `NGC_API_KEY` is accepted for NVIDIA.
+- `VELUNE_PREFER_ENV_KEYS=1` makes environment variables take precedence over saved keys.
+
 - **Execution modes: Manual, Plan and Auto** (`/manual`, `/plan`, `/auto`,
   Shift+Tab, `velune --mode`, `[execution] mode`; the status bar shows the mode).
   - **Manual** (default) reads freely and asks before every change. Related
@@ -54,6 +67,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   never touched. No new dependencies; turn it off with `[display] math_rendering = false`.
 
 ### Fixed
+
+- **Saved API keys lost across restarts.** A failed OS-keyring read no longer generates (and stores) a
+  new master key over the real one. Credential saves are read-modify-write under a lock, confirmed
+  by reading back, and raise on failure; an unreadable store is never overwritten (backup read in
+  place, unreadable file kept aside). Another process's saved key is no longer reverted.
+- **A saved key beats a stale environment variable**, so the key you verified is the key used.
+- **Keys wrongly marked invalid.** A 403, timeout, rate limit, outage or Velune's own format
+  pre-check no longer invalidates a key; the key is saved unverified ("Credential saved, but
+  validation could not be completed") and re-checked. Invalid keys are re-checked every 6 hours.
+- **NVIDIA NIM.** Models were tagged `nvidia_nim`, which nothing could route to; they now use
+  `nvidia`, and older caches are migrated. Keys are confirmed with a one-token completion because
+  `/v1/models` accepts any key. Embedding/rerank/image models are no longer listed as chat models,
+  and errors are typed (403/404/429) with stream parsing hardened.
+- **Model lists shrinking.** A refresh no longer clears the catalog first; a provider whose listing
+  failed keeps its last known models, and a curated fallback is labelled with the failure reason.
+  OpenAI/Anthropic discovery reads the key at scan time, follows the configured base URL, and
+  Anthropic listings are paginated. Fine-tuned OpenAI models are listed; Responses-only models are not.
+- Anthropic requests no longer send `top_p` alongside `temperature` (newer models reject both).
+- **`OLLAMA_HOST` is honoured everywhere** (validation, liveness, `doctor`, `init`, chat), not only
+  discovery.
+- Onboarding no longer titles every failure "Invalid API Key", shows all discovered models rather
+  than the first 30, and reports discovery failures.
 
 - **LaTeX in answers was printed broken** (`[ A=\begin{bmatrix} 1 & 2 & 3\ 0 & …`). Markdown treated
   `\[`, `\(` and `\\` as escapes and deleted the backslashes before anything could render the math.

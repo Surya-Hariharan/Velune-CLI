@@ -11,6 +11,7 @@ No cloud required. No quota. No lock-in.
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?style=for-the-badge)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Surya-Hariharan/Velune-CLI/ci.yml?branch=main&label=CI&style=for-the-badge&logo=github)](https://github.com/Surya-Hariharan/Velune-CLI/actions/workflows/ci.yml)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/velune-cli?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/velune-cli)
 
 [Quickstart](#60-second-quickstart) · [Commands](#commands) · [Architecture](#architecture) · [Docs](#project-docs) · [Contributing](#contributing)
 
@@ -164,6 +165,20 @@ velune init
 velune
 ```
 
+Ollama on another machine or port? Set `OLLAMA_HOST` (for example
+`OLLAMA_HOST=192.168.1.20:11434`); Velune uses it for setup, discovery, health
+checks and chat alike.
+
+**Models on an external drive.** Run `/model locate` (or
+`/model register <path>`) on the Ollama store folder (the one containing
+`manifests/` and `blobs/`). Velune remembers it. If the drive is unplugged,
+the model stays listed as *unavailable* with the reason. Plug it back in at the
+same path and `/model recheck` (or just your next message) picks it up again.
+If the drive comes back under a different path, use
+`/model relocate <model> <new-path>`. A single `.gguf` file or a safetensors
+model folder can be registered with `/model register <path>`. That imports it
+into Ollama, which copies the file, so Velune shows the size and asks first.
+
 ### 2b. Cloud free tier (Groq, fastest, no GPU needed)
 
 ```bash
@@ -261,14 +276,21 @@ render above the input line.
 | **DeepSeek** | ☁️ Cloud | Pay-per-token | DeepSeek R1, DeepSeek Coder | `/connect deepseek` |
 | **Cohere** | ☁️ Cloud | Pay-per-token | Command R+, Command R | `/connect cohere` |
 | **Meta (Llama API)** | ☁️ Cloud | Pay-per-token | First-party Llama models | `/connect meta` |
-| **NVIDIA NIM** | ☁️ Cloud | Pay-per-token | Llama, Mistral, and other NIM models | `/connect nvidia` |
+| **NVIDIA NIM** | ☁️ Cloud | Free credits / paid | Chat models from build.nvidia.com (Llama, Mistral, DeepSeek, Nemotron, …), read live | `/connect nvidia` with an `nvapi-…` key from <https://build.nvidia.com/settings/api-keys> (or `NVIDIA_API_KEY`) |
 | **HuggingFace** | ☁️ Cloud | Free/paid | Open models via Inference API | `/connect huggingface` |
 
 > Keys are stored AES-GCM-encrypted in your user config directory; the encryption key lives in your OS
 > keyring (or is derived from `VELUNE_MASTER_PASSPHRASE` on headless machines). Never plain text, never
 > in git. `velune setup`, `velune provider add <id>` and the REPL's `/connect` all walk you through it.
-> Model lists for OpenAI, Anthropic, Gemini and Groq are read live from the provider, so retired models
-> drop out automatically.
+> Model lists for OpenAI, Anthropic, Gemini, Groq and NVIDIA NIM are read live from the provider, so retired
+> models drop out automatically. If a listing fails (offline, rate limit, a key without list
+> permission), Velune keeps the last known list and tells you why instead of shrinking it.
+>
+> A key you save through Velune is the key Velune uses, even if an older `OPENAI_API_KEY` (etc.) is set
+> in your shell. Set `VELUNE_PREFER_ENV_KEYS=1` if you want environment variables to win instead.
+> `/model status` shows which key is in effect. If the provider can't be reached when you add a key,
+> the key is still saved and re-checked automatically later. Only a key the provider actually rejects
+> is refused.
 
 ---
 
@@ -391,12 +413,17 @@ velune/
 │   ├── handlers/     Slash-command implementations (lazily imported)
 │   ├── display/      Live dashboards and the council pipeline view
 │   └── rendering/    Markdown (tables, charts, Mermaid), error panels, diff fragments
-├── providers/        18 providers: adapters, discovery, credentials/crypto, validation, retry
+├── providers/        18 providers: adapters, discovery, credentials/crypto, validation, retry,
+│                     endpoint resolution (OLLAMA_HOST, base URLs), local-model import
 │   ├── adapters/     Per-provider inference + streaming implementations
 │   └── discovery/    Model catalog discovery (live-reconciled for OpenAI/Anthropic/Gemini/Groq)
-├── models/           Model registry, capability scoring, council role mapping
+├── models/           Model registry (non-destructive refresh), local-model registrations,
+│                     capability scoring, council role mapping
 ├── cognition/        Council: Planner -> Coder -> Reviewer -> Challenger -> Synthesizer
 │   └── council/      DebateSession, per-role agents, tier classifier, contracts
+├── council/          Deliberative Council engine (R0–R3 stages; behind the
+│                     `cognition.council_engine` flag, off by default)
+├── permissions/      Execution-mode and approval policy (Manual / Plan / Auto)
 ├── orchestration/    Native tool-calling loop
 ├── prompt_intelligence/  Provider-aware prompt compiler
 ├── context/          Context assembly, budgets, token counting, @mentions, prompt caching

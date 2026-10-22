@@ -162,7 +162,7 @@ council assignment.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `model` | `m` | `/model [model-id\|discover\|connect <id>\|use <id>\|list\|status\|remove <id>\|locate\|locations]` | Discover, connect, switch, inspect, or locate models |
+| `model` | `m` | `/model [model-id\|discover\|connect <id>\|use <id>\|list\|status\|remove <id>\|locate\|locations\|register <path>\|recheck [id]\|relocate <id> <path>]` | Discover, connect, switch, inspect, or locate models |
 | `pull` | `download`, `get` | `/pull [model-id]` | Download an Ollama model interactively |
 | `delete` | `remove`, `rm` | `/delete <model-id>` | Delete a locally installed Ollama model |
 | `roles` | `councilmodel`, `cm` | `/roles [show\|reset]` | Assign specific models to each Reasoning Council agent role |

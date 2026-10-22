@@ -199,8 +199,18 @@ are choosing to run.
 ### Secrets protection
 
 - API keys are bring-your-own and stored AES-GCM-encrypted on disk (master key in the OS keyring), with
-  per-provider environment-variable fallback (e.g. `GROQ_API_KEY`); they are never cached process-wide and never written
-  into the workspace.
+  per-provider environment-variable fallback (e.g. `GROQ_API_KEY`); they are never written into the
+  workspace. A key saved through Velune takes precedence over an environment variable unless
+  `VELUNE_PREFER_ENV_KEYS=1` is set; `/model status` and `velune provider test` report which one is in
+  use, never its value.
+- **Credential store integrity.** Writes are atomic, serialised by a cross-process lock, and read back
+  and compared before success is reported (a failure raises instead). An unreadable store (changed
+  keyring or passphrase, truncation) is never overwritten: Velune reads `credentials.json.bak` in
+  place, refuses to write, and says so at startup. `velune provider repair` moves an unreadable file
+  aside (`credentials.json.unreadable-<time>`) instead of deleting it. A transient keyring read failure
+  never generates a replacement master key.
+- **A 403 is not a bad key.** Only a 401 (invalid/expired/revoked) marks a stored key invalid; timeouts,
+  rate limits, outages and permission errors leave it intact and it is re-checked automatically.
 - On disk, keys are AES-GCM encrypted (`velune/providers/crypto.py`) under a master
   key sourced with a strength-first fallback: an existing OS keyring entry, else a
   newly generated one stored in the keyring, else a key derived from

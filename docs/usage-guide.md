@@ -65,6 +65,19 @@ add a cloud provider key (also `velune provider add <id>` from the terminal). Ke
 `VELUNE_MASTER_PASSPHRASE` on headless machines — never in `velune.toml`. Then `/model use <id>` (or the
 `/model` palette, or Alt+↑/↓) to switch.
 
+**When something isn't reachable.** Velune tells apart *the key was rejected* from everything else
+(offline, timed out, rate-limited, provider down, key not allowed to list models). Only a rejected key is
+refused; otherwise the key is saved and re-checked automatically. A local model whose server is stopped
+or whose drive is unplugged stays in the list, marked unavailable with the reason:
+
+| Command | Use it to |
+| --- | --- |
+| `/model status` | See whether the active model is available, its endpoint/storage path, and which key is in use |
+| `/model recheck [id]` | Re-test now (after reconnecting a drive or starting `ollama serve`); for a cloud model, re-verifies the key |
+| `/model relocate <id> <path>` | Point a model at its new location when a drive mounts under a different path |
+| `/model register <path>` | Add an Ollama store folder (in place), or import a `.gguf` file / safetensors folder into Ollama (copies it — you'll be asked first) |
+| `/model remove <id>` | Forget a model registration (model files are never touched) |
+
 **Rule of thumb:** local models are fine for `INSTANT`/`STANDARD`-tier work
 (explaining code, small edits); reserve your biggest/most expensive model
 for `FULL`-tier tasks (security review, cross-cutting refactors) via
