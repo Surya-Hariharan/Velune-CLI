@@ -5,14 +5,28 @@ API so that invalid, expired, revoked, or rate-limited keys are caught before
 being persisted to the encrypted credential store (``providers/keystore.py``,
 ``providers/crypto.py``). The store's own AES-256-GCM master key — not the
 provider keys directly — is what the OS keyring (Windows Credential Manager /
-macOS Keychain / Linux Secret Service) protects.  No regex, no prefix
-heuristics — the only source of truth is the provider's own response.
+macOS Keychain / Linux Secret Service) protects. A cheap structural pre-check
+rejects obvious paste errors; the provider's own response decides everything
+else.
+
+What a result proves
+--------------------
+The statuses keep five questions apart that used to collapse into "invalid
+key": is the key *saved*, is *authentication confirmed*, is the provider
+*reachable*, is a *model available*, does *inference succeed*. Only
+:attr:`ValidationStatus.OK` means the provider authenticated this key. Only the
+statuses in :data:`KEY_REJECTING_STATUSES` say the key itself is bad. Every
+other failure — timeout, outage, rate limit, permission on one endpoint, a
+missing test model — is *inconclusive* about the key and must never be
+reported, or persisted, as an invalid key.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from velune._compat import StrEnum
 
@@ -31,6 +45,24 @@ class ValidationStatus(StrEnum):
     #: OpenAI-compatible endpoint). This is "can't check", not "check failed" —
     #: reporting it as UNKNOWN_ERROR made healthy local providers look broken.
     NOT_SUPPORTED = "not_supported"
+    #: The request did not complete in time.
+    TIMEOUT = "timeout"
+    #: The provider answered with a 5xx — an outage, not a verdict on the key.
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    #: The provider is reachable but the check could not prove the key works
+    #: (e.g. NVIDIA's model listing does not require a key, and the test model
+    #: used to confirm it was unavailable).
+    UNCONFIRMED = "unconfirmed"
+
+
+#: The only verdicts that are statements about the credential itself.
+KEY_REJECTING_STATUSES: frozenset[ValidationStatus] = frozenset(
+    {
+        ValidationStatus.INVALID_KEY,
+        ValidationStatus.EXPIRED_KEY,
+        ValidationStatus.REVOKED_KEY,
+    }
+)
 
 
 @dataclass
@@ -40,10 +72,24 @@ class ValidationResult:
     message: str
     models: list[str] = field(default_factory=list)
     account_info: dict = field(default_factory=dict)
+    #: HTTP status of the deciding response, when there was one.
+    http_status: int | None = None
 
     @property
     def ok(self) -> bool:
         return self.status == ValidationStatus.OK
+
+    @property
+    def rejects_key(self) -> bool:
+        """True only when the provider said this key is bad."""
+        return self.status in KEY_REJECTING_STATUSES
+
+    @property
+    def inconclusive(self) -> bool:
+        """Not OK, but says nothing against the key (worth saving and retrying)."""
+        return (
+            not self.ok and not self.rejects_key and self.status != ValidationStatus.MALFORMED_KEY
+        )
 
     def human_message(self) -> str:
         """Return a single, user-facing diagnostic line."""
@@ -60,7 +106,8 @@ class ValidationResult:
 # prefix check and falls through to the minimum-length check plus the real
 # network round-trip. This is a cheap pre-filter, never a substitute for it:
 # matching a prefix does not mean the key is valid, only that it is not
-# obviously wrong.
+# obviously wrong. The UIs still offer to save a key that fails it (a
+# gateway/proxy key may legitimately look different).
 _KEY_PREFIXES: dict[str, tuple[str, ...]] = {
     "openai": ("sk-",),
     "anthropic": ("sk-ant-",),
@@ -114,535 +161,299 @@ def _redact_key(text: str, api_key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Per-provider validators
+# Shared response / exception classification
 # ---------------------------------------------------------------------------
 
 
-async def _validate_openai(api_key: str) -> ValidationResult:
+def _provider_detail(resp: Any) -> str:
+    """The provider's own error message, sanitized and shortened."""
     try:
-        import httpx
+        body = resp.json()
+    except Exception:
+        try:
+            text = resp.text
+        except Exception:
+            return ""
+        body = None
+    else:
+        text = ""
+    message = ""
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            message = str(err.get("message") or err.get("status") or "")
+        elif isinstance(err, str):
+            message = err
+        elif body.get("detail"):
+            message = str(body["detail"])
+        elif body.get("message"):
+            message = str(body["message"])
+    else:
+        message = text
+    from velune.core.redaction import redact_secrets
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
+    return redact_secrets(" ".join(message.split()))[:200]
+
+
+def _classify_status(provider_id: str, label: str, resp: Any) -> ValidationResult:
+    """Map a non-success HTTP response to a result, with the right category."""
+    code = resp.status_code
+    detail = _provider_detail(resp)
+    lowered = detail.lower()
+    said = f" Provider said: {detail}" if detail else ""
+
+    if code == 401:
+        if "expired" in lowered:
             return ValidationResult(
-                provider_id="openai",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
+                provider_id,
+                ValidationStatus.EXPIRED_KEY,
+                f"{label} API key has expired.",
+                http_status=code,
             )
-        if resp.status_code == 401:
-            body = resp.json()
-            err = body.get("error", {}).get("message", "")
-            if "expired" in err.lower():
-                return ValidationResult(
-                    "openai", ValidationStatus.EXPIRED_KEY, "OpenAI API key has expired."
-                )
+        if "revoked" in lowered or "deactivated" in lowered or "disabled" in lowered:
             return ValidationResult(
-                "openai", ValidationStatus.INVALID_KEY, "Invalid OpenAI API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "openai",
-                ValidationStatus.RATE_LIMITED,
-                "OpenAI API key is rate-limited. Try again in a moment.",
+                provider_id,
+                ValidationStatus.REVOKED_KEY,
+                f"{label} API key was revoked.",
+                http_status=code,
             )
         return ValidationResult(
-            "openai", ValidationStatus.UNKNOWN_ERROR, f"OpenAI returned HTTP {resp.status_code}."
+            provider_id,
+            ValidationStatus.INVALID_KEY,
+            f"Authentication failed: {label} rejected this API key.",
+            http_status=code,
         )
-    except Exception as e:
+    if code == 403:
         return ValidationResult(
-            "openai", ValidationStatus.NETWORK_ERROR, f"Network error reaching OpenAI: {e}"
+            provider_id,
+            ValidationStatus.PERMISSION_DENIED,
+            f"Access denied or insufficient permissions at {label} (HTTP 403).{said}",
+            http_status=code,
         )
-
-
-async def _validate_anthropic(api_key: str) -> ValidationResult:
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # GET /v1/models is free (no tokens billed) and independent of any one
-            # model id staying available, unlike a 1-token completion against a
-            # hardcoded model that turns a valid key into a 404 once it is retired.
-            resp = await client.get(
-                "https://api.anthropic.com/v1/models",
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-            )
-        if resp.status_code == 200:
-            try:
-                ids = [m["id"] for m in resp.json().get("data", []) if "id" in m]
-            except (ValueError, AttributeError, TypeError):
-                ids = []
-            return ValidationResult(
-                provider_id="anthropic",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=ids or ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
-                account_info={"organization": "verified"},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "anthropic", ValidationStatus.INVALID_KEY, "Invalid Anthropic API key."
-            )
-        if resp.status_code == 403:
-            return ValidationResult(
-                "anthropic",
-                ValidationStatus.PERMISSION_DENIED,
-                "Anthropic API key lacks permission for this operation.",
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "anthropic", ValidationStatus.RATE_LIMITED, "Anthropic API key is rate-limited."
-            )
+    if code == 404:
         return ValidationResult(
-            "anthropic",
+            provider_id,
             ValidationStatus.UNKNOWN_ERROR,
-            f"Anthropic returned HTTP {resp.status_code}.",
+            f"{label} endpoint not found (HTTP 404) — check the configured base URL.",
+            http_status=code,
         )
-    except Exception as e:
+    if code == 408:
         return ValidationResult(
-            "anthropic", ValidationStatus.NETWORK_ERROR, f"Network error reaching Anthropic: {e}"
+            provider_id,
+            ValidationStatus.TIMEOUT,
+            f"Connection to {label} timed out (HTTP 408).",
+            http_status=code,
         )
-
-
-async def _validate_google(api_key: str) -> ValidationResult:
-    try:
-        import httpx
-
-        # The key goes in a header, never the query string. httpx embeds the
-        # request URL in its exception messages, and those messages are
-        # persisted to credentials.json via mark_invalid(reason=...) — a key in
-        # the URL would be written to disk and echoed by provider status output.
-        url = "https://generativelanguage.googleapis.com/v1beta/models"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers={"x-goog-api-key": api_key})
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m.get("name", "").split("/")[-1] for m in data.get("models", [])]
-            return ValidationResult(
-                provider_id="google",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 400:
-            body = resp.json()
-            status_val = body.get("error", {}).get("status", "")
-            if status_val in ("INVALID_ARGUMENT",):
-                return ValidationResult(
-                    "google", ValidationStatus.INVALID_KEY, "Invalid Google API key."
-                )
-        if resp.status_code == 403:
-            body = resp.json()
-            msg = body.get("error", {}).get("message", "")
-            if "api key" in msg.lower():
-                return ValidationResult(
-                    "google", ValidationStatus.INVALID_KEY, "Invalid or disabled Google API key."
-                )
-            return ValidationResult(
-                "google",
-                ValidationStatus.PERMISSION_DENIED,
-                "Google API key lacks required permissions.",
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "google", ValidationStatus.RATE_LIMITED, "Google API key is rate-limited."
-            )
+    if code == 429:
         return ValidationResult(
-            "google", ValidationStatus.UNKNOWN_ERROR, f"Google returned HTTP {resp.status_code}."
+            provider_id,
+            ValidationStatus.RATE_LIMITED,
+            f"Rate limit reached at {label}. Try again in a moment.",
+            http_status=code,
         )
-    except Exception as e:
+    if 500 <= code < 600:
         return ValidationResult(
-            "google",
-            ValidationStatus.NETWORK_ERROR,
-            _redact_key(f"Network error reaching Google: {e}", api_key),
+            provider_id,
+            ValidationStatus.PROVIDER_UNAVAILABLE,
+            f"{label} is temporarily unavailable (HTTP {code}).",
+            http_status=code,
         )
+    return ValidationResult(
+        provider_id,
+        ValidationStatus.UNKNOWN_ERROR,
+        f"{label} returned HTTP {code}.{said}",
+        http_status=code,
+    )
 
 
-async def _validate_groq(api_key: str) -> ValidationResult:
-    try:
-        import httpx
+def _classify_exception(
+    provider_id: str, label: str, exc: BaseException, api_key: str
+) -> ValidationResult:
+    """Map a transport/parse failure to a result. Never claims the key is bad."""
+    import httpx
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.groq.com/openai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="groq",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult("groq", ValidationStatus.INVALID_KEY, "Invalid Groq API key.")
-        if resp.status_code == 429:
-            return ValidationResult(
-                "groq", ValidationStatus.RATE_LIMITED, "Groq API key is rate-limited."
-            )
+    if isinstance(exc, httpx.TimeoutException):
         return ValidationResult(
-            "groq", ValidationStatus.UNKNOWN_ERROR, f"Groq returned HTTP {resp.status_code}."
+            provider_id, ValidationStatus.TIMEOUT, f"Connection to {label} timed out."
         )
-    except Exception as e:
+    if isinstance(exc, ValueError):  # includes json.JSONDecodeError
         return ValidationResult(
-            "groq", ValidationStatus.NETWORK_ERROR, f"Network error reaching Groq: {e}"
-        )
-
-
-async def _validate_openrouter(api_key: str) -> ValidationResult:
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://openrouter.ai/api/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="openrouter",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models[:30],  # cap at 30 for display
-                account_info={"total_models": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "openrouter", ValidationStatus.INVALID_KEY, "Invalid OpenRouter API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "openrouter", ValidationStatus.RATE_LIMITED, "OpenRouter API key is rate-limited."
-            )
-        return ValidationResult(
-            "openrouter",
+            provider_id,
             ValidationStatus.UNKNOWN_ERROR,
-            f"OpenRouter returned HTTP {resp.status_code}.",
+            f"{label} returned a response Velune could not read.",
         )
-    except Exception as e:
-        return ValidationResult(
-            "openrouter", ValidationStatus.NETWORK_ERROR, f"Network error reaching OpenRouter: {e}"
-        )
+    return ValidationResult(
+        provider_id,
+        ValidationStatus.NETWORK_ERROR,
+        _redact_key(f"Could not connect to {label}: {exc}", api_key),
+    )
 
 
-async def _validate_together(api_key: str) -> ValidationResult:
+def _ids(field_name: str = "id", list_key: str = "data") -> Callable[[Any], list[str]]:
+    def parse(body: Any) -> list[str]:
+        items = body if isinstance(body, list) else (body or {}).get(list_key, [])
+        return [str(m[field_name]) for m in items if isinstance(m, dict) and m.get(field_name)]
+
+    return parse
+
+
+@dataclass(frozen=True)
+class _ListSpec:
+    """A provider whose key is checked by an authenticated model listing."""
+
+    label: str
+    url: str | Callable[[], str]
+    auth: Callable[[str], dict[str, str]] = lambda key: {"Authorization": f"Bearer {key}"}
+    parse: Callable[[Any], list[str]] = field(default_factory=_ids)
+    params: dict[str, Any] | None = None
+    #: Provider-specific reading of a non-200 response; None → generic mapping.
+    special: Callable[[str, Any], ValidationResult | None] | None = None
+
+
+async def _list_check(provider_id: str, spec: _ListSpec, api_key: str) -> ValidationResult:
+    import httpx
+
+    url = spec.url() if callable(spec.url) else spec.url
     try:
-        import httpx
-
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.together.xyz/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
+            resp = await client.get(url, headers=spec.auth(api_key), params=spec.params)
         if resp.status_code == 200:
-            data = resp.json()
-            models = [
-                m.get("id", "") for m in (data if isinstance(data, list) else data.get("data", []))
-            ]
+            models = spec.parse(resp.json())
             return ValidationResult(
-                provider_id="together",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models[:20],
-                account_info={"total_models": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "together", ValidationStatus.INVALID_KEY, "Invalid Together.AI API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "together", ValidationStatus.RATE_LIMITED, "Together.AI API key is rate-limited."
-            )
-        return ValidationResult(
-            "together",
-            ValidationStatus.UNKNOWN_ERROR,
-            f"Together.AI returned HTTP {resp.status_code}.",
-        )
-    except Exception as e:
-        return ValidationResult(
-            "together", ValidationStatus.NETWORK_ERROR, f"Network error reaching Together.AI: {e}"
-        )
-
-
-async def _validate_fireworks(api_key: str) -> ValidationResult:
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.fireworks.ai/inference/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="fireworks",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models[:20],
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "fireworks", ValidationStatus.INVALID_KEY, "Invalid Fireworks.AI API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "fireworks", ValidationStatus.RATE_LIMITED, "Fireworks.AI API key is rate-limited."
-            )
-        return ValidationResult(
-            "fireworks",
-            ValidationStatus.UNKNOWN_ERROR,
-            f"Fireworks.AI returned HTTP {resp.status_code}.",
-        )
-    except Exception as e:
-        return ValidationResult(
-            "fireworks", ValidationStatus.NETWORK_ERROR, f"Network error reaching Fireworks.AI: {e}"
-        )
-
-
-async def _validate_deepseek(api_key: str) -> ValidationResult:
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.deepseek.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="deepseek",
+                provider_id=provider_id,
                 status=ValidationStatus.OK,
                 message="Authenticated successfully",
                 models=models,
                 account_info={"model_count": len(models)},
+                http_status=200,
             )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "deepseek", ValidationStatus.INVALID_KEY, "Invalid DeepSeek API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "deepseek", ValidationStatus.RATE_LIMITED, "DeepSeek API key is rate-limited."
-            )
-        return ValidationResult(
-            "deepseek",
-            ValidationStatus.UNKNOWN_ERROR,
-            f"DeepSeek returned HTTP {resp.status_code}.",
-        )
+        if spec.special is not None:
+            special = spec.special(provider_id, resp)
+            if special is not None:
+                return special
+        return _classify_status(provider_id, spec.label, resp)
     except Exception as e:
-        return ValidationResult(
-            "deepseek", ValidationStatus.NETWORK_ERROR, f"Network error reaching DeepSeek: {e}"
-        )
+        return _classify_exception(provider_id, spec.label, e, api_key)
 
 
-async def _validate_mistral(api_key: str) -> ValidationResult:
+# ---------------------------------------------------------------------------
+# Provider-specific readings
+# ---------------------------------------------------------------------------
+
+
+def _google_special(provider_id: str, resp: Any) -> ValidationResult | None:
     try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.mistral.ai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="mistral",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "mistral", ValidationStatus.INVALID_KEY, "Invalid Mistral API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "mistral", ValidationStatus.RATE_LIMITED, "Mistral API key is rate-limited."
-            )
+        err = (resp.json() or {}).get("error", {}) or {}
+    except Exception:
+        return None
+    if resp.status_code == 400 and err.get("status") == "INVALID_ARGUMENT":
         return ValidationResult(
-            "mistral", ValidationStatus.UNKNOWN_ERROR, f"Mistral returned HTTP {resp.status_code}."
+            provider_id,
+            ValidationStatus.INVALID_KEY,
+            "Authentication failed: invalid Google API key.",
+            http_status=400,
         )
-    except Exception as e:
+    if resp.status_code == 403 and "api key" in str(err.get("message", "")).lower():
         return ValidationResult(
-            "mistral", ValidationStatus.NETWORK_ERROR, f"Network error reaching Mistral: {e}"
+            provider_id,
+            ValidationStatus.INVALID_KEY,
+            "Authentication failed: invalid or disabled Google API key.",
+            http_status=403,
         )
+    return None
 
 
-async def _validate_cohere(api_key: str) -> ValidationResult:
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.cohere.com/v1/models",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m.get("name", "") for m in data.get("models", [])]
-            return ValidationResult(
-                provider_id="cohere",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "cohere", ValidationStatus.INVALID_KEY, "Invalid Cohere API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "cohere", ValidationStatus.RATE_LIMITED, "Cohere API key is rate-limited."
-            )
-        return ValidationResult(
-            "cohere", ValidationStatus.UNKNOWN_ERROR, f"Cohere returned HTTP {resp.status_code}."
-        )
-    except Exception as e:
-        return ValidationResult(
-            "cohere", ValidationStatus.NETWORK_ERROR, f"Network error reaching Cohere: {e}"
-        )
+def _anthropic_models(body: Any) -> list[str]:
+    return _ids()(body)
 
 
-async def _validate_nvidia(api_key: str) -> ValidationResult:
-    try:
-        import httpx
+def _openai_url() -> str:
+    from velune.providers.endpoints import provider_base_url
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://integrate.api.nvidia.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="nvidia",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models[:20],
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "nvidia", ValidationStatus.INVALID_KEY, "Invalid NVIDIA API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "nvidia", ValidationStatus.RATE_LIMITED, "NVIDIA API key is rate-limited."
-            )
-        return ValidationResult(
-            "nvidia",
-            ValidationStatus.UNKNOWN_ERROR,
-            f"NVIDIA NIM returned HTTP {resp.status_code}.",
-        )
-    except Exception as e:
-        return ValidationResult(
-            "nvidia", ValidationStatus.NETWORK_ERROR, f"Network error reaching NVIDIA NIM: {e}"
-        )
+    return f"{provider_base_url('openai')}/models"
 
 
-async def _validate_xai(api_key: str) -> ValidationResult:
-    try:
-        import httpx
+def _anthropic_url() -> str:
+    from velune.providers.endpoints import provider_base_url
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.x.ai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="xai",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult("xai", ValidationStatus.INVALID_KEY, "Invalid xAI API key.")
-        if resp.status_code == 429:
-            return ValidationResult(
-                "xai", ValidationStatus.RATE_LIMITED, "xAI API key is rate-limited."
-            )
-        return ValidationResult(
-            "xai", ValidationStatus.UNKNOWN_ERROR, f"xAI returned HTTP {resp.status_code}."
-        )
-    except Exception as e:
-        return ValidationResult(
-            "xai", ValidationStatus.NETWORK_ERROR, f"Network error reaching xAI: {e}"
-        )
+    return f"{provider_base_url('anthropic')}/v1/models"
 
 
-async def _validate_meta(api_key: str) -> ValidationResult:
-    try:
-        import httpx
+def _google_models(body: Any) -> list[str]:
+    return [
+        str(m.get("name", "")).split("/")[-1]
+        for m in (body or {}).get("models", [])
+        if isinstance(m, dict) and m.get("name")
+    ]
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.llama.com/compat/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.status_code == 200:
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            return ValidationResult(
-                provider_id="meta",
-                status=ValidationStatus.OK,
-                message="Authenticated successfully",
-                models=models,
-                account_info={"model_count": len(models)},
-            )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "meta", ValidationStatus.INVALID_KEY, "Invalid Meta Llama API key."
-            )
-        if resp.status_code == 429:
-            return ValidationResult(
-                "meta", ValidationStatus.RATE_LIMITED, "Meta Llama API key is rate-limited."
-            )
-        return ValidationResult(
-            "meta",
-            ValidationStatus.UNKNOWN_ERROR,
-            f"Meta Llama API returned HTTP {resp.status_code}.",
-        )
-    except Exception as e:
-        return ValidationResult(
-            "meta", ValidationStatus.NETWORK_ERROR, f"Network error reaching Meta Llama API: {e}"
-        )
+
+_LIST_SPECS: dict[str, _ListSpec] = {
+    "openai": _ListSpec("OpenAI", _openai_url),
+    "anthropic": _ListSpec(
+        # GET /v1/models is free (no tokens billed) and independent of any one
+        # model id staying available, unlike a 1-token completion against a
+        # hardcoded model that turns a valid key into a 404 once it is retired.
+        "Anthropic",
+        _anthropic_url,
+        auth=lambda key: {"x-api-key": key, "anthropic-version": "2023-06-01"},
+        parse=_anthropic_models,
+        params={"limit": 1000},
+    ),
+    # The key goes in a header, never the query string. httpx embeds the
+    # request URL in its exception messages, and those messages are persisted
+    # to credentials.json via mark_invalid(reason=...) — a key in the URL would
+    # be written to disk and echoed by provider status output.
+    "google": _ListSpec(
+        "Google",
+        "https://generativelanguage.googleapis.com/v1beta/models",
+        auth=lambda key: {"x-goog-api-key": key},
+        parse=_google_models,
+        special=_google_special,
+    ),
+    "groq": _ListSpec("Groq", "https://api.groq.com/openai/v1/models"),
+    "openrouter": _ListSpec("OpenRouter", "https://openrouter.ai/api/v1/models"),
+    "together": _ListSpec("Together.AI", "https://api.together.xyz/v1/models"),
+    "fireworks": _ListSpec("Fireworks.AI", "https://api.fireworks.ai/inference/v1/models"),
+    "deepseek": _ListSpec("DeepSeek", "https://api.deepseek.com/v1/models"),
+    "mistral": _ListSpec("Mistral", "https://api.mistral.ai/v1/models"),
+    "cohere": _ListSpec(
+        "Cohere",
+        "https://api.cohere.com/v1/models",
+        parse=_ids(field_name="name", list_key="models"),
+    ),
+    "xai": _ListSpec("xAI", "https://api.x.ai/v1/models"),
+    "meta": _ListSpec("Meta Llama API", "https://api.llama.com/compat/v1/models"),
+}
+
+
+def _make_list_validator(provider_id: str) -> Callable[[str], Any]:
+    spec = _LIST_SPECS[provider_id]
+
+    async def _validate(api_key: str) -> ValidationResult:
+        return await _list_check(provider_id, spec, api_key)
+
+    _validate.__name__ = f"_validate_{provider_id}"
+    return _validate
+
+
+_validate_openai = _make_list_validator("openai")
+_validate_anthropic = _make_list_validator("anthropic")
+_validate_google = _make_list_validator("google")
+_validate_groq = _make_list_validator("groq")
+_validate_openrouter = _make_list_validator("openrouter")
+_validate_together = _make_list_validator("together")
+_validate_fireworks = _make_list_validator("fireworks")
+_validate_deepseek = _make_list_validator("deepseek")
+_validate_mistral = _make_list_validator("mistral")
+_validate_cohere = _make_list_validator("cohere")
+_validate_xai = _make_list_validator("xai")
+_validate_meta = _make_list_validator("meta")
 
 
 async def _validate_huggingface(api_key: str) -> ValidationResult:
-    try:
-        import httpx
+    import httpx
 
+    try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 "https://huggingface.co/api/whoami-v2",
@@ -650,66 +461,139 @@ async def _validate_huggingface(api_key: str) -> ValidationResult:
             )
         if resp.status_code == 200:
             data = resp.json()
-            username = data.get("name", "unknown")
             return ValidationResult(
                 provider_id="huggingface",
                 status=ValidationStatus.OK,
                 message="Authenticated successfully",
                 models=[],
-                account_info={"username": username, "type": data.get("type", "")},
+                account_info={
+                    "username": data.get("name", "unknown"),
+                    "type": data.get("type", ""),
+                },
+                http_status=200,
             )
-        if resp.status_code == 401:
-            return ValidationResult(
-                "huggingface", ValidationStatus.INVALID_KEY, "Invalid HuggingFace token."
-            )
-        return ValidationResult(
-            "huggingface",
-            ValidationStatus.UNKNOWN_ERROR,
-            f"HuggingFace returned HTTP {resp.status_code}.",
-        )
+        return _classify_status("huggingface", "HuggingFace", resp)
     except Exception as e:
+        return _classify_exception("huggingface", "HuggingFace", e, api_key)
+
+
+async def _validate_nvidia(api_key: str) -> ValidationResult:
+    """List NIM models, then confirm the key with a 1-token completion.
+
+    NVIDIA's ``GET /v1/models`` answers 200 without checking the key, so a
+    listing alone "verified" any ``nvapi-`` string and the failure only showed
+    up at the first chat. The completion (``max_tokens=1``) against a small
+    model that serves the hosted catalog is what actually exercises the key.
+    If no test model can be called, the result is UNCONFIRMED — saved, but not
+    claimed as verified.
+    """
+    import httpx
+
+    from velune.providers.adapters.nvidia import pick_probe_model
+    from velune.providers.endpoints import provider_base_url
+
+    label = "NVIDIA NIM"
+    base = provider_base_url("nvidia")
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            listing = await client.get(f"{base}/models", headers=headers)
+        if listing.status_code != 200:
+            return _classify_status("nvidia", label, listing)
+        models = _ids()(listing.json())
+    except Exception as e:
+        return _classify_exception("nvidia", label, e, api_key)
+
+    probe = pick_probe_model(models)
+    if probe is None:
         return ValidationResult(
-            "huggingface",
-            ValidationStatus.NETWORK_ERROR,
-            f"Network error reaching HuggingFace: {e}",
+            "nvidia",
+            ValidationStatus.UNCONFIRMED,
+            "NVIDIA NIM is reachable, but no chat model was listed to confirm the key with.",
+            models=models,
         )
+    try:
+        # Cold-starting NIM functions can take a while to answer.
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.post(
+                f"{base}/chat/completions",
+                headers=headers,
+                json={
+                    "model": probe,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
+            )
+    except Exception as e:
+        result = _classify_exception("nvidia", label, e, api_key)
+        result.models = models
+        return result
+
+    if resp.status_code == 200:
+        return ValidationResult(
+            provider_id="nvidia",
+            status=ValidationStatus.OK,
+            message="Authenticated successfully",
+            models=models,
+            account_info={"model_count": len(models), "verified_with": probe},
+            http_status=200,
+        )
+    if resp.status_code in (404, 422):
+        return ValidationResult(
+            "nvidia",
+            ValidationStatus.UNCONFIRMED,
+            f"NVIDIA NIM is reachable, but the test model {probe} is unavailable "
+            f"(HTTP {resp.status_code}), so the key could not be confirmed.",
+            models=models,
+            http_status=resp.status_code,
+        )
+    result = _classify_status("nvidia", label, resp)
+    result.models = models
+    return result
 
 
 async def _validate_ollama(_api_key: str = "") -> ValidationResult:
-    """Ollama is local and keyless — just check reachability."""
-    try:
-        import httpx
+    """Ollama is local and keyless — check the configured endpoint is serving."""
+    import httpx
 
+    from velune.providers.endpoints import ollama_base_url
+
+    base = ollama_base_url()
+    try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get("http://localhost:11434/api/tags")
+            resp = await client.get(f"{base}/api/tags")
         if resp.status_code == 200:
             data = resp.json()
-            models = [m["name"] for m in data.get("models", [])]
+            models = [
+                m["name"] for m in data.get("models", []) if isinstance(m, dict) and "name" in m
+            ]
             return ValidationResult(
                 provider_id="ollama",
                 status=ValidationStatus.OK,
-                message="Ollama server reachable",
+                message=f"Ollama server reachable at {base}",
                 models=models,
-                account_info={"local": True, "model_count": len(models)},
+                account_info={"local": True, "model_count": len(models), "endpoint": base},
+                http_status=200,
             )
+        return _classify_status("ollama", f"Ollama at {base}", resp)
+    except httpx.TimeoutException:
         return ValidationResult(
-            "ollama",
-            ValidationStatus.UNKNOWN_ERROR,
-            f"Ollama server returned HTTP {resp.status_code}.",
+            "ollama", ValidationStatus.TIMEOUT, f"Connection to Ollama at {base} timed out."
         )
     except Exception:
         return ValidationResult(
             "ollama",
             ValidationStatus.NETWORK_ERROR,
-            "Ollama server is not running. Start it with `ollama serve`.",
+            f"Ollama server is not reachable at {base}. Start it with `ollama serve`, "
+            "or set OLLAMA_HOST to where it runs.",
         )
 
 
 async def _validate_lmstudio(_api_key: str = "") -> ValidationResult:
     """LM Studio is local and keyless — just check reachability."""
-    try:
-        import httpx
+    import httpx
 
+    try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get("http://localhost:1234/v1/models")
         if resp.status_code == 200:
@@ -758,6 +642,11 @@ _VALIDATORS: dict[str, object] = {
     "lmstudio": _validate_lmstudio,
 }
 
+#: Overall budget per provider. NVIDIA's check includes a completion that may
+#: wait on a cold start.
+_DEFAULT_BUDGET_S = 15.0
+_BUDGETS_S: dict[str, float] = {"nvidia": 40.0}
+
 
 async def validate_provider(provider_id: str, api_key: str = "") -> ValidationResult:
     """Validate *provider_id* credentials with a live API round-trip.
@@ -782,12 +671,13 @@ async def validate_provider(provider_id: str, api_key: str = "") -> ValidationRe
             return ValidationResult(
                 provider_id=provider_id, status=ValidationStatus.MALFORMED_KEY, message=issue
             )
+    budget = _BUDGETS_S.get(provider_id, _DEFAULT_BUDGET_S)
     try:
-        return await asyncio.wait_for(validator(api_key), timeout=15.0)
+        return await asyncio.wait_for(validator(api_key), timeout=budget)  # type: ignore[operator]
     except (asyncio.TimeoutError, TimeoutError):  # distinct classes before 3.11
         return ValidationResult(
             provider_id=provider_id,
-            status=ValidationStatus.NETWORK_ERROR,
+            status=ValidationStatus.TIMEOUT,
             message=f"Validation timed out for {provider_id}. Check your network connection.",
         )
 
@@ -818,7 +708,7 @@ def validate_provider_sync(provider_id: str, api_key: str = "") -> ValidationRes
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, validate_provider(provider_id, api_key))
-            return future.result(timeout=20.0)
+            return future.result(timeout=_BUDGETS_S.get(provider_id, _DEFAULT_BUDGET_S) + 5.0)
     except Exception as e:
         return ValidationResult(
             provider_id=provider_id,
