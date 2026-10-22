@@ -915,11 +915,19 @@ def repair_providers_cmd() -> None:
     """Attempt to repair corrupted or invalid provider credentials.
 
     Tries to restore from the automatic backup, then removes any records
-    with empty or missing keys.
+    with empty or missing keys. It does nothing when the file is fine but the
+    OS keyring is locked: unlock the keyring instead.
     """
     console.print(f"[{design.MUTED}]Running credential repair...[/{design.MUTED}]\n")
 
     report = repair_keystore()
+
+    if report.get("blocked"):
+        console.print(
+            f"[{design.WARN}]Nothing was repaired, and nothing was changed.[/{design.WARN}]"
+        )
+        console.print(f"[{design.MUTED}]{report['blocked']}[/{design.MUTED}]")
+        return
 
     if report["restored_backup"]:
         console.print(f"[{design.OK}]✓ Restored from backup (.bak file)[/{design.OK}]")

@@ -373,6 +373,11 @@ def _keyring_lookup() -> tuple[bytes | None, bool]:
     return None, True
 
 
+def keyring_answered() -> bool:
+    """True when the OS keyring responded (with a key or "no entry") just now."""
+    return _keyring_lookup()[1]
+
+
 def _keyring_read_key() -> bytes | None:
     """The stored keyring master key, or None (absent *or* unreadable)."""
     return _keyring_lookup()[0]
@@ -470,9 +475,59 @@ def _candidate_master_keys() -> Iterator[bytes]:
     yield from _emit(_get_fallback_key())  # legacy machine-key store predating a passphrase
 
 
-def encrypt_credentials(plaintext: str) -> bytes:
-    """Encrypt credentials JSON string to bytes using AES-GCM."""
+class MasterKeyUnavailable(RuntimeError):
+    """The master key protecting an existing credential store cannot be reached right now."""
+
+
+_MIN_STORE_BYTES = _NONCE_LEN + 16  # nonce + GCM tag: anything shorter is not a store
+
+
+def _opens_with_fallback_key(path: Path) -> bool:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+    if len(data) < _MIN_STORE_BYTES:
+        return False
+    try:
+        AESGCM(_get_fallback_key()).decrypt(data[:_NONCE_LEN], data[_NONCE_LEN:], None)
+    except InvalidTag:
+        return False
+    return True
+
+
+def _weak_key_write_is_safe() -> bool:
+    """May the machine-derived key encrypt the credential store right now?
+
+    Yes when there is no store yet (first run on a host with no keyring) or the
+    store already uses it. No when a store exists that the machine key cannot
+    open: it is protected by a keyring or passphrase key that is unreachable at
+    this moment, and re-encrypting under the weak key would silently downgrade
+    it (the old key stays valid, so nothing is lost, but the protection is).
+    """
+    config = Path(user_config_dir("Velune"))
+    existing = [
+        p
+        for p in (config / "credentials.json", config / "credentials.json.bak")
+        if p.exists() and p.stat().st_size >= _MIN_STORE_BYTES
+    ]
+    return not existing or any(_opens_with_fallback_key(p) for p in existing)
+
+
+def encrypt_credentials(plaintext: str, *, protect_store: bool = False) -> bytes:
+    """Encrypt credentials JSON string to bytes using AES-GCM.
+
+    With ``protect_store=True`` (the credential store's own writes) this raises
+    :class:`MasterKeyUnavailable` instead of falling back to the weak
+    machine-derived key over a store that a stronger key protects.
+    """
     key = get_or_create_master_key()
+    if protect_store and key == _get_fallback_key() and not _weak_key_write_is_safe():
+        raise MasterKeyUnavailable(
+            "The OS keyring did not answer, so your saved keys were left as they are "
+            "rather than re-encrypted with a weaker key. Unlock or restore the keyring "
+            "(or set the same VELUNE_MASTER_PASSPHRASE as before) and try again."
+        )
     aesgcm = AESGCM(key)
     nonce = os.urandom(12)
     ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)

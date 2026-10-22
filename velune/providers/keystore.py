@@ -29,12 +29,14 @@ key). :func:`key_source` reports which one is in effect, without the value.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import logging
 import os
 import shutil
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -44,8 +46,14 @@ from typing import Any
 from platformdirs import user_config_dir
 
 from velune._compat import StrEnum
-from velune.core.filelock import locked
-from velune.providers.crypto import decrypt_credentials, encrypt_credentials
+from velune.core.filelock import FileLockTimeout, locked
+from velune.providers.crypto import (
+    DecryptionError,
+    MasterKeyUnavailable,
+    decrypt_credentials,
+    encrypt_credentials,
+    keyring_answered,
+)
 
 logger = logging.getLogger("velune.providers.keystore")
 
@@ -53,6 +61,9 @@ logger = logging.getLogger("velune.providers.keystore")
 # STALE and re-checked in the background. Stale never means unusable — see
 # KeyState below.
 VERIFY_TTL_SECONDS = 86_400  # 24h
+
+# How soon an unreadable store is retried on the next lookup (see _ensure_cache).
+_LOAD_RETRY_SECONDS = 2.0
 
 
 class KeyState(StrEnum):
@@ -71,11 +82,23 @@ class KeyState(StrEnum):
     ENV = "env"  # supplied via environment variable; we don't own its lifecycle
 
 
+class _EmptyStoreFile(ValueError):
+    """A store file exists but holds no bytes at all."""
+
+
 class CredentialStoreError(OSError):
     """The encrypted credential store could not be read or written safely.
 
     Raised instead of reporting a save as successful, and instead of replacing
     an unreadable store (whose keys may still be recoverable) with a new one.
+    """
+
+
+class CredentialKeyUnavailable(CredentialStoreError):
+    """The store looks intact but its key cannot be reached right now.
+
+    Distinct from a damaged store: the fix is to unlock or restore the keyring
+    (or set the same passphrase), not to move any file. ``repair`` refuses it.
     """
 
 
@@ -219,6 +242,8 @@ class CredentialManager:
         self._key_revisions: dict[str, int] = {}
         # Why the last load could not read the store, for diagnostics.
         self.load_error: str | None = None
+        self.load_key_unavailable = False
+        self._load_failed_at: float | None = None
 
     # ------------------------------------------------------------------
     # Reading
@@ -240,7 +265,7 @@ class CredentialManager:
         """Decrypt and parse one store file; raises on anything unreadable."""
         encrypted_data = path.read_bytes()
         if not encrypted_data:
-            return {}
+            raise _EmptyStoreFile(f"{path.name} is empty")
         data = json.loads(decrypt_credentials(encrypted_data))
         providers = data.get("providers", {}) if isinstance(data, dict) else None
         if not isinstance(providers, dict):
@@ -262,6 +287,16 @@ class CredentialManager:
             return {}, "empty"
         try:
             return self._decode(self._credentials_file), "primary"
+        except _EmptyStoreFile as primary_exc:
+            # Velune never writes an empty store (every save is an encrypted
+            # table), so a zero-byte file is damage — a crash or a full disk —
+            # not "no keys". Read the backup instead; with no backup there is
+            # nothing to lose and it counts as a fresh store. Reporting it as
+            # "primary" would copy the empty file over the backup on the next
+            # save.
+            primary_error = primary_exc
+            if not self._backup_file.exists():
+                return {}, "empty"
         except Exception as primary_exc:
             primary_error = primary_exc
         if self._backup_file.exists():
@@ -274,12 +309,27 @@ class CredentialManager:
                 return data, "backup"
             except Exception:
                 pass
+        # A decryption failure while the keyring is not answering says nothing
+        # about the file: the key is simply out of reach. Anything else (the
+        # keyring answered and its key still does not open the file, or the
+        # decrypted content is not a credential table) means the store itself
+        # cannot be used with the keys we have.
+        if isinstance(primary_error, DecryptionError) and not keyring_answered():
+            raise CredentialKeyUnavailable(
+                "Your saved keys are intact but locked: the OS keyring is not "
+                "answering. Unlock or restore the keyring (or set the same "
+                "VELUNE_MASTER_PASSPHRASE as before); Velune picks the keys up "
+                "again on its own, no restart needed. Nothing was changed and no "
+                f"new key was created. Do not run `velune provider repair` for this. File: {self._credentials_file}"
+            )
         raise CredentialStoreError(
-            f"Stored credentials could not be read ({primary_error}). Nothing was "
-            f"overwritten: the file is still at {self._credentials_file}. If your "
-            "OS keyring or VELUNE_MASTER_PASSPHRASE changed, restore it and retry; "
-            "otherwise run `velune provider repair` to move the unreadable file "
-            "aside and start a fresh store."
+            f"Stored credentials could not be read with the keys available ({primary_error}). "
+            f"Nothing was overwritten: the file and its backup are untouched at "
+            f"{self._credentials_file}. If you use VELUNE_MASTER_PASSPHRASE, check it is "
+            "set to the value used when the keys were saved. Otherwise run "
+            "`velune provider repair`: it restores a readable backup if there is one, "
+            "or moves this file aside (not deleted) so you can add your keys again. "
+            "It cannot recover keys that were encrypted with a key you no longer have."
         )
 
     def _load_disk(self, retry: bool = True) -> dict[str, dict[str, Any]]:
@@ -291,25 +341,54 @@ class CredentialManager:
         try:
             data, _source = self._read_store()
             self.load_error = None
+            self.load_key_unavailable = False
             return data
         except CredentialStoreError as exc:
             # Non-fatal for reads: the CLI keeps working on environment
             # variables. Writes go through _read_store directly and refuse.
             self.load_error = str(exc)
+            self.load_key_unavailable = isinstance(exc, CredentialKeyUnavailable)
             logger.warning("%s", exc)
             return {}
 
     def _ensure_cache(self) -> dict[str, dict[str, Any]]:
         """The cached provider table, re-read if the file changed. Caller holds the lock."""
         stamp = self._stamp()
-        if self._cache is None or stamp != self._cache_stamp:
+        # A load that failed (keyring locked, wrong passphrase) is retried after
+        # a short pause even though the file itself has not changed: fixing the
+        # cause happens outside the file, and a long-running REPL must not stay
+        # blind to its saved keys until restart. The pause keeps a persistent
+        # failure from re-running the key derivation on every lookup.
+        retry_failed = (
+            self.load_error is not None
+            and self._load_failed_at is not None
+            and time.monotonic() - self._load_failed_at >= _LOAD_RETRY_SECONDS
+        )
+        if self._cache is None or stamp != self._cache_stamp or retry_failed:
             self._cache = self._load_disk()
             self._cache_stamp = stamp
+            self._load_failed_at = time.monotonic() if self.load_error is not None else None
         return self._cache
 
     # ------------------------------------------------------------------
     # Writing
     # ------------------------------------------------------------------
+
+    @contextlib.contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Hold the cross-process lock; a timeout becomes a :class:`CredentialStoreError`.
+
+        Every caller handles that error type, whereas a bare ``FileLockTimeout``
+        would surface as a crash instead of "try again".
+        """
+        try:
+            with locked(self._credentials_file):
+                yield
+        except FileLockTimeout as exc:
+            raise CredentialStoreError(
+                "Another Velune process is saving credentials right now. "
+                "Nothing was changed; try again in a moment."
+            ) from exc
 
     def _transact(
         self, mutate: Callable[[dict[str, dict[str, Any]]], None]
@@ -330,12 +409,17 @@ class CredentialManager:
         """
         self._config_dir.mkdir(parents=True, exist_ok=True)
 
-        with locked(self._credentials_file):
+        with self._exclusive():
             current, source = self._read_store()
             updated = copy.deepcopy(current)
             mutate(updated)
 
-            encrypted_data = encrypt_credentials(json.dumps({"providers": updated}, indent=2))
+            try:
+                encrypted_data = encrypt_credentials(
+                    json.dumps({"providers": updated}, indent=2), protect_store=True
+                )
+            except MasterKeyUnavailable as exc:
+                raise CredentialStoreError(str(exc)) from exc
 
             # Atomic write sequence: temp file -> fsync -> rename.
             temp_file = self._credentials_file.with_suffix(".tmp")
@@ -387,7 +471,7 @@ class CredentialManager:
                     "Saved credentials did not match what was written; the save was not confirmed."
                 )
 
-        return updated
+            return updated
 
     def _commit(self, mutate: Callable[[dict[str, dict[str, Any]]], None]) -> None:
         """Run :meth:`_transact` and adopt the result as the cache. Caller holds the lock."""
@@ -1030,6 +1114,13 @@ def repair_keystore() -> dict[str, Any]:
         _manager._cache = None
         _manager._ensure_cache()
         unreadable = _manager.load_error is not None
+        key_unavailable = _manager.load_key_unavailable
+
+    if unreadable and key_unavailable:
+        # The file is fine; the keyring is not answering. Moving it aside or
+        # restoring a backup over it would turn a temporary lock into a loss.
+        report["blocked"] = _manager.load_error
+        return report
 
     if unreadable:
         if _manager._attempt_backup_restore():

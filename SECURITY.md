@@ -207,7 +207,9 @@ are choosing to run.
   and compared before success is reported (a failure raises instead). An unreadable store (changed
   keyring or passphrase, truncation) is never overwritten: Velune reads `credentials.json.bak` in
   place, refuses to write, and says so at startup. `velune provider repair` moves an unreadable file
-  aside (`credentials.json.unreadable-<time>`) instead of deleting it. A transient keyring read failure
+  aside (`credentials.json.unreadable-<time>`) instead of deleting it, and does nothing when the file is intact but the keyring is locked (the message
+  then says to unlock the keyring, and Velune picks the keys up again without a restart). A transient
+  keyring read failure also never re-encrypts the store with the weaker machine-derived key, and
   never generates a replacement master key.
 - **A 403 is not a bad key.** Only a 401 (invalid/expired/revoked) marks a stored key invalid; timeouts,
   rate limits, outages and permission errors leave it intact and it is re-checked automatically.
