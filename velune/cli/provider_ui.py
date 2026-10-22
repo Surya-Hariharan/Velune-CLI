@@ -47,10 +47,12 @@ from velune.providers.credential_manager import (
     add_credential,
     persist_credential,
 )
-from velune.providers.discovery.scanner import ModelDiscoveryScanner
+from velune.providers.discovery.scanner import ModelDiscoveryScanner, ScanReport
 from velune.providers.keystore import (
+    CredentialStoreError,
     KeyState,
     is_ollama_live,
+    override_note,
     verification_state,
 )
 from velune.providers.validation import ValidationStatus
@@ -78,15 +80,30 @@ _FAILURE_HINTS: dict[ValidationStatus, str] = {
     ),
     ValidationStatus.EXPIRED_KEY: "This key has expired. Generate a new one in the console.",
     ValidationStatus.REVOKED_KEY: "This key was revoked. You need to create a replacement.",
-    ValidationStatus.RATE_LIMITED: "The API is rate-limited right now. Wait a moment and retry.",
+    ValidationStatus.RATE_LIMITED: "Rate limit reached. The key was kept and is re-checked later.",
     ValidationStatus.PERMISSION_DENIED: (
-        "The key is real but lacks permission for this operation — check its scopes."
+        "Access denied or insufficient permissions: the key authenticated but may not list "
+        "models (a restricted or project key). It was kept; models you can use still work."
     ),
     ValidationStatus.NETWORK_ERROR: (
-        "Could not reach the provider. If you're offline you can still save the key "
-        "and it will be verified later."
+        "Could not reach the provider. The key was kept and will be verified when you're online."
     ),
-    ValidationStatus.MALFORMED_KEY: "The key format looks wrong — check you copied all of it.",
+    ValidationStatus.TIMEOUT: (
+        "The connection timed out. The key was kept and will be verified later."
+    ),
+    ValidationStatus.PROVIDER_UNAVAILABLE: (
+        "The provider is temporarily unavailable. The key was kept and will be verified later."
+    ),
+    ValidationStatus.UNCONFIRMED: (
+        "The provider is reachable but the key could not be confirmed yet. It was kept."
+    ),
+    ValidationStatus.UNKNOWN_ERROR: (
+        "Unexpected response from the provider — if you use a gateway, check its base URL."
+    ),
+    ValidationStatus.MALFORMED_KEY: (
+        "The key format looks wrong — check you copied all of it. (Gateway/proxy keys can "
+        "differ; choose Save anyway if that's what this is.)"
+    ),
 }
 
 
@@ -222,20 +239,37 @@ class ProviderPalette:
                     if r.validation and r.validation.models
                     else "Verified — key accepted"
                 ),
-                fail=lambda r: (
-                    r.validation.human_message() if r.validation else "Verification failed"
-                ),
+                fail=lambda r: r.summary(),
                 is_ok=lambda r: r.ok,
             )
+
+            if result.store_error:
+                self.console.print(f"[{design.DANGER}]{result.summary()}[/{design.DANGER}]")
+                return
+
+            note = override_note(pid)
+            if note and result.saved:
+                self.console.print(f"[{design.FAINT}]{note}[/{design.FAINT}]")
 
             if result.ok:
                 self._report_saved(meta.display_name)
                 await self._discover_one(pid)
                 return
 
+            if result.saved:
+                # The status frame above is transient; keep the outcome on screen.
+                self.console.print(f"[{design.WARN}]{result.summary()}[/{design.WARN}]")
+
             hint = _FAILURE_HINTS.get(result.validation.status) if result.validation else None
             if hint:
                 self.console.print(f"[{design.FAINT}]{hint}[/{design.FAINT}]")
+
+            if result.saved:
+                # Inconclusive: the key is stored (unverified) and the
+                # background verifier will re-check it. It may well work, so
+                # list its models now rather than leaving the provider empty.
+                await self._discover_one(pid)
+                return
 
             action = await single_select(
                 f"{meta.display_name} — not connected",
@@ -259,11 +293,18 @@ class ProviderPalette:
                 # exists to remove. It will be re-checked in the background.
                 # Persist directly (no re-validation) — the verdict above
                 # already told us it failed.
-                persist_credential(pid, key, verified=False)
+                try:
+                    persist_credential(pid, key, verified=False)
+                except CredentialStoreError as exc:
+                    self.console.print(
+                        f"[{design.DANGER}]Could not save the credential: {exc}[/{design.DANGER}]"
+                    )
+                    return
                 self.console.print(
                     f"[{design.WARN}]Saved unverified — Velune will re-check it "
                     f"automatically.[/{design.WARN}]"
                 )
+                await self._discover_one(pid)
             return
 
     def _report_saved(self, label: str) -> None:
@@ -286,20 +327,40 @@ class ProviderPalette:
 
         async def _scan():
             try:
-                return await ModelDiscoveryScanner().scan_provider(pid)
+                return await ModelDiscoveryScanner().scan_provider_detailed(pid)
             except Exception as exc:
                 _log.debug("Discovery error for %s: %s", pid, exc)
-                return []
+                report = ScanReport()
+                report.failed[pid] = f"{type(exc).__name__}: {exc}"[:200]
+                return report
 
-        models = await run_with_status(
+        def _ok(report) -> str:
+            return f"{len(report.models)} {label} model(s) available"
+
+        def _fail(report) -> str:
+            reason = report.failed.get(pid)
+            if reason and report.models:
+                return (
+                    f"Could not list {label} models: {reason}. Showing "
+                    f"{len(report.models)} known model(s) instead."
+                )
+            if reason:
+                return f"Could not list {label} models: {reason}"
+            if pid in report.skipped:
+                return f"No model discovery for {label} — use /model use <model-id>"
+            return f"{label} returned no chat models for this key"
+
+        report = await run_with_status(
             _scan(),
             pending=f"Discovering {label} models…",
-            ok=lambda ms: f"{len(ms)} {label} model(s) available",
-            # Not an error: several providers legitimately expose no list endpoint.
-            fail=f"No model list from {label} — this is normal for some providers",
-            is_ok=lambda ms: bool(ms),
+            ok=_ok,
+            fail=_fail,
+            is_ok=lambda r: bool(r.models) and pid not in r.failed,
         )
-        self._register(models)
+        if not report.models or pid in report.failed:
+            # Keep the reason visible; the status frame is transient.
+            self.console.print(f"[{design.FAINT}]{_fail(report)}[/{design.FAINT}]")
+        self._register(report.models)
 
     def _register(self, models) -> None:
         """Register discovered models *and* persist the catalog to disk.

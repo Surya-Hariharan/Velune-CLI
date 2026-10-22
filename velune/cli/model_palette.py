@@ -57,7 +57,19 @@ _TRIGGERS = ("/models", "/model")
 #: over the command being typed and Enter would submit the wrong thing.
 #: ``/models`` takes no subcommands, so this only applies to ``/model``.
 _SUBCOMMANDS = frozenset(
-    {"discover", "connect", "use", "list", "status", "remove", "locate", "locations"}
+    {
+        "discover",
+        "connect",
+        "use",
+        "list",
+        "status",
+        "remove",
+        "locate",
+        "locations",
+        "register",
+        "recheck",
+        "relocate",
+    }
 )
 
 _VISIBLE_ROWS = 9

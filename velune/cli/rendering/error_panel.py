@@ -49,6 +49,7 @@ _PROVIDER_ERROR_TITLES: dict[str, str] = {
     "ModelNotFoundError": "Model or Endpoint Not Found",
     "InvalidRequestError": "Request Rejected",
     "ProviderAuthenticationError": "Authentication Failed",
+    "ProviderPermissionError": "Access Denied",
     "RateLimitError": "Rate Limited",
     "ProviderConnectionError": "Connection Failed",
     "ProviderTimeoutError": "Provider Timed Out",
@@ -63,6 +64,10 @@ _PROVIDER_ERROR_FIXES: dict[str, list[str]] = {
     "ProviderAuthenticationError": [
         "Run /connect to enter a new API key for this provider",
         _DOCTOR_HINT,
+    ],
+    "ProviderPermissionError": [
+        "Your key works but is not allowed to use this model — pick another with /model",
+        "Check the model is enabled for your account or project in the provider console",
     ],
     "ModelNotFoundError": [
         "Pick another model with /model",

@@ -447,8 +447,11 @@ async def _configure_one_provider_key(controller: WizardController, pid: str) ->
         # ever happened later, when the user picks and activates a model.
         try:
             added = await add_credential(pid, key, set_as_first_default=False)
-        except Exception:
+        except Exception as exc:
             added = None
+            unexpected = f"Could not complete the check ({type(exc).__name__}). Nothing was saved."
+        else:
+            unexpected = ""
 
         if added is not None and added.ok:
             result = added.validation
@@ -459,30 +462,70 @@ async def _configure_one_provider_key(controller: WizardController, pid: str) ->
             )
             return pid
 
-        subtitle = (
-            added.validation.human_message()
-            if added and added.validation
-            else "Could not save this key."
-        )
+        if added is not None and added.saved:
+            # Inconclusive (offline, timeout, outage, rate limit, restricted
+            # key): saved unverified and re-checked later, not "invalid".
+            await controller.show_transient(
+                [[(f"fg:{design.WARN}", f"  ⚠ {added.summary()}")]],
+                delay=1.2,
+            )
+            return pid
+
+        title, subtitle, options = _key_failure_screen(added, unexpected)
         choice = await controller.run_widget(
-            SelectWidget(
-                title="❌ Invalid API Key",
-                subtitle=subtitle,
-                options=[
-                    Option("retry", "Retry"),
-                    Option("skip", "Skip"),
-                    Option("back", "Back"),
-                ],
-            ),
+            SelectWidget(title=title, subtitle=subtitle, options=options),
             stage_index=2,
         )
         if choice is BACK or choice == "back":
             return BACK
         if choice == "skip":
             return None
+        if choice == "anyway":
+            from velune.providers.credential_manager import persist_credential
+            from velune.providers.keystore import CredentialStoreError
+
+            try:
+                persist_credential(pid, key, verified=False)
+            except CredentialStoreError as exc:
+                await controller.show_transient(
+                    [[(f"fg:{design.DANGER}", f"  ✗ Could not save the key: {exc}")]], delay=1.5
+                )
+                continue
+            return pid
         # retry: loop again
 
     return None
+
+
+def _key_failure_screen(added, unexpected: str) -> tuple[str, str, list[Option]]:
+    """Title, explanation and choices for a key that was not saved.
+
+    Each failure category gets its own title — this used to say "Invalid API
+    Key" for every failure, including a full disk or a locked keyring.
+    """
+    from velune.providers.validation import ValidationStatus
+
+    retry_skip = [Option("retry", "Retry"), Option("skip", "Skip"), Option("back", "Back")]
+    if added is None:
+        return "⚠ Could not complete setup", unexpected, retry_skip
+    if added.store_error:
+        return "❌ Could not save the key", added.summary(), retry_skip
+    result = added.validation
+    if result is not None and result.status == ValidationStatus.MALFORMED_KEY:
+        return (
+            "⚠ Key format looks wrong",
+            result.human_message(),
+            [
+                Option("retry", "Retry"),
+                Option("anyway", "Save anyway", "e.g. a gateway or proxy key"),
+                Option("skip", "Skip"),
+                Option("back", "Back"),
+            ],
+        )
+    if result is not None and result.rejects_key:
+        return "❌ Authentication failed", result.human_message(), retry_skip
+    message = result.human_message() if result is not None else "Verification failed."
+    return "⚠ Could not verify the key", message, retry_skip
 
 
 # ── Stage 4: Discover Models ─────────────────────────────────────────────────
@@ -494,15 +537,24 @@ async def _stage_discover_models(controller: WizardController) -> Any:
     await controller.show_transient(
         [[(f"fg:{design.MUTED}", "  Discovering available models...")]], delay=0.3
     )
+    from velune.providers.discovery.scanner import ScanReport
+
     try:
-        models = await ModelDiscoveryScanner().scan_all()
-    except Exception:
-        models = []
+        report = await ModelDiscoveryScanner().scan_all_detailed()
+    except Exception as exc:
+        report = ScanReport()
+        report.failed["discovery"] = f"{type(exc).__name__}: {exc}"[:200]
+    models = report.models
+    _remember_discovered(models)
+    failure_lines = [f"  ⚠ {pid}: {why}" for pid, why in sorted(report.failed.items())]
 
     if not models:
-        result = await _continue_screen(
-            controller, 3, "Discover Models", "No models discovered — check provider connectivity."
-        )
+        detail = "No models discovered."
+        if failure_lines:
+            detail += "\n" + "\n".join(failure_lines)
+        else:
+            detail += " Check provider connectivity."
+        result = await _continue_screen(controller, 3, "Discover Models", detail)
         return [] if result is BACK else []
 
     provider_counts: dict[str, int] = {}
@@ -513,11 +565,33 @@ async def _stage_discover_models(controller: WizardController) -> Any:
         for pid, count in sorted(provider_counts.items())
     ]
     lines.append(f"\n  {len(models)} model(s) available total.")
+    if failure_lines:
+        lines.append("")
+        lines.extend(failure_lines)
 
     result = await _continue_screen(controller, 3, "Discover Models", "\n".join(lines))
     if result is BACK:
         return BACK
     return models
+
+
+def _remember_discovered(models: list[ModelDescriptor]) -> None:
+    """Merge the wizard's scan into the registry cache the REPL loads at startup.
+
+    Merged by (provider, model) rather than overwritten, so models already
+    known from an earlier session are not dropped by a partial scan.
+    """
+    if not models:
+        return
+    try:
+        from velune.models.registry_cache import ModelRegistryCache
+
+        cache = ModelRegistryCache()
+        merged = {(m.provider_id, m.model_id): m for m in cache.load()}
+        merged.update({(m.provider_id, m.model_id): m for m in models})
+        cache.save(list(merged.values()))
+    except Exception:
+        pass  # the REPL rescans on start; this only saves it the wait
 
 
 # ── Stage 5: Select Default Model ────────────────────────────────────────────
@@ -566,7 +640,9 @@ async def _stage_select_model(
 async def _manual_model_select(controller: WizardController, models: list[ModelDescriptor]) -> Any:
     from velune.cli.model_prefs import save_active_model
 
-    display_models = models[:30]
+    # Every model, not the first 30: the picker filters as you type, and a
+    # hard cap hid most cloud models (they sort after local ones).
+    display_models = models
     options = [
         Option(
             f"{m.provider_id}::{m.model_id}",

@@ -23,6 +23,7 @@ from velune.providers.default_provider import (
     set_first_default,
 )
 from velune.providers.keystore import (
+    CredentialStoreError,
     credentials_file_path,
     delete_key,
     export_providers_json,
@@ -31,6 +32,7 @@ from velune.providers.keystore import (
     has_key,
     import_providers_json,
     is_ollama_live,
+    override_note,
     repair_keystore,
 )
 from velune.providers.validation import (
@@ -210,6 +212,9 @@ def add_provider(
 
     if no_validate:
         added = add_credential_sync(pid, api_key, skip_validation=True, set_as_first_default=True)
+        if added.store_error:
+            console.print(f"[{design.DANGER}]{added.summary()}[/{design.DANGER}]")
+            raise typer.Exit(1)
         console.print(
             f"[{design.WARN}]Key saved without validation (--no-validate was set).[/{design.WARN}]"
         )
@@ -225,6 +230,14 @@ def add_provider(
         added = add_credential_sync(pid, api_key, set_as_first_default=True)
     result = added.validation
 
+    if added.store_error:
+        console.print(f"[{design.DANGER}]{added.summary()}[/{design.DANGER}]")
+        raise typer.Exit(1)
+
+    note = override_note(pid)
+    if note and added.saved:
+        console.print(f"[{design.MUTED}]{note}[/{design.MUTED}]")
+
     if added.ok:
         console.print(f"[{design.OK}]{result.human_message()}[/{design.OK}]")
         if result.models:
@@ -236,20 +249,42 @@ def add_provider(
                 f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
             )
         _print_provider_next_steps(pid, result.models, validated=True)
+    elif added.saved:
+        # Inconclusive (offline, timeout, rate limit, outage, restricted key):
+        # the key was kept, unverified, and will be re-checked automatically.
+        console.print(f"[{design.WARN}]{added.summary()}[/{design.WARN}]")
+        console.print(
+            f"[{design.MUTED}]Velune re-checks it automatically; run "
+            f"`velune provider test {pid}` to retry now.[/{design.MUTED}]"
+        )
+        if added.became_default:
+            console.print(
+                f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
+            )
+        _print_provider_next_steps(pid, result.models, validated=False)
     else:
         console.print(f"[{design.WARN}]{result.human_message()}[/{design.WARN}]")
-        if result.status == ValidationStatus.NETWORK_ERROR:
-            save_q = typer.confirm("Save key anyway (network may be offline)?", default=True)
+        if result.status == ValidationStatus.MALFORMED_KEY:
+            # The format pre-check is ours, not the provider's verdict — a
+            # gateway or proxy key can legitimately look different.
+            save_q = typer.confirm("Save the key anyway (e.g. a gateway/proxy key)?", default=False)
             if save_q:
-                became_default = persist_credential(
-                    pid, api_key, verified=False, set_as_first_default=True
-                )
+                try:
+                    became_default = persist_credential(
+                        pid, api_key, verified=False, set_as_first_default=True
+                    )
+                except CredentialStoreError as exc:
+                    console.print(
+                        f"[{design.DANGER}]Could not save the credential: {exc}[/{design.DANGER}]"
+                    )
+                    raise typer.Exit(1) from exc
                 console.print(f"[{design.WARN}]Key saved without validation.[/{design.WARN}]")
                 if became_default:
                     console.print(
                         f"[{design.OK}]★ Set as default provider (first configured).[/{design.OK}]"
                     )
                 _print_provider_next_steps(pid, result.models, validated=False)
+                return
         raise typer.Exit(1)
 
 
@@ -308,7 +343,9 @@ def remove_provider(
             return
 
     delete_key(pid)
-    console.print(f"[{design.OK}]Key for '{pid}' removed from OS keychain.[/{design.OK}]")
+    console.print(
+        f"[{design.OK}]Key for '{pid}' removed from Velune's encrypted credential store.[/{design.OK}]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -547,13 +584,16 @@ def api_status(
             console.print(f"[{design.OK}]✓ Valid[/{design.OK}]")
             console.print(f"[{design.OK}]✓ Reachable[/{design.OK}]")
             console.print(f"[{design.OK}]✓ Loaded[/{design.OK}]")
+        elif result.rejects_key:
+            console.print(
+                f"[{design.DANGER}]✗ Invalid[/{design.DANGER}] [{design.MUTED}]({result.message})[/{design.MUTED}]"
+            )
         else:
-            if result.status == ValidationStatus.NETWORK_ERROR:
-                console.print(f"[{design.WARN}]⚠ Offline validation unavailable[/{design.WARN}]")
-            else:
-                console.print(
-                    f"[{design.DANGER}]✗ Invalid[/{design.DANGER}] [{design.MUTED}]({result.message})[/{design.MUTED}]"
-                )
+            console.print(
+                f"[{design.WARN}]⚠ Could not confirm the key[/{design.WARN}] "
+                f"[{design.MUTED}]({result.message})[/{design.MUTED}]"
+            )
+        console.print(f"[{design.MUTED}]  Key in use: {info.get('effective', '')}[/{design.MUTED}]")
 
 
 # ---------------------------------------------------------------------------
@@ -883,6 +923,15 @@ def repair_providers_cmd() -> None:
 
     if report["restored_backup"]:
         console.print(f"[{design.OK}]✓ Restored from backup (.bak file)[/{design.OK}]")
+    elif report.get("quarantined"):
+        console.print(
+            f"[{design.WARN}]The credential store could not be read and no readable backup "
+            f"exists. It was moved aside (not deleted) to:[/{design.WARN}] {report['quarantined']}"
+        )
+        console.print(
+            f"[{design.MUTED}]A fresh store will be created on the next save. If the OS keyring "
+            f"or VELUNE_MASTER_PASSPHRASE comes back, that file can still be restored.[/{design.MUTED}]"
+        )
     else:
         console.print(
             f"[{design.MUTED}]Primary credential store loaded (no restore needed)[/{design.MUTED}]"

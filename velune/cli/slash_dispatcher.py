@@ -380,7 +380,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             description="Discover, connect, switch, inspect, or locate models",
             usage=(
                 "/model [model-id|discover|connect <id>|use <id>|list|status|"
-                "remove <id>|locate|locations]"
+                "remove <id>|locate|locations|register <path>|recheck [id]|"
+                "relocate <id> <path>]"
             ),
             handler=repl._cmd_model,
             examples=(
