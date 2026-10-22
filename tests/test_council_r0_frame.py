@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from tests.async_run import run_with_deadline
 from tests.council_core_fakes import CounterIds, FakeClock, FakeSeatInvoker
 from tests.council_scripted import (
     StaticPrompts,
@@ -236,7 +237,7 @@ def test_cancellation_mid_frame_stops_cleanly_and_carries_a_cancelled_outcome():
         leftovers = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
         return info.value.outcome, invoker.in_flight, leftovers
 
-    outcome, in_flight, leftovers = asyncio.run(asyncio.wait_for(scenario(), timeout=15))
+    outcome, in_flight, leftovers = run_with_deadline(scenario(), 15)
     assert outcome.status is OutcomeStatus.CANCELLED and outcome.answer is None
     assert outcome.failure_summary == "cancelled during frame"
     assert in_flight == 0 and leftovers == []

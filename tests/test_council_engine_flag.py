@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import velune.cognition.prompts as prompts_pkg
+from tests.async_run import run_with_deadline
 from tests.council_fakes import FakeMapper, FakeProviderRegistry, make_orchestrator
 from tests.council_scripted import PERSPECTIVE_SEATS
 from tests.council_wire import ScriptedProvider, runtime_invoker
@@ -58,7 +59,7 @@ class Container:
 
 
 def run(coro, timeout: float = 30):
-    return asyncio.run(asyncio.wait_for(coro, timeout))
+    return run_with_deadline(coro, timeout)
 
 
 # ── the flag ────────────────────────────────────────────────────────────────
@@ -278,6 +279,7 @@ import velune.main
 import velune.cli.handlers.council
 import velune.cli.commands.ask
 import velune.mcp.server
+from tests.async_run import run_with_deadline
 loaded = sorted(m for m in sys.modules if m == "velune.council" or m.startswith("velune.council."))
 print("LOADED=" + ",".join(loaded))
 """

@@ -7,6 +7,7 @@ import itertools
 
 import pytest
 
+from tests.async_run import run_with_deadline
 from tests.council_core_fakes import FakeSeatInvoker
 from tests.council_fakes import Delay, FakeMapper, FakeProvider, make_model
 from tests.council_scripted import (
@@ -45,7 +46,7 @@ class Sink:
 
 
 def run(coro, timeout: float = 30):
-    return asyncio.run(asyncio.wait_for(coro, timeout))
+    return run_with_deadline(coro, timeout)
 
 
 def fake(failing: dict[str, object] | None = None, moderator=None) -> FakeSeatInvoker:

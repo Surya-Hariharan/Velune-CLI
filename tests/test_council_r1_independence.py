@@ -7,12 +7,12 @@ their work, which is the only thing a model ever sees.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import json
 
 import pytest
 
+from tests.async_run import run_with_deadline
 from tests.council_core_fakes import FakeSeatInvoker
 from tests.council_scripted import (
     PERSPECTIVE_SEATS,
@@ -51,7 +51,7 @@ PEERS_OF = {seat: [s for s in PERSPECTIVE_SEATS if s != seat] for seat in PERSPE
 
 
 def run(coro, timeout: float = 30):
-    return asyncio.run(asyncio.wait_for(coro, timeout))
+    return run_with_deadline(coro, timeout)
 
 
 def request_with_evidence(**kw):

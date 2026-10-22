@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import subprocess
@@ -10,6 +9,7 @@ import sys
 
 import pytest
 
+from tests.async_run import run_with_deadline
 from tests.council_core_fakes import FakeSeatInvoker
 from tests.council_scripted import (
     PERSPECTIVE_SEATS,
@@ -40,7 +40,7 @@ def fake_invoker(tag: str = "", **overrides) -> FakeSeatInvoker:
 
 
 def run(invoker, request=None, **kw):
-    return asyncio.run(asyncio.wait_for(explore(invoker, request, **kw), timeout=20))
+    return run_with_deadline(explore(invoker, request, **kw), 20)
 
 
 def test_healthy_run_yields_five_typed_perspectives_and_no_answer():

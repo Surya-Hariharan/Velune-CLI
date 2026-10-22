@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from tests.async_run import run_with_deadline
 from tests.council_core_fakes import FakeSeatInvoker
 from tests.council_scripted import (
     PERSPECTIVE_SEATS,
@@ -53,7 +54,7 @@ PREFIX = {s.id: s.claim_prefix for s in GENERAL_PROFILE.perspective_seats}
 
 
 def run(coro, timeout: float = 30):
-    return asyncio.run(asyncio.wait_for(coro, timeout))
+    return run_with_deadline(coro, timeout)
 
 
 class Events:
@@ -534,7 +535,7 @@ def test_cancellation_mid_revision_keeps_the_earlier_stages_and_leaves_nothing_r
         leftovers = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
         return info.value.outcome, leftovers
 
-    outcome, leftovers = asyncio.run(asyncio.wait_for(main(), 30))
+    outcome, leftovers = run_with_deadline(main(), 30)
     assert outcome.status is OutcomeStatus.CANCELLED and outcome.answer is None
     assert outcome.failure_summary == "cancelled during revision"
     assert [s.stage for s in outcome.stage_results] == [F, P, R]

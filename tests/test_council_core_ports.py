@@ -7,6 +7,7 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
+from tests.async_run import run_with_deadline
 from tests.council_core_fakes import (
     CounterIds,
     FakeAssignments,
@@ -42,7 +43,7 @@ def call(seat: str = "analyst", **kw) -> SeatCall:
 
 
 def run(coro, timeout: float = 10):
-    return asyncio.run(asyncio.wait_for(coro, timeout))
+    return run_with_deadline(coro, timeout)
 
 
 def test_fakes_satisfy_the_port_protocols():

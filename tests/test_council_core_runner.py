@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
+from tests.async_run import run_with_deadline
 from tests.council_core_fakes import CounterIds, FakeClock, FakeSeatInvoker
 from velune.council.contracts import Artifact
 from velune.council.domain import ArtifactKind, Depth, StageId
@@ -116,7 +117,7 @@ def request(**kw) -> CouncilRequest:
 
 
 def run(coro, timeout: float = 15):
-    return asyncio.run(asyncio.wait_for(coro, timeout))
+    return run_with_deadline(coro, timeout)
 
 
 def by_stage(outcome):
