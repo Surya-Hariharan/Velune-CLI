@@ -87,6 +87,15 @@ async def cmd_model(repl: VeluneREPL, args: str) -> None:
         return await _model_locate(repl)
     if sub == "locations":
         return await _model_locations(repl, rest)
+    if sub in ("register", "recheck", "relocate"):
+        from velune.cli.handlers import model_local
+
+        handler = {
+            "register": model_local.cmd_model_register,
+            "recheck": model_local.cmd_model_recheck,
+            "relocate": model_local.cmd_model_relocate,
+        }[sub]
+        return await handler(repl, rest)
 
     model_registry = repl._require("runtime.model_registry", "model registry")
     if model_registry is None:
@@ -718,7 +727,35 @@ async def activate_model(repl: VeluneREPL, model: ModelDescriptor) -> None:
         )
         return
 
+    registry = None
+    try:
+        registry = repl.container.get("runtime.model_registry")
+    except Exception:
+        registry = None
+
+    if model.is_local and registry is not None and hasattr(registry, "recheck"):
+        from velune.models.registry import is_available
+
+        if not is_available(model):
+            # Re-test before refusing: the drive may be back, the daemon restarted.
+            model = await registry.recheck(model, force=True)
+            if not is_available(model):
+                from velune.cli.handlers.model_local import print_unavailable
+
+                print_unavailable(
+                    repl,
+                    model,
+                    headline=f"Cannot switch to {model.model_id} right now — it is unavailable.",
+                )
+                if repl.active_model is not None:
+                    repl.console.print(f"[dim]Still using {repl.active_model.model_id}.[/dim]")
+                return
+
     repl.active_model = model
+    if model.is_local and registry is not None and hasattr(registry, "remember_local"):
+        # Remember the endpoint/path/metadata so this model survives the drive
+        # or server being unavailable at a later start (see local_models.py).
+        registry.remember_local(model)
 
     # Resize the context meter here rather than waiting for the next render.
     # It was only re-synced during _refresh_status_state, so between the switch
@@ -778,12 +815,17 @@ def restore_active_model(repl: VeluneREPL) -> None:
     except Exception:
         model = None
     if model is not None:
+        # Restored even when it is currently unavailable (drive unplugged,
+        # daemon stopped): the user's choice is kept, and the first prompt
+        # rechecks it and explains what is wrong instead of silently switching.
         repl.active_model = model
 
 
 async def _model_discover(repl: VeluneREPL) -> None:
+    from velune.providers.endpoints import ollama_base_url
+
     repl.console.print(
-        "[dim]Discovering models — Ollama (:11434), LM Studio (:1234), "
+        f"[dim]Discovering models — Ollama ({ollama_base_url()}), LM Studio (:1234), "
         "OpenAI-compatible servers (:8000/:8080/:3000), "
         "and configured cloud providers...[/dim]"
     )
@@ -872,25 +914,53 @@ async def _model_status(repl: VeluneREPL) -> None:
         return
     m = repl.active_model
     reachable = "[dim]unknown[/dim]"
+    extra_lines: list[str] = []
     try:
-        provider_registry = repl.container.get("runtime.provider_registry")
-        provider = provider_registry.get(m.provider_id)
-        if provider is not None and hasattr(provider, "health_check"):
-            ok = await provider.health_check()
-            reachable = "[green]reachable[/green]" if ok else "[red]unreachable[/red]"
+        registry = repl.container.get("runtime.model_registry")
     except Exception:
-        pass
-    repl.console.print(
-        Panel(
-            f"[bold cyan]{m.model_id}[/bold cyan]\n"
-            f"provider   {m.provider_id}\n"
-            f"location   {'local' if m.is_local else 'cloud'}\n"
-            f"context    {m.context_length:,} tokens\n"
-            f"status     {reachable}",
-            title="Active Model",
-            border_style="dim",
-        )
+        registry = None
+    if m.is_local and registry is not None and hasattr(registry, "recheck"):
+        from velune.models.registry import is_available
+
+        m = await registry.recheck(m)
+        repl.active_model = m
+        reachable = "[green]available[/green]" if is_available(m) else "[red]unavailable[/red]"
+        record = registry.registration(m.provider_id, m.model_id)
+        if record is not None:
+            if record.endpoint:
+                extra_lines.append(f"endpoint   {record.endpoint}")
+            if record.source_path:
+                extra_lines.append(f"storage    {record.source_path}")
+            extra_lines.append(f"verified   {record.last_verified or 'never'}")
+    else:
+        try:
+            provider_registry = repl.container.get("runtime.provider_registry")
+            provider = provider_registry.get(m.provider_id)
+            if provider is not None and hasattr(provider, "health_check"):
+                ok = await provider.health_check()
+                reachable = "[green]reachable[/green]" if ok else "[red]unreachable[/red]"
+        except Exception:
+            pass
+        try:
+            from velune.providers.keystore import key_source
+
+            extra_lines.append(f"key        {key_source(m.provider_id).describe()}")
+        except Exception:
+            pass
+    body = (
+        f"[bold cyan]{m.model_id}[/bold cyan]\n"
+        f"provider   {m.provider_id}\n"
+        f"location   {'local' if m.is_local else 'cloud'}\n"
+        f"context    {m.context_length:,} tokens\n"
+        f"status     {reachable}"
     )
+    if extra_lines:
+        body += "\n" + "\n".join(extra_lines)
+    repl.console.print(Panel(body, title="Active Model", border_style="dim"))
+    from velune.cli.handlers.model_local import availability_lines
+
+    for line in availability_lines(m):
+        repl.console.print(line)
 
 
 async def _model_remove(repl: VeluneREPL, name: str) -> None:
@@ -909,7 +979,10 @@ async def _model_remove(repl: VeluneREPL, name: str) -> None:
         if repl.active_model and repl.active_model.model_id == name:
             repl.active_model = None
     if removed:
-        repl.console.print(f"[green]Removed [cyan]{name}[/cyan] from the registry.[/green]")
+        repl.console.print(
+            f"[green]Removed [cyan]{name}[/cyan] from the registry.[/green] "
+            "[dim](Model files were not touched.)[/dim]"
+        )
     else:
         repl.console.print(
             f"[yellow]'{name}' was not in the registry.[/yellow] "

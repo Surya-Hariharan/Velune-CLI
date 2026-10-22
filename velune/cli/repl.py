@@ -31,6 +31,18 @@ if TYPE_CHECKING:
     from velune.providers.base import ModelProvider
 
 
+def _model_usable(model: ModelDescriptor, provider_registry) -> bool:
+    """Cheap, offline check: not known-unavailable, and a cloud key exists."""
+    from velune.models.registry import is_available
+
+    if not is_available(model):
+        return False
+    if model.is_local:
+        return True
+    checker = getattr(provider_registry, "check_provider_available", None)
+    return True if checker is None else bool(checker(model.provider_id))
+
+
 class VeluneREPL:
     def __init__(self, runtime: RuntimeContext) -> None:
         self.runtime = runtime
@@ -478,6 +490,28 @@ class VeluneREPL:
         except Exception as exc:
             _log.debug("Could not persist theme selection: %s", exc)
 
+    def _warn_if_credentials_unreadable(self) -> None:
+        """Say so at startup when saved API keys exist but cannot be decrypted.
+
+        Otherwise the only symptom is "No models available", which reads as
+        the keys having been lost. The store itself is left untouched (see
+        ``keystore.CredentialStoreError``), so restoring the keyring or
+        passphrase brings the keys back.
+        """
+        try:
+            from velune.providers.keystore import store_load_error
+
+            error = store_load_error()
+        except Exception:
+            return
+        if error:
+            from velune.cli import design
+
+            self.console.print(
+                f"[{design.WARN}]⚠ Your saved API keys could not be read.[/{design.WARN}] "
+                f"[{design.FAINT}]{error}[/{design.FAINT}]"
+            )
+
     async def _reverify_stale_keys(self) -> None:
         """Re-check any stored API key that has aged past its TTL.
 
@@ -757,6 +791,7 @@ class VeluneREPL:
             interactive_host.install(self._inline_flow)
 
         restore_active_model(self)
+        self._warn_if_credentials_unreadable()
         await self._start_episodic_session()
 
         # Workspace trust must be resolved BEFORE any hook dispatch: project-level
@@ -1130,11 +1165,46 @@ class VeluneREPL:
 
         provider_registry = self.container.get("runtime.provider_registry")
         for model in models:
+            if not _model_usable(model, provider_registry):
+                continue
             provider = provider_registry.get(model.provider_id)
             if provider:
                 self.active_model = model
                 return model, provider
         return None, None
+
+    async def _ensure_active_model_usable(self, model: ModelDescriptor, text: str) -> bool:
+        """Check a local model before a turn; explain (and keep the prompt) if it is down.
+
+        The catalog's availability is only as fresh as the last scan — the
+        REPL does not rescan at startup — so a local model is re-tested here:
+        always when it is known to be unavailable, otherwise at most once per
+        throttle window (one ``/api/tags`` call and a ``stat``). The typed
+        prompt is put back in the composer so nothing is lost while the user
+        reconnects the drive or starts the server.
+        """
+        from velune.models.registry import is_available
+
+        if not model.is_local:
+            return True
+        try:
+            registry = self.container.get("runtime.model_registry")
+            model = await registry.recheck(model, force=not is_available(model))
+        except Exception as exc:
+            _log.debug("Recheck of %s failed: %s", model.model_id, exc)
+            return True  # let the turn report the real error
+        self.active_model = model
+        if is_available(model):
+            return True
+        from velune.cli.handlers.model_local import print_unavailable
+
+        print_unavailable(
+            self,
+            model,
+            headline=f"{model.model_id} is unavailable, so the message was not sent.",
+        )
+        self._pending_prompt_text = text
+        return False
 
     def _next_fallback_candidate(
         self, tried_provider_ids: set[str]
@@ -1154,6 +1224,8 @@ class VeluneREPL:
             return None
         for candidate_model in model_registry.list_all():
             if candidate_model.provider_id in tried_provider_ids:
+                continue
+            if not _model_usable(candidate_model, provider_registry):
                 continue
             candidate_provider = provider_registry.get(candidate_model.provider_id)
             if candidate_provider is not None:
@@ -1409,6 +1481,10 @@ class VeluneREPL:
             model, provider = model_override, provider_override
         else:
             model, provider = await self._resolve_active_model_and_provider()
+            if model is not None and not await self._ensure_active_model_usable(model, text):
+                return
+            if model is not None:
+                model = self.active_model or model
         if model is None or provider is None:
             from velune.cli.rendering.error_panel import render_error
             from velune.core.errors.catalog import NoModelsAvailableError
