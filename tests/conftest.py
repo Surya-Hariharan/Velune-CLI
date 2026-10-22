@@ -8,7 +8,14 @@ test's custom base URL cannot redirect another test's requests.
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
+
+# The real-terminal suite needs pyte to read the emulated screen back. CI jobs that
+# install only the core test tooling (the lowest-dependency-versions matrix) cannot
+# even import it, so skip collecting it there instead of erroring.
+collect_ignore_glob = [] if importlib.util.find_spec("pyte") else ["tui/*"]
 
 
 @pytest.fixture(autouse=True)

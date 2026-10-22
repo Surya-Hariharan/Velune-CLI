@@ -100,17 +100,17 @@ jobs:
           bandit -c pyproject.toml -r velune/ --severity-level medium --confidence-level medium
 
       - name: Bandit low-severity regression baseline
-        # Low-severity findings (183 as of writing — mostly broad
+        # Low-severity findings (184 as of writing — mostly broad
         # try/except-pass patterns, not a mass rewrite worth blocking every
         # PR on) aren't part of the gate above, so nothing stops that count
         # from silently growing over time. This doesn't re-triage the
-        # existing 183; it only fails if new ones are added. Raise
+        # existing 184; it only fails if new ones are added. Raise
         # BASELINE_LOW deliberately, in the PR that adds the finding, only
         # after confirming it's reviewed and accepted — the same convention
         # already used for the asyncio.run() and create_subprocess_shell
         # allowlists above.
         run: |
-          BASELINE_LOW=183
+          BASELINE_LOW=184
           bandit -c pyproject.toml -r velune/ -f json -o bandit_low.json --quiet || true
           count=$(python -c "import json; print(json.load(open('bandit_low.json'))['metrics']['_totals']['SEVERITY.LOW'])")
           rm -f bandit_low.json

@@ -203,6 +203,11 @@ def test_command_arguments_that_leave_the_workspace_are_detected(tmp_path):
     assert command_paths_outside("type " + str(tmp_path.parent / "x.txt"), boundary)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="a lone /s is a switch on Windows, a path elsewhere")
+def test_windows_switches_are_not_flagged_as_paths(tmp_path):
+    assert not command_paths_outside("dir /s", Boundary(tmp_path))
+
+
 def test_ordinary_commands_are_not_flagged(tmp_path):
     boundary = Boundary(tmp_path)
     for command in (
@@ -212,7 +217,6 @@ def test_ordinary_commands_are_not_flagged(tmp_path):
         "git diff HEAD~1",
         "python -m pip install -e .[dev]",
         "curl https://example.com/a/../b",
-        "dir /s",
         "ruff check src/",
         "python " + str(tmp_path / "inside.py"),
     ):

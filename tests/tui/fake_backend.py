@@ -26,7 +26,7 @@ MODEL = "fake-model:latest"
 
 LONG_REPLY = " ".join(f"word{i}" for i in range(400))
 MULTILINE_REPLY = (
-    "Here is a list:\n\n- alpha\n- beta\n- gamma\n\n```python\nprint('hello')\n```\n\nDone."
+    "Here is a list:\n\n- alpha\n- beta\n- gamma\n\n```python\nvalue = 'hello'\n```\n\nDone."
 )
 
 

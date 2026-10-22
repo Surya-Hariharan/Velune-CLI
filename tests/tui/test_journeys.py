@@ -126,7 +126,7 @@ def test_multiline_markdown_reply_renders_structure(connected):
     flows.idle(s)
     t = s.text()
     assert "alpha" in t and "beta" in t and "gamma" in t
-    assert "print('hello')" in t
+    assert "value = 'hello'" in t
     assert "```" not in t, "raw markdown fence leaked into the rendered reply"
     assert_clean_frame(s)
     s.snapshot("05_multiline_reply")
