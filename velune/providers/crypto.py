@@ -344,25 +344,38 @@ def _passphrase_master_key() -> bytes | None:
     return _derive_key_from_passphrase(passphrase, _MASTER_PASSPHRASE_SALT)
 
 
-def _keyring_read_key() -> bytes | None:
+def _keyring_lookup() -> tuple[bytes | None, bool]:
     """Read the stored master key from the OS keyring without creating one.
 
-    Returns None when no backend is available *or* the read fails transiently —
-    the caller must not treat that as 'switch keys', which is why decryption
-    tries every candidate key rather than a single one.
+    Returns ``(key, answered)``. ``answered`` is True only when the keyring
+    actually responded — with a key, or with "no entry". A missing backend or a
+    read that raised (locked keychain, D-Bus hiccup, Credential Manager busy)
+    is ``(None, False)``: that says nothing about whether a master key exists,
+    so it must never be taken as permission to generate a new one.
     """
     try:
         import keyring
     except Exception:
-        return None
+        return None, False
     try:
         key_b64 = keyring.get_password(_SERVICE, _USERNAME)
     except Exception as e:
         logger.debug("Keyring read failed (transient or unavailable): %s", e)
-        return None
+        return None, False
     if key_b64:
-        return base64.b64decode(key_b64.encode("ascii"))
-    return None
+        try:
+            return base64.b64decode(key_b64.encode("ascii")), True
+        except Exception as e:
+            # A damaged entry is not "no entry": overwriting it would orphan
+            # whatever it used to encrypt.
+            logger.debug("Keyring master key is unreadable: %s", e)
+            return None, False
+    return None, True
+
+
+def _keyring_read_key() -> bytes | None:
+    """The stored keyring master key, or None (absent *or* unreadable)."""
+    return _keyring_lookup()[0]
 
 
 def _keyring_create_key() -> bytes | None:
@@ -387,12 +400,17 @@ def get_or_create_master_key() -> bytes:
     weak machine key on keyring-less hosts, and a one-time warning is emitted
     when only the machine fallback remains.
     """
-    key = _keyring_read_key()
+    key, answered = _keyring_lookup()
     if key is not None:
         return key
-    key = _keyring_create_key()
-    if key is not None:
-        return key
+    # Only mint a new keyring key when the keyring positively said it has none.
+    # Creating one after a *failed* read used to overwrite the real master key
+    # whenever the read hiccupped, leaving credentials.json permanently
+    # undecryptable — every stored API key lost across a restart.
+    if answered:
+        key = _keyring_create_key()
+        if key is not None:
+            return key
 
     pk = _passphrase_master_key()
     if pk is not None:

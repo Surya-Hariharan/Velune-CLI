@@ -29,7 +29,7 @@ from pathlib import Path
 from velune.kernel.entrypoint import run_async
 from velune.providers import catalog
 from velune.providers.default_provider import set_first_default
-from velune.providers.keystore import mark_verified, save_key
+from velune.providers.keystore import CredentialStoreError, mark_verified, save_key
 from velune.providers.validation import ValidationResult, validate_provider
 
 
@@ -53,6 +53,21 @@ class CredentialAddResult:
     validation: ValidationResult | None = None
     unknown_provider: bool = False
     not_a_key_provider: bool = False
+    #: Set when the key could not be written to (or read back from) the store.
+    store_error: str | None = None
+
+    def summary(self) -> str:
+        """One user-facing line for this outcome — never contains the key."""
+        if self.store_error:
+            return f"Could not save the credential: {self.store_error}"
+        if self.ok and self.verified:
+            return "Credential saved and verified."
+        if self.ok:
+            return "Credential saved (validation skipped)."
+        reason = self.validation.human_message() if self.validation else "Verification failed"
+        if self.saved:
+            return f"Credential saved, but validation could not be completed: {reason}"
+        return reason
 
 
 def persist_credential(
@@ -73,7 +88,9 @@ def persist_credential(
     the one place ``save_key``/``mark_verified``/``set_first_default`` are
     actually invoked from.
 
-    Returns whether this call set the workspace default provider.
+    Returns whether this call set the workspace default provider. Raises
+    :class:`~velune.providers.keystore.CredentialStoreError` if the key could
+    not be persisted and confirmed — callers must not report success then.
     """
     save_key(provider_id, key, verified=verified)
     if verified:
@@ -83,16 +100,44 @@ def persist_credential(
     return set_first_default(provider_id, config_path=config_path)
 
 
+def _store_failure(
+    provider_id: str, exc: CredentialStoreError, validation: ValidationResult | None
+) -> CredentialAddResult:
+    return CredentialAddResult(
+        ok=False,
+        provider_id=provider_id,
+        saved=False,
+        verified=False,
+        became_default=False,
+        validation=validation,
+        store_error=str(exc),
+    )
+
+
 async def add_credential(
     provider_id: str,
     key: str,
     *,
     skip_validation: bool = False,
     save_unverified_on_failure: bool = False,
+    save_when_inconclusive: bool = True,
     set_as_first_default: bool = True,
     config_path: Path | None = None,
 ) -> CredentialAddResult:
     """Validate (unless skipped) and persist *key* for *provider_id*.
+
+    A key the provider *rejected* (401: invalid, expired, revoked) is never
+    saved unless *save_unverified_on_failure* is set. A check that could not
+    reach a verdict — offline, timeout, rate limit, provider outage, a 403 on
+    the listing endpoint, a test model that is unavailable — is saved as
+    unverified when *save_when_inconclusive* (the default): the key may well be
+    fine, the background verifier will re-check it, and losing what the user
+    just pasted because the network blinked is the worse outcome. The result
+    then has ``saved=True, ok=False``; :meth:`CredentialAddResult.summary`
+    renders it as "Credential saved, but validation could not be completed".
+
+    A failure to *store* the key is reported in ``store_error``, never as
+    success.
 
     Does not prompt, print, or render anything — every caller owns its own
     UI. *config_path*, if given, is forwarded to
@@ -120,14 +165,19 @@ async def add_credential(
             not_a_key_provider=True,
         )
 
+    key = key.strip()
+
     if skip_validation:
-        became_default = persist_credential(
-            provider_id,
-            key,
-            verified=False,
-            set_as_first_default=set_as_first_default,
-            config_path=config_path,
-        )
+        try:
+            became_default = persist_credential(
+                provider_id,
+                key,
+                verified=False,
+                set_as_first_default=set_as_first_default,
+                config_path=config_path,
+            )
+        except CredentialStoreError as exc:
+            return _store_failure(provider_id, exc, None)
         return CredentialAddResult(
             ok=True,
             provider_id=provider_id,
@@ -139,14 +189,17 @@ async def add_credential(
     result = await validate_provider(provider_id, key)
 
     if result.ok:
-        became_default = persist_credential(
-            provider_id,
-            key,
-            verified=True,
-            model_count=len(result.models),
-            set_as_first_default=set_as_first_default,
-            config_path=config_path,
-        )
+        try:
+            became_default = persist_credential(
+                provider_id,
+                key,
+                verified=True,
+                model_count=len(result.models),
+                set_as_first_default=set_as_first_default,
+                config_path=config_path,
+            )
+        except CredentialStoreError as exc:
+            return _store_failure(provider_id, exc, result)
         return CredentialAddResult(
             ok=True,
             provider_id=provider_id,
@@ -156,14 +209,24 @@ async def add_credential(
             validation=result,
         )
 
-    if save_unverified_on_failure:
-        became_default = persist_credential(
-            provider_id,
-            key,
-            verified=False,
-            set_as_first_default=set_as_first_default,
-            config_path=config_path,
-        )
+    if save_unverified_on_failure or (save_when_inconclusive and result.inconclusive):
+        try:
+            became_default = persist_credential(
+                provider_id,
+                key,
+                verified=False,
+                set_as_first_default=set_as_first_default,
+                config_path=config_path,
+            )
+        except CredentialStoreError as exc:
+            return _store_failure(provider_id, exc, result)
+        if result.inconclusive:
+            from velune.providers.keystore import note_check_failure
+
+            try:
+                note_check_failure(provider_id, reason=result.message)
+            except CredentialStoreError:
+                pass
         return CredentialAddResult(
             ok=False,
             provider_id=provider_id,
@@ -195,25 +258,27 @@ def add_credential_sync(
     """Synchronous wrapper around :func:`add_credential` for non-async contexts
     (the Typer CLI), mirroring ``validation.py``'s ``validate_provider_sync``.
     """
-    coro = add_credential(
-        provider_id,
-        key,
-        skip_validation=skip_validation,
-        save_unverified_on_failure=save_unverified_on_failure,
-        set_as_first_default=set_as_first_default,
-        config_path=config_path,
-    )
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result(timeout=20.0)
-        return loop.run_until_complete(coro)
+    def _coro():
+        return add_credential(
+            provider_id,
+            key,
+            skip_validation=skip_validation,
+            save_unverified_on_failure=save_unverified_on_failure,
+            set_as_first_default=set_as_first_default,
+            config_path=config_path,
+        )
+
+    try:
+        asyncio.get_running_loop()
     except RuntimeError:
         # No event loop in this thread at all (typical Typer/CLI entry point).
-        # Bridge into async via the kernel's single blocking-entry helper
-        # rather than a second direct call here — see its docstring.
-        return run_async(coro)
+        # Bridge into async via the kernel's single blocking-entry helper.
+        # (The old code caught RuntimeError around run_until_complete, so a
+        # RuntimeError raised *by* the coroutine re-ran an awaited coroutine
+        # and hid the real error.)
+        return run_async(_coro())
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, _coro()).result(timeout=60.0)

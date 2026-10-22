@@ -85,13 +85,21 @@ def raise_typed_http_error(provider_label: str, exc: httpx.HTTPError, action: st
         InvalidRequestError,
         ModelNotFoundError,
         ProviderAuthenticationError,
+        ProviderPermissionError,
         RateLimitError,
     )
 
     status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
-    if status in (401, 403):
+    if status == 401:
         raise ProviderAuthenticationError(
-            f"{provider_label} rejected the API key (HTTP {status}) during {action}."
+            f"{provider_label} rejected the API key (HTTP 401) during {action}."
+        ) from exc
+    if status == 403:
+        detail = _error_detail(exc)
+        raise ProviderPermissionError(
+            f"{provider_label} denied access (HTTP 403) during {action} — the key "
+            f"is not permitted to use this model or endpoint."
+            + (f" Provider said: {detail}" if detail else "")
         ) from exc
     if status == 429:
         assert isinstance(exc, httpx.HTTPStatusError)

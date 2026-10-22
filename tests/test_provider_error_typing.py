@@ -11,6 +11,7 @@ from velune.core.errors.provider import (
     InvalidRequestError,
     ModelNotFoundError,
     ProviderAuthenticationError,
+    ProviderPermissionError,
     RateLimitError,
 )
 from velune.core.types.inference import InferenceRequest
@@ -46,7 +47,9 @@ async def _drain(provider):
 
 CASES = [
     (401, ProviderAuthenticationError),
-    (403, ProviderAuthenticationError),
+    # A 403 is "not allowed to use this model/endpoint", not "bad key"; its own
+    # type keeps it from marking the stored credential invalid.
+    (403, ProviderPermissionError),
     (404, ModelNotFoundError),
     (400, InvalidRequestError),
     (429, RateLimitError),

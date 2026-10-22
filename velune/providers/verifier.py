@@ -10,10 +10,14 @@ The central rule, and the reason this lives apart from ``validation.py``:
 
     Only a verdict that says something about the *key* may mark it invalid.
 
-A ``NETWORK_ERROR`` or ``RATE_LIMITED`` response tells us about the network or
-the provider's load, not about the credential — so those leave the record STALE
-and it is retried later. Without that distinction, running re-verification in
-the background would tell every offline user their keys are broken.
+A ``NETWORK_ERROR``, ``TIMEOUT``, ``RATE_LIMITED`` or ``PROVIDER_UNAVAILABLE``
+response tells us about the network or the provider's load, not about the
+credential — so those leave the record as it was (with the reason noted) and
+it is retried later. ``PERMISSION_DENIED`` is a 403 on one endpoint for a key
+that *did* authenticate, and ``MALFORMED_KEY`` is our own pre-check, not the
+provider's verdict; neither may mark a key invalid either. Without that
+distinction, running re-verification in the background would tell every
+offline or restricted-key user their keys are broken.
 """
 
 from __future__ import annotations
@@ -24,12 +28,15 @@ import logging
 from velune.providers.keystore import (
     KeyState,
     get_key,
-    list_stale_providers,
+    key_source,
+    list_recheck_due_providers,
     mark_invalid,
     mark_verified,
+    note_check_failure,
     verification_state,
 )
 from velune.providers.validation import (
+    KEY_REJECTING_STATUSES,
     ValidationResult,
     ValidationStatus,
     validate_provider,
@@ -38,17 +45,9 @@ from velune.providers.validation import (
 logger = logging.getLogger("velune.providers.verifier")
 
 # Verdicts that are a statement about the credential itself. Anything outside
-# this set (network error, rate limit, unknown) is treated as "no new
-# information" and leaves the stored state untouched.
-_KEY_REJECTING_STATUSES: frozenset[ValidationStatus] = frozenset(
-    {
-        ValidationStatus.INVALID_KEY,
-        ValidationStatus.EXPIRED_KEY,
-        ValidationStatus.REVOKED_KEY,
-        ValidationStatus.MALFORMED_KEY,
-        ValidationStatus.PERMISSION_DENIED,
-    }
-)
+# this set is treated as "no new information" and leaves the stored state
+# untouched. Kept under its old name for callers that import it.
+_KEY_REJECTING_STATUSES: frozenset[ValidationStatus] = KEY_REJECTING_STATUSES
 
 # Cap on how many providers we re-check at once, so a user with a dozen
 # configured providers doesn't open a dozen simultaneous TLS connections at REPL
@@ -66,13 +65,19 @@ async def reverify(provider_id: str) -> ValidationResult:
     key = get_key(provider_id) or ""
     result = await validate_provider(provider_id, key)
 
+    if key_source(provider_id).source != "stored":
+        # The key in effect came from the environment: its verdict must not be
+        # written onto the (different, or absent) stored record.
+        return result
+
     if result.ok:
         mark_verified(provider_id, model_count=len(result.models))
     elif result.status in _KEY_REJECTING_STATUSES:
         mark_invalid(provider_id, reason=result.message)
     else:
-        # Inconclusive (offline, rate-limited, provider outage). Leave the
-        # record as-is so it stays STALE and is retried on the next run.
+        # Inconclusive (offline, timeout, rate limit, outage, restricted key).
+        # Keep the state, note why, and retry on a later run.
+        note_check_failure(provider_id, reason=result.message)
         logger.debug(
             "Re-verification of %s was inconclusive (%s); leaving state unchanged.",
             provider_id,
@@ -85,12 +90,16 @@ async def reverify(provider_id: str) -> ValidationResult:
 async def reverify_stale(max_concurrency: int | None = None) -> list[ValidationResult]:
     """Re-verify every provider whose key has aged past the TTL.
 
-    Safe to fire and forget on startup: it touches only providers already in
-    :attr:`KeyState.STALE`, never blocks on more than *max_concurrency*
+    Also re-checks keys marked INVALID once ``INVALID_RECHECK_SECONDS`` has
+    passed, so a recoverable rejection (and INVALID marks written by older
+    versions for 403s) heals without removing and re-adding the key.
+
+    Safe to fire and forget on startup: it touches only providers in
+    :attr:`KeyState.STALE` or due INVALID ones, never blocks on more than *max_concurrency*
     (default ``_MAX_CONCURRENCY``) requests at once, and swallows per-provider
     failures so one dead endpoint can't take down the sweep.
     """
-    stale = list_stale_providers()
+    stale = list_recheck_due_providers()
     if not stale:
         return []
 

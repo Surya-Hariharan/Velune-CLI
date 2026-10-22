@@ -46,6 +46,7 @@ from velune.core.errors.provider import (
     ProviderConnectionError,
     ProviderError,
     ProviderNotFoundError,
+    ProviderPermissionError,
 )
 
 __all__ = [
@@ -68,6 +69,7 @@ __all__ = [
     "ProviderNotFoundError",
     "ProviderConnectionError",
     "ProviderAuthenticationError",
+    "ProviderPermissionError",
     "ModelNotFoundError",
     "InferenceError",
     # Internal orchestration errors

@@ -398,13 +398,22 @@ class BaseCouncilAgent(ABC):
     def _note_provider_failure(provider_id: str, exc: Exception) -> None:
         """Persist a definitive key rejection so the next run fails fast at preflight.
 
-        Only :class:`ProviderAuthenticationError` qualifies — it is raised solely
-        for 401-style verdicts, which say something about the key itself. Network
-        failures and rate limits must not poison the stored key state.
+        Only a 401-style :class:`ProviderAuthenticationError` qualifies — it says
+        something about the key itself. A 403
+        (:class:`ProviderPermissionError`) is about one model or endpoint the
+        key may not use; marking the whole credential invalid for it used to
+        block discovery and activation of every other model on the provider.
+        Network failures and rate limits must not poison the stored key state
+        either.
         """
-        from velune.core.errors.provider import ProviderAuthenticationError
+        from velune.core.errors.provider import (
+            ProviderAuthenticationError,
+            ProviderPermissionError,
+        )
 
-        if not isinstance(exc, ProviderAuthenticationError):
+        if not isinstance(exc, ProviderAuthenticationError) or isinstance(
+            exc, ProviderPermissionError
+        ):
             return
         try:
             from velune.providers import keystore

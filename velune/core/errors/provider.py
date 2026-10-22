@@ -25,6 +25,20 @@ class ProviderAuthenticationError(ProviderError):
     pass
 
 
+class ProviderPermissionError(ProviderAuthenticationError):
+    """Raised on HTTP 403: the key authenticated but may not do *this*.
+
+    Typically a model the account has not been granted, a restricted project
+    key, or an endpoint outside the key's scopes. A subclass of
+    :class:`ProviderAuthenticationError` so existing handlers still stop
+    retrying and fall back to another provider, but it says nothing about the
+    key being bad — it must never mark the stored credential invalid (see
+    ``cognition/council/base.py``'s ``_note_provider_failure``).
+    """
+
+    pass
+
+
 class ModelNotFoundError(ProviderError):
     """Raised when a model is not found.
 

@@ -52,8 +52,6 @@ def _result(status: ValidationStatus) -> ValidationResult:
         ValidationStatus.INVALID_KEY,
         ValidationStatus.EXPIRED_KEY,
         ValidationStatus.REVOKED_KEY,
-        ValidationStatus.MALFORMED_KEY,
-        ValidationStatus.PERMISSION_DENIED,
     ],
 )
 async def test_a_real_rejection_marks_the_credential_invalid(mock_config_dir, mock_keyring, status):
@@ -73,6 +71,13 @@ async def test_a_real_rejection_marks_the_credential_invalid(mock_config_dir, mo
         ValidationStatus.NETWORK_ERROR,
         ValidationStatus.RATE_LIMITED,
         ValidationStatus.UNKNOWN_ERROR,
+        ValidationStatus.TIMEOUT,
+        ValidationStatus.PROVIDER_UNAVAILABLE,
+        ValidationStatus.UNCONFIRMED,
+        # Previously treated as key rejections; neither is the provider saying
+        # the key is bad (403 = restricted key; malformed = our own pre-check).
+        ValidationStatus.PERMISSION_DENIED,
+        ValidationStatus.MALFORMED_KEY,
     ],
 )
 async def test_a_transient_failure_leaves_the_credential_state_untouched(

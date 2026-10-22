@@ -27,6 +27,7 @@ def isolated_config_dir(tmp_path, monkeypatch):
 def _no_keyring():
     return patch.multiple(
         crypto,
+        _keyring_lookup=lambda: (None, False),
         _keyring_read_key=lambda: None,
         _keyring_create_key=lambda: None,
     )

@@ -181,13 +181,24 @@ def _stub_validation(monkeypatch, status: ValidationStatus, models=()):
 
 @pytest.mark.parametrize(
     "status",
-    [ValidationStatus.NETWORK_ERROR, ValidationStatus.RATE_LIMITED],
+    [
+        ValidationStatus.NETWORK_ERROR,
+        ValidationStatus.RATE_LIMITED,
+        ValidationStatus.TIMEOUT,
+        ValidationStatus.PROVIDER_UNAVAILABLE,
+        ValidationStatus.UNCONFIRMED,
+        # A 403 on the listing endpoint is a restricted key, not a bad one.
+        ValidationStatus.PERMISSION_DENIED,
+        # Our own structural pre-check is not the provider's verdict.
+        ValidationStatus.MALFORMED_KEY,
+    ],
 )
 async def test_inconclusive_verdict_leaves_the_key_stale(monkeypatch, status):
-    """An offline user must never be told their key is broken.
+    """An offline (or restricted-key) user must never be told their key is broken.
 
-    A network error or a rate limit says something about the network, not about
-    the credential — so the record stays STALE and is retried later.
+    A network error, timeout, outage, rate limit or 403 says something about
+    the network or one endpoint, not about the credential — so the record stays
+    STALE and is retried later.
     """
     ks.save_key("openai", "sk-good", verified=True)
     _backdate("openai", seconds=ks.VERIFY_TTL_SECONDS + 60)
@@ -204,7 +215,6 @@ async def test_inconclusive_verdict_leaves_the_key_stale(monkeypatch, status):
         ValidationStatus.INVALID_KEY,
         ValidationStatus.EXPIRED_KEY,
         ValidationStatus.REVOKED_KEY,
-        ValidationStatus.PERMISSION_DENIED,
     ],
 )
 async def test_key_rejecting_verdict_marks_invalid(monkeypatch, status):
