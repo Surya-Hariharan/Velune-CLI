@@ -939,14 +939,14 @@ async def _model_status(repl: VeluneREPL) -> None:
             if provider is not None and hasattr(provider, "health_check"):
                 ok = await provider.health_check()
                 reachable = "[green]reachable[/green]" if ok else "[red]unreachable[/red]"
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("health check for %s failed: %s", m.provider_id, exc)
         try:
             from velune.providers.keystore import key_source
 
             extra_lines.append(f"key        {key_source(m.provider_id).describe()}")
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("key source for %s unavailable: %s", m.provider_id, exc)
     body = (
         f"[bold cyan]{m.model_id}[/bold cyan]\n"
         f"provider   {m.provider_id}\n"

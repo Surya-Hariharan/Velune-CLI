@@ -16,6 +16,7 @@ the entire wizard via ``WizardCancelled``, handled by ``WizardController.run``.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -590,8 +591,8 @@ def _remember_discovered(models: list[ModelDescriptor]) -> None:
         merged = {(m.provider_id, m.model_id): m for m in cache.load()}
         merged.update({(m.provider_id, m.model_id): m for m in models})
         cache.save(list(merged.values()))
-    except Exception:
-        pass  # the REPL rescans on start; this only saves it the wait
+    except Exception as exc:  # the REPL rescans on start; this only saves it the wait
+        logging.getLogger(__name__).debug("could not cache discovered models: %s", exc)
 
 
 # ── Stage 5: Select Default Model ────────────────────────────────────────────

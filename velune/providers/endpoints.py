@@ -46,7 +46,8 @@ def normalize_ollama_host(value: str) -> str:
     parts = urlsplit(raw)
     scheme = parts.scheme or "http"
     host = parts.hostname or "127.0.0.1"
-    if host in ("0.0.0.0", "::"):
+    # A wildcard is a bind address, not somewhere to connect: talk to loopback.
+    if host in ("0.0.0.0", "::"):  # nosec B104
         host = "127.0.0.1"
     try:
         port = parts.port
