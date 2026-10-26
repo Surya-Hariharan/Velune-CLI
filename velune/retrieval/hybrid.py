@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -155,7 +156,8 @@ class HybridRetriever:
         """
         # Pick up a re-indexed corpus before querying it, so lexical retrieval
         # reflects the workspace as it is now rather than as it was at boot.
-        self.refresh_lexical_index()
+        # (Off the event loop: a re-index makes this a multi-MB JSON load + BM25 build.)
+        await asyncio.to_thread(self.refresh_lexical_index)
 
         lexical_hits: list[RetrievalHit] = []
         vector_hits: list[RetrievalHit] = []
@@ -180,8 +182,11 @@ class HybridRetriever:
         if query.lexical_weight > 0.0:
             t0 = time.perf_counter()
             try:
-                lexical_hits = self.lexical_retriever.retrieve(
-                    query.text, top_k=query.top_k, namespace=query.namespace
+                lexical_hits = await asyncio.to_thread(
+                    self.lexical_retriever.retrieve,
+                    query.text,
+                    top_k=query.top_k,
+                    namespace=query.namespace,
                 )
             except Exception:
                 pass
@@ -196,8 +201,11 @@ class HybridRetriever:
                 emb = await self._generate_embedding_async(query.text)
                 diagnostics["vector"]["embedding_available"] = emb is not None
                 if emb is not None:  # Only do vector search if real embedding
-                    vector_hits = self.vector_retriever.retrieve(
-                        emb, top_k=query.top_k, namespace=query.namespace
+                    vector_hits = await asyncio.to_thread(
+                        self.vector_retriever.retrieve,
+                        emb,
+                        top_k=query.top_k,
+                        namespace=query.namespace,
                     )
                 else:
                     logger.info("Vector retrieval skipped — no embedding available")
