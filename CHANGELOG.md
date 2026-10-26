@@ -68,6 +68,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **`/council` now sees your repository.** It read its services from a container the app never
+  filled, so every council run started with "Repository context unavailable." and took git and
+  config context from whatever directory Velune was launched in. The council, its tier
+  classifier and the code tools (`semantic_code_search`, `symbol_search`, `go_to_definition`) now
+  use the running app's own services, so each workspace gets its own context. No provider is
+  contacted and no model is probed as a result.
+- **`/council` no longer corrupts the screen.** Council agents drew their own live panels straight
+  onto the terminal under the full-screen app, overwriting the transcript and the input line. Progress
+  is now added to the transcript like other output.
+- **Searching a large project no longer freezes Velune.** `grep_files` and `find_files` run off the
+  UI thread, return at most 100 / 500 results (with a `truncated` note when cut off), skip files over
+  1 MiB and binary files, stop after 10 s, and treat the pattern as a per-line regex. A slow or
+  pathological pattern such as `^(a+)+$` is cut off instead of hanging, and an invalid pattern is
+  reported as an error. They also resolve the directory against the project, not the launch folder.
 - **Saved API keys lost across restarts.** A failed OS-keyring read no longer generates (and stores) a
   new master key over the real one. Credential saves are read-modify-write under a lock, confirmed
   by reading back, and raise on failure; an unreadable store is never overwritten (backup read in
