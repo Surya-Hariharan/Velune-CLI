@@ -71,9 +71,9 @@ def _create_tool_registry(env: RuntimeEnvironment):
         GitCheckout(workspace=ws),
         execute_cmd_tool,
         TerminalHistory(),
-        SemanticCodeSearch(workspace=ws),
-        SymbolSearch(workspace=ws),
-        GoToDefinition(workspace=ws),
+        SemanticCodeSearch(workspace=ws, container=env.container),
+        SymbolSearch(workspace=ws, container=env.container),
+        GoToDefinition(workspace=ws, container=env.container),
         FindReferences(workspace=ws),
         WebFetch(),
     ]

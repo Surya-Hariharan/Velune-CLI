@@ -37,6 +37,7 @@ def _create_council_orchestrator(env: RuntimeEnvironment):
         sqlite_manager=sqlite_manager,
         config=env.config,
         lineage_memory=lineage_memory,
+        container=env.container,
     )
 
 

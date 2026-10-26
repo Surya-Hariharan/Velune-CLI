@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
-from velune.execution.path_guard import PathGuard
+from velune.execution.path_guard import resolve_in_workspace
 from velune.tools.base.tool import BaseTool, ToolPermission
+from velune.tools.code._container import resolve_container
 
 # Node types that can be a symbol's definition site — excludes NodeType.FILE.
 _DEFINITION_NODE_TYPES = frozenset({"class", "function", "method"})
@@ -13,8 +16,11 @@ _DEFINITION_NODE_TYPES = frozenset({"class", "function", "method"})
 class GoToDefinition(BaseTool):
     """Tool for navigating to symbol definitions."""
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(self, workspace: Path | None = None, container: Any | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+        # The runtime's service container (explicit injection). ``None`` falls back
+        # to the process-wide registry for standalone use.
+        self._container = container
 
     def get_required_permissions(self) -> set[ToolPermission]:
         # Read-only: runs in every execution mode without approval.
@@ -41,24 +47,29 @@ class GoToDefinition(BaseTool):
         the graph isn't available/warm yet or has no match, so this tool
         still works during Tier-1 warm-up or in an unindexed workspace.
         """
-        guard = PathGuard(self.workspace)
-        path = guard.validate(file_path)
+        path = resolve_in_workspace(file_path, self.workspace, label="go_to_definition")
 
         graph_hit = await self._lookup_via_graph(symbol_name, path)
         if graph_hit is not None:
             return graph_hit
 
-        from velune.repository.parser import RepositorySnapshotParser
+        return await asyncio.to_thread(self._parse_single_file, symbol_name, path)
 
-        parser = RepositorySnapshotParser()
+    @staticmethod
+    def _parse_single_file(symbol_name: str, path: Path) -> dict | None:
+        """Single-file fallback, off the event loop and bounded by the parse-size limit."""
+        from velune.repository.parser import RepositorySnapshotParser
+        from velune.repository.schemas import MAX_STRUCTURAL_PARSE_BYTES
 
         try:
+            if path.stat().st_size > MAX_STRUCTURAL_PARSE_BYTES:
+                return None
             with open(path, encoding="utf-8", errors="ignore") as f:
                 code = f.read()
         except Exception:
             return None
 
-        symbols, _ = parser.parse(path, code)
+        symbols, _ = RepositorySnapshotParser().parse(path, code)
         for symbol in symbols:
             if symbol.name == symbol_name:
                 return {
@@ -71,9 +82,7 @@ class GoToDefinition(BaseTool):
 
     async def _lookup_via_graph(self, symbol_name: str, ref_path: Path) -> dict[str, Any] | None:
         try:
-            from velune.kernel.registry import get_container
-
-            container = get_container()
+            container = resolve_container(self._container)
             if not container.has("runtime.knowledge_query"):
                 return None
             query = container.get("runtime.knowledge_query")
@@ -130,8 +139,11 @@ class GoToDefinition(BaseTool):
 class FindReferences(BaseTool):
     """Tool for finding symbol references."""
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(self, workspace: Path | None = None, container: Any | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+        # The runtime's service container (explicit injection). ``None`` falls back
+        # to the process-wide registry for standalone use.
+        self._container = container
 
     def get_required_permissions(self) -> set[ToolPermission]:
         # Read-only: runs in every execution mode without approval.
@@ -162,7 +174,7 @@ class FindReferences(BaseTool):
 
         grep = GrepFiles(workspace=self.workspace)
         results = await grep.execute(
-            pattern=symbol_name,
+            pattern=re.escape(symbol_name),
             directory=directory,
             file_pattern=file_pattern,
         )

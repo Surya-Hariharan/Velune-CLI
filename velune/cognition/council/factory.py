@@ -41,6 +41,7 @@ class CouncilAgentFactory:
         mapper: ModelSpecializationMapper,
         live_lock: Any | None = None,
         *,
+        live_console: Any | None = None,
         fallback_provider_ids: tuple[str, ...] | list[str] = (),
         allow_cloud_fallback_from_local: bool = False,
         max_fallbacks: int = 2,
@@ -48,6 +49,8 @@ class CouncilAgentFactory:
         self.provider_registry = provider_registry
         self.mapper = mapper
         self.live_lock = live_lock
+        # Console agents may stream a panel onto; ``None`` = agents draw nothing.
+        self.live_console = live_console
         # Per-seat fallback: providers the user allows as alternates, in preference order.
         # Empty (the default) means a failed seat is simply unavailable.
         self.fallback_provider_ids = tuple(fallback_provider_ids)
@@ -97,6 +100,7 @@ class CouncilAgentFactory:
 
     def _finish(self, agent: Any, role: CouncilRole, model: ModelDescriptor) -> Any:
         agent.live_lock = self.live_lock
+        agent.live_console = self.live_console
         agent._fallback_providers = self.fallbacks_for(role, model)
         return agent
 

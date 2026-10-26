@@ -1,17 +1,42 @@
 from __future__ import annotations
 
+import asyncio
+import re
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from velune.execution.path_guard import PathGuard
+from velune.execution.path_guard import resolve_in_workspace
 from velune.tools.base.tool import BaseTool, ToolPermission
+from velune.tools.code._container import resolve_container
+
+#: Limits of the ``symbol_search`` fallback scan (the graph path is unaffected).
+SYMBOL_SCAN_MAX_FILES = 5_000
+SYMBOL_SCAN_MAX_RESULTS = 200
+SYMBOL_SCAN_TIME_BUDGET_SECONDS = 10.0
+
+
+def _limit_results(results: list, limit: int) -> list:
+    """Cap *results* at *limit* entries, keeping (or adding) the truncation marker."""
+    from velune.tools.filesystem.search import truncation_marker
+
+    hits = [r for r in results if not (isinstance(r, dict) and r.get("truncated"))]
+    marker = next((r for r in results if isinstance(r, dict) and r.get("truncated")), None)
+    if len(hits) > limit:
+        reasons = [f"limit={limit}"] + (marker["reasons"] if marker else [])
+        return [*hits[:limit], truncation_marker(reasons)]
+    return [*hits, marker] if marker else hits
 
 
 class SemanticCodeSearch(BaseTool):
     """Tool for semantic code search."""
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(self, workspace: Path | None = None, container: Any | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+        # The runtime's service container (explicit injection). ``None`` falls back
+        # to the process-wide registry for standalone use.
+        self._container = container
 
     def get_required_permissions(self) -> set[ToolPermission]:
         # Read-only: runs in every execution mode without approval.
@@ -37,9 +62,7 @@ class SemanticCodeSearch(BaseTool):
         this tool degrades rather than fails when retrieval isn't available.
         """
         try:
-            from velune.kernel.registry import get_container
-
-            container = get_container()
+            container = resolve_container(self._container)
             if container.has("runtime.retrieval"):
                 retriever = container.get("runtime.retrieval")
                 if retriever is not None:
@@ -74,8 +97,8 @@ class SemanticCodeSearch(BaseTool):
         from velune.tools.filesystem.search import GrepFiles
 
         grep = GrepFiles(workspace=self.workspace)
-        results = await grep.execute(pattern=query, directory=directory)
-        return results[:limit]
+        results = await grep.execute(pattern=re.escape(query), directory=directory)
+        return _limit_results(results, limit)
 
     def get_schema(self) -> dict:
         return {
@@ -101,8 +124,11 @@ class SemanticCodeSearch(BaseTool):
 class SymbolSearch(BaseTool):
     """Tool for searching symbols."""
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(self, workspace: Path | None = None, container: Any | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+        # The runtime's service container (explicit injection). ``None`` falls back
+        # to the process-wide registry for standalone use.
+        self._container = container
 
     def get_required_permissions(self) -> set[ToolPermission]:
         # Read-only: runs in every execution mode without approval.
@@ -131,23 +157,48 @@ class SymbolSearch(BaseTool):
         if graph_hits is not None:
             return graph_hits
 
+        root_path = resolve_in_workspace(directory, self.workspace, label="symbol_search")
+        cancel = threading.Event()
+        try:
+            return await asyncio.to_thread(self._scan_python, root_path, symbol_name, cancel)
+        except asyncio.CancelledError:
+            cancel.set()
+            raise
+
+    def _scan_python(self, root_path: Path, symbol_name: str, cancel: threading.Event) -> list:
+        """Bounded full scan -- the fallback when the knowledge graph is unavailable.
+
+        Python files only; at most ``SYMBOL_SCAN_MAX_FILES`` files, none larger than
+        the structural-parse limit, within ``SYMBOL_SCAN_TIME_BUDGET_SECONDS``.
+        """
         from velune.repository.parser import RepositorySnapshotParser
         from velune.repository.scanner import FilesystemScanner
+        from velune.repository.schemas import MAX_STRUCTURAL_PARSE_BYTES
+        from velune.tools.filesystem.search import truncation_marker
 
-        guard = PathGuard(self.workspace)
-        root_path = guard.validate(directory)
-
-        scanner = FilesystemScanner(root_path)
-        files = scanner.scan([".py"])
-
+        deadline = time.monotonic() + SYMBOL_SCAN_TIME_BUDGET_SECONDS
+        files = FilesystemScanner(root_path).scan([".py"])
         parser = RepositorySnapshotParser()
+        reasons: list[str] = []
+        results: list[dict] = []
+        skipped_large = 0
 
-        results = []
-        for file_path in files:
+        for index, file_path in enumerate(files):
+            if cancel.is_set():
+                break
+            if index >= SYMBOL_SCAN_MAX_FILES:
+                reasons.append(f"file_limit={SYMBOL_SCAN_MAX_FILES}")
+                break
+            if time.monotonic() > deadline:
+                reasons.append(f"time_budget={SYMBOL_SCAN_TIME_BUDGET_SECONDS:g}s")
+                break
             try:
+                if file_path.stat().st_size > MAX_STRUCTURAL_PARSE_BYTES:
+                    skipped_large += 1
+                    continue
                 with open(file_path, encoding="utf-8", errors="ignore") as f:
                     code = f.read()
-            except Exception:
+            except OSError:
                 continue
 
             symbols, _ = parser.parse(file_path, code)
@@ -163,7 +214,14 @@ class SymbolSearch(BaseTool):
                             "line": symbol.line_start,
                         }
                     )
+            if len(results) >= SYMBOL_SCAN_MAX_RESULTS:
+                reasons.append(f"max_results={SYMBOL_SCAN_MAX_RESULTS}")
+                break
 
+        if skipped_large:
+            reasons.append(f"skipped_files_over_{MAX_STRUCTURAL_PARSE_BYTES}_bytes")
+        if reasons:
+            results.append(truncation_marker(reasons))
         return results
 
     async def _search_via_graph(self, symbol_name: str) -> list[dict] | None:
@@ -178,9 +236,7 @@ class SymbolSearch(BaseTool):
         cold-start signal.
         """
         try:
-            from velune.kernel.registry import get_container
-
-            container = get_container()
+            container = resolve_container(self._container)
             if not container.has("runtime.knowledge_query"):
                 return None
             query = container.get("runtime.knowledge_query")

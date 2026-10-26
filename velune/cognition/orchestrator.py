@@ -48,7 +48,14 @@ class CouncilOrchestrator:
         config: VeluneConfig | None = None,
         lineage_memory: LineageMemoryTier | None = None,
         pool: SQLiteConnectionPool | None = None,
+        container: Any | None = None,
     ) -> None:
+        # The runtime's own service container (explicit dependency injection).
+        # Services are resolved from it at the moment of use, never cached, so a
+        # workspace switch that hot-swaps services is picked up. ``None`` keeps
+        # the legacy behaviour of consulting the process-wide registry
+        # (standalone construction, tests).
+        self._container = container
         self.provider_registry = provider_registry
         self.mapper = mapper
         self.arbitrator = CouncilArbitrator(historical_accuracy=historical_accuracy)
@@ -97,9 +104,7 @@ class CouncilOrchestrator:
         # Reduce Service Locator usage: resolve task_registry once in constructor if not passed
         task_registry = None
         try:
-            from velune.kernel.registry import get_container
-
-            container = get_container()
+            container = self._runtime_container()
             if container.has("runtime.task_registry"):
                 task_registry = container.get("runtime.task_registry")
         except Exception:
@@ -126,9 +131,8 @@ class CouncilOrchestrator:
         # profile, since this only ever pulls the ceiling down, never up.
         try:
             from velune.hardware.profiles import RuntimeProfileName
-            from velune.kernel.registry import get_container
 
-            _container = get_container()
+            _container = self._runtime_container()
             _profile = (
                 _container.get("runtime.profile") if _container.has("runtime.profile") else None
             )
@@ -145,6 +149,7 @@ class CouncilOrchestrator:
 
         self.tier_classifier = TierClassifier(
             task_registry=task_registry,
+            repository_service_getter=self._repository_service,
             max_council_tier=max_tier,
             default_tier_override=default_override,
             low_resource_mode=low_resource_mode,
@@ -161,13 +166,26 @@ class CouncilOrchestrator:
         # Resolve the event bus for retry event emission (best-effort)
         self._bus: Any | None = None
         try:
-            from velune.kernel.registry import get_container
-
-            _c = get_container()
+            _c = self._runtime_container()
             if _c.has("runtime.bus"):
                 self._bus = _c.get("runtime.bus")
         except Exception:
             pass
+
+    def _runtime_container(self) -> Any:
+        """The container this orchestrator reads runtime services from."""
+        if self._container is not None:
+            return self._container
+        from velune.kernel.registry import get_container
+
+        return get_container()
+
+    def _repository_service(self) -> Any | None:
+        """The workspace's RepositoryCognitionService, or ``None`` when absent."""
+        container = self._runtime_container()
+        if container.has("runtime.repository_cognition"):
+            return container.get("runtime.repository_cognition")
+        return None
 
     def get_state(self, run_id: str) -> Any | None:
         """Get the cached OrchestrationState by run_id."""
@@ -273,9 +291,7 @@ class CouncilOrchestrator:
         # a missing workspace or write error must never break a run.
         trace_log = None
         try:
-            from velune.kernel.registry import get_container
-
-            _container = get_container()
+            _container = self._runtime_container()
             if _container.has("runtime.workspace"):
                 from velune.observability.trace_sink import trace_log_for_workspace
 
@@ -318,9 +334,7 @@ class CouncilOrchestrator:
 
         repo_context = "Repository context unavailable."
         try:
-            from velune.kernel.registry import get_container
-
-            container = get_container()
+            container = self._runtime_container()
             if container.has("runtime.repository_cognition"):
                 repository_cognition = container.get("runtime.repository_cognition")
 
@@ -375,10 +389,9 @@ class CouncilOrchestrator:
         # Inject git state as a separate firewall-bounded context block so the
         # council agents know the current branch, staged diff, and recent commits.
         try:
-            from velune.kernel.registry import get_container as _get_container
             from velune.repository.git_context import GitContextProvider
 
-            _c = _get_container()
+            _c = self._runtime_container()
             _ws = _c.get("runtime.workspace") if _c.has("runtime.workspace") else "."
             _git_provider = GitContextProvider(Path(_ws))
             _git_snap = await asyncio.to_thread(_git_provider.gather)
@@ -392,11 +405,10 @@ class CouncilOrchestrator:
 
         # Inject config file intelligence so the council knows project commands and deps.
         try:
-            from velune.kernel.registry import get_container as _get_container2
             from velune.repository.config_intelligence import ConfigIntelligenceExtractor
             from velune.repository.project_type import ProjectTypeDetector
 
-            _c2 = _get_container2()
+            _c2 = self._runtime_container()
             _ws2 = _c2.get("runtime.workspace") if _c2.has("runtime.workspace") else "."
             _profile = ProjectTypeDetector().detect(Path(_ws2))
             _intel = ConfigIntelligenceExtractor().extract(Path(_ws2), _profile.config_files)
@@ -517,9 +529,7 @@ class CouncilOrchestrator:
 
         # 1. Integrate target-file structural awareness and fan-in signal
         try:
-            from velune.kernel.registry import get_container
-
-            container = get_container()
+            container = self._runtime_container()
             if container.has("runtime.repository_cognition"):
                 repo_service = container.get("runtime.repository_cognition")
                 grapher = repo_service.grapher
@@ -601,9 +611,7 @@ class CouncilOrchestrator:
             default_score = 0.7
 
         try:
-            from velune.kernel.registry import get_container
-
-            container = get_container()
+            container = self._runtime_container()
             if not container.has("runtime.repository_cognition"):
                 return default_score
 
@@ -776,7 +784,13 @@ class CouncilOrchestrator:
         try:
             from velune.telemetry.cost_estimator import CostEstimator
 
-            # Resolve the registry to find which cloud model will be used
+            # Resolve the registry to find which cloud model will be used.
+            # NOTE: deliberately still the process-wide registry, not
+            # ``self._runtime_container()``. The runtime container is never
+            # published there, so this gate has never fired in the REPL; wiring
+            # it to the runtime container would make it read ``sys.stdin`` from
+            # inside the full-screen app. Re-routing it needs a UI-owned prompt
+            # first (tracked separately).
             try:
                 from velune.kernel.registry import get_container
 

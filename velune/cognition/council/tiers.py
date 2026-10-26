@@ -1,5 +1,6 @@
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 from velune._compat import StrEnum
@@ -150,11 +151,13 @@ class TierClassifier:
     def __init__(
         self,
         task_registry: Any | None = None,
+        repository_service_getter: Callable[[], Any | None] | None = None,
         max_council_tier: str = "full",
         default_tier_override: str = "auto",
         low_resource_mode: bool = False,
     ) -> None:
         self.task_registry = task_registry
+        self.repository_service_getter = repository_service_getter
         self.max_council_tier = max_council_tier
         self.default_tier_override = default_tier_override
         self.low_resource_mode = low_resource_mode
@@ -199,11 +202,18 @@ class TierClassifier:
         try:
             import re
 
-            from velune.kernel.registry import get_container
+            if self.repository_service_getter is not None:
+                repo_service = self.repository_service_getter()
+            else:
+                from velune.kernel.registry import get_container
 
-            container = get_container()
-            if container.has("runtime.repository_cognition"):
-                repo_service = container.get("runtime.repository_cognition")
+                container = get_container()
+                repo_service = (
+                    container.get("runtime.repository_cognition")
+                    if container.has("runtime.repository_cognition")
+                    else None
+                )
+            if repo_service is not None:
                 grapher = repo_service.grapher
 
                 # Scan prompt for mentioned source files
