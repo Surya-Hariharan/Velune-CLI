@@ -109,7 +109,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif p.startswith("/api/chat"):
             self._stream(_last_user(payload.get("messages")), payload.get("stream", True), "ollama")
         elif p.endswith("/chat/completions"):
-            if not self._authorized():
+            if getattr(self.server, "outage", False):
+                # A mid-session provider outage: the key is fine, the service is down.
+                self._json({"error": {"message": "service unavailable"}}, 503)
+            elif not self._authorized():
                 self._json(
                     {"error": {"message": "Invalid API key", "type": "invalid_request_error"}}, 401
                 )
@@ -224,6 +227,7 @@ class FakeBackend:
         self._srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._srv.requests = []  # type: ignore[attr-defined]
         self._srv.chunk_delay = 0.0  # type: ignore[attr-defined]
+        self._srv.outage = False  # type: ignore[attr-defined]
         self._thread = threading.Thread(target=self._srv.serve_forever, daemon=True)
 
     @property
@@ -242,6 +246,15 @@ class FakeBackend:
     @chunk_delay.setter
     def chunk_delay(self, v: float) -> None:
         self._srv.chunk_delay = v  # type: ignore[attr-defined]
+
+    @property
+    def outage(self) -> bool:
+        """While True every chat completion answers HTTP 503 (keys stay valid)."""
+        return self._srv.outage  # type: ignore[attr-defined]
+
+    @outage.setter
+    def outage(self, v: bool) -> None:
+        self._srv.outage = v  # type: ignore[attr-defined]
 
     def start(self) -> FakeBackend:
         self._thread.start()

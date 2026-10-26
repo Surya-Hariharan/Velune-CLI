@@ -270,8 +270,6 @@ async def _submit_background_job(
 
 
 async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | None) -> None:
-    from rich.console import Group
-    from rich.live import Live
     from rich.panel import Panel
 
     from velune._compat import uncancel_task
@@ -282,17 +280,6 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
         return
 
     orchestrator = repl.container.get("runtime.council_orchestrator")
-    repo_cognition = repl.container.get("runtime.repository_cognition")
-
-    repl.console.print("[dim]Scanning workspace...[/dim]")
-    try:
-        snapshot = repo_cognition.get_snapshot() or repo_cognition.index(force=False)
-        lines = [f"Root: {snapshot.root_path}"]
-        for f in snapshot.files[:20]:
-            lines.append(f"  {f.path} ({f.language.value})")
-    except Exception:
-        pass
-
     repl.console.print()
 
     tracker = PipelineTracker()
@@ -313,7 +300,6 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
     last_run_id: str | None = None
     current_phase: str | None = None
     phase_messages: list[str] = []
-    active_live: Live | None = None
     _phase_timings: dict[str, float] = {}
 
     def make_panel(phase_name: str, messages: list[str]) -> Panel:
@@ -328,9 +314,6 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
             expand=True,
         )
 
-    def make_view(phase_name: str, messages: list[str]) -> Group:
-        return Group(tracker.render(), "", make_panel(phase_name, messages))
-
     try:
         async with repl._interrupts.foreground():
             async for milestone in orchestrator.stream(
@@ -343,8 +326,11 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
                 message = milestone.message
 
                 if phase != current_phase:
-                    if active_live:
-                        active_live.stop()
+                    # A finished phase becomes one panel in the transcript. There
+                    # is deliberately no live region here: the console is the
+                    # full-screen app's transcript sink, so a Live view would
+                    # either draw nothing or fight the composer for the screen.
+                    if current_phase is not None:
                         repl.console.print(make_panel(current_phase, phase_messages))
 
                     if milestone.elapsed_ms is not None and current_phase:
@@ -353,21 +339,12 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
                     current_phase = phase
                     phase_messages = []
                     tracker.advance(phase)
-
-                    active_live = Live(
-                        make_view(current_phase, phase_messages),
-                        console=repl.console,
-                        refresh_per_second=4,
-                        transient=True,
-                    )
-                    active_live.start()
+                    # Immediate, append-only progress: the phase that just began.
+                    repl.console.print(f"[dim]▸ {phase.capitalize()}…[/dim]")
 
                 phase_messages.append(message)
-                if active_live:
-                    active_live.update(make_view(current_phase, phase_messages))
 
-            if active_live:
-                active_live.stop()
+            if current_phase is not None:
                 repl.console.print(make_panel(current_phase, phase_messages))
             tracker.complete()
             repl.console.print()
@@ -383,18 +360,12 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
         task_obj = asyncio.current_task()
         if task_obj is not None:
             uncancel_task(task_obj)
-        if active_live:
-            active_live.stop()
         repl.console.print("\n[yellow]Council run interrupted.[/yellow]")
         return
     except KeyboardInterrupt:
-        if active_live:
-            active_live.stop()
         repl.console.print("\n[yellow]Council run interrupted.[/yellow]")
         return
     except Exception as e:
-        if active_live:
-            active_live.stop()
         tracker.fail(current_phase)
         repl.console.print(tracker.render())
         from velune.cli.rendering.error_panel import render_error, render_unexpected_error

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -62,6 +62,12 @@ class BaseCouncilAgent(ABC):
         self.provider = provider
         self.system_prompt = system_prompt
         self.live_lock = live_lock
+        # The Rich console an agent may draw its streaming panel on. ``None``
+        # (the default) means the agent draws nothing of its own: the owner of
+        # the terminal (the full-screen REPL, a CLI command's status line)
+        # decides how progress is shown, so no agent ever opens a competing
+        # live region on the real stdout.
+        self.live_console: Any | None = None
         # The council *seat* this agent occupies, which is not the same thing
         # as its CouncilRole: the security, performance, and maintainability
         # critics are all built on the REVIEWER role descriptor, so role
@@ -187,16 +193,15 @@ class BaseCouncilAgent(ABC):
                     supports_streaming = False
 
                 if supports_streaming:
-                    import sys
-
-                    from rich.console import Console
                     from rich.live import Live
                     from rich.panel import Panel
 
                     from velune.cli.rendering import CustomMarkdown
 
-                    console = Console()
-                    is_interactive = sys.stdout.isatty()
+                    # Only ever the console the terminal's owner handed in; an
+                    # agent never builds its own ``Console()`` on the real stdout.
+                    console = self.live_console
+                    is_interactive = console is not None and bool(console.is_terminal)
 
                     acquired = False
                     try:
