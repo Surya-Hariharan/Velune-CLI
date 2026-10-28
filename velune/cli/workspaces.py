@@ -49,6 +49,32 @@ _WORKSPACE_SCOPED_KEYS = frozenset(
         "runtime.three_brain_coordinator",
         "runtime.memory_lifecycle",
         "runtime.repository_cognition",
+        # The tools, the command sandbox, retrieval and the knowledge graph all
+        # capture the workspace root when they are built. Left alone they keep
+        # searching, running commands in and indexing the previous project while
+        # the permission boundary (rebuilt from ``runtime.workspace``) already
+        # points at the new one.
+        "runtime.execution_executor",
+        "runtime.knowledge_graph",
+        "runtime.knowledge_query",
+        "runtime.retrieval",
+        "runtime.intelligence_engine",
+        "runtime.tool_registry",
+    }
+)
+
+# Of the above, the ones whose old instance is bound to the previous project's files,
+# commands or index. If one of these cannot be rebuilt for the new workspace it is
+# retired (set to ``None``, which every consumer already tolerates) rather than left
+# running against the project the user just left.
+_RETIRE_ON_FAILURE = frozenset(
+    {
+        "runtime.execution_executor",
+        "runtime.knowledge_graph",
+        "runtime.knowledge_query",
+        "runtime.retrieval",
+        "runtime.intelligence_engine",
+        "runtime.tool_registry",
     }
 )
 
@@ -196,7 +222,14 @@ async def switch_workspace(container: Any, new_workspace: Path) -> list[str]:
 
     # 1. Shut down old storage-owning services so file handles and worker
     #    tasks never leak across workspaces.
-    for key in ("runtime.embedding_pipeline", "runtime.lancedb_store", "runtime.sqlite_pool"):
+    #    The intelligence engine goes first: its background tasks write to the
+    #    graph, cognition and stores that are shut down or replaced below.
+    for key in (
+        "runtime.intelligence_engine",
+        "runtime.embedding_pipeline",
+        "runtime.lancedb_store",
+        "runtime.sqlite_pool",
+    ):
         try:
             if container.has(key):
                 old = container.get(key)
@@ -206,24 +239,54 @@ async def switch_workspace(container: Any, new_workspace: Path) -> list[str]:
             _log.warning("Shutdown of %s during workspace switch failed: %s", key, exc)
             notes.append(f"warning: {key} did not shut down cleanly")
 
+    #    The command sandbox may be a Docker container; the executor is about to be
+    #    replaced, so stop its sandbox or every switch leaks one.
+    try:
+        if container.has("runtime.execution_executor"):
+            old_sandbox = getattr(container.get("runtime.execution_executor"), "sandbox", None)
+            if old_sandbox is not None and callable(getattr(old_sandbox, "stop", None)):
+                old_sandbox.stop()
+    except Exception as exc:
+        _log.warning("Stopping the previous command sandbox failed: %s", exc)
+        notes.append("warning: previous command sandbox did not stop cleanly")
+
     # 2. Rebind the workspace root itself.
     container.register_instance("runtime.workspace", new_workspace)
 
     # 3. Rebuild workspace-scoped modules with the same factories used at
     #    bootstrap, in their declared dependency order.
+    from velune.execution.subsystems import EXECUTION_MODULES
+    from velune.intelligence.subsystems import INTELLIGENCE_MODULES
     from velune.kernel.bootstrap import RuntimeEnvironment
+    from velune.kernel.lifecycle import ComponentStatus
+    from velune.knowledge.subsystems import KNOWLEDGE_MODULES
     from velune.memory.subsystems import MEMORY_MODULES
     from velune.repository.subsystems import REPOSITORY_MODULES
+    from velune.retrieval.subsystems import RETRIEVAL_MODULES
+    from velune.tools.subsystems import TOOL_MODULES
 
+    lifecycle = container.get("runtime.lifecycle")
     env = RuntimeEnvironment(
         workspace=new_workspace,
         config=container.get("runtime.config"),
         container=container,
-        lifecycle=container.get("runtime.lifecycle"),
+        lifecycle=lifecycle,
     )
 
+    # Concatenation order is dependency order: retrieval needs the vector client
+    # (memory), the engine needs cognition/graph/retrieval, the tools need the
+    # executor.
+    modules = (
+        MEMORY_MODULES
+        + REPOSITORY_MODULES
+        + EXECUTION_MODULES
+        + KNOWLEDGE_MODULES
+        + RETRIEVAL_MODULES
+        + INTELLIGENCE_MODULES
+        + TOOL_MODULES
+    )
     rebuilt = 0
-    for module in MEMORY_MODULES + REPOSITORY_MODULES:
+    for module in modules:
         if module.container_key not in _WORKSPACE_SCOPED_KEYS:
             continue
         try:
@@ -231,10 +294,16 @@ async def switch_workspace(container: Any, new_workspace: Path) -> list[str]:
             container.hot_swap(module.container_key, instance)
             if hasattr(instance, "initialize"):
                 await instance.initialize()
+            if module.lifecycle_key and instance is not None:
+                # Track the new instance so exit shuts it down, not the one just replaced.
+                lifecycle.register(module.lifecycle_key, instance)
+                lifecycle.set_status(module.lifecycle_key, ComponentStatus.HEALTHY)
             rebuilt += 1
         except Exception as exc:
             _log.warning("Workspace switch: module '%s' failed to rebuild: %s", module.name, exc)
             notes.append(f"warning: {module.name} unavailable in this workspace")
+            if module.container_key in _RETIRE_ON_FAILURE:
+                container.hot_swap(module.container_key, None)
 
     notes.insert(0, f"{rebuilt} workspace services rebound")
     return notes

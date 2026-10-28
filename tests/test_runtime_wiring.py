@@ -145,12 +145,200 @@ async def test_a_workspace_switch_is_reflected_in_the_next_council_context(
     assert SENTINEL_B in context and SENTINEL_A not in context
 
 
+# ── workspace switch rebinds the tools, not just the cognition ───────────────
+
+
+async def _switch(runtime, ws):
+    from velune.cli.workspaces import switch_workspace
+
+    await switch_workspace(runtime.container, ws)
+
+
+def _tool(runtime, name):
+    return runtime.container.get("runtime.tool_registry").get(name)
+
+
+async def test_switch_points_the_filesystem_tools_at_the_new_workspace(runtime_a, tmp_path):
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    await _switch(runtime_a, ws_b)
+
+    listing = await _tool(runtime_a, "read_directory").execute(".")
+    assert f"{SENTINEL_B}.py" in listing and f"{SENTINEL_A}.py" not in listing
+
+    found = await _tool(runtime_a, "find_files").execute("*.py")
+    assert any(SENTINEL_B in str(f) for f in found)
+    assert not any(SENTINEL_A in str(f) for f in found)
+
+    hits = await _tool(runtime_a, "grep_files").execute(SENTINEL_B.lower())
+    assert hits and all(SENTINEL_A.lower() not in str(h).lower() for h in hits)
+
+
+async def test_switch_points_command_execution_and_git_at_the_new_workspace(runtime_a, tmp_path):
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    await _switch(runtime_a, ws_b)
+
+    assert Path(_tool(runtime_a, "execute_command")._workspace_path).resolve() == ws_b.resolve()
+    assert Path(_tool(runtime_a, "git_status").workspace).resolve() == ws_b.resolve()
+    executor = runtime_a.container.get("runtime.execution_executor")
+    assert executor.workspace_path == ws_b.resolve()
+
+
+async def test_switch_points_retrieval_and_the_graph_at_the_new_workspace(runtime_a, tmp_path):
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    await _switch(runtime_a, ws_b)
+    runtime_a.container.get("runtime.repository_cognition").index(force=True)
+
+    hits = await _tool(runtime_a, "semantic_code_search").execute("zebra ledger total")
+    paths = [str(h.get("path", "")) for h in hits]
+    assert paths and all(str(tmp_path / "ws_a") not in p for p in paths)
+
+    graph = runtime_a.container.get("runtime.knowledge_graph")
+    assert Path(graph._db_path).resolve().is_relative_to(ws_b.resolve())
+
+
+async def test_switch_registers_the_rebuilt_services_for_lifecycle_shutdown(runtime_a, tmp_path):
+    """The old instance must not stay registered, or exit shuts down the wrong one."""
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    await _switch(runtime_a, ws_b)
+
+    lifecycle = runtime_a.container.get("runtime.lifecycle")
+    assert lifecycle._components["retrieval"] is runtime_a.container.get("runtime.retrieval")
+
+
+async def test_switching_back_restores_the_first_workspace(runtime_a, tmp_path):
+    ws_a = tmp_path / "ws_a"
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    await _switch(runtime_a, ws_b)
+    await _switch(runtime_a, ws_a)
+
+    listing = await _tool(runtime_a, "read_directory").execute(".")
+    assert f"{SENTINEL_A}.py" in listing and f"{SENTINEL_B}.py" not in listing
+
+
+async def test_a_b_a_leaves_every_service_and_the_council_on_the_first_workspace(
+    runtime_a, tmp_path
+):
+    ws_a = tmp_path / "ws_a"
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    await _switch(runtime_a, ws_b)
+    assert SENTINEL_B in await _council_context(runtime_a)
+    await _switch(runtime_a, ws_a)
+
+    context = await _council_context(runtime_a)
+    assert SENTINEL_A in context and SENTINEL_B not in context
+
+    container = runtime_a.container
+    assert Path(container.get("runtime.workspace")) == ws_a.resolve()
+    assert container.get("runtime.execution_executor").workspace_path == ws_a.resolve()
+    assert Path(_tool(runtime_a, "execute_command")._workspace_path).resolve() == ws_a.resolve()
+    assert Path(_tool(runtime_a, "git_status").workspace).resolve() == ws_a.resolve()
+    assert (
+        Path(container.get("runtime.knowledge_graph")._db_path)
+        .resolve()
+        .is_relative_to(ws_a.resolve())
+    )
+    retriever = container.get("runtime.retrieval")
+    assert Path(retriever._lexical_index_path).resolve().is_relative_to(ws_a.resolve())
+    assert container.get("runtime.repository_cognition").workspace_root == ws_a.resolve()
+
+
+async def test_the_read_boundary_follows_the_switch(runtime_a, tmp_path):
+    """After the switch a read of the *previous* project is outside the workspace."""
+    from velune.execution.path_guard import PathTraversalError
+
+    ws_a = tmp_path / "ws_a"
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    await _switch(runtime_a, ws_b)
+
+    assert await _tool(runtime_a, "read_file").execute(f"{SENTINEL_B}.py")
+    with pytest.raises((PathTraversalError, PermissionError)):
+        await _tool(runtime_a, "read_file").execute(str(ws_a / f"{SENTINEL_A}.py"))
+
+
+async def test_repeated_switching_stops_every_superseded_engine(runtime_a, tmp_path):
+    engines = [runtime_a.container.get("runtime.intelligence_engine")]
+    ws_a = tmp_path / "ws_a"
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+    for target in (ws_b, ws_a, ws_b, ws_a):
+        await _switch(runtime_a, target)
+        engines.append(runtime_a.container.get("runtime.intelligence_engine"))
+
+    assert all(engine is not None for engine in engines)
+    assert len({id(e) for e in engines}) == len(engines), "an engine was reused across workspaces"
+    assert [e._running for e in engines] == [False, False, False, False, True]
+
+
+async def test_shutdown_after_a_switch_stops_the_current_engine(runtime_a, tmp_path):
+    await _switch(runtime_a, _make_repo(tmp_path / "ws_b", SENTINEL_B))
+    engine = runtime_a.container.get("runtime.intelligence_engine")
+    assert engine._running
+
+    await runtime_a.container.get("runtime.lifecycle").shutdown()
+
+    assert engine._running is False
+    assert all(task.done() for task in engine._tasks)
+
+
+async def test_a_service_that_fails_to_rebuild_is_retired_not_left_on_the_old_workspace(
+    runtime_a, tmp_path, monkeypatch
+):
+    """A tool registry still bound to the previous project is worse than no registry."""
+    import velune.tools.subsystems as tool_subsystems
+
+    def boom(env):
+        raise RuntimeError("cannot build tools")
+
+    monkeypatch.setattr(tool_subsystems.TOOL_MODULES[0], "factory", boom, raising=False)
+    ws_b = _make_repo(tmp_path / "ws_b", SENTINEL_B)
+
+    notes = await _switch_notes(runtime_a, ws_b)
+
+    assert any("tool_registry" in n for n in notes)
+    assert runtime_a.container.get("runtime.tool_registry") is None
+    # everything that did rebuild is on the new workspace
+    assert runtime_a.container.get("runtime.execution_executor").workspace_path == ws_b.resolve()
+
+
+async def _switch_notes(runtime, ws) -> list[str]:
+    from velune.cli.workspaces import switch_workspace
+
+    return await switch_workspace(runtime.container, ws)
+
+
+async def test_the_superseded_command_sandbox_is_stopped(runtime_a, tmp_path):
+    class Sandbox:
+        stopped = 0
+
+        def stop(self):
+            Sandbox.stopped += 1
+
+    runtime_a.container.get("runtime.execution_executor").sandbox = Sandbox()
+
+    await _switch(runtime_a, _make_repo(tmp_path / "ws_b", SENTINEL_B))
+
+    assert Sandbox.stopped == 1
+
+
 async def test_runtime_does_not_publish_itself_into_the_process_wide_registry(runtime_a):
     """Wiring is by injection: a global would leak one runtime's services into another's."""
     from velune.kernel.registry import get_container
 
     assert not get_container().has("runtime.repository_cognition")
     assert not get_container().has("runtime.provider_registry")
+
+
+async def test_switching_does_not_publish_into_the_process_wide_registry(runtime_a, tmp_path):
+    await _switch(runtime_a, _make_repo(tmp_path / "ws_b", SENTINEL_B))
+    for key in (
+        "runtime.tool_registry",
+        "runtime.retrieval",
+        "runtime.knowledge_graph",
+        "runtime.execution_executor",
+        "runtime.intelligence_engine",
+    ):
+        from velune.kernel.registry import get_container
+
+        assert not get_container().has(key), key
 
 
 # ── code tools ───────────────────────────────────────────────────────────────
