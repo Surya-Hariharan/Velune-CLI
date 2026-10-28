@@ -78,6 +78,10 @@ class ExecutionConfig(BaseModel):
     # `/hunk` command itself, so toggling it once carries over to the next
     # session in the same workspace instead of resetting every launch.
     hunk_review_default: bool = False
+    # Commit the files a council edit session changed. Off by default: a commit is
+    # a durable change to the user's history that they did not ask for, so it must
+    # be opted into (``execution.council_auto_commit = true`` in velune.toml).
+    council_auto_commit: bool = False
     low_resource_mode: bool = False
     # Docker sandbox — when True, all agent-executed commands run inside a
     # per-session Docker container instead of the host subprocess sandbox.

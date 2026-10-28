@@ -493,6 +493,13 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
 
     repl.console.print(f"[green]Applied {len(accepted_paths)} file(s).[/green]")
 
+    if not _council_auto_commit_enabled(repl):
+        repl.console.print(
+            "[dim]Changes left uncommitted. Review them with [bold]/diff[/bold]; set "
+            "[bold]execution.council_auto_commit = true[/bold] to have Velune commit them.[/dim]"
+        )
+        return
+
     committed = await _auto_commit_edits(repl, accepted_paths, task, workspace)
     if committed:
         repl.console.print("[dim]Changes committed. Use [bold]/undo[/bold] to revert.[/dim]")
@@ -529,8 +536,17 @@ async def _authorize_council_edits(repl: VeluneREPL, file_writes: dict) -> bool 
     return decision.verdict is Verdict.ALLOW
 
 
+def _council_auto_commit_enabled(repl: VeluneREPL) -> bool:
+    config = repl.container.get_optional("runtime.config")
+    execution = getattr(config, "execution", None)
+    return bool(getattr(execution, "council_auto_commit", False))
+
+
 async def _auto_commit_edits(repl: VeluneREPL, paths: list, task: str, workspace) -> bool:
-    """Stage *paths* and create a Velune-tagged git commit."""
+    """Stage *paths* and commit exactly those paths with a Velune-tagged message.
+
+    ``--only`` keeps anything else the user already staged out of the commit.
+    """
     import subprocess
     from pathlib import Path as _Path
 
@@ -562,7 +578,7 @@ async def _auto_commit_edits(repl: VeluneREPL, paths: list, task: str, workspace
 
     commit = await asyncio.to_thread(
         subprocess.run,
-        ["git", "commit", "-m", message],
+        ["git", "commit", "--only", "-m", message, "--"] + rel_paths,
         cwd=workspace,
         capture_output=True,
         text=True,
