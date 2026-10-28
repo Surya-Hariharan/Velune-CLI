@@ -159,15 +159,20 @@ class GrepFiles(BaseTool):
             ):
                 extensions = [file_pattern[1:]]
 
-        scanner = FilesystemScanner(root)
-        candidates = scanner.scan(extensions)
+        # git and the directory walk both run under the call's deadline and cancel flag.
+        scanner = FilesystemScanner(root, git_timeout=max(1.0, deadline - time.monotonic()))
+        candidates = scanner.scan(extensions, deadline=deadline, cancel=cancel)
         reasons: list[str] = []
         files: list[str] = []
+        if scanner.truncated and not cancel.is_set():
+            reasons.append(f"time_budget={GREP_TIME_BUDGET_SECONDS:g}s")
         for file_path in candidates:
             if cancel.is_set():
                 break
             if time.monotonic() > deadline:
-                reasons.append(f"time_budget={GREP_TIME_BUDGET_SECONDS:g}s")
+                budget = f"time_budget={GREP_TIME_BUDGET_SECONDS:g}s"
+                if budget not in reasons:
+                    reasons.append(budget)
                 break
             if self._ignore.is_ignored(file_path):
                 continue
@@ -319,8 +324,18 @@ class FindFiles(BaseTool):
             # node_modules / .venv / build output. A directory is ignored when a
             # child of it would be (this is how ``dir/`` patterns match).
             dirnames[:] = sorted(d for d in dirnames if not self._ignore.is_ignored(here / d / "_"))
+            stopped = False
             for name in sorted(filenames):
                 entries += 1
+                # A single directory can hold more entries than the whole budget
+                # allows; the check between directories alone would never fire.
+                if entries % 256 == 0:
+                    if cancel.is_set():
+                        stopped = True
+                        break
+                    if time.monotonic() > deadline:
+                        reasons.append(f"time_budget={FIND_TIME_BUDGET_SECONDS:g}s")
+                        break
                 if not fnmatch.fnmatch(name, pattern):
                     continue
                 path = here / name
@@ -331,7 +346,7 @@ class FindFiles(BaseTool):
                     reasons.append(f"max_results={FIND_MAX_RESULTS}")
                     break
             entries += len(dirnames)
-            if reasons:
+            if stopped or reasons:
                 break
             if entries >= FIND_MAX_ENTRIES:
                 reasons.append(f"entry_limit={FIND_MAX_ENTRIES}")

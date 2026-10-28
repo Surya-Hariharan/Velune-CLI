@@ -18,6 +18,8 @@ Both .gitignore (at workspace root) and .veluneignore are read.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from pathlib import Path
 
 from velune.repository.schemas import EXTENSION_LANGUAGE_MAP
@@ -158,8 +160,19 @@ class FilesystemScanner:
       3. Workspace ``.veluneignore`` (highest priority — user overrides)
     """
 
-    def __init__(self, root_path: Path) -> None:
+    # Class-level defaults so a scanner built without ``__init__`` (tests do this to
+    # inject a fake tree) still walks unbounded instead of raising.
+    #: True when the last :meth:`scan` stopped early (deadline or cancel).
+    truncated: bool = False
+    _deadline: float | None = None
+    _cancel: threading.Event | None = None
+    _git_timeout: float = 15.0
+
+    def __init__(self, root_path: Path, *, git_timeout: float = 15.0) -> None:
         self.root_path = root_path.resolve()
+        # ``git ls-files`` runs while the ignore spec is built. A hung git (a huge
+        # or network-mounted tree) must not hang the caller with it.
+        self._git_timeout = git_timeout
         self._spec = self._build_spec()
 
     # ------------------------------------------------------------------
@@ -181,8 +194,22 @@ class FilesystemScanner:
 
         return self._spec.match_file(rel_posix)
 
-    def scan(self, extensions: list[str] | None = None) -> list[Path]:
-        """Scan the workspace recursively and return all valid files."""
+    def scan(
+        self,
+        extensions: list[str] | None = None,
+        *,
+        deadline: float | None = None,
+        cancel: threading.Event | None = None,
+    ) -> list[Path]:
+        """Scan the workspace recursively and return all valid files.
+
+        With *deadline* (a ``time.monotonic()`` value) or *cancel*, the walk stops
+        at the next entry once either trips and returns what it has found so far;
+        :attr:`truncated` then tells the caller the list is incomplete.
+        """
+        self.truncated = False
+        self._deadline = deadline
+        self._cancel = cancel
         files: list[Path] = []
         # Tracks resolved real directory paths already entered, so a symlink
         # cycle (or two links into the same real directory) can't recurse
@@ -264,6 +291,7 @@ class FilesystemScanner:
                 check=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=self._git_timeout,
             )
             for line in res.stdout.splitlines():
                 if not line.strip():
@@ -275,6 +303,14 @@ class FilesystemScanner:
             pass
         return found
 
+    def _should_stop(self) -> bool:
+        if (self._cancel is not None and self._cancel.is_set()) or (
+            self._deadline is not None and time.monotonic() > self._deadline
+        ):
+            self.truncated = True
+            return True
+        return False
+
     def _recursive_scan(
         self,
         current_dir: Path,
@@ -285,6 +321,8 @@ class FilesystemScanner:
         """Recurse through directories, skipping ignored items and symlink cycles."""
         try:
             for item in sorted(current_dir.iterdir()):  # sorted for deterministic order
+                if self._should_stop():
+                    return
                 if self.is_ignored(item):
                     continue
                 if item.is_dir():
