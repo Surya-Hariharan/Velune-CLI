@@ -86,14 +86,20 @@ class HybridRetriever:
         # after the first re-index lexical retrieval kept serving boot-time
         # state for the rest of the session. See ``refresh_lexical_index``.
         self._lexical_index_path: Path | None = None
-        self._lexical_index_mtime: float | None = None
+        self._lexical_index_mtime: tuple[int, int] | None = None
+
+    @staticmethod
+    def _file_signature(path: Path) -> tuple[int, int]:
+        """(mtime_ns, size): a rewrite inside one timestamp tick still changes the size."""
+        st = path.stat()
+        return (st.st_mtime_ns, st.st_size)
 
     def bind_lexical_index(self, path: Path, *, loaded: bool = True) -> None:
         """Track *path* as the on-disk source for the BM25 corpus."""
         self._lexical_index_path = path
         if loaded:
             try:
-                self._lexical_index_mtime = path.stat().st_mtime
+                self._lexical_index_mtime = self._file_signature(path)
             except OSError:
                 self._lexical_index_mtime = None
 
@@ -108,10 +114,10 @@ class HybridRetriever:
         if path is None:
             return False
         try:
-            mtime = path.stat().st_mtime
+            mtime = self._file_signature(path)
         except OSError:
             return False
-        if self._lexical_index_mtime is not None and mtime <= self._lexical_index_mtime:
+        if self._lexical_index_mtime is not None and mtime == self._lexical_index_mtime:
             return False
 
         try:
@@ -120,11 +126,12 @@ class HybridRetriever:
             logger.debug("Could not reload BM25 index from %s: %s", path, exc)
             return False
 
+        # An empty corpus is a real state (every indexed file was deleted), not a
+        # failed read: keeping the old one would keep returning deleted files.
         self._lexical_index_mtime = mtime
-        if not docs:
-            return False
         self.lexical_retriever = BM25Retriever()
-        self.lexical_retriever.add_documents_batch(docs)
+        if docs:
+            self.lexical_retriever.add_documents_batch(docs)
         logger.info("BM25 index reloaded: %d documents from %s", len(docs), path)
         return True
 

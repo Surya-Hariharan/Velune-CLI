@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -265,8 +266,16 @@ class RepositoryIndexer:
 
         # Save new cache
         try:
-            with open(self.cache_path, "w", encoding="utf-8") as f:
-                json.dump(new_cache, f, indent=2)
+            # Write-then-rename so a concurrent reader (the turn path) never sees a
+            # half-written cache and mistakes it for "no index".
+            tmp_path = self.cache_path.with_suffix(".json.tmp")
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(new_cache, f, indent=2)
+                os.replace(tmp_path, self.cache_path)
+            except BaseException:
+                tmp_path.unlink(missing_ok=True)  # keep the last valid cache, drop the partial
+                raise
         except Exception:
             pass
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -217,8 +218,31 @@ class RepositoryCognitionService:
         if progress_callback is not None:
             inc.progress_callback = progress_callback
         await inc.apply_delta(delta)
+        await self._refresh_derived_stores()
         self._last_delta = delta
         return delta
+
+    def _refresh_file_snapshot(self) -> RepositorySnapshot | None:
+        """Bring the symbol/file cache and the BM25 corpus up to date with the tree.
+
+        ``IncrementalIndexer.apply_delta`` records *that* files changed, in
+        ``index_state.json``. The prompt path reads the symbols from
+        ``index_cache.json`` and the lexical corpus from ``retrieval_index.json``,
+        which only a full :meth:`index` rewrote, so after an edit, rename or
+        delete both kept describing the previous tree. ``RepositoryIndexer.index``
+        re-parses only the files whose hash changed, so this is cheap to repeat.
+        """
+        if self.unsafe_reason():
+            return None
+        snapshot = self.indexer.index()
+        self._save_retrieval_index(snapshot)
+        return snapshot
+
+    async def _refresh_derived_stores(self) -> None:
+        try:
+            await asyncio.to_thread(self._refresh_file_snapshot)
+        except Exception as exc:
+            logger.warning("Could not refresh the repository snapshot after an edit: %s", exc)
 
     async def run_deep(self) -> RepositorySnapshot:
         """Full repository cognition (``deep`` mode): symbols + graph + architecture.
@@ -502,7 +526,13 @@ class RepositoryCognitionService:
         from velune.repository.api_mapper import APIConnectionMap, APIMapper, render_api_map
         from velune.repository.incremental_indexer import IncrementalIndexer
 
-        snapshot = self.get_snapshot()
+        # The delta is already applied to index_state.json; the snapshot the graph
+        # is patched from must reflect it, not the previous full index.
+        try:
+            snapshot = self._refresh_file_snapshot()
+        except Exception as exc:
+            logger.debug("Snapshot refresh failed, using the cached one: %s", exc)
+            snapshot = self.get_snapshot()
         if snapshot is None:
             return {"files_recomputed": 0, "edge_count": 0, "route_count": 0}
 
@@ -908,8 +938,16 @@ class RepositoryCognitionService:
         retrieval_path = self.root_path / ".velune" / "retrieval_index.json"
         try:
             retrieval_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(retrieval_path, "w", encoding="utf-8") as fh:
-                json.dump(docs, fh)
+            # Write-then-rename: the retriever stats and reloads this file while the
+            # engine and the REPL can both be rewriting it.
+            tmp_path = retrieval_path.with_suffix(".json.tmp")
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as fh:
+                    json.dump(docs, fh)
+                os.replace(tmp_path, retrieval_path)
+            except BaseException:
+                tmp_path.unlink(missing_ok=True)  # keep the last valid file, drop the partial
+                raise
             logger.debug("Saved %d retrieval documents to %s", len(docs), retrieval_path)
         except Exception as exc:
             logger.debug("Could not save retrieval index: %s", exc)
@@ -991,6 +1029,7 @@ class RepositoryCognitionService:
         try:
             await inc.apply_delta(delta)
             logger.info("Background incremental index complete: %d file(s) processed.", n)
+            await self._refresh_derived_stores()
 
             # Write a minimal retrieval index so BM25 is non-empty even on cold start.
             # The full symbol-enriched index is written when index() runs synchronously;
