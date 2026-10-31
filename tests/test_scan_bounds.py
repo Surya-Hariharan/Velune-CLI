@@ -171,30 +171,34 @@ def test_an_unreadable_directory_does_not_abort_the_scan(tree, monkeypatch):
     assert scanner.truncated is False  # unreadable is not the same as out of time
 
 
-def test_a_git_ls_files_that_outlives_its_timeout_is_killed(tree, monkeypatch, tmp_path):
+def test_a_git_ls_files_that_outlives_its_timeout_is_killed(tree, monkeypatch):
     """subprocess.run must be handed a real timeout and must not leave the child running."""
     import psutil
 
-    pid_file = tmp_path / "child.pid"
-    real_run = subprocess.run
-    slow = "; ".join(
-        [
-            "import os, time, pathlib",
-            f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))",
-            "time.sleep(60)",
-        ]
-    )
+    # The parent learns the child's pid from Popen itself. The child must not have to start
+    # and report in before the timeout: under load an interpreter can take longer than the
+    # 0.5 s timeout to come up, and it would be killed before it could write anything.
+    real_run, real_popen = subprocess.run, subprocess.Popen
+    spawned: list[subprocess.Popen] = []
+
+    class SpyPopen(real_popen):  # type: ignore[valid-type, misc]
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            spawned.append(self)
 
     def run(cmd, *args, **kwargs):
         if cmd and cmd[0] == "git":
-            cmd = [sys.executable, "-c", slow]  # stands in for a git that never returns
+            cmd = [sys.executable, "-c", "import time; time.sleep(60)"]  # a git that never returns
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", SpyPopen)
     started = time.monotonic()
 
     FilesystemScanner(tree, git_timeout=0.5)
 
     assert time.monotonic() - started < 10
-    pid = int(pid_file.read_text())
-    assert not psutil.pid_exists(pid), "the timed-out child process is still running"
+    assert spawned, "the scanner never started the stand-in git"
+    for proc in spawned:
+        assert proc.poll() is not None, "the timed-out child process was not reaped"
+        assert not psutil.pid_exists(proc.pid), "the timed-out child process is still running"
