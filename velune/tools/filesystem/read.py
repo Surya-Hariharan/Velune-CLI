@@ -9,7 +9,7 @@ from typing import Any, BinaryIO
 
 from velune.permissions.gate import resolve_tool_path
 from velune.tools.base.tool import BaseTool, ToolPermission
-from velune.tools.filesystem.ignore import load_ignore
+from velune.tools.filesystem.ignore import ignore_warning, load_ignore
 
 # ── read_file limits (defined here, in one place) ────────────────────────────
 #: A whole-file read refuses files larger than this. A ranged read streams the file
@@ -345,7 +345,6 @@ class ReadDirectory(BaseTool):
 
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = workspace or Path.cwd()
-        self._ignore = load_ignore(self.workspace)
 
     def get_name(self) -> str:
         return "read_directory"
@@ -364,13 +363,20 @@ class ReadDirectory(BaseTool):
             path_action(ActionType.READ, args.get("directory_path", "."), boundary, "list folder")
         ]
 
-    async def execute(self, directory_path: str) -> list[str]:
-        """List directory contents, excluding .veluneignore patterns."""
+    async def execute(self, directory_path: str) -> list:
+        """List directory contents, hiding what the workspace's ignore rules exclude."""
         path = resolve_tool_path(directory_path, self.workspace, label="ReadDirectory")
         if not path.exists() or not path.is_dir():
             raise NotADirectoryError(f"Directory not found: {directory_path}")
 
-        return [item.name for item in path.iterdir() if not self._ignore.is_ignored(item)]
+        # The shared hierarchical matcher (same as find_files / grep_files); a fresh one
+        # per call so an edited .gitignore is seen.
+        ignore = load_ignore(self.workspace)
+        names: list = [item.name for item in path.iterdir() if not ignore.is_ignored(item)]
+        warning = ignore_warning(ignore)  # only when some ignore rule could not be applied
+        if warning:
+            names.append(warning)
+        return names
 
     def get_schema(self) -> dict:
         return {

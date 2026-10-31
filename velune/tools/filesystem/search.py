@@ -31,7 +31,7 @@ from typing import Any
 
 from velune.execution.path_guard import resolve_in_workspace
 from velune.tools.base.tool import BaseTool, ToolPermission
-from velune.tools.filesystem.ignore import load_ignore
+from velune.tools.filesystem.ignore import ignore_warning, is_link, load_ignore
 
 # ── Documented limits ────────────────────────────────────────────────────────
 #: Matching lines returned by one ``grep_files`` call.
@@ -73,7 +73,6 @@ class GrepFiles(BaseTool):
 
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
-        self._ignore = load_ignore(self.workspace)
 
     def get_required_permissions(self) -> set[ToolPermission]:
         # Read-only: runs in every execution mode without approval.
@@ -106,7 +105,7 @@ class GrepFiles(BaseTool):
 
         cancel = threading.Event()
         try:
-            files, discovery_reasons = await asyncio.to_thread(
+            files, discovery_reasons, warning = await asyncio.to_thread(
                 self._collect_files, root_path, file_pattern, deadline, cancel
             )
         except asyncio.CancelledError:
@@ -116,7 +115,8 @@ class GrepFiles(BaseTool):
         reasons = list(discovery_reasons)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return [truncation_marker([*reasons, "time_budget"], files_searched=0)]
+            early = [warning] if warning else []
+            return [*early, truncation_marker([*reasons, "time_budget"], files_searched=0)]
 
         matches, report = await self._scan_isolated(pattern, files, remaining)
 
@@ -132,6 +132,8 @@ class GrepFiles(BaseTool):
             reasons.append("search_worker_failed")
 
         results: list[dict[str, Any]] = list(matches)
+        if warning:
+            results.append(warning)
         if reasons:
             extra = {
                 k: report[k]
@@ -149,7 +151,7 @@ class GrepFiles(BaseTool):
         file_pattern: str,
         deadline: float,
         cancel: threading.Event,
-    ) -> tuple[list[str], list[str]]:
+    ) -> tuple[list[str], list[str], dict[str, Any] | None]:
         from velune.repository.scanner import FilesystemScanner
 
         extensions = None
@@ -159,8 +161,15 @@ class GrepFiles(BaseTool):
             ):
                 extensions = [file_pattern[1:]]
 
-        # git and the directory walk both run under the call's deadline and cancel flag.
-        scanner = FilesystemScanner(root, git_timeout=max(1.0, deadline - time.monotonic()))
+        # The walk applies the same hierarchical matcher as find_files / read_directory
+        # (a fresh one per call, so an edited .gitignore is seen), pruning ignored
+        # directories before they are entered. No git process is involved.
+        ignore = load_ignore(self.workspace)
+        scanner = FilesystemScanner(
+            root,
+            git_timeout=max(1.0, deadline - time.monotonic()),
+            ignore=ignore,
+        )
         candidates = scanner.scan(extensions, deadline=deadline, cancel=cancel)
         reasons: list[str] = []
         files: list[str] = []
@@ -174,15 +183,13 @@ class GrepFiles(BaseTool):
                 if budget not in reasons:
                     reasons.append(budget)
                 break
-            if self._ignore.is_ignored(file_path):
-                continue
             if file_pattern and not file_path.match(file_pattern):
                 continue
             files.append(str(file_path))
             if len(files) >= GREP_MAX_FILES:
                 reasons.append(f"file_limit={GREP_MAX_FILES}")
                 break
-        return files, reasons
+        return files, reasons, ignore_warning(ignore)
 
     # ── matching (isolated process) ──────────────────────────────────────────
 
@@ -277,7 +284,6 @@ class FindFiles(BaseTool):
 
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
-        self._ignore = load_ignore(self.workspace)
 
     def get_required_permissions(self) -> set[ToolPermission]:
         # Read-only: runs in every execution mode without approval.
@@ -312,6 +318,9 @@ class FindFiles(BaseTool):
         matches: list[str] = []
         reasons: list[str] = []
         entries = 0
+        ignore = load_ignore(self.workspace)  # fresh per call: sees edited ignore files
+        if ignore.is_ignored(root, is_dir=True):
+            return []  # inside an excluded directory: nothing here can be listed
 
         for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
             if cancel.is_set():
@@ -320,10 +329,19 @@ class FindFiles(BaseTool):
                 reasons.append(f"time_budget={FIND_TIME_BUDGET_SECONDS:g}s")
                 break
             here = Path(dirpath)
-            # Prune ignored directories in place so os.walk never descends into
-            # node_modules / .venv / build output. A directory is ignored when a
-            # child of it would be (this is how ``dir/`` patterns match).
-            dirnames[:] = sorted(d for d in dirnames if not self._ignore.is_ignored(here / d / "_"))
+            # Prune in place so os.walk never descends into node_modules / .venv / build
+            # output (or anything a .gitignore excludes). A symlink or junction to a directory
+            # is never followed -- the same rule grep_files uses -- so a directory is reached
+            # by one path only, a link cannot loop, and nothing leads out of the workspace.
+            kept: list[str] = []
+            for d in sorted(dirnames):
+                try:
+                    info = os.lstat(here / d)
+                except OSError:
+                    continue
+                if not is_link(info) and not ignore.is_ignored(here / d, is_dir=True, info=info):
+                    kept.append(d)
+            dirnames[:] = kept
             stopped = False
             for name in sorted(filenames):
                 entries += 1
@@ -339,7 +357,7 @@ class FindFiles(BaseTool):
                 if not fnmatch.fnmatch(name, pattern):
                     continue
                 path = here / name
-                if self._ignore.is_ignored(path):
+                if ignore.is_ignored(path, is_dir=False):
                     continue
                 matches.append(str(path))
                 if len(matches) >= FIND_MAX_RESULTS:
@@ -352,9 +370,13 @@ class FindFiles(BaseTool):
                 reasons.append(f"entry_limit={FIND_MAX_ENTRIES}")
                 break
 
+        warning = ignore_warning(ignore)
+        results: list = list(matches)
+        if warning:
+            results.append(warning)
         if reasons:
-            return [*matches, truncation_marker(reasons, entries_examined=entries)]
-        return matches
+            results.append(truncation_marker(reasons, entries_examined=entries))
+        return results
 
     def get_schema(self) -> dict:
         return {

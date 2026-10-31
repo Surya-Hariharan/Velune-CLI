@@ -1,159 +1,735 @@
-""".veluneignore — gitignore-syntax file exclusion for Velune file tools.
+"""Hierarchical, Git-compatible file exclusion for Velune's file tools.
 
-Ported from Gemini CLI's .geminiignore concept, using Python's `pathspec`
-library (already a Velune dependency) for full gitignore-pattern support.
+``read_directory``, ``find_files`` and ``grep_files`` all decide what to hide with the
+one matcher in this module, so the three tools cannot disagree.
+
+Rules come from, lowest precedence first:
+
+1. the built-in defaults (:data:`DEFAULT_IGNORE_RULES`, each with its rationale);
+2. ``.gitignore`` then ``.veluneignore`` in each directory, root first. A deeper file
+   overrides a shallower one, and within one file a later line overrides an earlier one
+   (so ``.veluneignore`` overrides ``.gitignore`` in the same directory).
+
+The semantics follow Git's, which matter in ways a flat pattern list gets wrong:
+
+* a path is excluded if any parent directory is excluded, and **no negation can bring it
+  back** (``!dir/file`` does not re-include a file inside an excluded ``dir/``);
+* a pattern is matched against a path's own name, relative to the directory holding the
+  ignore file: no slash means "at any depth below", a slash anywhere but the end anchors
+  it, a trailing slash restricts it to directories, ``**`` spans directories;
+* excluded directories are never entered, and their ignore files never read;
+* case follows Git's ``core.ignorecase`` for the workspace's repository, or the case
+  behaviour of the filesystem when there is no repository config.
+
+Nothing here widens what a tool can reach. Ignore files are only read inside the workspace
+and never through a symlink; a path outside the workspace, and a link that leads outside
+it, are always reported as ignored.
+
+A pattern that cannot be applied (malformed, over-long) or an ignore file that cannot be
+read is never dropped silently: it is recorded in :attr:`VeluneIgnore.diagnostics`, and the
+file tools append that to their results (see :func:`ignore_warning`) so that the agent
+knows files those rules were meant to hide may appear.
 
 Usage::
 
-    from velune.tools.filesystem.ignore import load_ignore
-
-    spec = load_ignore(workspace)          # loads .veluneignore + defaults
-    filtered = spec.filter(all_paths)      # drop ignored paths
-    if spec.is_ignored(some_path):
+    spec = load_ignore(workspace)
+    if spec.is_ignored(some_path):       # a file or directory, absolute or workspace-relative
         ...
 
-The default excludes cover VCS dirs, build artifacts, secrets, media blobs,
-and OS/IDE noise — matching typical .gitignore convention.  A workspace-level
-`.veluneignore` file can extend or override these with any gitignore patterns.
+An instance caches parsed ignore files and per-directory results, so create one per
+tool call (cheap) rather than keeping one across calls, or edits to an ignore file would
+go unnoticed.
 """
 
 from __future__ import annotations
 
+import functools
+import itertools
+import logging
+import os
+import re
+import stat
+import string
+import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-import pathspec
+logger = logging.getLogger("velune.tools.filesystem.ignore")
 
-# Patterns always applied, even without a .veluneignore file.
-_DEFAULT_PATTERNS: list[str] = [
-    # VCS
-    ".git/",
-    ".hg/",
-    ".svn/",
-    ".fossil/",
-    # Python caches & build
-    "__pycache__/",
-    "*.pyc",
-    "*.pyo",
-    "*.pyd",
-    "*.egg-info/",
-    "*.egg",
-    "dist/",
-    "build/",
-    ".tox/",
-    ".nox/",
-    ".venv/",
-    "venv/",
-    "env/",
-    ".env/",
-    # Ruff / mypy / pytest caches
-    ".ruff_cache/",
-    ".mypy_cache/",
-    ".pytest_cache/",
-    ".dmypy.json",
-    # Node
-    "node_modules/",
-    ".npm/",
-    ".yarn/",
-    ".pnp.cjs",
-    ".pnp.js",
-    # JS build outputs
-    ".next/",
-    ".nuxt/",
-    ".output/",
-    "out/",
-    ".turbo/",
-    # Coverage
-    "coverage/",
-    ".coverage",
-    "htmlcov/",
-    "*.lcov",
-    # Secrets / credentials — NEVER expose these to the model
-    ".env",
-    ".env.*",
-    "*.key",
-    "*.pem",
-    "*.cert",
-    "*.crt",
-    "*.pfx",
-    "*.p12",
-    "secrets.json",
-    "credentials.json",
-    ".secrets/",
-    # IDE / OS noise
-    ".DS_Store",
-    "Thumbs.db",
-    ".idea/",
-    ".vscode/",
-    "*.swp",
-    "*.swo",
-    "*~",
-    # Large media (not useful as LLM context)
-    "*.mp4",
-    "*.mov",
-    "*.avi",
-    "*.mkv",
-    "*.webm",
-    "*.jpg",
-    "*.jpeg",
-    "*.png",
-    "*.gif",
-    "*.bmp",
-    "*.ico",
-    "*.webp",
-    "*.tiff",
-    "*.svg",
-    # Archives
-    "*.zip",
-    "*.tar",
-    "*.tar.gz",
-    "*.tgz",
-    "*.tar.bz2",
-    "*.tbz2",
-    "*.tar.xz",
-    "*.gz",
-    "*.bz2",
-    "*.7z",
-    "*.rar",
-    "*.xz",
-    # Compiled / binary
-    "*.so",
-    "*.dylib",
-    "*.dll",
-    "*.exe",
-    "*.wasm",
-    "*.bin",
-    "*.class",
-    # Databases
-    "*.db",
-    "*.sqlite",
-    "*.sqlite3",
-    "*.db-shm",
-    "*.db-wal",
-    # Velune internals
-    ".velune/temp/",
-]
+#: Ignore files read in every directory, in increasing precedence.
+IGNORE_FILENAMES: tuple[str, ...] = (".gitignore", ".veluneignore")
+#: An ignore file larger than this is not read (and the fact is reported).
+MAX_IGNORE_FILE_BYTES = 1024 * 1024
+#: A pattern longer than this is not applied (and the fact is reported).
+MAX_PATTERN_CHARS = 4096
+#: Diagnostics listed in a tool result; the rest are only counted.
+MAX_DIAGNOSTICS_SHOWN = 20
+
+
+# ── built-in defaults ────────────────────────────────────────────────────────
+#
+# Policy. A pattern is a default only if it hides something that is (a) VCS or secret
+# material that must never reach a model, (b) a dependency tree, build output or cache that
+# a tool generated and a person does not edit, (c) opaque binary data that cannot be read as
+# text, (d) editor/OS litter, or (e) Velune's own state. Being "not source" or "awkward to
+# search" is NOT a reason: repositories control such files themselves with ``.gitignore`` /
+# ``.veluneignore`` (so ``*.parquet``, ``*.min.js`` and ``*.min.css`` are not defaults).
+# Any default can be undone by a ``!pattern`` in a workspace ignore file.
+
+_VCS = "Version-control metadata: repository internals (objects, config, hooks) - never useful or safe to expose"
+_PYBUILD = "Python bytecode and packaging output regenerated from source"
+_ENV = "Virtual environment / installed dependencies: third-party code, enormous, not the project's own"
+_CACHE = "Tool cache regenerated on demand"
+_NODE = "Node dependency tree or package-manager state"
+_JSBUILD = "JavaScript framework build output regenerated from source"
+_COVERAGE = "Test-coverage output regenerated by the test run"
+_SECRET = "Secret or credential material - must never be exposed to the model"
+_NOISE = "Editor / operating-system litter"
+_MEDIA = "Image or video: binary media (or vector art) with no text to read"
+_ARCHIVE = "Compressed archive: opaque binary container"
+_BINARY = "Compiled or native binary: not readable as text"
+_DB = "Database file or its journal: opaque binary state"
+_VELUNE = "Velune's own state and indexes (including plans and caches)"
+_VENDOR = "Vendored third-party code copied into the repository: not first-party, can be huge"
+
+DEFAULT_IGNORE_RULES: tuple[tuple[str, str], ...] = (
+    (".git/", _VCS),
+    (".hg/", _VCS),
+    (".svn/", _VCS),
+    (".fossil/", _VCS),
+    ("__pycache__/", _PYBUILD),
+    ("*.pyc", _PYBUILD),
+    ("*.pyo", _PYBUILD),
+    ("*.pyd", _PYBUILD),
+    ("*.egg-info/", _PYBUILD),
+    ("*.egg", _PYBUILD),
+    ("dist/", "Distribution output (wheels, bundles) regenerated by the build"),
+    ("build/", "Build output regenerated by the build"),
+    (".tox/", _ENV),
+    (".nox/", _ENV),
+    (".venv/", _ENV),
+    ("venv/", _ENV),
+    ("env/", _ENV),
+    (".env/", _ENV),
+    (".ruff_cache/", _CACHE),
+    (".mypy_cache/", _CACHE),
+    (".pytest_cache/", _CACHE),
+    (".dmypy.json", _CACHE),
+    ("node_modules/", _NODE),
+    (".npm/", _NODE),
+    (".yarn/", _NODE),
+    (".pnp.cjs", _NODE),
+    (".pnp.js", _NODE),
+    (".next/", _JSBUILD),
+    (".nuxt/", _JSBUILD),
+    (".output/", _JSBUILD),
+    ("out/", _JSBUILD),
+    (".turbo/", _JSBUILD),
+    ("coverage/", _COVERAGE),
+    (".coverage", _COVERAGE),
+    ("htmlcov/", _COVERAGE),
+    ("*.lcov", _COVERAGE),
+    (".env", _SECRET),
+    (".env.*", _SECRET),
+    ("*.key", _SECRET),
+    ("*.pem", _SECRET),
+    ("*.cert", _SECRET),
+    ("*.crt", _SECRET),
+    ("*.pfx", _SECRET),
+    ("*.p12", _SECRET),
+    ("secrets.json", _SECRET),
+    ("credentials.json", _SECRET),
+    (".secrets/", _SECRET),
+    (".DS_Store", _NOISE),
+    ("Thumbs.db", _NOISE),
+    (".idea/", _NOISE),
+    (".vscode/", _NOISE),
+    ("*.swp", _NOISE),
+    ("*.swo", _NOISE),
+    ("*~", _NOISE),
+    ("*.mp4", _MEDIA),
+    ("*.mov", _MEDIA),
+    ("*.avi", _MEDIA),
+    ("*.mkv", _MEDIA),
+    ("*.webm", _MEDIA),
+    ("*.jpg", _MEDIA),
+    ("*.jpeg", _MEDIA),
+    ("*.png", _MEDIA),
+    ("*.gif", _MEDIA),
+    ("*.bmp", _MEDIA),
+    ("*.ico", _MEDIA),
+    ("*.webp", _MEDIA),
+    ("*.tiff", _MEDIA),
+    ("*.zip", _ARCHIVE),
+    ("*.tar", _ARCHIVE),
+    ("*.tar.gz", _ARCHIVE),
+    ("*.tgz", _ARCHIVE),
+    ("*.tar.bz2", _ARCHIVE),
+    ("*.tbz2", _ARCHIVE),
+    ("*.tar.xz", _ARCHIVE),
+    ("*.gz", _ARCHIVE),
+    ("*.bz2", _ARCHIVE),
+    ("*.7z", _ARCHIVE),
+    ("*.rar", _ARCHIVE),
+    ("*.xz", _ARCHIVE),
+    ("*.so", _BINARY),
+    ("*.dylib", _BINARY),
+    ("*.dll", _BINARY),
+    ("*.exe", _BINARY),
+    ("*.wasm", _BINARY),
+    ("*.bin", _BINARY),
+    ("*.class", _BINARY),
+    ("*.db", _DB),
+    ("*.sqlite", _DB),
+    ("*.sqlite3", _DB),
+    ("*.db-shm", _DB),
+    ("*.db-wal", _DB),
+    (".velune/", _VELUNE),
+    ("vendor/", _VENDOR),
+    ("vendored/", _VENDOR),
+    ("third_party/", _VENDOR),
+    ("thirdparty/", _VENDOR),
+)
+
+#: Just the patterns, in order.
+_DEFAULT_PATTERNS: list[str] = [pattern for pattern, _ in DEFAULT_IGNORE_RULES]
+
+
+# ── pattern compilation ──────────────────────────────────────────────────────
+
+_POSIX_CLASSES = {
+    "alpha": "a-zA-Z",
+    "digit": "0-9",
+    "alnum": "a-zA-Z0-9",
+    "upper": "A-Z",
+    "lower": "a-z",
+    "space": " \\t\\n\\r\\f\\v",
+    "blank": " \\t",
+    "punct": re.escape(string.punctuation),
+    "xdigit": "0-9A-Fa-f",
+    "cntrl": "\\x00-\\x1f\\x7f",
+    "print": " -~",
+    "graph": "!-~",
+}
+
+
+class _PatternError(ValueError):
+    """A pattern Git itself cannot use (it then matches nothing); the message says why."""
+
+
+def _escaped(text: str, index: int) -> bool:
+    """True when the character at *index* is preceded by an odd number of backslashes."""
+    count = 0
+    while index > 0 and text[index - 1] == "\\":
+        count += 1
+        index -= 1
+    return count % 2 == 1
+
+
+def _translate_class(seg: str, start: int) -> tuple[str, int]:
+    """Translate the ``[...]`` bracket expression at ``seg[start]``; returns (regex, next)."""
+    n = len(seg)
+    j = start + 1
+    negate = False
+    if j < n and seg[j] in "!^":
+        negate = True
+        j += 1
+    items: list[str] = []
+    first = True
+    while j < n:
+        c = seg[j]
+        if c == "]" and not first:
+            body = "".join(items)
+            return f"(?!/)[{'^' if negate else ''}{body}]", j + 1
+        first = False
+        if c == "[" and seg.startswith("[:", j):
+            end = seg.find(":]", j + 2)
+            if end != -1:
+                name = seg[j + 2 : end]
+                if name not in _POSIX_CLASSES:
+                    raise _PatternError(f"unknown character class [:{name}:]")
+                items.append(_POSIX_CLASSES[name])
+                j = end + 2
+                continue
+        if c == "\\":
+            if j + 1 >= n:
+                raise _PatternError("a backslash ends the pattern inside a bracket expression")
+            j += 1
+            c = seg[j]
+        if j + 2 < n and seg[j + 1] == "-" and seg[j + 2] != "]":
+            hi = seg[j + 2]
+            step = 3
+            if hi == "\\":
+                if j + 3 >= n:
+                    raise _PatternError("a backslash ends the pattern inside a bracket range")
+                hi = seg[j + 3]
+                step = 4
+            if ord(hi) < ord(c):
+                raise _PatternError(f"reversed range {c}-{hi} in a bracket expression")
+            items.append(f"{re.escape(c)}-{re.escape(hi)}")
+            j += step
+        else:
+            items.append(re.escape(c))
+            j += 1
+    raise _PatternError("unterminated '[' bracket expression")
+
+
+_group_ids = itertools.count()
+
+
+def _translate_segment(seg: str) -> str:
+    """Regex for one path segment (no ``/``).
+
+    ``*`` groups split the segment into fixed-width pieces. With two or fewer ``*`` a plain
+    regex is fine. With more, naive backtracking is exponential on a hostile pattern such
+    as ``a*a*a*a*...b`` -- and a ``re`` match cannot be interrupted -- so each middle piece
+    is instead matched at its leftmost position and committed to (an atomic lookahead),
+    the classic linear wildcard algorithm.
+    """
+    pieces: list[list[str]] = [[]]
+    i = 0
+    n = len(seg)
+    while i < n:
+        c = seg[i]
+        if c == "\\":
+            if i + 1 >= n:
+                raise _PatternError("the pattern ends with a backslash")
+            pieces[-1].append(re.escape(seg[i + 1]))
+            i += 2
+        elif c == "*":
+            while i < n and seg[i] == "*":
+                i += 1
+            pieces.append([])
+        elif c == "?":
+            pieces[-1].append("[^/]")
+            i += 1
+        elif c == "[":
+            cls, i = _translate_class(seg, i)
+            pieces[-1].append(cls)
+        else:
+            pieces[-1].append(re.escape(c))
+            i += 1
+
+    joined = ["".join(piece) for piece in pieces]
+    if len(joined) <= 3:  # at most two stars
+        return "[^/]*".join(joined)
+    out = [joined[0]]
+    for middle in joined[1:-1]:
+        name = f"g{next(_group_ids)}"
+        out.append(f"(?=(?P<{name}>[^/]*?{middle}))(?P={name})")
+    out.append("[^/]*" + joined[-1])
+    return "".join(out)
+
+
+_SPECIAL = "*?[\\"
+_ANY_SEGMENT = "[^/]+"
+
+
+@dataclass(frozen=True)
+class _Rule:
+    regex: str
+    negate: bool
+    dir_only: bool
+    #: How the rule is answered: ``name`` (a plain name at any depth), ``path`` (a plain
+    #: anchored path), ``suffix`` (``*`` then plain text), ``multi`` (two or more ``**``,
+    #: matched segment by segment with no backtracking blow-up), else ``regex``.
+    kind: str = "regex"
+    key: str = ""
+    #: For ``multi``: one regex per path segment, ``None`` for "any number of segments".
+    segs: tuple[str | None, ...] = ()
+
+
+def _compile_line(line: str) -> _Rule | None:
+    """One ignore-file line as a rule; ``None`` for a blank line or comment.
+
+    Raises :class:`_PatternError` for a pattern Git cannot use or that is over-long.
+    """
+    if not line or line.startswith("#"):
+        return None
+    end = len(line)
+    while end > 0 and line[end - 1] == " " and not _escaped(line, end - 1):
+        end -= 1  # trailing spaces are dropped unless escaped
+    line = line[:end]
+    if len(line) > MAX_PATTERN_CHARS:
+        raise _PatternError(f"pattern is longer than {MAX_PATTERN_CHARS} characters")
+    negate = line.startswith("!")
+    if negate:
+        line = line[1:]
+    dir_only = line.endswith("/")
+    if dir_only:
+        line = line[:-1]
+    anchored = "/" in line
+    if line.startswith("/"):
+        line = line[1:]
+    if not line:
+        return None
+
+    segments = line.split("/")
+    translated = [None if seg == "**" else _translate_segment(seg) for seg in segments]
+
+    if translated.count(None) >= 2:
+        items: list[str | None] = [] if anchored else [None]
+        for k, seg in enumerate(translated):
+            if seg is None and k == len(translated) - 1:
+                items.extend([_ANY_SEGMENT, None])  # a trailing "/**" needs something inside
+            elif seg is None:
+                if not items or items[-1] is not None:
+                    items.append(None)
+            else:
+                items.append(seg)
+        return _Rule("", negate, dir_only, "multi", "", tuple(items))
+
+    body: list[str] = []
+    for k, seg in enumerate(translated):
+        last = k == len(translated) - 1
+        if seg is None:
+            body.append(".+" if last else "(?:[^/]+/)*")
+        else:
+            body.append(seg if last else seg + "/")
+    regex = ("^" if anchored else "^(?:.*/)?") + "".join(body) + "$"
+
+    kind, key = "regex", ""
+    if not any(c in line for c in _SPECIAL):
+        kind, key = ("path", line) if anchored else ("name", line)
+    elif not anchored and line.startswith("*") and not any(c in line[1:] for c in _SPECIAL):
+        kind, key = "suffix", line[1:]
+    return _Rule(regex, negate, dir_only, kind, key)
+
+
+def _match_segments(items: Sequence[re.Pattern[str] | None], parts: Sequence[str]) -> bool:
+    """Match path segments against *items* (a compiled segment, or ``None`` = any run of them).
+
+    The classic wildcard algorithm with whole segments as the "characters": it remembers only
+    the last ``None`` and retries from there, so the work is at most items x segments however
+    many ``**`` there are.
+    """
+    n, m = len(items), len(parts)
+    i = j = 0
+    star = -1
+    mark = 0
+    while j < m:
+        item = items[i] if i < n else False
+        if item is None:
+            star, mark = i, j
+            i += 1
+        elif item is not False and item.fullmatch(parts[j]):  # type: ignore[union-attr]
+            i += 1
+            j += 1
+        elif star >= 0:
+            mark += 1
+            j = mark
+            i = star + 1
+        else:
+            return False
+    while i < n and items[i] is None:
+        i += 1
+    return i == n
+
+
+@dataclass(frozen=True)
+class _View:
+    """The rules that apply to one kind of path (directories, or files), indexed for lookup.
+
+    Values are indices into the full rule list, so the *largest* index among all the matching
+    rules is the last matching rule -- Git's "last match wins" -- whichever index it came from.
+    """
+
+    names: dict[str, int]
+    paths: dict[str, int]
+    suffixes: dict[str, int]
+    longest_suffix: int
+    regex: re.Pattern[str] | None
+    multis: tuple[tuple[int, tuple[re.Pattern[str] | None, ...]], ...]  # newest first
+    fold: bool
+
+    def last_match(self, rel: str) -> int:
+        """Index of the last rule matching *rel*, or -1."""
+        name = rel.rpartition("/")[2]
+        if self.fold:
+            name, key = name.lower(), rel.lower()
+        else:
+            key = rel
+        best = self.names.get(name, -1)
+        found = self.paths.get(key, -1)
+        if found > best:
+            best = found
+        if self.suffixes:
+            for start in range(max(0, len(name) - self.longest_suffix), len(name) + 1):
+                found = self.suffixes.get(name[start:], -1)
+                if found > best:
+                    best = found
+        if self.regex is not None:
+            hit = self.regex.match(rel)
+            if hit is not None:
+                found = int(hit.lastgroup[1:])  # type: ignore[index]
+                if found > best:
+                    best = found
+        if self.multis:
+            parts = rel.split("/")
+            for index, items in self.multis:
+                if index <= best:
+                    break
+                if _match_segments(items, parts):
+                    best = index
+                    break
+        return best
+
+
+@dataclass(frozen=True)
+class _RuleSet:
+    """An ordered rule list compiled for "last matching rule wins" lookup."""
+
+    dirs: _View
+    files: _View
+    negates: tuple[bool, ...]
+
+
+def _make_view(rules: Sequence[tuple[int, _Rule]], flags: int) -> _View:
+    fold = bool(flags & re.IGNORECASE)
+    names: dict[str, int] = {}
+    paths: dict[str, int] = {}
+    suffixes: dict[str, int] = {}
+    globs: list[tuple[int, _Rule]] = []
+    multis: list[tuple[int, tuple[re.Pattern[str] | None, ...]]] = []
+    for index, rule in rules:  # in order, so a later rule overwrites an earlier one
+        key = rule.key.lower() if fold else rule.key
+        if rule.kind == "name":
+            names[key] = index
+        elif rule.kind == "path":
+            paths[key] = index
+        elif rule.kind == "suffix":
+            suffixes[key] = index
+        elif rule.kind == "multi":
+            multis.append(
+                (index, tuple(None if s is None else re.compile(s, flags) for s in rule.segs))
+            )
+        else:
+            globs.append((index, rule))
+    # reversed, so the first alternative to match is the last rule that matches
+    alternatives = [f"(?P<r{index}>{rule.regex})" for index, rule in reversed(globs)]
+    regex = re.compile("|".join(alternatives), flags) if alternatives else None
+    return _View(
+        names,
+        paths,
+        suffixes,
+        max(map(len, suffixes), default=0),
+        regex,
+        tuple(reversed(multis)),
+        fold,
+    )
+
+
+def _make_ruleset(rules: Sequence[_Rule], flags: int) -> _RuleSet | None:
+    if not rules:
+        return None
+    indexed = list(enumerate(rules))
+    return _RuleSet(
+        _make_view(indexed, flags),
+        _make_view([(i, r) for i, r in indexed if not r.dir_only], flags),
+        tuple(rule.negate for rule in rules),
+    )
+
+
+#: A rule that could not be applied: (1-based line number, the pattern, why).
+_Problem = tuple[int, str, str]
+
+
+def parse_ignore_text_checked(text: str) -> tuple[list[_Rule], list[_Problem]]:
+    """Rules for the lines of an ignore file, and a report of every line that is not applied."""
+    rules: list[_Rule] = []
+    problems: list[_Problem] = []
+    for number, raw in enumerate(text.lstrip("﻿").split("\n"), 1):
+        line = raw[:-1] if raw.endswith("\r") else raw
+        try:
+            rule = _compile_line(line)
+        except _PatternError as exc:
+            problems.append((number, line.strip()[:200], f"{exc}; it matches nothing"))
+            continue
+        except (re.error, RecursionError, OverflowError, MemoryError) as exc:
+            problems.append(
+                (
+                    number,
+                    line.strip()[:200],
+                    f"unsupported ({type(exc).__name__}); it is not applied",
+                )
+            )
+            continue
+        if rule is not None:
+            rules.append(rule)
+    return rules, problems
+
+
+def parse_ignore_text(text: str) -> list[_Rule]:
+    """Rules for the lines of an ignore file; unusable lines are skipped, never fatal."""
+    return parse_ignore_text_checked(text)[0]
+
+
+def _flags(case_sensitive: bool) -> int:
+    return re.DOTALL | (0 if case_sensitive else re.IGNORECASE)
+
+
+@functools.lru_cache(maxsize=8)
+def _compiled_defaults(patterns: tuple[str, ...], case_sensitive: bool) -> _RuleSet | None:
+    rules = [r for r in (_compile_line(p) for p in patterns) if r is not None]
+    return _make_ruleset(rules, _flags(case_sensitive))
+
+
+def _matches(rules: _RuleSet | None, rel: str, is_dir: bool) -> bool | None:
+    """The verdict of the last matching rule (True = ignored), or ``None`` if none match."""
+    if rules is None:
+        return None
+    index = (rules.dirs if is_dir else rules.files).last_match(rel)
+    return None if index < 0 else not rules.negates[index]
+
+
+# ── links and case ───────────────────────────────────────────────────────────
+
+_REPARSE_POINT = 0x400
+_MOUNT_POINT = 0xA0000003  # a Windows junction
+_SYMLINK_REPARSE = 0xA000000C
+
+
+def is_link(info: os.stat_result) -> bool:
+    """A symlink or a Windows junction (from an ``lstat``).
+
+    Other reparse points -- OneDrive placeholders and the like -- are ordinary files and
+    directories to us.
+    """
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    if getattr(info, "st_file_attributes", 0) & _REPARSE_POINT:
+        return getattr(info, "st_reparse_tag", 0) in (_MOUNT_POINT, _SYMLINK_REPARSE)
+    return False
+
+
+_TRUE = {"true", "yes", "on", "1"}
+_FALSE = {"false", "no", "off", "0"}
+
+
+def _git_ignorecase(root: Path) -> bool | None:
+    """``core.ignorecase`` from the workspace repository's own config, if it sets one."""
+    config = root / ".git" / "config"
+    try:
+        if config.stat().st_size > MAX_IGNORE_FILE_BYTES:
+            return None
+        text = config.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    in_core = False
+    value: bool | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            in_core = line.lower().replace(" ", "") == "[core]"
+        elif in_core and "=" in line:
+            key, _, setting = line.partition("=")
+            if key.strip().lower() == "ignorecase":
+                word = setting.split("#")[0].split(";")[0].strip().strip('"').lower()
+                if word in _TRUE:
+                    value = True
+                elif word in _FALSE:
+                    value = False
+    return value
+
+
+def _filesystem_is_case_sensitive(root: Path) -> bool:
+    """Probe whether *root* is reachable under a different spelling of its own name."""
+    default = sys.platform not in ("win32", "darwin")
+    swapped = root.name.swapcase()
+    if swapped == root.name:
+        return default
+    try:
+        alias = root.parent / swapped
+        return not (alias.exists() and os.path.samefile(alias, root))
+    except OSError:
+        return default
+
+
+def detect_case_sensitive(root: Path) -> bool:
+    """Whether names in *root* are compared case-sensitively, as Git would.
+
+    Git's ``core.ignorecase`` from ``<root>/.git/config`` wins; without one, the case
+    behaviour of the filesystem itself decides.
+    """
+    configured = _git_ignorecase(root)
+    if configured is not None:
+        return not configured
+    return _filesystem_is_case_sensitive(root)
+
+
+# ── the matcher ──────────────────────────────────────────────────────────────
 
 
 class VeluneIgnore:
-    """Compiled ignore spec for one workspace root."""
+    """Hierarchical ignore matcher for one workspace root."""
 
-    def __init__(self, spec: pathspec.PathSpec, root: Path) -> None:
-        self._spec = spec
+    def __init__(
+        self,
+        root: Path,
+        defaults: Sequence[str] | None = None,
+        *,
+        use_ignore_files: bool = True,
+        case_sensitive: bool | None = None,
+    ) -> None:
+        """*case_sensitive* ``None`` (the default) follows Git/the filesystem; see
+        :func:`detect_case_sensitive`."""
         self._root = root.resolve()
+        self._root_folded = os.path.normcase(str(self._root))
+        self._root_prefix = self._root_folded.rstrip(os.sep) + os.sep
+        if case_sensitive is None:
+            case_sensitive = detect_case_sensitive(self._root)
+        self.case_sensitive = case_sensitive
+        self._flags = _flags(case_sensitive)
+        patterns = tuple(_DEFAULT_PATTERNS if defaults is None else defaults)
+        self._defaults = _compiled_defaults(patterns, case_sensitive)
+        self._use_files = use_ignore_files
+        # directory ("" = root) -> rule groups of it and its ancestors, deepest first, as
+        # (length of the "dir/" prefix to strip from a path, rules)
+        self._chains: dict[str, tuple[tuple[int, _RuleSet], ...]] = {}
+        self._dir_state: dict[str, bool] = {}  # directory -> excluded (itself or via a parent)
+        #: Ignore files that could not be read or used, as (path, reason).
+        self.skipped: list[tuple[str, str]] = []
+        self._problems: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def is_ignored(self, path: Path) -> bool:
-        """Return True when *path* should be excluded from file operations."""
-        try:
-            rel = path.resolve().relative_to(self._root)
-        except ValueError:
-            # Path is outside the workspace — treat as non-ignored so callers
-            # can decide what to do with out-of-tree paths.
+    def is_ignored(
+        self,
+        path: Path | str,
+        is_dir: bool | None = None,
+        *,
+        info: os.stat_result | None = None,
+    ) -> bool:
+        """True when *path* (a file or directory) must be hidden from file tools.
+
+        *is_dir* says whether it is a directory (needed for ``dir/`` patterns) and *info* is
+        its ``lstat`` if the caller already has one; both are looked up when omitted. A path
+        outside the workspace, and a link that leads outside it, are always ignored.
+        """
+        rel = self._relative(path)
+        if rel is None:
+            return True
+        if not rel:
             return False
-        return self._spec.match_file(rel.as_posix())
+        parent = rel.rpartition("/")[0]
+        if parent and self._parent_excluded(parent):
+            return True
+        full = os.path.join(self._root, rel)
+        if info is None:
+            try:
+                info = os.lstat(full)
+            except OSError:
+                info = None  # not on disk: judge by name alone
+        if info is not None:
+            if is_dir is None:
+                is_dir = stat.S_ISDIR(info.st_mode)  # a symlink to a directory is a file, as in Git
+            if is_link(info) and not self._link_inside(full):
+                return True
+        return self._decide(rel, bool(is_dir))
 
     def filter(self, paths: list[Path]) -> list[Path]:
         """Return the subset of *paths* that are NOT ignored."""
@@ -167,34 +743,171 @@ class VeluneIgnore:
     def root(self) -> Path:
         return self._root
 
+    @property
+    def diagnostics(self) -> list[dict[str, Any]]:
+        """Every ignore rule or file seen so far that was NOT applied, and why."""
+        return list(self._problems)
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    def _link_inside(self, full: str) -> bool:
+        try:
+            real = os.path.normcase(os.path.realpath(full))
+        except OSError:
+            return False
+        return real == self._root_folded or real.startswith(self._root_prefix)
+
+    def _relative(self, path: Path | str) -> str | None:
+        """Workspace-relative POSIX path ("" for the root), or None if outside."""
+        p = os.path.normpath(os.fspath(path))
+        if not os.path.isabs(p):
+            p = os.path.join(self._root, p)
+        folded = os.path.normcase(p)
+        if folded == self._root_folded:
+            return ""
+        if folded.startswith(self._root_prefix) and len(folded) == len(p):
+            rel = p[len(self._root_prefix) :]
+        else:  # a different spelling of the root (8.3 names, links): compare real paths
+            try:
+                rel = os.path.relpath(Path(p).resolve(), self._root)
+            except (ValueError, OSError):
+                return None
+            if rel == "." or rel.startswith(".."):
+                return "" if rel == "." else None
+        return rel.replace(os.sep, "/")
+
+    def _parent_excluded(self, parent: str) -> bool:
+        """Is directory *parent* excluded, itself or through one of its own parents?"""
+        known = self._dir_state.get(parent)
+        if known is not None:
+            return known
+        parts = parent.split("/")
+        excluded = False
+        for k in range(1, len(parts) + 1):
+            current = "/".join(parts[:k])
+            state = self._dir_state.get(current)
+            if state is None:
+                state = excluded or self._decide(current, True)
+                self._dir_state[current] = state
+            excluded = state
+            if excluded:
+                self._dir_state[parent] = True
+                return True
+        return excluded
+
+    def _decide(self, rel: str, is_dir: bool) -> bool:
+        """Verdict for *rel* by its own name, assuming no parent is excluded."""
+        for prefix_len, rules in self._chain(rel.rpartition("/")[0]):
+            verdict = _matches(rules, rel[prefix_len:], is_dir)
+            if verdict is not None:
+                return verdict
+        return bool(_matches(self._defaults, rel, is_dir))
+
+    def _chain(self, directory: str) -> tuple[tuple[int, _RuleSet], ...]:
+        cached = self._chains.get(directory)
+        if cached is not None:
+            return cached
+        parts = directory.split("/") if directory else []
+        chain: tuple[tuple[int, _RuleSet], ...] = ()
+        for k in range(len(parts) + 1):
+            current = "/".join(parts[:k])
+            known = self._chains.get(current)
+            if known is None:
+                rules = self._load_rules(current)
+                known = (((len(current) + 1) if current else 0, rules), *chain) if rules else chain
+                self._chains[current] = known
+            chain = known
+        return chain
+
+    def _load_rules(self, directory: str) -> _RuleSet | None:
+        if not self._use_files:
+            return None
+        rules: list[_Rule] = []
+        for name in IGNORE_FILENAMES:
+            text = self._read_ignore_file(directory, name)
+            if text:
+                parsed, problems = parse_ignore_text_checked(text)
+                rules.extend(parsed)
+                shown = f"{directory}/{name}" if directory else name
+                for number, pattern, why in problems:
+                    self._problems.append(
+                        {"file": shown, "line": number, "pattern": pattern, "problem": why}
+                    )
+                    logger.debug("%s line %d not applied: %s", shown, number, why)
+        try:
+            return _make_ruleset(rules, self._flags)
+        except (re.error, RecursionError, OverflowError, MemoryError) as exc:
+            where = f"{directory}/" if directory else ""
+            self._problems.append(
+                {
+                    "file": f"{where}{IGNORE_FILENAMES[0]} / {IGNORE_FILENAMES[1]}",
+                    "problem": f"the rules in this directory could not be compiled "
+                    f"({type(exc).__name__}) and are NOT applied",
+                }
+            )
+            return None
+
+    def _read_ignore_file(self, directory: str, name: str) -> str | None:
+        path = self._root / directory / name if directory else self._root / name
+        try:
+            info = os.lstat(path)
+        except OSError:
+            return None  # the usual case: no such file
+        if not stat.S_ISREG(info.st_mode):
+            self._skip(directory, name, path, "not a regular file (symlinks are not followed)")
+            return None
+        if info.st_size > MAX_IGNORE_FILE_BYTES:
+            self._skip(directory, name, path, f"larger than {MAX_IGNORE_FILE_BYTES} bytes")
+            return None
+        try:
+            real = Path(os.path.realpath(path))
+            real.relative_to(self._root)  # a parent junction must not lead outside
+            with open(path, "rb") as handle:
+                data = handle.read(MAX_IGNORE_FILE_BYTES + 1)
+        except (OSError, ValueError) as exc:
+            self._skip(directory, name, path, f"unreadable ({type(exc).__name__})")
+            return None
+        return data.decode("utf-8", errors="replace")
+
+    def _skip(self, directory: str, name: str, path: Path, reason: str) -> None:
+        self.skipped.append((str(path), reason))
+        shown = f"{directory}/{name}" if directory else name
+        self._problems.append({"file": shown, "problem": f"ignore file not applied: {reason}"})
+        logger.debug("ignore file %s skipped: %s", path, reason)
+
+
+def ignore_warning(ignore: VeluneIgnore) -> dict[str, Any] | None:
+    """The entry a file tool appends to its results when ignore rules could not be applied.
+
+    ``None`` when everything was applied. Otherwise a dict the model can read: files those
+    rules were meant to hide may be present in the results.
+    """
+    problems = ignore.diagnostics
+    if not problems:
+        return None
+    warning: dict[str, Any] = {
+        "ignore_warning": (
+            f"{len(problems)} ignore rule(s)/file(s) could NOT be applied, so files they were "
+            "meant to hide may appear in these results. Details below."
+        ),
+        "details": problems[:MAX_DIAGNOSTICS_SHOWN],
+    }
+    if len(problems) > MAX_DIAGNOSTICS_SHOWN:
+        warning["more"] = len(problems) - MAX_DIAGNOSTICS_SHOWN
+    return warning
+
 
 def load_ignore(workspace: Path) -> VeluneIgnore:
-    """Build a :class:`VeluneIgnore` for *workspace*.
+    """Build the matcher for *workspace*: defaults plus every ``.gitignore``/``.veluneignore``.
 
-    Reads ``.veluneignore`` from the workspace root (if present) and merges
-    its patterns on top of :data:`_DEFAULT_PATTERNS`.  Comments (lines
-    starting with ``#``) and blank lines are silently skipped.
-
-    Never raises — any file-read error is logged and the default spec is
-    returned unchanged.
+    Never raises: an unreadable or malformed ignore file is skipped and reported in
+    :attr:`VeluneIgnore.diagnostics`.
     """
-    patterns: list[str] = list(_DEFAULT_PATTERNS)
-
-    ignore_file = workspace / ".veluneignore"
-    if ignore_file.is_file():
-        try:
-            for line in ignore_file.read_text(encoding="utf-8").splitlines():
-                stripped = line.strip()
-                if stripped and not stripped.startswith("#"):
-                    patterns.append(stripped)
-        except OSError:
-            pass  # non-fatal: fall back to defaults
-
-    spec = pathspec.PathSpec.from_lines("gitignore", patterns)
-    return VeluneIgnore(spec, workspace)
+    return VeluneIgnore(workspace)
 
 
 def default_ignore(workspace: Path) -> VeluneIgnore:
-    """Return a VeluneIgnore built only from the default patterns (no file)."""
-    spec = pathspec.PathSpec.from_lines("gitignore", _DEFAULT_PATTERNS)
-    return VeluneIgnore(spec, workspace)
+    """A matcher built only from the default patterns (no ignore files are read)."""
+    return VeluneIgnore(workspace, use_ignore_files=False)

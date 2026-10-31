@@ -18,11 +18,14 @@ Both .gitignore (at workspace root) and .veluneignore are read.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from velune.repository.schemas import EXTENSION_LANGUAGE_MAP
+from velune.tools.filesystem.ignore import is_link
 
 logger = logging.getLogger("velune.repository.scanner")
 
@@ -167,13 +170,27 @@ class FilesystemScanner:
     _deadline: float | None = None
     _cancel: threading.Event | None = None
     _git_timeout: float = 15.0
+    _matcher: Any = None
 
-    def __init__(self, root_path: Path, *, git_timeout: float = 15.0) -> None:
+    def __init__(
+        self,
+        root_path: Path,
+        *,
+        git_timeout: float = 15.0,
+        ignore: Any = None,
+    ) -> None:
+        """*ignore* is a shared hierarchical matcher (``velune.tools.filesystem.ignore``).
+
+        With it the scanner defers every ignore decision to that matcher, so a file tool
+        and its discovery walk cannot disagree, and no ``git`` process is started. Without
+        it (indexing) the scanner builds its own rules as before.
+        """
         self.root_path = root_path.resolve()
         # ``git ls-files`` runs while the ignore spec is built. A hung git (a huge
         # or network-mounted tree) must not hang the caller with it.
         self._git_timeout = git_timeout
-        self._spec = self._build_spec()
+        self._matcher = ignore
+        self._spec = None if ignore is not None else self._build_spec()
 
     # ------------------------------------------------------------------
     # Public API (unchanged signature for backward compat)
@@ -181,6 +198,8 @@ class FilesystemScanner:
 
     def is_ignored(self, path: Path) -> bool:
         """Return True when *path* should be excluded from indexing."""
+        if self._matcher is not None:
+            return self._ignored_by_matcher(path)
         try:
             rel = path.resolve().relative_to(self.root_path)
         except ValueError:
@@ -193,6 +212,22 @@ class FilesystemScanner:
             return self._spec.match_file(rel_posix + "/") or self._spec.match_file(rel_posix)
 
         return self._spec.match_file(rel_posix)
+
+    def _ignored_by_matcher(self, path: Path) -> bool:
+        """Shared-matcher decision, with one rule for links.
+
+        A symlink or junction to a *directory* is never followed (find_files does the same):
+        a directory is reached by one path only, a link cannot loop, and nothing leads out of
+        the root. A link to a file is listed unless it points outside the workspace, which
+        the matcher itself refuses.
+        """
+        try:
+            info = os.lstat(path)
+        except OSError:
+            return True
+        if is_link(info) and os.path.isdir(path):
+            return True
+        return bool(self._matcher.is_ignored(path, info=info))  # type: ignore[union-attr]
 
     def scan(
         self,
