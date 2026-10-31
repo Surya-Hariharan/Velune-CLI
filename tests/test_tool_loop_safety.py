@@ -13,6 +13,10 @@ from velune.permissions.gate import PermissionGate
 from velune.tools.base.registry import ToolRegistry
 from velune.tools.base.tool import BaseTool, ToolPermission
 
+# Synthetic placeholder shaped like a provider key; built at runtime so secret scanners
+# do not mistake the fixture for a leaked credential.
+_FAKE_KEY = "sk-" + "proj-" + "abcdefghij0123456789" * 2 + "ABCDEFGH"
+
 
 class _Provider:
     provider_id = "fake"
@@ -48,7 +52,7 @@ class _LeakyRead(BaseTool):
         return {ToolPermission.FILESYSTEM_READ}
 
     async def execute(self, **kw):
-        return "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+        return f"OPENAI_API_KEY={_FAKE_KEY}"
 
 
 class _AlwaysFails(BaseTool):
@@ -103,8 +107,8 @@ async def test_secrets_in_tool_output_are_redacted_before_the_model_sees_them():
         InferenceRequest(model_id="m", messages=[])
     )
     sent = str(provider.seen[-1])
-    assert "sk-proj-abcdefghijklmnopqrstuvwxyz" not in sent
-    assert "sk-proj-abcdefghijklmnopqrstuvwxyz" not in result.invocations[0].result
+    assert _FAKE_KEY[:34] not in sent
+    assert _FAKE_KEY[:34] not in result.invocations[0].result
 
 
 async def test_identical_failing_call_is_not_re_executed():

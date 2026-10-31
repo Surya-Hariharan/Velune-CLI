@@ -71,7 +71,7 @@ async def test_openai_validation_discovery_and_the_adapter_share_the_configured_
     assert seen, "nothing was requested"
     assert {r.url.host for r in seen} == {"gateway.example"}
     assert all(r.url.path.startswith("/v1/") for r in seen)
-    assert not any(str(r.url).startswith("https://api.openai.com") for r in seen)
+    assert not any(r.url.host == "api.openai.com" for r in seen)
 
 
 async def test_anthropic_validation_discovery_and_the_adapter_share_the_configured_gateway(
