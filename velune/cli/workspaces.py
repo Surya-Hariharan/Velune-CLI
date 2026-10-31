@@ -240,12 +240,19 @@ async def switch_workspace(container: Any, new_workspace: Path) -> list[str]:
             notes.append(f"warning: {key} did not shut down cleanly")
 
     #    The command sandbox may be a Docker container; the executor is about to be
-    #    replaced, so stop its sandbox or every switch leaks one.
+    #    replaced, so stop its sandbox or every switch leaks one. The executor's own
+    #    shutdown does it off the event loop (``docker stop`` can take 10s+), bounded,
+    #    and exactly once -- if the rebuild below fails the old executor stays
+    #    registered with the lifecycle, and exit must not stop its sandbox again.
     try:
         if container.has("runtime.execution_executor"):
-            old_sandbox = getattr(container.get("runtime.execution_executor"), "sandbox", None)
-            if old_sandbox is not None and callable(getattr(old_sandbox, "stop", None)):
-                old_sandbox.stop()
+            old_executor = container.get("runtime.execution_executor")
+            if callable(getattr(old_executor, "shutdown", None)):
+                await old_executor.shutdown()
+            else:
+                old_sandbox = getattr(old_executor, "sandbox", None)
+                if old_sandbox is not None and callable(getattr(old_sandbox, "stop", None)):
+                    old_sandbox.stop()
     except Exception as exc:
         _log.warning("Stopping the previous command sandbox failed: %s", exc)
         notes.append("warning: previous command sandbox did not stop cleanly")

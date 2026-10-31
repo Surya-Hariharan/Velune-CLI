@@ -83,8 +83,12 @@ def network(monkeypatch):
 
 
 @pytest.fixture
-def runtime_a(tmp_path, isolated_home, network):
-    return build_runtime(_make_repo(tmp_path / "ws_a", SENTINEL_A))
+async def runtime_a(tmp_path, isolated_home, network):
+    runtime = build_runtime(_make_repo(tmp_path / "ws_a", SENTINEL_A))
+    yield runtime
+    # The fixture owns the runtime: release its pools, workers and sandbox even when the
+    # test failed. A test that already shut it down leaves nothing for this to do.
+    await runtime.container.get("runtime.lifecycle").shutdown()
 
 
 async def _council_context(runtime, prompt="where is the entry point?") -> str:
@@ -126,7 +130,10 @@ async def test_a_second_runtime_never_sees_the_first_workspaces_context(
     runtime_a, tmp_path, isolated_home, network
 ):
     runtime_b = build_runtime(_make_repo(tmp_path / "ws_b", SENTINEL_B))
-    context_b = await _council_context(runtime_b)
+    try:
+        context_b = await _council_context(runtime_b)
+    finally:
+        await runtime_b.container.get("runtime.lifecycle").shutdown()
     context_a = await _council_context(runtime_a)
 
     assert SENTINEL_B in context_b and SENTINEL_A not in context_b

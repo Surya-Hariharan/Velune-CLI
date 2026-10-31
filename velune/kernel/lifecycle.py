@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -29,6 +30,11 @@ class Subsystem(Protocol):
 
 class LifecycleCoordinator:
     """Orchestrates structured startup, health transitions, and graceful shutdown of subsystems."""
+
+    #: Upper bound on one component's ``shutdown()``/``stop()``. Longer than the
+    #: executor's own sandbox-stop cap (20s) so a legitimate Docker stop is never cut
+    #: short here, short enough that a wedged component costs bounded exit time.
+    COMPONENT_SHUTDOWN_TIMEOUT_S = 30.0
 
     def __init__(self) -> None:
         self._components: dict[str, Subsystem] = {}
@@ -135,15 +141,33 @@ class LifecycleCoordinator:
             )
 
     async def shutdown(self) -> None:
-        """Shut down all registered subsystems gracefully in reverse order."""
+        """Shut down all registered subsystems gracefully in reverse order.
+
+        Every component gets its turn even if an earlier one fails or this coroutine
+        is cancelled part-way: a cancellation is remembered, the remaining components
+        are still shut down, and it is re-raised once they have been.
+        """
+        cancelled: asyncio.CancelledError | None = None
+
         # Fire-and-forget tasks must stop before any component closes: several of
         # them write to the SQLite pool and embedding pipeline torn down below.
         # The REPL also does this, but run() can raise before reaching its
         # shutdown path, so this is the backstop that always executes.
         try:
+            # Commands already running on a worker thread are not stopped by task
+            # cancellation; trip their cancel events so the sandbox kills the tree.
+            from velune.execution.cancellation import cancel_all
+
+            cancel_all()
+        except Exception as e:
+            logger.error("Failed to cancel running commands during shutdown: %s", e)
+
+        try:
             from velune.core.task_registry import cancel_tracked
 
             await cancel_tracked(timeout=10.0)
+        except asyncio.CancelledError as e:
+            cancelled = e
         except Exception as e:
             logger.error("Failed to cancel tracked tasks during shutdown: %s", e)
 
@@ -151,6 +175,8 @@ class LifecycleCoordinator:
             try:
                 task_registry = self.container.get("runtime.task_registry")
                 await task_registry.cancel_all(timeout=10.0)
+            except asyncio.CancelledError as e:
+                cancelled = e
             except Exception as e:
                 logger.error("Failed to cancel background tasks during shutdown: %s", e)
 
@@ -160,14 +186,25 @@ class LifecycleCoordinator:
             self._states[name] = ComponentStatus.SHUTTING_DOWN
             try:
                 if hasattr(comp, "shutdown") and callable(comp.shutdown):
-                    await comp.shutdown()
+                    await asyncio.wait_for(comp.shutdown(), self.COMPONENT_SHUTDOWN_TIMEOUT_S)
                 elif hasattr(comp, "stop") and callable(comp.stop):
-                    if asyncio.iscoroutinefunction(comp.stop):
-                        await comp.stop()
+                    if inspect.iscoroutinefunction(comp.stop):
+                        await asyncio.wait_for(comp.stop(), self.COMPONENT_SHUTDOWN_TIMEOUT_S)
                     else:
                         comp.stop()
                 self._states[name] = ComponentStatus.SHUTDOWN
                 logger.info("Subsystem '%s' shut down successfully.", name)
+            except asyncio.TimeoutError:
+                self._states[name] = ComponentStatus.FAILED
+                logger.error(
+                    "Subsystem '%s' did not shut down within %.0fs; continuing.",
+                    name,
+                    self.COMPONENT_SHUTDOWN_TIMEOUT_S,
+                )
+            except asyncio.CancelledError as e:
+                cancelled = e
+                self._states[name] = ComponentStatus.FAILED
+                logger.warning("Shutdown of subsystem '%s' was cancelled.", name)
             except Exception as e:
                 self._states[name] = ComponentStatus.FAILED
                 logger.error("Error shutting down subsystem '%s': %s", name, e)
@@ -175,3 +212,5 @@ class LifecycleCoordinator:
         self._components.clear()
         self._states.clear()
         self._started = False
+        if cancelled is not None:
+            raise cancelled

@@ -90,7 +90,13 @@ def _kill_process_tree(pid: int) -> None:
         parent = psutil.Process(pid)
     except psutil.NoSuchProcess:
         return
-    children = parent.children(recursive=True)
+    try:
+        children = parent.children(recursive=True)
+    except psutil.Error as e:
+        # Enumeration can fail (access denied, a race with exiting children). The
+        # parent must still die, and the caller must still reach its cleanup.
+        logger.warning("Could not list children of sandbox process %s: %s", pid, e)
+        children = []
     for proc in (*children, parent):
         try:
             proc.kill()

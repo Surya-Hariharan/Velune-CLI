@@ -18,6 +18,9 @@ from velune.execution.validator import PostExecutionValidator
 
 logger = TracedLogger("velune.execution.executor")
 
+# Docker stop (10s grace) + rm; bounded so a wedged daemon cannot hang application exit.
+SANDBOX_STOP_TIMEOUT_S = 20.0
+
 
 def _build_sandbox(
     workspace_path: Path,
@@ -67,10 +70,45 @@ class ExecutionExecutor:
         bus: Any | None = None,
     ) -> None:
         self.workspace_path = Path(workspace_path).resolve()
+        self._shutdown_started = False
         self.sandbox = _build_sandbox(self.workspace_path, config, bus)
-        self.validator = PostExecutionValidator(self.workspace_path, self.sandbox)
-        self.rollback_manager = RollbackManager(self.workspace_path)
-        self.planner = ExecutionPlanner()
+        try:
+            self.validator = PostExecutionValidator(self.workspace_path, self.sandbox)
+            self.rollback_manager = RollbackManager(self.workspace_path)
+            self.planner = ExecutionPlanner()
+        except BaseException:
+            # The sandbox may already be a running container; nothing else holds a
+            # reference to it once this constructor raises, so stop it here.
+            self._stop_sandbox()
+            raise
+
+    def _stop_sandbox(self) -> None:
+        stop = getattr(self.sandbox, "stop", None)
+        if not callable(stop):
+            return
+        try:
+            stop()
+        except Exception as exc:
+            logger.warning("Stopping the command sandbox failed: %s", exc)
+
+    async def shutdown(self, timeout: float = SANDBOX_STOP_TIMEOUT_S) -> None:
+        """Stop the command sandbox this executor owns. Idempotent and bounded.
+
+        The lifecycle coordinator calls this at application exit; without it a
+        Docker-backed sandbox outlived the process. ``stop()`` is blocking
+        (``docker stop`` + ``rm``), so it runs on a worker thread and the wait is
+        capped: a hung daemon delays exit by at most *timeout*, not forever. If the
+        caller is cancelled mid-stop the worker thread still finishes the stop.
+        """
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+        if not callable(getattr(self.sandbox, "stop", None)):
+            return
+        try:
+            await asyncio.wait_for(asyncio.to_thread(self._stop_sandbox), timeout=timeout)
+        except asyncio.TimeoutError:  # builtin TimeoutError only from 3.11
+            logger.warning("Command sandbox did not stop within %.0fs; continuing exit", timeout)
 
     async def execute_plan(self, plan: TaskPlan, dry_run: bool = False) -> TaskResult:
         """Process a task plan DAG.
