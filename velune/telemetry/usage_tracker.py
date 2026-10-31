@@ -9,6 +9,8 @@ Schema v2 adds:
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -266,8 +268,25 @@ class SessionUsageTracker:
         self._lock = Lock()
         self._init_db()
 
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Open a connection for one operation and always close it.
+
+        ``with sqlite3.connect(...)`` only commits or rolls back — it never closes —
+        so each call used to leave a handle for the garbage collector. That raised
+        ``ResourceWarning: unclosed database`` and, on Windows, ``WinError 32`` when
+        the database file was removed straight afterwards. The connection is owned by
+        the call: committed on success, rolled back on error, closed either way.
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             # Main records table — v2 schema with provider_id, latency, success columns
             conn.execute(
                 """
@@ -316,7 +335,7 @@ class SessionUsageTracker:
         """Record a :class:`UsageEvent` from the analytics pipeline."""
         total = event.input_tokens + event.output_tokens
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """
                     INSERT INTO usage_records
@@ -369,7 +388,7 @@ class SessionUsageTracker:
         estimated_cost = _estimate_cost(provider_id, model, input_tokens, output_tokens)
 
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """
                     INSERT INTO usage_records
@@ -402,7 +421,7 @@ class SessionUsageTracker:
     # ------------------------------------------------------------------
 
     def get_session_total_tokens(self, session_id: str) -> int:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT SUM(total_tokens) FROM usage_records WHERE session_id = ?",
                 (session_id,),
@@ -410,7 +429,7 @@ class SessionUsageTracker:
             return row[0] if row and row[0] else 0
 
     def get_session_estimated_cost(self, session_id: str) -> float | None:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT SUM(estimated_cost) FROM usage_records WHERE session_id = ?",
                 (session_id,),
@@ -418,7 +437,7 @@ class SessionUsageTracker:
             return row[0] if row and row[0] else None
 
     def get_session_summary(self, session_id: str) -> UsageSummary | None:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT SUM(total_tokens), SUM(estimated_cost),
@@ -461,7 +480,7 @@ class SessionUsageTracker:
     def get_provider_usage(self, days: int = 30) -> list[ProviderUsage]:
         """Return per-provider usage aggregated over the last *days* days."""
         cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -512,7 +531,7 @@ class SessionUsageTracker:
     def get_model_usage(self, days: int = 30) -> list[ModelUsage]:
         """Return per-model usage aggregated over the last *days* days."""
         cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT
@@ -549,7 +568,7 @@ class SessionUsageTracker:
     def get_total_cost(self, days: int = 30) -> float:
         """Return total estimated cost over *days* days."""
         cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT SUM(estimated_cost) FROM usage_records WHERE timestamp > ?",
                 (cutoff,),
@@ -559,7 +578,7 @@ class SessionUsageTracker:
     def get_cache_stats(self, days: int = 30) -> dict:
         """Return aggregated cache token statistics over *days* days."""
         cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT
@@ -586,7 +605,7 @@ class SessionUsageTracker:
 
     def get_recent_sessions(self, days: int = 7) -> list[UsageSummary]:
         cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             session_ids = [
                 row[0]
                 for row in conn.execute(
@@ -598,7 +617,7 @@ class SessionUsageTracker:
 
     def get_stats_last_n_days(self, days: int = 7) -> dict:
         cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT COUNT(DISTINCT session_id), SUM(total_tokens),
@@ -629,7 +648,7 @@ class SessionUsageTracker:
     def cleanup_old_records(self, days: int = 90) -> int:
         cutoff = (_utcnow_naive() - timedelta(days=days)).isoformat()
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute("DELETE FROM usage_records WHERE timestamp < ?", (cutoff,))
                 count = cursor.rowcount
                 conn.commit()

@@ -301,17 +301,21 @@ class SQLiteManager:
         for attempt in range(5):
             try:
                 conn = sqlite3.connect(str(self.db_path), timeout=30.0)
-                conn.execute("PRAGMA busy_timeout=5000")
-                if query == "__BATCH__":
-                    # params is actually a list of (query, params) tuples
-                    for q, p in params:
-                        conn.execute(q, p)
-                elif params is None:
-                    conn.executescript(query)
-                else:
-                    conn.execute(query, params)
-                conn.commit()
-                conn.close()
+                try:
+                    conn.execute("PRAGMA busy_timeout=5000")
+                    if query == "__BATCH__":
+                        # params is actually a list of (query, params) tuples
+                        for q, p in params:
+                            conn.execute(q, p)
+                    elif params is None:
+                        conn.executescript(query)
+                    else:
+                        conn.execute(query, params)
+                    conn.commit()
+                finally:
+                    # A failed statement used to skip close(), leaking the handle
+                    # (and, on Windows, the file lock) on every error and retry.
+                    conn.close()
                 return
             except sqlite3.OperationalError as e:
                 last_error = e
