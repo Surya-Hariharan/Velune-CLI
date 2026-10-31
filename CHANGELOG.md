@@ -68,6 +68,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **`read_directory`, `find_files` and `grep_files` now agree on what is ignored.** They used three
+  different rule sets: `find_files` and `read_directory` honoured only the root `.veluneignore`, so
+  they listed files that `grep_files` hid, and nested `.gitignore` files only worked through a `git`
+  subprocess. All three now share one matcher that follows Git's rules: a `.gitignore` and a
+  `.veluneignore` in every directory apply to it and its descendants, deeper files override
+  shallower ones, `!` negation works, and nothing inside an excluded directory can be re-included.
+  It needs no `git`, re-reads edited ignore files on the next call, never enters excluded
+  directories, and agrees with `git check-ignore` on thousands of randomly generated trees.
+  - **Shared defaults** (each documented with its reason in `DEFAULT_IGNORE_RULES`): VCS data,
+    secrets, dependency trees, caches and build output, binary media/archives/databases, editor
+    litter, `.velune/`, and vendored code (`vendor/`, `third_party/`). `find_files` and
+    `read_directory` now hide the vendored directories and `.velune/` as `grep_files` always did.
+    Files that are merely awkward to search (`*.parquet`, `*.min.js`, `*.min.css`) and SVG
+    (`*.svg`, which is text and often source) are no longer hidden by default anywhere: a repository decides, with its own ignore files.
+  - **Case follows Git.** Matching uses the repository's `core.ignorecase` (or, with no repository,
+    the filesystem), so `Build/` hides `build/` on Windows exactly as Git does.
+  - **Nothing is dropped silently.** Patterns with many `**` or `*` are matched in bounded time, not
+    skipped. A pattern Git itself cannot use (such as an unterminated `[`) and an ignore file that
+    cannot be read are reported: `find_files`, `grep_files` and `read_directory` append an
+    `ignore_warning` entry naming the file, line and reason, so you and the model know files that
+    rule was meant to hide may appear.
+  - **One link policy.** A symlink or Windows junction to a directory is never followed by any of
+    the three tools, so a directory is reached by one path only, links cannot loop, and nothing
+    leads out of the project (`find_files` used to follow a junction that left the project, and
+    the two search tools disagreed about links inside it). A link to a file that points outside
+    the project is hidden. Ignore files are never read through a symlink or from outside the project.
 - **`/council` now sees your repository.** It read its services from a container the app never
   filled, so every council run started with "Repository context unavailable." and took git and
   config context from whatever directory Velune was launched in. The council, its tier
