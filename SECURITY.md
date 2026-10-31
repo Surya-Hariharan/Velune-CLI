@@ -278,8 +278,11 @@ to a GitHub issue themselves if they choose to. See
 
 ### Dependency security
 
-- `mcp>=1.28.1` is pinned in `pyproject.toml` specifically to floor out
-  CVE-2026-59950 in earlier `mcp` releases.
+- `mcp>=1.30.0` is pinned in `pyproject.toml` to floor out CVE-2026-59950 and the
+  later Dependabot-reported `mcp` advisories fixed in 1.30.0.
+- `[tool.uv] constraint-dependencies` floors transitive packages with advisories
+  (`msgpack>=1.2.3`, `certifi>=2026.10.18`, `virtualenv>=21.14.9`); `uv.lock` pins
+  patched `filelock`, `opentelemetry-*` and the rest.
 - The former `[llamacpp]` extra was **permanently removed**: `llama-cpp-python` pulls
   in `diskcache ≤ 5.6.3`, which has an unpatched unsafe pickle-deserialization RCE
   risk with no fixed version available. See [Optional extras](README.md#optional-extras)

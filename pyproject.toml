@@ -77,7 +77,7 @@ dependencies = [
     # @server.list_tools()/@server.call_tool() registration velune/mcp/server.py
     # depends on was removed in favor of constructor kwargs), so ceiling until
     # that migration is done deliberately.
-    "mcp>=1.28.1,<2.0.0",
+    "mcp>=1.30.0,<2.0.0",
 
     # Memory metadata store (stdlib-backed; vector store is the [rag] extra)
     "aiosqlite>=0.19.0",
@@ -140,7 +140,7 @@ parsing = [
 # OpenTelemetry exporters for external trace/metric backends. Velune's own
 # trace log works without these; install only to ship spans to an OTLP collector.
 telemetry = [
-    "opentelemetry-api>=1.22.0",
+    "opentelemetry-api>=1.45.1",
     "opentelemetry-sdk>=1.22.0",
     "opentelemetry-exporter-otlp>=1.22.0",
 ]
@@ -300,7 +300,8 @@ reportPossiblyUnboundVariable = false
 # msgpack <=1.2.0: GHSA-6v7p-g79w-8964 (out-of-bounds read / Unpacker reuse crash)
 # diskcache: removed from the dependency tree (see [llamacpp] removal above).
 #            diskcache has no patched version; the only safe fix is removal.
-constraint-dependencies = ["msgpack>=1.2.1"]
+# certifi <2026.10.18, virtualenv <21.14.9 (dev-only, via pre-commit): Dependabot alerts.
+constraint-dependencies = ["msgpack>=1.2.3", "certifi>=2026.10.18", "virtualenv>=21.14.9"]
 
 [tool.bandit]
 # Scan velune/ only; tests legitimately exercise unsafe patterns.
