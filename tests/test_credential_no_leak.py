@@ -11,9 +11,11 @@ configured/verified *state* only, never any character of the key itself.
 from __future__ import annotations
 
 import base64
+import io
 from unittest.mock import patch
 
 import pytest
+from rich.console import Console
 
 from velune.providers.keystore import CredentialManager, save_key
 
@@ -69,7 +71,15 @@ def test_provider_inspect_never_includes_key_characters(mock_config_dir, mock_ke
     from velune.cli.commands import providers as providers_cmd
 
     printed: list[str] = []
-    monkeypatch.setattr(providers_cmd.console, "print", lambda *a, **k: printed.append(str(a)))
+
+    def _capture(*renderables, **_kwargs):
+        # Render to text: str() of a Rich renderable is its repr, whose memory address
+        # can contain the secret's last characters by chance.
+        buf = io.StringIO()
+        Console(file=buf, width=200, color_system=None).print(*renderables)
+        printed.append(buf.getvalue())
+
+    monkeypatch.setattr(providers_cmd.console, "print", _capture)
 
     providers_cmd.inspect_provider(provider_id="anthropic", no_live=True)
 

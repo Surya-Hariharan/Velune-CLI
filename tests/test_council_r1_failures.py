@@ -438,11 +438,11 @@ def _cancel_when_in_flight(scripts, seats_in_flight, settings=None):
         while not all(provider.requests_for(s) for s in seats_in_flight):
             await asyncio.sleep(0.01)
         task.cancel()
-        with pytest.raises(CouncilCancelled) as info:
+        with pytest.raises(asyncio.CancelledError) as info:
             await task
         await asyncio.sleep(0.05)
         leftovers = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        return info.value.outcome, provider, leftovers
+        return CouncilCancelled.unwrap(info.value).outcome, provider, leftovers
 
     return run(scenario())
 

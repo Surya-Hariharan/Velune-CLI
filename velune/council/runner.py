@@ -56,6 +56,20 @@ class CouncilCancelled(asyncio.CancelledError):
         super().__init__("council run cancelled")
         self.outcome = outcome
 
+    @classmethod
+    def unwrap(cls, exc: BaseException) -> CouncilCancelled:
+        """Recover the ``CouncilCancelled`` from what ``await task`` raised.
+
+        Before Python 3.11 a cancelled ``Task`` hands its awaiter a plain ``CancelledError``,
+        keeping the original only as ``__context__``; 3.11+ preserves the subclass.
+        """
+        cause: BaseException | None = exc
+        while cause is not None:
+            if isinstance(cause, cls):
+                return cause
+            cause = cause.__context__
+        raise TypeError("no CouncilCancelled in the exception chain") from exc
+
 
 class StageContractViolation(Exception):
     """A stage returned output that breaks its own contract."""

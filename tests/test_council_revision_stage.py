@@ -530,10 +530,10 @@ def test_cancellation_mid_revision_keeps_the_earlier_stages_and_leaves_nothing_r
                 break
             await asyncio.sleep(0.01)
         task.cancel()
-        with pytest.raises(CouncilCancelled) as info:
+        with pytest.raises(asyncio.CancelledError) as info:
             await task
         leftovers = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        return info.value.outcome, leftovers
+        return CouncilCancelled.unwrap(info.value).outcome, leftovers
 
     outcome, leftovers = run_with_deadline(main(), 30)
     assert outcome.status is OutcomeStatus.CANCELLED and outcome.answer is None

@@ -509,11 +509,11 @@ def test_cancellation_mid_stage_keeps_completed_results_and_leaves_no_tasks():
         task = asyncio.ensure_future(make_runner(stages).run(request()))
         await gate.wait()
         task.cancel()
-        with pytest.raises(CouncilCancelled) as info:
+        with pytest.raises(asyncio.CancelledError) as info:
             await task
         await asyncio.sleep(0)
         leftovers = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        return info.value.outcome, leftovers
+        return CouncilCancelled.unwrap(info.value).outcome, leftovers
 
     outcome, leftovers = run(scenario())
     assert leftovers == []
@@ -536,7 +536,7 @@ def test_cancellation_inside_parallel_seat_calls_cancels_every_pending_call():
         while invoker.in_flight < 1:
             await asyncio.sleep(0.01)
         task.cancel()
-        with pytest.raises(CouncilCancelled):
+        with pytest.raises(asyncio.CancelledError):
             await task
         await asyncio.sleep(0)
         return invoker.in_flight, [

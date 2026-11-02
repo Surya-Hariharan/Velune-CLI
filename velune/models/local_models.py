@@ -396,9 +396,14 @@ async def _ollama_tags(base: str, timeout: float) -> tuple[set[str] | None, Fail
         return None, FailureKind.TIMEOUT
     except (httpx.HTTPError, ValueError):
         return None, FailureKind.ENDPOINT_UNREACHABLE
-    return {
-        m.get("name") or m.get("model") for m in data.get("models", []) if isinstance(m, dict)
-    }, None
+    names = {
+        name
+        for m in data.get("models", [])
+        if isinstance(m, dict)
+        for name in (m.get("name") or m.get("model"),)
+        if isinstance(name, str)
+    }
+    return names, None
 
 
 async def check_registration(record: LocalModelRecord, *, timeout: float = 3.0) -> CheckResult:

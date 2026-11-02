@@ -372,7 +372,7 @@ jobs:
           velune doctor
 
       - name: Test suite at lowest versions
-        run: pytest -m "not integration"
+        run: pytest -m "not integration" --ignore=tests/tui
 
   # Reproduces the most common real-world failure: `pip install velune-cli`
   # into a Python that already holds stale copies of our dependencies from

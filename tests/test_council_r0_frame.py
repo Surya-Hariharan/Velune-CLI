@@ -231,11 +231,11 @@ def test_cancellation_mid_frame_stops_cleanly_and_carries_a_cancelled_outcome():
         while invoker.in_flight < 1:
             await asyncio.sleep(0.01)
         task.cancel()
-        with pytest.raises(CouncilCancelled) as info:
+        with pytest.raises(asyncio.CancelledError) as info:
             await task
         await asyncio.sleep(0)
         leftovers = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        return info.value.outcome, invoker.in_flight, leftovers
+        return CouncilCancelled.unwrap(info.value).outcome, invoker.in_flight, leftovers
 
     outcome, in_flight, leftovers = run_with_deadline(scenario(), 15)
     assert outcome.status is OutcomeStatus.CANCELLED and outcome.answer is None
