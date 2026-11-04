@@ -68,3 +68,7 @@ class RetryLimitExceeded(EngineError):
 
 class InvalidArtifactError(EngineError, ValueError):
     """An artifact reference that does not belong in the run it was recorded against."""
+
+
+class DriverConfigError(EngineError, ValueError):
+    """The driver was built with agents it cannot run (missing, or not reasoning-only)."""

@@ -6,7 +6,24 @@ legacy council, and the ``orchestration.engine`` flag defaults to ``"off"``. The
 (``velune.cognition``) and the deliberative core (``velune.council``) are untouched.
 """
 
+from velune.orchestration.engine.artifacts import (
+    ArtifactReader,
+    ArtifactStore,
+    AssignmentPolicy,
+    ContextBuilder,
+    StaticAssignments,
+    StoredArtifact,
+)
+from velune.orchestration.engine.driver import (
+    DriverResult,
+    PlanReviewDriver,
+    RunHandle,
+    Verdict,
+    parse_verdict,
+    plan_review_specs,
+)
 from velune.orchestration.engine.errors import (
+    DriverConfigError,
     DuplicateAgentError,
     EngineError,
     IllegalTransitionError,
@@ -70,13 +87,20 @@ __all__ = [
     "AgentRegistry",
     "AgentRunner",
     "AgentSpec",
+    "ArtifactReader",
+    "ArtifactStore",
+    "AssignmentPolicy",
+    "ContextBuilder",
     "ContextItem",
+    "DriverConfigError",
+    "DriverResult",
     "DuplicateAgentError",
     "EngineError",
     "FailureKind",
     "IllegalTransitionError",
     "InvalidArtifactError",
     "OutcomeStatus",
+    "PlanReviewDriver",
     "PromptResolver",
     "ReadGrant",
     "ReasoningAgentRunner",
@@ -84,10 +108,14 @@ __all__ = [
     "ReasoningRequest",
     "ReasoningResult",
     "RetryLimitExceeded",
+    "RunHandle",
+    "StaticAssignments",
     "StaticPromptResolver",
+    "StoredArtifact",
     "TerminalStateError",
     "ToolPolicy",
     "UnknownAgentError",
+    "Verdict",
     "advance",
     "allowed_from",
     "can_transition",
@@ -95,5 +123,7 @@ __all__ = [
     "engine_enabled",
     "engine_mode",
     "fail",
+    "parse_verdict",
+    "plan_review_specs",
     "record_artifact",
 ]
