@@ -38,8 +38,9 @@ def _is_private_ip(address: str) -> tuple[bool, str]:
         ip = ipaddress.ip_address(address)
     except ValueError:
         # It's a hostname — resolve it via getaddrinfo (all returned addresses checked)
+        # NOTE: no socket.setdefaulttimeout(): it is process-global and does not
+        # bound getaddrinfo() anyway (see velune/mcp/security.py).
         try:
-            socket.setdefaulttimeout(3)
             resolved = socket.getaddrinfo(address, None, proto=socket.IPPROTO_TCP)
             for _family, _type, _proto, _canonname, sockaddr in resolved:
                 ip_str = sockaddr[0]

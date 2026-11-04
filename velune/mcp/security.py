@@ -91,8 +91,10 @@ def validate_mcp_url(url: str, allowed_hosts: Iterable[str] | None = None) -> No
 
     # Resolve hostnames and block if ANY resolved address is metadata/link-local,
     # defeating DNS-rebinding (evil.example.com -> 169.254.169.254).
+    # NOTE: no socket.setdefaulttimeout() here. It is process-global (it leaks into
+    # every socket created afterwards, e.g. PTY relays) and has no effect on
+    # getaddrinfo(), which is a blocking resolver call with no timeout parameter.
     try:
-        socket.setdefaulttimeout(3)
         for *_unused, sockaddr in socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP):
             resolved_ip = sockaddr[0]
             if resolved_ip in _METADATA_HOSTS:
