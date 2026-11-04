@@ -19,6 +19,7 @@ import re
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import pyte
@@ -69,6 +70,36 @@ def redact(text: str) -> str:
     return _SECRET_RE.sub("[REDACTED]", text)
 
 
+# ── failure diagnostics (bounded) ────────────────────────────────────────────
+_TAIL_CHUNKS = 200  # PTY chunks kept with their arrival time
+_TAIL_CHUNK_CHARS = 2000  # per-chunk cap
+_TAIL_CHARS = 8000  # cap on the tail printed in a failure report
+# Stricter than ``_SECRET_RE``: any prefix of a key shape is masked, because the
+# tail can end mid-token. NUL is allowed inside a token so a key split across two
+# chunks (joined with NUL markers) is still caught.
+_DIAG_SECRET_RE = re.compile(r"(?:sk-|gsk_|AIza|tui-test-passphrase)(?:[A-Za-z0-9_\-]|\x00)*")
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _diag_redact(text: str) -> str:
+    """Mask secret-shaped tokens, keeping any NUL chunk markers so splitting still works."""
+    return _DIAG_SECRET_RE.sub(lambda m: "[REDACTED]" + "\x00" * m.group().count("\x00"), text)
+
+
+def _escape(chunk: str) -> str:
+    """Render control characters visibly (``\\e`` for ESC) so one chunk is one line."""
+    return _CTRL_RE.sub(
+        lambda m: "\\e" if m.group() == "\x1b" else f"\\x{ord(m.group()):02x}", chunk
+    )
+
+
+def _clip(data: str) -> str:
+    """Keep the end of an oversized chunk, without the half-token the cut may leave."""
+    if len(data) <= _TAIL_CHUNK_CHARS:
+        return data
+    return re.sub(r"^[A-Za-z0-9_\-]{1,256}", "", data[-_TAIL_CHUNK_CHARS:])
+
+
 class TermSession:
     def __init__(
         self,
@@ -87,6 +118,12 @@ class TermSession:
         self._stream = pyte.Stream(self.screen)
         self._lock = threading.Lock()
         self.raw = ""  # every byte written by the program (for secret scans)
+        # Failure diagnostics only (never read by assertions). Bounded: the last
+        # _TAIL_CHUNKS chunks with their arrival times, plus two scalars.
+        self._t0 = time.monotonic()
+        self._tail: deque[tuple[float, str]] = deque(maxlen=_TAIL_CHUNKS)
+        self._chunk_count = 0
+        self._last_output: float | None = None
         self.eof = False
         env = {
             k: v
@@ -137,9 +174,13 @@ class TermSession:
                 break
             if isinstance(data, bytes):
                 data = data.decode("utf-8", "replace")
+            now = time.monotonic() - self._t0
             with self._lock:
                 self.raw += data
                 self._stream.feed(data)
+                self._tail.append((now, _clip(data)))
+                self._chunk_count += 1
+                self._last_output = now
         self.eof = True
 
     def send(self, text: str) -> None:
@@ -166,17 +207,52 @@ class TermSession:
 
     def wait_for(self, needle: str | re.Pattern[str], timeout: float = 20.0) -> str:
         pat = needle if isinstance(needle, re.Pattern) else re.compile(re.escape(needle))
-        end = time.time() + timeout
-        while time.time() < end:
+        start = time.monotonic()
+        end = start + timeout
+        while time.monotonic() < end:
             t = self.text()
             if pat.search(t):
                 return t
             if self.eof:
                 break
             time.sleep(0.05)
-        raise AssertionError(
-            f"timed out waiting for {pat.pattern!r}\n--- screen ---\n{self.text()}"
+        raise AssertionError(self._wait_failure_report(pat.pattern, time.monotonic() - start))
+
+    def _wait_failure_report(self, pattern: str, waited: float) -> str:
+        """Timing and recent PTY output for a failed ``wait_for`` (diagnostic only).
+
+        Everything is passed through ``_diag_redact`` and the PTY tail is bounded
+        (``_TAIL_CHUNKS`` chunks, ``_TAIL_CHARS`` characters). The same report is
+        also written under ``ARTIFACT_DIR`` so CI can upload it.
+        """
+        with self._lock:
+            tail = list(self._tail)
+            chunks, last = self._chunk_count, self._last_output
+        age = time.monotonic() - self._t0
+        quiet = "none" if last is None else f"{last:.1f}s (quiet for {age - last:.1f}s)"
+        # Redact across chunk boundaries (a key may arrive split over two chunks):
+        # join with NUL markers the secret pattern is allowed to span, then split.
+        joined = _diag_redact("\x00".join(_escape(chunk) for _ts, chunk in tail))
+        pieces = joined.split("\x00") if tail else []
+        tail_text = "".join(f"[{ts:8.2f}s] {c}\n" for (ts, _), c in zip(tail, pieces, strict=True))
+        if len(tail_text) > _TAIL_CHARS:  # keep whole lines only, never half a token
+            tail_text = tail_text[-_TAIL_CHARS:]
+            tail_text = tail_text[tail_text.find("\n") + 1 :]
+        report = (
+            f"timed out waiting for {pattern!r}\n"
+            f"waited {waited:.1f}s; session age {age:.1f}s; last PTY output at {quiet}; "
+            f"{chunks} chunks; eof={self.eof}\n"
+            f"--- screen ---\n{_diag_redact(self.text())}\n"
+            f"--- last PTY output (escaped, newest last, up to {_TAIL_CHUNKS} chunks) ---\n"
+            f"{tail_text}"
         )
+        try:
+            ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+            name = f"wait_for_failure_{os.getpid()}_{int(time.time() * 1000)}.txt"
+            (ARTIFACT_DIR / name).write_text(report, encoding="utf-8")
+        except OSError:
+            pass  # diagnostics must never mask the real failure
+        return report
 
     def wait_gone(self, needle: str, timeout: float = 20.0) -> None:
         end = time.time() + timeout

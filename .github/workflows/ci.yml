@@ -214,7 +214,19 @@ jobs:
           pip install -e ".[all,dev]"
 
       - name: Run test suite
-        run: pytest
+        env:
+          # Windows only (empty elsewhere, which falls back to the harness default):
+          # collect TUI failure reports where the next step can upload them.
+          VELUNE_TUI_ARTIFACTS: ${{ runner.os == 'Windows' && format('{0}/tui-artifacts', runner.temp) || '' }}
+        run: pytest ${{ runner.os == 'Windows' && '--durations=15' || '' }}
+
+      - name: Upload TUI artifacts
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-artifacts-py${{ matrix.python-version }}
+          path: ${{ runner.temp }}/tui-artifacts
+          if-no-files-found: ignore
 
   build:
     name: Build & Validate Artifacts
