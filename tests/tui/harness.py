@@ -100,6 +100,33 @@ def _clip(data: str) -> str:
     return re.sub(r"^[A-Za-z0-9_\-]{1,256}", "", data[-_TAIL_CHUNK_CHARS:])
 
 
+def _exc_summary(exc: BaseException) -> str:
+    """Type and a short, redacted message (never the traceback or any environment)."""
+    return f"{type(exc).__name__}: {_diag_redact(_escape(str(exc)))[:200]}"
+
+
+def _child_state(p: object) -> str:
+    """Best-effort, non-blocking child status. Anything unavailable is ``unknown``.
+
+    ``isalive`` is read first because ptyprocess updates its exit/signal status
+    inside it. ``exitstatus`` is ``None`` while the child runs. Nothing here waits.
+    """
+    parts = []
+    try:
+        parts.append(f"alive={bool(p.isalive())}")  # type: ignore[attr-defined]
+    except Exception as exc:
+        parts.append(f"alive=unknown({type(exc).__name__})")
+    for attr in ("exitstatus", "signalstatus"):
+        try:
+            parts.append(f"{attr}={getattr(p, attr)!r}")
+        except AttributeError:
+            if attr == "exitstatus":
+                parts.append("exitstatus=unknown(unsupported)")
+        except Exception as exc:
+            parts.append(f"{attr}=unknown({type(exc).__name__})")
+    return " ".join(parts)
+
+
 class TermSession:
     def __init__(
         self,
@@ -124,6 +151,8 @@ class TermSession:
         self._tail: deque[tuple[float, str]] = deque(maxlen=_TAIL_CHUNKS)
         self._chunk_count = 0
         self._last_output: float | None = None
+        # How/when the reader stopped, and the child's state at that moment.
+        self._reader_end: tuple[float, str, str, str] | None = None
         self.eof = False
         env = {
             k: v
@@ -165,23 +194,38 @@ class TermSession:
 
     # ── I/O ──────────────────────────────────────────────────────────────
     def _pump(self) -> None:
-        while True:
-            try:
-                data = self._p.read(65536)
-            except (EOFError, OSError):
-                break
-            if not data:
-                break
-            if isinstance(data, bytes):
-                data = data.decode("utf-8", "replace")
-            now = time.monotonic() - self._t0
-            with self._lock:
-                self.raw += data
-                self._stream.feed(data)
-                self._tail.append((now, _clip(data)))
-                self._chunk_count += 1
-                self._last_output = now
+        end, detail = "empty-read", ""
+        try:
+            while True:
+                try:
+                    data = self._p.read(65536)
+                except (EOFError, OSError) as exc:
+                    end, detail = "read-raised", _exc_summary(exc)
+                    break
+                if not data:
+                    break
+                if isinstance(data, bytes):
+                    data = data.decode("utf-8", "replace")
+                now = time.monotonic() - self._t0
+                with self._lock:
+                    self.raw += data
+                    self._stream.feed(data)
+                    self._tail.append((now, _clip(data)))
+                    self._chunk_count += 1
+                    self._last_output = now
+        except BaseException as exc:
+            # Unchanged behaviour: the thread still dies and ``eof`` stays False.
+            self._record_reader_end("exception", _exc_summary(exc))
+            raise
+        self._record_reader_end(end, detail)
         self.eof = True
+
+    def _record_reader_end(self, end: str, detail: str) -> None:
+        """Diagnostics only; must never raise (it runs on the reader thread)."""
+        try:
+            self._reader_end = (time.monotonic() - self._t0, end, detail, _child_state(self._p))
+        except Exception:
+            pass
 
     def send(self, text: str) -> None:
         self._p.write(text)
@@ -242,6 +286,7 @@ class TermSession:
             f"timed out waiting for {pattern!r}\n"
             f"waited {waited:.1f}s; session age {age:.1f}s; last PTY output at {quiet}; "
             f"{chunks} chunks; eof={self.eof}\n"
+            f"{self._reader_child_lines()}"
             f"--- screen ---\n{_diag_redact(self.text())}\n"
             f"--- last PTY output (escaped, newest last, up to {_TAIL_CHUNKS} chunks) ---\n"
             f"{tail_text}"
@@ -253,6 +298,26 @@ class TermSession:
         except OSError:
             pass  # diagnostics must never mask the real failure
         return report
+
+    def _reader_child_lines(self) -> str:
+        """Reader-thread and child-process state for the failure report."""
+        try:
+            end = self._reader_end
+            thread = "alive" if self._t.is_alive() else "stopped"
+            if end is None:
+                reader = f"reader: still running (thread {thread})"
+            else:
+                when, how, detail, child = end
+                reader = (
+                    f"reader: ended at {when:.1f}s via {how}"
+                    f"{' (' + detail + ')' if detail else ''}; thread {thread}"
+                )
+                child = f"child at reader end: {child}"
+            now_child = f"child now: {_child_state(self._p)}"
+            lines = [reader, child, now_child] if end is not None else [reader, now_child]
+            return "\n".join(lines) + "\n"
+        except Exception as exc:  # diagnostics must never mask the real failure
+            return f"reader/child state: unknown ({type(exc).__name__})\n"
 
     def wait_gone(self, needle: str, timeout: float = 20.0) -> None:
         end = time.time() + timeout

@@ -30,8 +30,29 @@ def _session(monkeypatch, tmp_path) -> TermSession:
     s._tail = deque(maxlen=harness._TAIL_CHUNKS)
     s._chunk_count = 0
     s._last_output = None
+    s._reader_end = None
+    s._p = _FakePty()
+    s._t = threading.Thread(target=lambda: None)  # never started: reads as "stopped"
     s.eof = False
     return s
+
+
+class _FakePty:
+    """Stands in for winpty/ptyprocess: scripted reads, no real terminal."""
+
+    def __init__(self, *, alive=True, exitstatus=None, reads=(), **extra):
+        self._alive, self.exitstatus, self._reads = alive, exitstatus, list(reads)
+        for k, v in extra.items():
+            setattr(self, k, v)
+
+    def isalive(self):
+        return self._alive
+
+    def read(self, _size):
+        item = self._reads.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
 
 def _feed(s: TermSession, data: str) -> None:
@@ -115,3 +136,96 @@ def test_a_cut_chunk_does_not_leave_half_a_key(monkeypatch, tmp_path):
     _feed(s, FAKE_KEY + " tail")  # the 20-char cut lands inside the key
     ((_t, kept),) = s._tail
     assert kept == " tail", kept
+
+
+# ── reader / child state ────────────────────────────────────────────────────
+
+
+def _run_pump(s: TermSession, pty: _FakePty) -> None:
+    s._p = pty
+    s._t = threading.Thread(target=s._pump)
+    s._t.start()
+    s._t.join(5)
+
+
+def _fail(s: TermSession) -> str:
+    with pytest.raises(AssertionError) as err:
+        s.wait_for("nothing", timeout=0.2)
+    return str(err.value)
+
+
+def test_eof_while_the_child_is_still_alive(monkeypatch, tmp_path):
+    s = _session(monkeypatch, tmp_path)
+    _run_pump(s, _FakePty(alive=True, exitstatus=None, reads=["hello", EOFError("Pty is closed")]))
+    msg = _fail(s)
+    assert s.eof and "eof=True" in msg
+    assert "reader: ended at" in msg and "via read-raised (EOFError: Pty is closed)" in msg
+    assert "thread stopped" in msg
+    assert "child at reader end: alive=True exitstatus=None" in msg
+    assert "child now: alive=True exitstatus=None" in msg
+    assert "hello" in msg  # output captured before EOF is still reported
+
+
+def test_eof_after_the_child_exited(monkeypatch, tmp_path):
+    s = _session(monkeypatch, tmp_path)
+    _run_pump(s, _FakePty(alive=False, exitstatus=7, reads=["bye", ""]))  # empty read = EOF
+    msg = _fail(s)
+    assert "via empty-read" in msg
+    assert "child at reader end: alive=False exitstatus=7" in msg
+
+
+def test_posix_style_signal_status_is_reported(monkeypatch, tmp_path):
+    s = _session(monkeypatch, tmp_path)
+    _run_pump(s, _FakePty(alive=False, exitstatus=None, signalstatus=9, reads=[OSError(5, "EIO")]))
+    msg = _fail(s)
+    assert "exitstatus=None signalstatus=9" in msg
+    assert "OSError" in msg
+
+
+def test_reader_exception_is_captured_without_changing_behaviour(monkeypatch, tmp_path):
+    s = _session(monkeypatch, tmp_path)
+    errors: list[threading.ExceptHookArgs] = []
+    monkeypatch.setattr(threading, "excepthook", errors.append)
+    _run_pump(s, _FakePty(alive=True, reads=[RuntimeError(f"boom {FAKE_KEY}")]))
+    assert len(errors) == 1  # the exception still escapes the thread, as before
+    assert s.eof is False  # ... and ``eof`` is still not set
+    msg = _fail(s)
+    assert "via exception (RuntimeError: boom" in msg
+    assert FAKE_KEY not in msg and "[REDACTED]" in msg
+    assert "reader: ended" in msg and "eof=False" in msg
+
+
+def test_unsupported_exit_status_is_reported_as_unknown(monkeypatch, tmp_path):
+    class NoStatus:  # no ``exitstatus`` / ``signalstatus`` at all
+        def isalive(self):
+            return False
+
+    s = _session(monkeypatch, tmp_path)
+    s._p = NoStatus()
+    assert "alive=False exitstatus=unknown(unsupported)" in _fail(s)
+
+
+def test_state_collection_failure_never_breaks_the_harness(monkeypatch, tmp_path):
+    class Hostile:
+        def isalive(self):
+            raise OSError("handle closed")
+
+        @property
+        def exitstatus(self):
+            raise ValueError("native call failed")
+
+        def read(self, _size):
+            return ""
+
+    s = _session(monkeypatch, tmp_path)
+    _run_pump(s, Hostile())  # state is collected on the reader thread: must not raise
+    assert s.eof is True
+    msg = _fail(s)
+    assert "alive=unknown(OSError)" in msg and "exitstatus=unknown(ValueError)" in msg
+
+    s2 = _session(monkeypatch, tmp_path)
+    s2._p = None  # not even an object: the report still comes out
+    s2._t = None
+    msg2 = _fail(s2)
+    assert "timed out waiting for 'nothing'" in msg2
+    assert "reader/child state: unknown" in msg2
