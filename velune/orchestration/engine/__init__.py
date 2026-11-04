@@ -7,6 +7,7 @@ legacy council, and the ``orchestration.engine`` flag defaults to ``"off"``. The
 """
 
 from velune.orchestration.engine.artifacts import (
+    ArtifactOrigin,
     ArtifactReader,
     ArtifactStore,
     AssignmentPolicy,
@@ -32,12 +33,7 @@ from velune.orchestration.engine.errors import (
     TerminalStateError,
     UnknownAgentError,
 )
-from velune.orchestration.engine.flag import (
-    ENGINE_OFF,
-    ENGINE_ON,
-    engine_enabled,
-    engine_mode,
-)
+from velune.orchestration.engine.flag import ENGINE_OFF, ENGINE_ON, engine_enabled, engine_mode
 from velune.orchestration.engine.machine import (
     TRANSITIONS,
     advance,
@@ -48,15 +44,17 @@ from velune.orchestration.engine.machine import (
     record_artifact,
 )
 from velune.orchestration.engine.ports import (
+    ActingInvoker,
+    ActingRequest,
+    ActingResult,
     PromptResolver,
     ReasoningInvoker,
     ReasoningRequest,
     ReasoningResult,
     StaticPromptResolver,
 )
-from velune.orchestration.engine.registry import (
-    AgentRegistry,
-)
+from velune.orchestration.engine.proposals import ProposedToolCall
+from velune.orchestration.engine.registry import AgentRegistry
 from velune.orchestration.engine.runner import (
     AgentFailure,
     AgentInput,
@@ -74,8 +72,43 @@ from velune.orchestration.engine.spec import (
     ReadGrant,
     ToolPolicy,
 )
+from velune.orchestration.engine.toolpolicy import (
+    EXCLUDED_TOOLS,
+    READ_ONLY_PERMISSIONS,
+    READ_ONLY_TOOL_CEILING,
+    ResolvedToolPolicy,
+    ToolDescriptor,
+    ToolPolicyError,
+    descriptors_from_registry,
+    resolve_tool_policy,
+)
+from velune.orchestration.engine.toolvalidate import (
+    ToolCallRejected,
+    ToolRejection,
+    ValidatedToolCall,
+    validate_proposals,
+    validate_tool_call,
+)
 
 __all__ = [
+    "EXCLUDED_TOOLS",
+    "READ_ONLY_PERMISSIONS",
+    "READ_ONLY_TOOL_CEILING",
+    "ActingInvoker",
+    "ActingRequest",
+    "ActingResult",
+    "ArtifactOrigin",
+    "ProposedToolCall",
+    "ResolvedToolPolicy",
+    "ToolCallRejected",
+    "ToolDescriptor",
+    "ToolPolicyError",
+    "ToolRejection",
+    "ValidatedToolCall",
+    "descriptors_from_registry",
+    "resolve_tool_policy",
+    "validate_proposals",
+    "validate_tool_call",
     "ENGINE_OFF",
     "ENGINE_ON",
     "TRANSITIONS",

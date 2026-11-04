@@ -19,8 +19,9 @@ import hashlib
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
+from velune._compat import StrEnum
 from velune.core.types.agent import AgentRole
 from velune.council.domain import ArtifactKind, ReadScope
 from velune.council.ports import IdSource
@@ -32,10 +33,23 @@ from velune.orchestration.state.run_state import RunPhase
 DIGEST_CHARS = 200
 
 
+class ArtifactOrigin(StrEnum):
+    """Where an artifact's content came from. Assigned by engine code, never read from content.
+
+    ``CALLER`` is material the caller supplied (the task), ``MODEL`` is text an agent wrote, and
+    ``TOOL`` is data a tool returned. Tool data is untrusted like model text, but it is a different
+    thing, so it is never mistaken for a model's statement or relabelled as one.
+    """
+
+    CALLER = "caller"
+    MODEL = "model"
+    TOOL = "tool"
+
+
 class StoredArtifact(Contract):
     """One thing the run produced or was given, with driver-stamped metadata.
 
-    ``author`` is ``None`` for material the caller supplied (the task itself).
+    ``author`` is ``None`` for material the caller supplied (the task itself) and for tool data.
     """
 
     artifact_id: str
@@ -46,6 +60,15 @@ class StoredArtifact(Contract):
     attempt: int = Field(ge=1)
     text: str = Field(min_length=1)
     digest: str
+    origin: ArtifactOrigin
+
+    @model_validator(mode="after")
+    def _origin_matches_author(self) -> StoredArtifact:
+        if self.origin is ArtifactOrigin.MODEL and self.author is None:
+            raise ValueError("model-origin text must have an author")
+        if self.origin is not ArtifactOrigin.MODEL and self.author is not None:
+            raise ValueError(f"{self.origin.value}-origin data cannot claim an agent author")
+        return self
 
 
 @runtime_checkable
@@ -75,7 +98,13 @@ class ArtifactStore:
         phase: RunPhase,
         attempt: int,
         target: AgentRole | None = None,
+        origin: ArtifactOrigin | None = None,
     ) -> StoredArtifact:
+        """Append an artifact. ``origin`` is the engine's claim about provenance, never the content's.
+
+        When omitted it follows the author: an agent author means model text, none means caller
+        material. Tool data must be stored with ``origin=ArtifactOrigin.TOOL`` and no author.
+        """
         item = StoredArtifact(
             artifact_id=self._ids.next_id("artifact"),
             kind=kind,
@@ -85,6 +114,9 @@ class ArtifactStore:
             attempt=attempt,
             text=text,
             digest=text_digest(text),
+            origin=origin
+            if origin is not None
+            else (ArtifactOrigin.MODEL if author is not None else ArtifactOrigin.CALLER),
         )
         self._items.append(item)
         return item
@@ -111,9 +143,7 @@ class AssignmentPolicy(Protocol):
 class StaticAssignments:
     """A fixed viewer to authors map. Anyone not listed is assigned nobody (fail closed)."""
 
-    def __init__(
-        self, mapping: Mapping[AgentRole, tuple[AgentRole, ...]] | None = None
-    ) -> None:
+    def __init__(self, mapping: Mapping[AgentRole, tuple[AgentRole, ...]] | None = None) -> None:
         self._mapping = dict(mapping or {})
 
     def assigned_authors(self, viewer: AgentRole) -> tuple[AgentRole, ...]:
@@ -142,15 +172,9 @@ class ContextBuilder:
             scope = spec.scope_for(artifact.kind)
             if not self._visible(scope, artifact, spec.role, assigned):
                 continue
-            text = (
-                digest_of(artifact.text)
-                if scope is ReadScope.DIGEST_ALL
-                else artifact.text
-            )
+            text = digest_of(artifact.text) if scope is ReadScope.DIGEST_ALL else artifact.text
             # kind and author come from the stored, driver-stamped record, never from the text.
-            items.append(
-                ContextItem(kind=artifact.kind, text=text, author=artifact.author)
-            )
+            items.append(ContextItem(kind=artifact.kind, text=text, author=artifact.author))
         return tuple(items)
 
     @staticmethod

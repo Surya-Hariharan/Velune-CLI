@@ -20,10 +20,9 @@ from velune.council.ports import SeatMessage
 from velune.council.profiles import RoutingRole
 from velune.council.results import ModelRef, SeatError, SeatStatus
 from velune.council.serialization import Contract
+from velune.orchestration.engine.proposals import ProposedToolCall, ToolNameStr
 
-Identifier = Annotated[
-    str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
-]
+Identifier = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")]
 
 
 class ReasoningRequest(Contract):
@@ -72,9 +71,7 @@ class ReasoningResult(Contract):
         return cls(status=SeatStatus.OK, text=text, **extra)  # type: ignore[arg-type]
 
     @classmethod
-    def failure(
-        cls, status: SeatStatus, message: str = "", **extra: object
-    ) -> ReasoningResult:
+    def failure(cls, status: SeatStatus, message: str = "", **extra: object) -> ReasoningResult:
         if status is SeatStatus.OK:
             raise ValueError("failure() needs a non-ok status")
         return cls(
@@ -92,6 +89,83 @@ class ReasoningInvoker(Protocol):
     """
 
     async def invoke(self, request: ReasoningRequest) -> ReasoningResult: ...
+
+
+MAX_PROPOSALS = 16
+
+
+class ActingRequest(ReasoningRequest):
+    """A request to an acting agent. ``offered_tools`` are names only: no schemas, no handles.
+
+    Nothing at this stage sends tool definitions to a provider; the names say what a later layer
+    would be allowed to offer, and they come from trusted policy resolution, never from the model.
+    """
+
+    offered_tools: tuple[ToolNameStr, ...] = Field(default=(), max_length=64)
+
+
+class ActingResult(Contract):
+    """What an acting agent returned: text and/or structured tool-call *proposals*.
+
+    Proposals are untrusted model output. This type has no field for an approval, a result or an
+    author, and a failure never carries proposals.
+    """
+
+    status: SeatStatus
+    text: str | None = None
+    proposals: tuple[ProposedToolCall, ...] = Field(default=(), max_length=MAX_PROPOSALS)
+    error: SeatError | None = None
+    model: ModelRef | None = None
+    attempts: int = Field(default=1, ge=0)
+
+    @model_validator(mode="after")
+    def _failure_is_not_success(self) -> ActingResult:
+        if self.status is SeatStatus.OK:
+            if self.text is None and not self.proposals:
+                raise ValueError("an ok result must carry text or tool-call proposals")
+            if self.error is not None:
+                raise ValueError("an ok result cannot carry an error")
+        else:
+            if self.text is not None or self.proposals:
+                raise ValueError("a result that did not deliver cannot carry text or proposals")
+            if self.error is not None and self.error.kind is SeatStatus.OK:
+                raise ValueError("an error cannot have status ok")
+        ids = [item.call_id for item in self.proposals]
+        if len(set(ids)) != len(ids):
+            raise ValueError("proposal call ids must be unique")
+        return self
+
+    @property
+    def ok(self) -> bool:
+        return self.status is SeatStatus.OK
+
+    @classmethod
+    def success(
+        cls, text: str | None = None, proposals: tuple[ProposedToolCall, ...] = (), **extra: object
+    ) -> ActingResult:
+        return cls(status=SeatStatus.OK, text=text, proposals=proposals, **extra)  # type: ignore[arg-type]
+
+    @classmethod
+    def failure(cls, status: SeatStatus, message: str = "", **extra: object) -> ActingResult:
+        if status is SeatStatus.OK:
+            raise ValueError("failure() needs a non-ok status")
+        return cls(
+            status=status,
+            error=SeatError(kind=status, message=message[:300]),
+            **extra,  # type: ignore[arg-type]
+        )
+
+
+@runtime_checkable
+class ActingInvoker(Protocol):
+    """Asks an acting agent for its next move. Never executes anything; never raises (but cancels).
+
+    The method is ``propose`` rather than ``invoke`` on purpose: a ``ReasoningInvoker`` does not
+    satisfy this protocol and cannot be passed where proposals are expected, and an acting invoker
+    cannot be mistaken for a reasoning one.
+    """
+
+    async def propose(self, request: ActingRequest) -> ActingResult: ...
 
 
 @runtime_checkable
