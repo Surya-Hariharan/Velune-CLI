@@ -63,6 +63,11 @@ class RealProcessTree:
         self.parent_pid: int | None = None
         self.child_pid: int | None = None
         self._procs: list[psutil.Process] = []
+        # The Popen objects the sandbox created. They are kept so cleanup() can reap them:
+        # the sandbox kills the tree through psutil, which leaves each Popen with no exit
+        # status, and an unreaped Popen warns ("subprocess N is still running") whenever
+        # the garbage collector reaches it -- in whichever test happens to be running.
+        self._popens: list = []
 
     async def start(self) -> None:
         cancellation.register(self.event)
@@ -72,6 +77,7 @@ class RealProcessTree:
         def spy(*a, **k):
             proc = real_popen(*a, **k)
             spawned.append(proc.pid)
+            self._popens.append(proc)
             return proc
 
         sandbox_mod.subprocess.Popen = spy  # restored in cleanup()
@@ -104,6 +110,9 @@ class RealProcessTree:
             except psutil.Error:
                 pass
         psutil.wait_procs(self._procs, timeout=5)
+        for popen in self._popens:
+            popen.wait(timeout=5)  # reap: records the exit status; raises if still alive
+            assert popen.returncode is not None
 
 
 @pytest.fixture
