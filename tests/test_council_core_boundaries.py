@@ -167,10 +167,17 @@ def test_only_the_runtime_adapter_touches_the_provider_stack():
 # ── nothing live depends on the core (zero behavioural change) ──────────────
 
 
+# The one approved consumer: the Phase 4B orchestration engine reuses the core's ports and value
+# types. It is flag-gated (``orchestration.engine`` = "off") and nothing live imports it, which
+# tests/test_engine_flag.py asserts; every other module stays forbidden from importing the core.
+ENGINE = PACKAGE / "orchestration" / "engine"
+STATE = PACKAGE / "orchestration" / "state"
+
+
 def test_no_module_outside_the_core_imports_it():
     offenders = []
     for path in PACKAGE.rglob("*.py"):
-        if COUNCIL in path.parents:
+        if COUNCIL in path.parents or ENGINE in path.parents or STATE in path.parents:
             continue
         for module, line in imports_of(path, strict=False):
             if module == "velune.council" or module.startswith("velune.council."):

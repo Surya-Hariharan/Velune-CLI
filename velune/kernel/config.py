@@ -300,6 +300,27 @@ class ResourceEntry(BaseModel):
     auto_connect: bool = False
 
 
+class OrchestrationConfig(BaseModel):
+    """Settings for the native multi-agent orchestration engine (velune.orchestration.engine)."""
+
+    # "off" is the default and the only behaviour today: the engine is a library with no caller.
+    # "on" is accepted so the setting is stable, but nothing reads it yet (no CLI, REPL or MCP
+    # path is wired to the engine). An unknown value falls back to "off" with a warning rather
+    # than failing config load.
+    engine: str = "off"
+
+    @field_validator("engine", mode="before")
+    @classmethod
+    def _normalize_engine(cls, value: object) -> str:
+        text = str(value).strip().lower() if value is not None else ""
+        if text in ("off", "on"):
+            return text
+        logging.getLogger("velune.kernel.config").warning(
+            "Unknown orchestration.engine %r (use 'off' or 'on'); using 'off'.", value
+        )
+        return "off"
+
+
 class ResourcesConfig(BaseModel):
     """Configuration for external resource connectors (Docker, DBs, Supabase).
 
@@ -343,6 +364,7 @@ class VeluneConfig(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
+    orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
