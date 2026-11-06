@@ -72,3 +72,12 @@ class InvalidArtifactError(EngineError, ValueError):
 
 class DriverConfigError(EngineError, ValueError):
     """The driver was built with agents it cannot run (missing, or not reasoning-only)."""
+
+
+class EngineDisabledError(EngineError):
+    """A supported engine entry point was used while the ``orchestration.engine`` flag is off."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the orchestration engine is disabled; set orchestration.engine to 'on' to use it"
+        )

@@ -102,6 +102,9 @@ class ActingRequest(ReasoningRequest):
     """
 
     offered_tools: tuple[ToolNameStr, ...] = Field(default=(), max_length=64)
+    # Set by the trusted runner, never by a model. False once any tool call has been started in this
+    # run: from then on a provider call must not be retried (and nothing may switch provider).
+    provider_retry_allowed: bool = True
 
 
 class ActingResult(Contract):
