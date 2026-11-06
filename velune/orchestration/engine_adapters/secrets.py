@@ -69,21 +69,42 @@ def provider_environment_source() -> Source:
     return environment_source(names)
 
 
+class ScrubberUnavailable(Exception):
+    """A required secret source could not be read. The message never contains a value."""
+
+    def __init__(self) -> None:
+        super().__init__("the credential-aware secret scrubber is unavailable")
+
+
 class SecretScrubber:
     """Replaces known secret values (and common spellings of them) and known key shapes.
 
-    A source that raises is skipped; scrubbing never fails open on the patterns, and never raises.
+    By default a source that raises is skipped, so scrubbing never raises and falls back to the key
+    shapes. With ``strict=True`` that downgrade is not allowed: a source that raises makes
+    :meth:`scrub` raise :class:`ScrubberUnavailable`, which every acting-path consumer turns into a
+    refusal or withheld text rather than passing content through with weaker redaction.
     """
 
-    def __init__(self, *sources: Source) -> None:
+    def __init__(self, *sources: Source, strict: bool = False) -> None:
         self._sources = sources
+        self._strict = strict
+
+    def verify(self) -> None:
+        """Read every source once; raise :class:`ScrubberUnavailable` if any cannot be read."""
+        for source in self._sources:
+            try:
+                list(source())
+            except Exception:
+                raise ScrubberUnavailable() from None
 
     def _values(self) -> list[str]:
         found: set[str] = set()
         for source in self._sources:
             try:
                 values = list(source())
-            except Exception:  # a locked or unreadable store must not break scrubbing
+            except Exception:  # a locked or unreadable store
+                if self._strict:
+                    raise ScrubberUnavailable() from None  # never the underlying error or values
                 continue
             for value in values:
                 if not isinstance(value, str) or len(value.strip()) < MIN_SECRET_CHARS:
@@ -115,9 +136,25 @@ def default_scrubber() -> SecretScrubber:
     return SecretScrubber(provider_environment_source(), credential_store_source())
 
 
+def credential_scrubber() -> SecretScrubber:
+    """The scrubber the native acting entrypoint uses: strict, and verified before it is returned.
+
+    Reuses the existing keystore and credential manager. Raises :class:`ScrubberUnavailable` if the
+    provider environment or the credential store cannot be read, so a caller never silently proceeds
+    with weaker redaction. Pattern and exact-value matching only: it cannot find a secret that is
+    encoded (base64, split, hashed, embedded in a larger token), is shorter than ``MIN_SECRET_CHARS``,
+    or is not held by this process.
+    """
+    scrubber = SecretScrubber(provider_environment_source(), credential_store_source(), strict=True)
+    scrubber.verify()
+    return scrubber
+
+
 __all__ = [
     "MIN_SECRET_CHARS",
+    "ScrubberUnavailable",
     "SecretScrubber",
+    "credential_scrubber",
     "credential_store_source",
     "default_scrubber",
     "environment_source",

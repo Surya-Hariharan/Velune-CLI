@@ -30,6 +30,14 @@ Reliability (Phase 4E-3). This class is the **single retry owner** for acting-pr
 * A provider obtained through the registry arrives wrapped in ``RetryingProvider``; that layer is
   stripped here so retries are never nested (3 x 3). Normal chat is unaffected: the registry and the
   wrapper are not changed, and an acting invoker simply holds the inner provider.
+* The wrapper's *concurrency semaphore* is kept (``split_retry_layer``): each request waits for a
+  permit on the same provider-wide gate the wrapper uses, so the limit holds across acting runs and
+  other users of that wrapper. A provider that arrives unwrapped gets one weakly-keyed shared gate
+  (default 4). A permit is held only around a request, never across a retry delay, and is released on
+  success, error, deadline and cancellation. Waiting for a permit counts against the call's deadline.
+* Provider attempts are *reserved* on the run's budget immediately before each request, after the
+  permit is held (``request.attempt_gate``). A denied reservation sends nothing. A reservation is
+  never refunded: ``provider_attempts`` counts reserved/started attempts.
 * Retryable: rate limits, provider-side timeouts, connection failures and the generic transient
   ``InferenceError`` bucket (5xx). A model call has no side effects until a response is accepted, so
   repeating it is safe. Not retryable: cancellation, authentication, unknown model or bad request,
@@ -57,6 +65,7 @@ import math
 import re
 import sys
 import time
+import weakref
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -130,6 +139,7 @@ class Rejection(StrEnum):
     REQUEST_TOO_LARGE = "request_too_large"
     SECRET_IN_ARGUMENTS = "secret_in_arguments"
     SECRET_IN_REQUEST = "secret_in_request"
+    ATTEMPT_BUDGET = "attempt_budget_exhausted"
 
 
 _FAILURE: Mapping[Rejection, tuple[SeatStatus, str]] = {
@@ -178,6 +188,10 @@ _FAILURE: Mapping[Rejection, tuple[SeatStatus, str]] = {
         SeatStatus.BLOCKED,
         "the trusted instructions contain secret material and were not sent",
     ),
+    Rejection.ATTEMPT_BUDGET: (
+        SeatStatus.BLOCKED,
+        "the provider-attempt budget is exhausted and the request was not sent",
+    ),
 }
 
 DEFAULT_MAX_REQUEST_CHARS = 400_000
@@ -221,18 +235,47 @@ class RetryEvent:
     delay_s: float
 
 
-def unwrap_retry_layer(provider: Any) -> Any:
-    """Strip the registry's ``RetryingProvider`` wrapper(s), so this adapter is the only retry owner.
+def split_retry_layer(provider: Any) -> tuple[Any, asyncio.Semaphore | None]:
+    """``(inner provider, the wrapper's concurrency semaphore)``.
 
-    Detected without importing provider code: a wrapped provider implies its module is already loaded.
+    Strips the registry's ``RetryingProvider`` wrapper(s), so this adapter is the only retry owner,
+    but hands back the wrapper's own provider-wide semaphore (the outermost one found) so the
+    concurrency limit it enforced is kept: every acting run, and every other user of the same wrapper
+    (normal chat, Council), then shares one limit. Detected without importing provider code: a wrapped
+    provider implies its module is already loaded.
     """
     module = sys.modules.get("velune.providers.retrying")
     layer = getattr(module, "RetryingProvider", None)
+    gate: asyncio.Semaphore | None = None
     for _ in range(8):
         if layer is None or not isinstance(provider, layer):
             break
+        found = getattr(provider, "_concurrency_gate", None)
+        if gate is None and isinstance(found, asyncio.Semaphore):
+            gate = found
         provider = provider._inner
-    return provider
+    return provider, gate
+
+
+def unwrap_retry_layer(provider: Any) -> Any:
+    """The provider with the registry's ``RetryingProvider`` wrapper(s) removed."""
+    return split_retry_layer(provider)[0]
+
+
+# One semaphore per provider instance that arrives without a wrapper (so there is none to reuse).
+# Weakly keyed: it never keeps a provider alive. Same default limit as ``RetryingProvider``.
+DEFAULT_PROVIDER_CONCURRENCY = 4
+_SHARED_GATES: weakref.WeakKeyDictionary[Any, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+
+
+def _shared_gate(provider: Any) -> asyncio.Semaphore:
+    try:
+        gate = _SHARED_GATES.get(provider)
+        if gate is None:
+            gate = _SHARED_GATES[provider] = asyncio.Semaphore(DEFAULT_PROVIDER_CONCURRENCY)
+        return gate
+    except TypeError:  # not weak-referenceable / hashable: limit only this invoker
+        return asyncio.Semaphore(DEFAULT_PROVIDER_CONCURRENCY)
 
 
 def classify_provider_error(exc: BaseException) -> tuple[Rejection, bool]:
@@ -424,6 +467,17 @@ class _Deadline(Exception):
     """The call's deadline passed while a provider request was in flight."""
 
 
+class _AttemptDenied(Exception):
+    """The run's provider-attempt budget refused a reservation: no request was sent."""
+
+
+class _CallState:
+    """Attempts actually reserved/started during one ``propose``. Touched only on the event loop."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+
 class ProviderActingInvoker:
     """``ActingInvoker`` over a :class:`ModelProvider`.
 
@@ -453,7 +507,10 @@ class ProviderActingInvoker:
         for limit in (max_request_chars, max_response_chars):
             if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
                 raise ValueError("size limits must be positive integers")
-        self._provider = unwrap_retry_layer(provider)
+        self._provider, wrapper_gate = split_retry_layer(provider)
+        # Provider-wide concurrency: the wrapper's semaphore when there was one, else one shared per
+        # provider instance. Held only around a request, never across a retry delay.
+        self._gate = wrapper_gate if wrapper_gate is not None else _shared_gate(self._provider)
         self._model_id = model_id
         self._catalog = {name: copy.deepcopy(d) for name, d in catalog.items()}
         self._temperature = temperature
@@ -529,9 +586,30 @@ class ProviderActingInvoker:
         self._events.append(RetryEvent(attempt, reason, round(delay, 3)))
         del self._events[:-100]
 
-    async def _attempt(self, inference: InferenceRequest, remaining: float) -> Any:
-        """One provider request, bounded by ``remaining`` seconds, never leaving a task behind."""
-        task = asyncio.ensure_future(self._provider.infer(inference))
+    async def _guarded(
+        self,
+        inference: InferenceRequest,
+        reserve: Callable[[], bool] | None,
+        state: _CallState,
+    ) -> Any:
+        """Wait for a provider-wide permit, reserve ONE attempt, then send. The permit is released
+        on success, exception, timeout and cancellation (``async with``)."""
+        async with self._gate:
+            if reserve is not None and not reserve():
+                raise _AttemptDenied  # nothing is sent
+            state.attempts += 1  # reserved = started, whatever happens next
+            return await self._provider.infer(inference)
+
+    async def _attempt(
+        self,
+        inference: InferenceRequest,
+        remaining: float,
+        reserve: Callable[[], bool] | None,
+        state: _CallState,
+    ) -> Any:
+        """One provider request, bounded by ``remaining`` seconds, never leaving a task behind.
+        The wait for a permit counts against ``remaining``."""
+        task = asyncio.ensure_future(self._guarded(inference, reserve, state))
         try:
             done, _ = await asyncio.wait({task}, timeout=remaining)
         except BaseException:  # includes CancelledError: stop the request, then let it propagate
@@ -580,19 +658,23 @@ class ProviderActingInvoker:
         policy = self._retry
         max_attempts = policy.max_attempts if request.provider_retry_allowed else 1
         deadline = self._clock() + request.timeout_s
-        attempts = 0
+        gate = getattr(request, "attempt_gate", None)
+        reserve = gate.reserve if callable(getattr(gate, "reserve", None)) else None
+        state = _CallState()
         while True:
             remaining = deadline - self._clock()
             if remaining <= 0:
-                return _failure(Rejection.TIMEOUT, model, max(attempts, 1))
-            attempts += 1
+                return _failure(Rejection.TIMEOUT, model, state.attempts)
             try:
-                response = await self._attempt(inference, remaining)
+                response = await self._attempt(inference, remaining, reserve, state)
             except asyncio.CancelledError:
                 raise
+            except _AttemptDenied:
+                return _failure(Rejection.ATTEMPT_BUDGET, model, state.attempts)
             except _Deadline:
-                return _failure(Rejection.TIMEOUT, model, attempts)
+                return _failure(Rejection.TIMEOUT, model, state.attempts)
             except Exception as exc:  # never echo it: its text may carry paths, bodies or secrets
+                attempts = state.attempts
                 kind, retryable = classify_provider_error(exc)
                 delay = self._delay(exc, policy, attempts)
                 if (
@@ -611,7 +693,7 @@ class ProviderActingInvoker:
                 model=model,
                 scrub=self._scrub,
                 max_response_chars=self._max_response_chars,
-                attempts=attempts,
+                attempts=state.attempts,
             )
 
     @staticmethod
@@ -636,6 +718,7 @@ __all__ = [
     "classify_provider_error",
     "fixed_failure_messages",
     "interpret_response",
+    "split_retry_layer",
     "tool_definition",
     "unwrap_retry_layer",
 ]
