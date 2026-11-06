@@ -241,11 +241,16 @@ class OpenAIProvider(ModelProvider):
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 latency_ms=latency,
+                metadata=self._response_metadata(data["choices"][0], tool_calls),
                 tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
             self._raise_provider_error(e, "completion")
             raise  # unreachable — _raise_provider_error always raises
+
+    def _response_metadata(self, choice: dict, tool_calls: list | None) -> dict:
+        """Extra ``InferenceResponse.metadata`` for ``infer()``. None by default; subclasses opt in."""
+        return {}
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         """Streaming chat completions.

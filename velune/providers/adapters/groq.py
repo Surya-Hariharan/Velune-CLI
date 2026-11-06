@@ -186,6 +186,24 @@ class GroqProvider(OpenAIProvider):
     def provider_id(self) -> str:
         return "groq"
 
+    def _response_metadata(self, choice: dict, tool_calls: list | None) -> dict:
+        """Preserve Groq's native ``finish_reason`` as ``metadata["stop_reason"]``.
+
+        ``InferenceResponse.finish_reason`` is overwritten with ``"tool_calls"`` whenever a call is
+        present, so a call cut off by the token limit looks complete. The native value is kept here
+        so a consumer can tell the two apart. Nothing is synthesized: the key is absent when the
+        field is missing, null, blank or not a string, and when the native reason contradicts the
+        message (``"tool_calls"`` without calls, or calls under any other reason). The one exception
+        is ``"length"``, which is kept even then, because it can only make a consumer refuse.
+        """
+        native = choice.get("finish_reason") if isinstance(choice, dict) else None
+        if not isinstance(native, str) or not native.strip():
+            return {}
+        normal = native.strip().lower()
+        if normal == "length" or (normal == "tool_calls") == bool(tool_calls):
+            return {"stop_reason": native}
+        return {}
+
     async def list_models(self) -> list[ModelDescriptor]:
         live = await fetch_live_models(get_key("groq"), self._base_url)
         return reconcile_with_live(live)
