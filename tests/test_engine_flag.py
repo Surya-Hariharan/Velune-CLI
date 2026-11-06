@@ -145,8 +145,10 @@ def _imports(path: Path) -> set[str]:
 def test_nothing_outside_the_engine_imports_the_engine_or_run_state():
     """No CLI, REPL, council or MCP path is wired to the engine in Phase 4B."""
     offenders = []
+    # Phase 4E-1: the one place allowed to bind engine ports to providers (not exported).
+    adapters = PACKAGE / "orchestration" / "engine_adapters"
     for path in PACKAGE.rglob("*.py"):
-        if ENGINE_DIR in path.parents or STATE_DIR in path.parents:
+        if ENGINE_DIR in path.parents or STATE_DIR in path.parents or adapters in path.parents:
             continue
         for module in _imports(path):
             if module.startswith(("velune.orchestration.engine", "velune.orchestration.state")):
@@ -185,10 +187,18 @@ def test_the_engine_modules_only_depend_on_the_council_core_and_core_types():
         "velune._compat",
         "velune.models.specializations",  # lazy, inside AgentSpec.council_role only
     )
+    # The trusted executor (Phase 4D-2) is the one module that must reach the existing enforcement
+    # path and redaction; nothing else in the engine may.
+    executor_only = (
+        "velune.core.redaction",
+        "velune.permissions",
+        "velune.tools.base.tool",
+    )
     offenders = []
     for path in [*ENGINE_DIR.glob("*.py"), *STATE_DIR.glob("*.py")]:
+        prefixes = allowed_prefixes + (executor_only if path.name == "toolexec.py" else ())
         for module in _imports(path):
-            if module.startswith("velune.") and not module.startswith(allowed_prefixes):
+            if module.startswith("velune.") and not module.startswith(prefixes):
                 offenders.append(f"{path.name} -> {module}")
     assert offenders == []
 

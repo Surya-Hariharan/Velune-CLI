@@ -6,6 +6,14 @@ legacy council, and the ``orchestration.engine`` flag defaults to ``"off"``. The
 (``velune.cognition``) and the deliberative core (``velune.council``) are untouched.
 """
 
+from velune.orchestration.engine.approval import (
+    ApprovalDecision,
+    ApprovalFailure,
+    ApprovalLedger,
+    ApprovalPort,
+    HeadlessApprovalPort,
+    InvocationRequest,
+)
 from velune.orchestration.engine.artifacts import (
     ArtifactOrigin,
     ArtifactReader,
@@ -14,6 +22,7 @@ from velune.orchestration.engine.artifacts import (
     ContextBuilder,
     StaticAssignments,
     StoredArtifact,
+    ToolArtifactMeta,
 )
 from velune.orchestration.engine.driver import (
     DriverResult,
@@ -23,9 +32,11 @@ from velune.orchestration.engine.driver import (
     parse_verdict,
     plan_review_specs,
 )
+from velune.orchestration.engine.entry import create_plan_review_driver
 from velune.orchestration.engine.errors import (
     DriverConfigError,
     DuplicateAgentError,
+    EngineDisabledError,
     EngineError,
     IllegalTransitionError,
     InvalidArtifactError,
@@ -91,6 +102,12 @@ from velune.orchestration.engine.toolvalidate import (
 )
 
 __all__ = [
+    "ApprovalDecision",
+    "ApprovalFailure",
+    "ApprovalLedger",
+    "ApprovalPort",
+    "HeadlessApprovalPort",
+    "InvocationRequest",
     "EXCLUDED_TOOLS",
     "READ_ONLY_PERMISSIONS",
     "READ_ONLY_TOOL_CEILING",
@@ -128,6 +145,7 @@ __all__ = [
     "DriverConfigError",
     "DriverResult",
     "DuplicateAgentError",
+    "EngineDisabledError",
     "EngineError",
     "FailureKind",
     "IllegalTransitionError",
@@ -145,6 +163,7 @@ __all__ = [
     "StaticAssignments",
     "StaticPromptResolver",
     "StoredArtifact",
+    "ToolArtifactMeta",
     "TerminalStateError",
     "ToolPolicy",
     "UnknownAgentError",
@@ -153,6 +172,7 @@ __all__ = [
     "allowed_from",
     "can_transition",
     "cancel",
+    "create_plan_review_driver",
     "engine_enabled",
     "engine_mode",
     "fail",
