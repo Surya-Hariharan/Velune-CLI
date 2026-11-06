@@ -21,29 +21,32 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import Field, model_validator
 
-from velune._compat import StrEnum
 from velune.core.types.agent import AgentRole
 from velune.council.domain import ArtifactKind, ReadScope
 from velune.council.ports import IdSource
 from velune.council.serialization import Contract
-from velune.orchestration.engine.runner import ContextItem
+from velune.orchestration.engine.runner import ArtifactOrigin, ContextItem
 from velune.orchestration.engine.spec import AgentSpec
 from velune.orchestration.state.run_state import RunPhase
 
 DIGEST_CHARS = 200
 
 
-class ArtifactOrigin(StrEnum):
-    """Where an artifact's content came from. Assigned by engine code, never read from content.
+class ToolArtifactMeta(Contract):
+    """Safe, engine-stamped facts about the tool call behind a tool-origin artifact.
 
-    ``CALLER`` is material the caller supplied (the task), ``MODEL`` is text an agent wrote, and
-    ``TOOL`` is data a tool returned. Tool data is untrusted like model text, but it is a different
-    thing, so it is never mistaken for a model's statement or relabelled as one.
+    Every field is an id, a digest, a bool or a fixed enum value: none is derived from tool output or
+    from an exception, and none is ever shown to a model (the artifact's ``text`` is the only part
+    that is).
     """
 
-    CALLER = "caller"
-    MODEL = "model"
-    TOOL = "tool"
+    request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+    call_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    outcome: str = Field(pattern=r"^[a-z][a-z0-9_]{0,59}$")
+    executed: bool = False
+    unsettled: bool = False
+    truncated: bool = False
 
 
 class StoredArtifact(Contract):
@@ -61,9 +64,16 @@ class StoredArtifact(Contract):
     text: str = Field(min_length=1)
     digest: str
     origin: ArtifactOrigin
+    # The trusted tool name for tool data, stamped by engine code. Never taken from the text.
+    source: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+    tool_meta: ToolArtifactMeta | None = None
 
     @model_validator(mode="after")
     def _origin_matches_author(self) -> StoredArtifact:
+        if self.tool_meta is not None and self.origin is not ArtifactOrigin.TOOL:
+            raise ValueError("only tool-origin data can carry tool metadata")
+        if self.source is not None and self.origin is not ArtifactOrigin.TOOL:
+            raise ValueError("only tool-origin data can name a tool source")
         if self.origin is ArtifactOrigin.MODEL and self.author is None:
             raise ValueError("model-origin text must have an author")
         if self.origin is not ArtifactOrigin.MODEL and self.author is not None:
@@ -99,11 +109,14 @@ class ArtifactStore:
         attempt: int,
         target: AgentRole | None = None,
         origin: ArtifactOrigin | None = None,
+        source: str | None = None,
+        tool_meta: ToolArtifactMeta | None = None,
     ) -> StoredArtifact:
         """Append an artifact. ``origin`` is the engine's claim about provenance, never the content's.
 
         When omitted it follows the author: an agent author means model text, none means caller
-        material. Tool data must be stored with ``origin=ArtifactOrigin.TOOL`` and no author.
+        material. Tool data must be stored with ``origin=ArtifactOrigin.TOOL`` and no author;
+        ``source`` optionally names the tool that produced it (engine-supplied, tool data only).
         """
         item = StoredArtifact(
             artifact_id=self._ids.next_id("artifact"),
@@ -117,6 +130,8 @@ class ArtifactStore:
             origin=origin
             if origin is not None
             else (ArtifactOrigin.MODEL if author is not None else ArtifactOrigin.CALLER),
+            source=source,
+            tool_meta=tool_meta,
         )
         self._items.append(item)
         return item
@@ -173,8 +188,16 @@ class ContextBuilder:
             if not self._visible(scope, artifact, spec.role, assigned):
                 continue
             text = digest_of(artifact.text) if scope is ReadScope.DIGEST_ALL else artifact.text
-            # kind and author come from the stored, driver-stamped record, never from the text.
-            items.append(ContextItem(kind=artifact.kind, text=text, author=artifact.author))
+            # kind, author, origin and source come from the stored record, never from the text.
+            items.append(
+                ContextItem(
+                    kind=artifact.kind,
+                    text=text,
+                    author=artifact.author,
+                    origin=artifact.origin,
+                    source=artifact.source,
+                )
+            )
         return tuple(items)
 
     @staticmethod
