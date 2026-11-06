@@ -7,7 +7,9 @@ What this does and does not guarantee
 -------------------------------------
 The guarantee applies to this entry point. Python cannot make direct construction impossible:
 ``PlanReviewDriver(...)`` remains importable and constructible by any code that wants it, and its
-tests do exactly that. No CLI, REPL or MCP path calls either one yet, and the flag is off by default.
+tests do exactly that. The only production caller is the opt-in ``velune native --plan-review`` path
+(``native_session.run_native_plan_review``); no REPL, chat or MCP path calls either one, and the flag is
+off by default.
 
 This module deliberately imports neither the acting runner nor the executor: the caller builds the
 runner it wants (that is where the tool and permission modules are loaded) and passes it in.

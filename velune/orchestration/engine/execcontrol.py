@@ -143,6 +143,10 @@ class BudgetLedger:
     def past_deadline(self) -> bool:
         return self._clock() >= self._deadline
 
+    def remaining_s(self) -> float:
+        """Seconds left on the run's wall clock (0.0 once it has passed). Read-only."""
+        return max(0.0, self._deadline - self._clock())
+
     def _problem(self, argument_bytes: int) -> BudgetRefusal | None:
         b = self.budget
         if self._clock() >= self._deadline:
@@ -190,8 +194,27 @@ class BudgetLedger:
             self._model_calls += 1
             return None
 
+    def reserve_provider_attempt(self) -> bool:
+        """Atomically reserve ONE provider attempt, immediately before the request is sent.
+
+        ``provider_attempts`` therefore counts *reserved / started* attempts: a reservation is never
+        refunded, even if the request later fails, times out or is cancelled (the request may have
+        reached the provider). ``False`` means the budget is spent and the request must not be sent.
+        Check and increment happen under one lock with no ``await``, so concurrent callers cannot
+        oversubscribe ``max_provider_attempts``. Model calls are counted separately.
+        """
+        with self._lock:
+            if self._provider_attempts >= self.budget.max_provider_attempts:
+                return False
+            self._provider_attempts += 1
+            return True
+
     def note_provider_attempts(self, attempts: int) -> None:
-        """Account the requests a finished model call actually sent (at least one)."""
+        """Account requests of an invoker that does not reserve per attempt (at least one).
+
+        Legacy post-hoc path, used only when an invoker never touched its ``AttemptGate``. It cannot
+        prevent overshoot; invokers that send provider requests should reserve instead.
+        """
         with self._lock:
             self._provider_attempts += max(1, int(attempts))
 

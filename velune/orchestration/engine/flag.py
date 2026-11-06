@@ -1,8 +1,9 @@
 """The ``orchestration.engine`` feature flag.
 
-Default ``"off"``. Phase 4B only defines and reads the flag; no CLI, REPL or MCP path consults it,
-so setting it to ``"on"`` changes nothing yet. A config object without an ``orchestration`` section
-(older objects, test doubles) reads as off.
+Default ``"off"``. Since Phase 4E-6 the only consumer outside the engine is the explicit ``velune
+native`` command (see ``velune/cli/commands/native.py``); chat, the REPL, ``ask``, ``run``, the
+Council and MCP never consult it. A config object without an ``orchestration`` section (older
+objects, test doubles) reads as off.
 """
 
 from __future__ import annotations

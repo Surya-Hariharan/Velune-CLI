@@ -37,7 +37,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Callable, Mapping
-from typing import Annotated, Literal, Protocol, runtime_checkable
+from typing import Annotated, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import Field, StringConstraints, model_validator
 
@@ -279,6 +279,29 @@ class _Progress:
         self.transcript_chars = 0
 
 
+class _AttemptGate:
+    """The per-model-call handle an invoker uses to reserve provider attempts on the run's ledger.
+
+    ``reserve()`` is called once right before each provider request; ``False`` means the attempt
+    budget is spent and no request may be sent. Counts are for the runner's bookkeeping only.
+    """
+
+    def __init__(self, ledger: Any) -> None:  # the run's ledger, borrowed from ``RunControl``
+        self._ledger = ledger
+        self.reserved = 0
+        self.denied = False
+
+    def reserve(self) -> bool:
+        if self._ledger.reserve_provider_attempt():
+            self.reserved += 1
+            return True
+        self.denied = True
+        return False
+
+
+AttemptGate = _AttemptGate  # public name, so the reasoning path reserves the same way
+
+
 class ActingAgentRunner:
     """``ActingRunner`` over an :class:`ActingInvoker` and a :class:`ToolExecutor`."""
 
@@ -400,6 +423,7 @@ class ActingAgentRunner:
             if refusal is not None:  # fail closed: no provider request is made
                 return self._failed(spec, ActingFailureKind.MODEL_BUDGET, progress)
             progress.turns = turn
+            gate = _AttemptGate(control.budget)
             request = ActingRequest(
                 run_id=input.run_id,
                 call_id=self._ids.next_id("call"),
@@ -410,12 +434,15 @@ class ActingAgentRunner:
                     SeatMessage(role="system", content=system),
                     SeatMessage(role="user", content=user),
                 ),
-                timeout_s=spec.budget.timeout_s,
+                # A provider call may not outlive the run's wall clock (reserve_model_call above has
+                # just shown some time remains; the floor only keeps the value valid).
+                timeout_s=min(spec.budget.timeout_s, max(control.budget.remaining_s(), 0.001)),
                 max_tokens=spec.budget.max_output_tokens,
                 offered_tools=offered,
                 # Once a tool call has been started anywhere in this run, a failed provider call is
                 # not retried: the run ends instead.
                 provider_retry_allowed=not (progress.records or control.budget.usage().calls > 0),
+                attempt_gate=gate,
             )
             try:
                 result = await asyncio.wait_for(
@@ -428,7 +455,11 @@ class ActingAgentRunner:
             except Exception:  # the invoker broke its never-raises contract
                 return self._failed(spec, ActingFailureKind.INTERNAL, progress)
 
-            control.budget.note_provider_attempts(result.attempts)
+            if gate.reserved == 0 and not gate.denied and result.attempts > 0:
+                # The invoker never used the gate (it does not reserve per attempt): account after.
+                control.budget.note_provider_attempts(result.attempts)
+            if gate.denied and not result.ok:  # the attempt budget refused a request: none was sent
+                return self._failed(spec, ActingFailureKind.MODEL_BUDGET, progress)
             if result.status is SeatStatus.CANCELLED or control.token.cancelled:
                 # Never an ordinary, retryable failure, and nothing further starts: no validation
                 # that could lead to a tool call, and no tool call.

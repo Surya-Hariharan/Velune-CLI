@@ -303,10 +303,11 @@ class ResourceEntry(BaseModel):
 class OrchestrationConfig(BaseModel):
     """Settings for the native multi-agent orchestration engine (velune.orchestration.engine)."""
 
-    # "off" is the default and the only behaviour today: the engine is a library with no caller.
-    # "on" is accepted so the setting is stable, but nothing reads it yet (no CLI, REPL or MCP
-    # path is wired to the engine). An unknown value falls back to "off" with a warning rather
-    # than failing config load.
+    # "off" is the default. "on" enables exactly one entry point, the explicit ``velune native``
+    # command (read-only, per-call approval, no fallback). Normal chat, the REPL, ``ask``, ``run``
+    # and the Council never read this flag. Set it with VELUNE_ORCHESTRATION__ENGINE=on or
+    # ``[orchestration] engine = "on"``. An unknown value falls back to "off" with a warning
+    # rather than failing config load.
     engine: str = "off"
 
     @field_validator("engine", mode="before")

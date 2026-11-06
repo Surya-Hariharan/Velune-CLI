@@ -11,7 +11,7 @@ not modified; a runtime binding for ``ReasoningInvoker`` is a later phase.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Protocol, runtime_checkable
+from typing import Annotated, Any, Protocol, runtime_checkable
 
 from pydantic import Field, StringConstraints, model_validator
 
@@ -105,6 +105,9 @@ class ActingRequest(ReasoningRequest):
     # Set by the trusted runner, never by a model. False once any tool call has been started in this
     # run: from then on a provider call must not be retried (and nothing may switch provider).
     provider_retry_allowed: bool = True
+    # Set by the trusted runner. An invoker that sends provider requests calls ``reserve()`` once
+    # immediately before EACH request and sends nothing when it returns False. Never serialized.
+    attempt_gate: Any = Field(default=None, exclude=True, repr=False)
 
 
 class ActingResult(Contract):

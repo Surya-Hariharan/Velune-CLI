@@ -283,6 +283,51 @@ def _clip_bytes(text: str, limit: int) -> tuple[str, bool]:
     return data[:limit].decode("utf-8", errors="ignore"), True
 
 
+_DISPLAY_VALUE_CHARS = 200
+_DISPLAY_KEY_CHARS = 64
+_DISPLAY_TOTAL_CHARS = 800
+
+
+def approval_display(call: ValidatedToolCall, scrub: Callable[[str], str] | None = None) -> str:
+    """Bounded, redacted, escaped ``key: value`` lines for a human approver. Presentation only.
+
+    Every value is secret-scrubbed first, then JSON-encoded with ASCII escapes (so control
+    characters, ANSI sequences, newlines and look-alike Unicode show as visible escapes), then
+    clipped. A clipped display says so; the approval still binds to the full-argument digest.
+    """
+    clean = scrub if scrub is not None else redact_secrets
+
+    def safe(text: str) -> str:
+        try:
+            return clean(text)
+        except Exception:
+            return "[unavailable]"  # never show unscrubbed text if scrubbing fails
+
+    def clip(text: str, limit: int) -> tuple[str, bool]:
+        return (text[:limit] + "…", True) if len(text) > limit else (text, False)
+
+    try:
+        arguments = call.arguments
+    except Exception:
+        return "(arguments unavailable)"
+    lines: list[str] = []
+    clipped = False
+    for key in sorted(arguments, key=str):
+        value = arguments[key]
+        raw = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+        shown_key, k_clip = clip(json.dumps(safe(str(key)))[1:-1], _DISPLAY_KEY_CHARS)
+        shown_val, v_clip = clip(json.dumps(safe(raw)), _DISPLAY_VALUE_CHARS)
+        clipped = clipped or k_clip or v_clip
+        lines.append(f"{shown_key}: {shown_val}")
+    text = "\n".join(lines) if lines else "(no arguments)"
+    if len(text) > _DISPLAY_TOTAL_CHARS:
+        text, clipped = text[:_DISPLAY_TOTAL_CHARS] + "…", True
+    if clipped:
+        total = len(call.arguments_json)
+        text += f"\n(display truncated; {total} chars of arguments in total)"
+    return text[:2000]
+
+
 class TrustedToolExecutor:
     """Runs validated, policy-permitted, approved and authorized read-only tool calls.
 
@@ -356,7 +401,9 @@ class TrustedToolExecutor:
                         call, "", ToolStatus.REFUSED, _BUDGET_CATEGORY[early], request_id=key
                     )
 
-            invocation = self._ledger.issue(call.name, call.call_digest)
+            invocation = self._ledger.issue(
+                call.name, call.call_digest, approval_display(call, self._scrub)
+            )
             invocation_id = invocation.invocation_id
             try:
                 decision = await self._approvals.request(invocation)

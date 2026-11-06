@@ -117,6 +117,23 @@ MAX_EVIDENCE_CHARS = 100_000
 EMPTY_EVIDENCE_TEXT = "[the tool returned no output]"
 EVIDENCE_CLIPPED_MARKER = "\n[output clipped by the driver]"
 UNSETTLED_KIND = "tool_outcome_unknown"
+DEADLINE_KIND = "deadline"
+BUDGET_KIND = "budget_exhausted"
+DEADLINE_MARGIN_S = 0.05
+# Failure kinds a spent clock can produce (a clamped provider call that timed out is reported as a
+# timeout or, by the acting runner, as a provider error) and kinds only a refused budget produces.
+# Each is reclassified only when the run's control shows the limit was actually reached.
+_DEADLINE_CANDIDATES = frozenset(
+    {
+        "agent_timeout",
+        "agent_unsupported",
+        "agent_provider_error",
+        "acting_timeout",
+        "acting_provider_error",
+        "acting_model_budget",
+    }
+)
+_BUDGET_CANDIDATES = frozenset({"agent_unsupported", "acting_model_budget"})
 _SETTLED_STATES = frozenset(
     {InvocationState.COMPLETED, InvocationState.FAILED, InvocationState.CANCELLED}
 )
@@ -295,15 +312,31 @@ class PlanReviewDriver:
         )
 
     async def run(
-        self, task: str, *, run_id: str | None = None, handle: RunHandle | None = None
+        self,
+        task: str,
+        *,
+        run_id: str | None = None,
+        handle: RunHandle | None = None,
+        control: RunControl | None = None,
     ) -> DriverResult:
-        """Run to a terminal state. Raises only ``asyncio.CancelledError``, after cancelling the run."""
+        """Run to a terminal state. Raises only ``asyncio.CancelledError``, after cancelling the run.
+
+        ``control`` is the caller's single :class:`RunControl` for the whole run. When given it is used
+        as is, from before the first planning step, so its wall clock covers plan, execute, review and
+        revision, and the driver never creates a competing one. It must belong to this run. Without
+        it the driver creates its own at the first EXECUTE, exactly as before.
+        """
+        if control is not None:
+            if run_id is not None and run_id != control.run_id:
+                raise DriverConfigError("the run control belongs to a different run")
+            run_id = control.run_id
         handle = handle if handle is not None else RunHandle()
         handle.state = RunState.start(
             run_id or self._ids.next_id("run"), max_attempts=self._max_attempts
         )
         store = ArtifactStore(self._ids)
         ctx = _RunContext()
+        ctx.control = control
         handle._context = ctx
         try:
             if not task.strip():
@@ -416,6 +449,8 @@ class PlanReviewDriver:
         accept: Callable[[str], str | None] | None = None,
     ) -> StoredArtifact | None:
         """Run one agent over trusted context. Returns the stored artifact, or ``None`` after failing the run."""
+        if not self._checkpoint(handle):
+            return None
         state = self._state(handle)
         spec = self._registry.get(role)
         outcome = await self._runner.run(
@@ -429,7 +464,7 @@ class PlanReviewDriver:
         )
         if not outcome.ok:
             failure = outcome.failure
-            kind_name = f"agent_{failure.kind.value}"[:40]  # type: ignore[union-attr]
+            kind_name = self._limit_kind(handle, f"agent_{failure.kind.value}"[:40])  # type: ignore[union-attr]
             self._fail(handle, kind_name, f"{role.value}: {failure.message}")  # type: ignore[union-attr]
             return None
         text = outcome.text or ""
@@ -469,6 +504,8 @@ class PlanReviewDriver:
             return await self._agent_phase(
                 handle, store, REASONER, Step.EXECUTE, ArtifactKind.PERSPECTIVE
             )
+        if not self._checkpoint(handle):
+            return None
         state = self._state(handle)
         spec = self._registry.get(REASONER)
         if ctx.control is None:
@@ -497,7 +534,8 @@ class PlanReviewDriver:
         self._absorb(ctx, outcome.tool_records)
         if not outcome.ok:
             failure = outcome.failure
-            self._fail(handle, failure.kind.value[:40], f"{spec.role.value}: {failure.message}")
+            kind_name = self._limit_kind(handle, failure.kind.value[:40])
+            self._fail(handle, kind_name, f"{spec.role.value}: {failure.message}")
             return None
         if not self._settled(handle, ctx):
             return None
@@ -586,6 +624,48 @@ class PlanReviewDriver:
         if spec.kind is AgentKind.ACTING:
             return items
         return tuple(item for item in items if item.origin is not ArtifactOrigin.TOOL)
+
+    def _checkpoint(self, handle: RunHandle) -> bool:
+        """Before any step starts: raise if the run was cancelled, fail it if its clock has run out.
+
+        Only meaningful with a caller-supplied control. Cancellation and the deadline stay distinct:
+        the first propagates as ``CancelledError``, the second ends the run as FAILED ``deadline``.
+        """
+        ctx = handle._context
+        control = ctx.control if ctx is not None else None
+        if control is None:
+            return True
+        if control.token.cancelled:
+            raise asyncio.CancelledError
+        if control.budget.past_deadline():
+            self._fail(handle, DEADLINE_KIND, "the run's time limit was reached")
+            return False
+        return True
+
+    def _limit_kind(self, handle: RunHandle, kind: str) -> str:
+        """Name a failure after the run limit that caused it, judged from the run's own control.
+
+        Only failure kinds that a spent clock or budget can produce are considered, and only when the
+        control actually shows the limit reached; any other failure keeps its own kind.
+        """
+        ctx = handle._context
+        control = ctx.control if ctx is not None else None
+        if control is None or not (kind in _DEADLINE_CANDIDATES or kind in _BUDGET_CANDIDATES):
+            return kind
+        ledger = control.budget
+        # A provider call is clamped to the clock's remainder, so its timeout fires at the deadline give
+        # or take timer granularity; a hair's margin keeps that from being reported as a plain timeout.
+        if kind in _DEADLINE_CANDIDATES and (
+            ledger.past_deadline() or ledger.remaining_s() < DEADLINE_MARGIN_S
+        ):
+            return DEADLINE_KIND
+        usage, limits = ledger.usage(), ledger.budget
+        if kind in _BUDGET_CANDIDATES and (
+            usage.model_calls >= limits.max_model_calls
+            or usage.provider_attempts >= limits.max_provider_attempts
+        ):
+            return BUDGET_KIND
+        return kind
 
     def _snapshot(self, handle: RunHandle) -> None:
         ctx = handle._context

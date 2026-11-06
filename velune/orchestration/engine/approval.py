@@ -34,6 +34,9 @@ class InvocationRequest(Contract):
     invocation_id: str = Field(min_length=8, max_length=64)
     tool: str
     call_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # Presentation only: sanitized, redacted, bounded text for a human. Never compared in
+    # ``consume`` and never an input to authorization.
+    display: str = Field(default="", max_length=2000)
 
 
 class ApprovalDecision(Contract):
@@ -94,12 +97,14 @@ class ApprovalLedger:
         self._new_id = new_id or (lambda: uuid.uuid4().hex)
         self._pending: dict[str, tuple[InvocationRequest, float]] = {}
 
-    def issue(self, tool: str, call_digest: str) -> InvocationRequest:
+    def issue(self, tool: str, call_digest: str, display: str = "") -> InvocationRequest:
         """Mint a fresh invocation identity and mark it pending."""
         invocation_id = self._new_id()
         if invocation_id in self._pending:  # never reuse a live identity
             raise RuntimeError("invocation id collision")
-        request = InvocationRequest(invocation_id=invocation_id, tool=tool, call_digest=call_digest)
+        request = InvocationRequest(
+            invocation_id=invocation_id, tool=tool, call_digest=call_digest, display=display
+        )
         self._pending[invocation_id] = (request, self._clock())
         return request
 
