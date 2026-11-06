@@ -42,8 +42,9 @@ listed where they differ.
 | 0.9.6 | 2026-07-18 | API-key lifecycle management, incremental repository cognition |
 | 0.9.7 | 2026-07-31 | Terminal zoom-lock investigation, REPL and packaging fixes |
 | 0.9.8 | 2026-10-05 | Install reliability: tested dependency floors, one-line installers, `velune doctor` rework |
+| 0.9.9 | 2026-11-07 | Opt-in native orchestration engine (`velune native`, experimental), local-model recovery, execution modes |
 
-Commits after `v0.9.8` on `main` are unreleased (see the `[Unreleased]`
+Commits after `v0.9.9` on `main` are unreleased (see the `[Unreleased]`
 section of the CHANGELOG).
 
 ## Architecture and feature milestones
@@ -81,6 +82,9 @@ relevant code.
   surface; `/fork`, `/retry`, `/trace` and `/theme` commands; provenance files
   (AUTHORS, NOTICE, GOVERNANCE); and a documentation overhaul with tests that
   keep the command reference in sync with the code.
+- **0.9.9:** the opt-in, experimental native orchestration engine (`velune native`, with an optional
+  `--plan-review` mode; see `docs/native-engine.md`), local-model recovery, and the Manual/Plan/Auto
+  execution modes.
 
 ## Security milestones
 

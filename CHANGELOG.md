@@ -8,6 +8,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+---
+
+## [0.9.9] - 2026-11-07
+
+### Added
+
+- **Native orchestration engine (experimental, opt-in, off by default).** `velune native "<task>"
+  --provider <id> --model <id>` runs a task on the new engine; it never runs unless you enable it
+  (`VELUNE_ORCHESTRATION__ENGINE=on`, or `[orchestration] engine = "on"` in `velune.toml`; a value in
+  `velune.toml` wins over the environment variable) and never falls back to normal chat, the Council,
+  another provider or another model. `chat`, `ask`, `run` and the Council are unchanged.
+  - **One read-only agent (default).** It may call a single tool, `read_file`. Every call is shown to
+    you and runs only after an explicit yes; the approval covers that one call and is never remembered.
+    `--yes` does not approve, and there is no approval without an interactive terminal.
+  - **`--plan-review` (opt-in).** A plan, an execution step (the only one that may read files) and a
+    review, with at most one revision. One provider and model do all three, so the review is a second
+    pass by the same model, not an independent check; the output says so.
+  - **One time limit and one request budget** (`--timeout`, default 120 s) cover every step, including
+    retries. Ctrl-C, a time limit, an exhausted budget and a refused tool call each end the run with a
+    distinct message; nothing further is requested afterwards. Errors are fixed messages with no raw
+    provider text, and credentials are scrubbed from everything sent to or returned from the model.
+  - See [docs/native-engine.md](docs/native-engine.md) for usage, limits and what is and is not tested.
+
 ### Added
 
 - **Local-model recovery.** Local models you activate or register are remembered in
