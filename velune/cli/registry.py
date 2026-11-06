@@ -90,6 +90,15 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "Ask a single one-off question.",
     ),
     CommandSpec(
+        "native",
+        "command",
+        "velune.cli.commands.native",
+        "native_command",
+        _CORE,
+        "Run a task on the opt-in native engine (read-only, approval-gated).",
+        bootstrap="light",
+    ),
+    CommandSpec(
         "init",
         "command",
         "velune.cli.commands.init",

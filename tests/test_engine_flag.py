@@ -142,13 +142,21 @@ def _imports(path: Path) -> set[str]:
     return found
 
 
+# Phase 4E-6: the single, explicit CLI entry point (``velune native``). It checks the flag first and
+# is imported lazily by the command registry only when that command is invoked. No other CLI, REPL,
+# council or MCP module may import the engine.
+NATIVE_CLI_COMMAND = PACKAGE / "cli" / "commands" / "native.py"
+
+
 def test_nothing_outside_the_engine_imports_the_engine_or_run_state():
-    """No CLI, REPL, council or MCP path is wired to the engine in Phase 4B."""
+    """Only the opt-in ``velune native`` command (Phase 4E-6) is wired to the engine."""
     offenders = []
     # Phase 4E-1: the one place allowed to bind engine ports to providers (not exported).
     adapters = PACKAGE / "orchestration" / "engine_adapters"
     for path in PACKAGE.rglob("*.py"):
         if ENGINE_DIR in path.parents or STATE_DIR in path.parents or adapters in path.parents:
+            continue
+        if path == NATIVE_CLI_COMMAND:
             continue
         for module in _imports(path):
             if module.startswith(("velune.orchestration.engine", "velune.orchestration.state")):
