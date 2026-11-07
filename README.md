@@ -132,11 +132,41 @@ is active. The usual problems with it:
   `python -m velune` (always works), or reinstall with `pipx`/the installer,
   which manage `PATH` for you.
 
-Every dependency ships prebuilt wheels for CPython 3.10–3.14 on Windows,
-macOS and Linux (x86-64 and ARM64), so no compiler or build step is needed.
-CI checks this for the lowest version of each dependency.
+On the platforms marked **Tested** below, the core dependencies install from
+prebuilt wheels for CPython 3.10–3.14, so no compiler or build step is needed.
+CI checks this, including at the lowest allowed version of each dependency.
 
 </details>
+
+#### Platform support
+
+| Platform | Status |
+|---|---|
+| Windows 10/11, x86-64 | **Tested** in CI |
+| macOS, Apple Silicon (arm64) | **Tested** in CI |
+| Linux, x86-64, glibc (Ubuntu, Debian, Fedora, …) | **Tested** in CI |
+| Linux, arm64, glibc | Not tested. Prebuilt wheels exist for the core dependencies. |
+| macOS, Intel (x86-64) | **Unverified.** In our lock file (`uv.lock`) the `cryptography` release has no macOS x86-64 wheel, so installing the base CLI may need a Rust toolchain to build it. The installer does not block it and it may work; we have not tested it or checked what PyPI currently offers. The optional `[rag]` extra is unavailable. |
+| Alpine / other musl Linux | Not tested. Prebuilt wheels exist for the core dependencies. |
+| WSL 2 | Not tested separately; treated as Linux. |
+| **Windows on ARM64** | **Unsupported.** The installer stops before downloading anything. Required dependencies (`cryptography`, `tiktoken`) publish no Windows ARM64 wheels, so an install would need a Rust and C++ build toolchain. |
+| 32-bit systems, BSD, other architectures | **Unsupported.** The installer stops before downloading anything. |
+
+**Tested** means a CI job installs and runs it. **Not tested** means the
+installer lets you proceed and our lock file has prebuilt wheels for the core
+dependencies, so we expect it to work, but no CI job covers it. **Unverified**
+means we found a gap that could make the install fail or need build tools, and
+have not confirmed either way. **Unsupported** means the installer refuses to
+run. None of these is a guarantee.
+
+**Optional extras.** The base CLI works without any extra; features that need
+one turn themselves off and `velune doctor` tells you which are available.
+The `[rag]` extra (LanceDB, PyArrow, Qdrant client) is the most restricted:
+LanceDB publishes prebuilt wheels only, with no source distribution, for
+Windows x86-64, macOS Apple Silicon and glibc Linux (x86-64 and arm64).
+`pip install 'velune-cli[rag]'` therefore fails on musl/Alpine, Intel Macs and
+Windows ARM64. The installer scripts install the base CLI only; add extras
+afterwards with pip, pipx or uv if your platform supports them.
 
 #### Verify the install
 
@@ -151,7 +181,8 @@ ends with **"✓ Core installation is healthy"** or a list of what's broken.
 Optional integrations (provider keys, a local Ollama, extras such as `[rag]`)
 are reported but never count as installation failures. The exit code is
 non-zero only when the core installation has a problem. `velune doctor --json`
-gives the same report as JSON for scripts and bug reports.
+gives the same report as JSON for scripts and bug reports; home-directory paths
+appear as `~` there so you can paste it without exposing your username.
 
 ### 2a. Local models (Ollama, free, no key)
 
@@ -355,6 +386,7 @@ velune health     # Provider reachability and response time
 
 ```bash
 velune doctor                         # Diagnose the installation (alias: doctor check)
+velune update --check [--pre] [--json] # Is a newer release on PyPI? Read-only; prints the command to run (exit 10 = update available)
 velune doctor providers|network
 velune logs [recent|live]
 velune status                         # Index freshness + workspace health
