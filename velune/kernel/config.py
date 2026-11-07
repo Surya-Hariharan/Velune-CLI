@@ -537,6 +537,55 @@ def get_default_config() -> VeluneConfig:
     return VeluneConfig()
 
 
+_config_log = logging.getLogger(__name__)
+
+# (path, reason) pairs already reported this process. Configuration is loaded
+# many times per run (every ConfigService.load()), and one broken file must
+# produce one warning, not a stream of identical ones.
+_REPORTED_CONFIG_PROBLEMS: set[tuple[str, str]] = set()
+
+
+def _describe_config_failure(exc: Exception) -> str:
+    """Say what went wrong with a config file without echoing its contents.
+
+    TOML parser and validation messages can quote the offending text, and a
+    config file may hold secrets, so only the error category, a line number or
+    the *names* of invalid settings are reported — never values.
+    """
+    if isinstance(exc, OSError):
+        return f"the file could not be read ({type(exc).__name__})"
+    if isinstance(exc, toml.TomlDecodeError):
+        line = getattr(exc, "lineno", None)
+        where = f" near line {line}" if isinstance(line, int) else ""
+        return f"it is not valid TOML{where}"
+    errors = getattr(exc, "errors", None)
+    if callable(errors):
+        try:
+            names = sorted({".".join(str(p) for p in e["loc"]) for e in errors()})
+        except Exception:
+            names = []
+        if names:
+            shown = ", ".join(names[:5]) + (", ..." if len(names) > 5 else "")
+            return f"these settings are invalid: {shown}"
+    return f"it could not be parsed ({type(exc).__name__})"
+
+
+def _warn_config_skipped(path: Path, reason: str) -> None:
+    from velune.core.privacy import redact_local_paths
+
+    key = (str(path), reason)
+    if key in _REPORTED_CONFIG_PROBLEMS:
+        return
+    _REPORTED_CONFIG_PROBLEMS.add(key)
+    _config_log.warning(
+        "Ignoring configuration file %s: %s. Using built-in defaults "
+        "(plus any VELUNE_* environment variables) instead. "
+        "Fix or remove the file to silence this warning.",
+        redact_local_paths(str(path)),
+        reason,
+    )
+
+
 class ConfigLoader:
     """Loads and overlays configuration from TOML and Environment variables."""
 
@@ -569,13 +618,19 @@ class ConfigLoader:
         override env vars when an explicit config file is present.  When no config
         file is found, ``VeluneConfig()`` is returned and env vars apply normally.
         """
-        if not self.config_path or not self.config_path.exists():
+        if not self.config_path:
             return get_default_config()
 
         try:
+            if not self.config_path.exists():
+                return get_default_config()
             data = toml.load(self.config_path)
             return VeluneConfig(**data)
-        except Exception:
+        except Exception as exc:
+            # Never crash startup over a bad config file, but never swallow it
+            # silently either: a user whose settings quietly vanish has no way
+            # to find out why.
+            _warn_config_skipped(self.config_path, _describe_config_failure(exc))
             return get_default_config()
 
     def load_with_env_overrides(self) -> VeluneConfig:
