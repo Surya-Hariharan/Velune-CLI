@@ -272,6 +272,15 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         _DIAG,
         "Trace a retrieval query through the search pipeline.",
     ),
+    CommandSpec(
+        "update",
+        "command",
+        "velune.cli.commands.update",
+        "update_cmd",
+        _DIAG,
+        "Check whether a newer Velune release is available (read-only).",
+        bootstrap="light",
+    ),
     # ── Trust & Recovery — never lose work ───────────────────────────────
     CommandSpec(
         "backup",

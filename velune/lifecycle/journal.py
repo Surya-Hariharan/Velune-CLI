@@ -1,0 +1,217 @@
+"""Lifecycle journal: what an operation intends to change, written *before* it does.
+
+If Velune (or the machine) dies half-way through a future update, the journal is
+how the next run learns what the previous installation looked like. It exists
+because uv overwrites its own receipt on reinstall (P2.0), so the previous
+version, pin and extras would otherwise be lost.
+
+This module is the data model and persistence only. It does not run uv, decide
+what to do after an interruption, or roll anything back.
+
+Durability, stated honestly
+---------------------------
+Writes go to a temporary file in the same directory, are flushed and fsynced,
+and are then moved into place with :func:`os.replace`. That gives readers
+either the old or the new file on the platforms where ``os.replace`` is atomic,
+but power-loss durability and Windows behaviour under antivirus/indexer locks
+are **not** tested here. A reader must therefore still cope with a missing,
+partial or malformed file; :func:`read_journal` never raises on bad content.
+
+A journal is never overwritten silently: an existing file means an earlier
+operation may not have finished, and the next step is a human or ``repair``
+decision, not a new write.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from velune.core.paths import app_data_root
+from velune.core.redaction import redact_secrets
+from velune.lifecycle.errors import ExitCode, LifecycleError
+from velune.lifecycle.ownership import OwnershipReport
+
+SCHEMA_VERSION = 1
+JOURNAL_FILENAME = "journal.json"
+OPERATIONS = ("update", "repair", "uninstall")
+PHASES = ("planned", "applying")
+_MAX_JOURNAL_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class JournalEntry:
+    """The pre-operation state needed to recover or explain an interrupted operation."""
+
+    operation: str
+    phase: str
+    started_at: str
+    from_version: str | None
+    specifier: str | None  # uv pin recorded in the receipt, e.g. "==0.9.9"
+    extras: tuple[str, ...] = ()
+    python_version: str | None = None  # running interpreter, e.g. "3.12.4"
+    python_base: str | None = None  # base interpreter recorded by uv
+    to_version: str | None = None
+    installer: str = "uv"
+    schema_version: int = field(default=SCHEMA_VERSION)
+
+    def to_json_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["extras"] = list(self.extras)
+        return data
+
+
+@dataclass(frozen=True)
+class JournalRead:
+    """Result of reading a journal. ``state`` is missing | ok | incomplete | malformed."""
+
+    state: str
+    entry: JournalEntry | None = None
+    problem: str | None = None
+
+
+def default_journal_path() -> Path:
+    """``<app data root>/lifecycle/journal.json`` (outside the tool environment)."""
+    return app_data_root() / "lifecycle" / JOURNAL_FILENAME
+
+
+def new_entry(
+    operation: str,
+    report: OwnershipReport,
+    *,
+    python_version: str,
+    to_version: str | None = None,
+    now: datetime | None = None,
+) -> JournalEntry:
+    """Build a ``planned`` entry from a *confirmed* uv-tool ownership report."""
+    if operation not in OPERATIONS:
+        raise ValueError(f"unknown lifecycle operation: {operation!r}")
+    if not report.mutation_allowed:
+        raise ValueError("a journal may only be created for a confirmed uv tool installation")
+    stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return JournalEntry(
+        operation=operation,
+        phase="planned",
+        started_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        from_version=report.version,
+        specifier=report.specifier,
+        extras=report.extras,
+        python_version=python_version,
+        python_base=report.python_base,
+        to_version=to_version,
+    )
+
+
+def _refuse_if_secret(data: dict[str, Any]) -> None:
+    """Never persist anything that looks like a credential."""
+    for key, value in data.items():
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if isinstance(item, str) and redact_secrets(item) != item:
+                raise ValueError(f"journal field {key!r} looks like a credential; not persisted")
+
+
+def write_journal(entry: JournalEntry, path: Path | None = None) -> Path:
+    """Persist *entry*; refuse to replace anything already at *path*.
+
+    Raises :class:`LifecycleError` (REFUSED) if a journal already exists or the
+    path is not a regular file, and ``ValueError`` if a field looks like a secret.
+    """
+    target = path or default_journal_path()
+    data = entry.to_json_dict()
+    _refuse_if_secret(data)
+
+    if os.path.lexists(target):
+        raise LifecycleError(
+            ExitCode.REFUSED,
+            "An earlier lifecycle operation did not finish (a journal file already exists). "
+            "Nothing was changed.",
+            recovery="Run 'velune doctor' to inspect it before trying again.",
+            details={"reason": "journal_exists"},
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    handle, tmp_name = tempfile.mkstemp(prefix=".journal-", suffix=".tmp", dir=target.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(data, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.path.lexists(target):  # lost a race with another writer
+            raise LifecycleError(
+                ExitCode.BUSY,
+                "Another lifecycle operation just created a journal. Nothing was changed.",
+                details={"reason": "journal_race"},
+            )
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return target
+
+
+def _str_or_none(value: Any) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    raise TypeError("expected a string")
+
+
+def read_journal(path: Path | None = None) -> JournalRead:
+    """Read a journal without ever raising on bad content."""
+    target = path or default_journal_path()
+    if not os.path.lexists(target):
+        return JournalRead("missing")
+    try:
+        if target.is_symlink() or not target.is_file():
+            return JournalRead("malformed", problem="journal path is not a regular file")
+        if target.stat().st_size > _MAX_JOURNAL_BYTES:
+            return JournalRead("malformed", problem="journal file is unreasonably large")
+        raw = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return JournalRead("malformed", problem="journal file is unreadable")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return JournalRead("malformed", problem="journal file is not valid JSON")
+    if not isinstance(data, dict):
+        return JournalRead("malformed", problem="journal is not a JSON object")
+    if data.get("schema_version") != SCHEMA_VERSION:
+        return JournalRead("malformed", problem="unsupported journal schema version")
+
+    required = ("operation", "phase", "started_at", "from_version", "specifier", "extras")
+    missing = [key for key in required if key not in data]
+    if missing:
+        return JournalRead("incomplete", problem="missing fields: " + ", ".join(missing))
+    try:
+        extras = data["extras"]
+        if not isinstance(extras, list) or not all(isinstance(e, str) for e in extras):
+            raise TypeError("extras must be a list of strings")
+        if data["operation"] not in OPERATIONS or data["phase"] not in PHASES:
+            raise TypeError("unknown operation or phase")
+        started_at = data["started_at"]
+        if not isinstance(started_at, str):
+            raise TypeError("started_at must be a string")
+        installer = data.get("installer", "uv")
+        if not isinstance(installer, str):
+            raise TypeError("installer must be a string")
+        entry = JournalEntry(
+            operation=data["operation"],
+            phase=data["phase"],
+            started_at=started_at,
+            from_version=_str_or_none(data["from_version"]),
+            specifier=_str_or_none(data["specifier"]),
+            extras=tuple(extras),
+            python_version=_str_or_none(data.get("python_version")),
+            python_base=_str_or_none(data.get("python_base")),
+            to_version=_str_or_none(data.get("to_version")),
+            installer=installer,
+        )
+    except TypeError as exc:
+        return JournalRead("malformed", problem=str(exc))
+    return JournalRead("ok", entry=entry)
