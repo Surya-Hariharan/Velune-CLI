@@ -65,9 +65,18 @@ jobs:
           fi
 
 
+  # The job above is a quick single-platform check. This runs the repository's
+  # complete CI pipeline (Windows/macOS/Linux x Python 3.10-3.14, wheel and
+  # installer smoke tests) so a tag cannot publish while that matrix is red.
+  full-ci:
+    name: Full CI Matrix
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
     name: Build Package
-    needs: ci
+    needs: [ci, full-ci]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -102,11 +111,36 @@ jobs:
       - name: Validate metadata (twine check --strict)
         run: twine check --strict dist/*
 
+      - name: Verify artifacts are complete and match the tag
+        run: |
+          # Exactly one non-empty wheel and sdist, both opening cleanly, with
+          # the tagged version in their metadata.
+          python scripts/release_artifacts.py verify \
+            --dist dist --version "${GITHUB_REF#refs/tags/v}"
+
+      - name: Generate SHA-256 checksums
+        run: |
+          # Written outside dist/ so the PyPI upload never sees it.
+          python scripts/release_artifacts.py checksums \
+            --dist dist --output checksums/SHA256SUMS
+
+      # Artifact names are scoped to the whole workflow run, and the full-ci job
+      # (ci.yml, run inside this same run) already uploads one named "dist".
+      # Release artifacts therefore carry a "release-" prefix; reusing "dist"
+      # would make this upload fail with a name conflict.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: release-dist
           path: dist/
+          if-no-files-found: error
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums
+          path: checksums/SHA256SUMS
+          if-no-files-found: error
 
   publish:
     name: Publish to PyPI
@@ -120,8 +154,20 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: release-dist
           path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-checksums
+          path: checksums/
+
+      - name: Verify artifacts are unchanged since the build job
+        run: |
+          # Integrity check only (corruption or truncation in transit between
+          # jobs); it does not prove who built the files.
+          (cd dist && sha256sum --check --strict ../checksums/SHA256SUMS)
+          test "$(ls dist | wc -l)" -eq "$(wc -l < checksums/SHA256SUMS)"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -141,8 +187,17 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: release-dist
           path: dist/
+
+      - name: Download checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: release-checksums
+          path: checksums/
+
+      - name: Verify artifacts match the checksum manifest
+        run: python3 scripts/release_artifacts.py check --dist dist --sums checksums/SHA256SUMS
 
       - name: Get version from tag
         id: get_version
@@ -190,6 +245,7 @@ jobs:
           {
             echo "body<<CHANGELOG_EOF"
             cat /tmp/changelog_body.txt
+            printf '\n\n---\n\n**Verifying downloads.** `SHA256SUMS` lists the SHA-256 of each file attached to this release; run `sha256sum --check SHA256SUMS` in the folder holding them. This detects corrupted or mismatched downloads. It is not a signature and does not prove who published the files.\n'
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -198,7 +254,10 @@ jobs:
         with:
           name: "Velune CLI ${{ steps.get_version.outputs.clean_version }}"
           tag_name: ${{ steps.get_version.outputs.version }}
-          files: dist/*
+          files: |
+            dist/*
+            checksums/SHA256SUMS
+          fail_on_unmatched_files: true
           body: ${{ steps.changelog.outputs.body }}
           draft: false
           prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') }}

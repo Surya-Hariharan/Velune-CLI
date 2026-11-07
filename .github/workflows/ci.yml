@@ -5,6 +5,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # Lets release.yml run this same pipeline (full OS x Python matrix and the
+  # install jobs) as a gate before anything is published.
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
