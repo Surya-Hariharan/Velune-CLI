@@ -73,18 +73,30 @@ def _fatal_environment_error(exc: BaseException) -> None:
             installed = f"version {version(dist)} is installed"
         except Exception:
             installed = "it is not installed"
+        try:  # stdlib-only helper; a failure here must not hide the real error
+            from velune.lifecycle.hints import is_uv_tool_environment, uv_reinstall_advice
+
+            uv_managed = is_uv_tool_environment()
+        except Exception:
+            uv_managed = False
+        if uv_managed:
+            # A uv tool environment has no pip, so the pip advice cannot work here.
+            fix = f"How to fix:\n  {uv_reinstall_advice()}\n"
+        else:
+            fix = (
+                "How to fix:\n"
+                "  1. Upgrade Velune and its dependencies in this Python:\n"
+                f'       "{sys.executable}" -m pip install --upgrade velune-cli\n'
+                "  2. Or install Velune in its own isolated environment, so no other\n"
+                "     tool can change its dependencies (recommended):\n"
+                "       pipx install velune-cli     (or: uv tool install velune-cli)\n"
+            )
         msg = (
             f"Velune could not start because its dependency '{dist}' is missing or "
             f"incompatible ({installed}).\n\n"
             f"  Underlying error: {type(exc).__name__}: {exc}\n\n"
             "This usually means another tool in the same Python environment\n"
-            "installed a different version of that package.\n\n"
-            "How to fix:\n"
-            "  1. Upgrade Velune and its dependencies in this Python:\n"
-            f'       "{sys.executable}" -m pip install --upgrade velune-cli\n'
-            "  2. Or install Velune in its own isolated environment, so no other\n"
-            "     tool can change its dependencies (recommended):\n"
-            "       pipx install velune-cli     (or: uv tool install velune-cli)\n"
+            "installed a different version of that package.\n\n" + fix
         )
         sys.stderr.write("\n" + msg + "\n")
         raise SystemExit(1)

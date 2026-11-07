@@ -346,10 +346,16 @@ def _run_doctor(*, fix: bool, json_output: bool, envelope: bool) -> None:
     if json_output:
         import json
 
+        from velune.core.privacy import sanitize_diagnostics
+
         payload: object = results
         if envelope:
             payload = {"environment": _environment_summary(), **verdict, "checks": results}
-        print(json.dumps(payload, indent=2))
+        # The JSON report is meant to be pasted into bug reports, so home
+        # directories (which embed the OS username) are shown as "~" and any
+        # credential-shaped text is redacted. The human-readable report above
+        # keeps full paths: it is only ever shown on the user's own screen.
+        print(json.dumps(sanitize_diagnostics(payload), indent=2))
     else:
         _render_environment(_environment_summary())
         _render_results(results)
@@ -600,12 +606,20 @@ def _check_core_dependencies() -> dict:
     problems = [f"missing: {', '.join(missing)}"] if missing else []
     if outdated:
         problems.append(f"incompatible: {', '.join(outdated)}")
+    from velune.lifecycle.hints import is_uv_tool_environment, uv_reinstall_advice
+
+    if is_uv_tool_environment():
+        # A uv tool environment has no pip; the pip advice below cannot work there.
+        fix = ". " + uv_reinstall_advice()
+    else:
+        fix = (
+            f'. Fix: "{sys.executable}" -m pip install --upgrade velune-cli '
+            "(or install isolated: pipx install velune-cli)."
+        )
     return {
         "name": "Core Dependencies",
         "status": "fail",
-        "message": "; ".join(problems)
-        + f'. Fix: "{sys.executable}" -m pip install --upgrade velune-cli '
-        "(or install isolated: pipx install velune-cli).",
+        "message": "; ".join(problems) + fix,
     }
 
 
