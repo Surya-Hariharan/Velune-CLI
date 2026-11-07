@@ -2,18 +2,21 @@
 
 What this does, in order, stopping at the first problem:
 
-1. Confirm the installation is a uv-managed tool (P2.1 ownership). Anything
-   else is refused *before* any network access.
+1. Work out how this copy was installed (P2.1 ownership detection). This only
+   *labels* the result; it never blocks the check. Whether Velune may change an
+   installation is a different question, answered by ``require_uv_tool`` in the
+   mutating commands, and that gate is unchanged.
 2. Make sure version comparison is possible (``packaging`` importable).
 3. Read the installed version from package metadata.
-4. Fetch the published release list from PyPI (metadata only).
+4. Fetch the published file list from PyPI's Simple API (metadata only).
 5. Select the latest applicable release and compare.
 
 It never runs uv install/upgrade/uninstall, writes no journal or receipt,
 touches no configuration or user data, and downloads no package files. The only
 subprocess it may start is the read-only ``uv tool dir`` inside ownership
 detection. The command shown to the user is text for them to run; Velune does
-not run it.
+not run it, and it is only offered for a confirmed uv-managed tool. For every
+other installation the user is pointed at whatever owns it.
 """
 
 from __future__ import annotations
@@ -26,9 +29,9 @@ from typing import Any
 from velune.lifecycle.errors import ExitCode, LifecycleError, LifecycleResult
 from velune.lifecycle.index import INDEX_HOST, fetch_releases, index_override_warnings
 from velune.lifecycle.ownership import (
+    OwnershipKind,
     OwnershipReport,
     detect_ownership,
-    require_uv_tool,
 )
 from velune.lifecycle.safety import manual_command, pinned_install_command
 from velune.lifecycle.versions import (
@@ -43,8 +46,36 @@ from velune.lifecycle.versions import (
 COMMAND = "update"
 
 
-def _next_action(report: OwnershipReport, latest: Any, platform: str) -> tuple[str, str]:
-    """``(command, guidance)`` for moving to *latest*. Never executed by Velune."""
+_NOT_UV_GUIDANCE = {
+    OwnershipKind.NOT_UV: (
+        "This Velune was not installed as a uv tool. Update it with the tool that "
+        "installed it (for example pip or pipx), or reinstall with the official "
+        "installer (see the Install section of the README)."
+    ),
+    OwnershipKind.EDITABLE: (
+        "This is a development (editable) install. Update your development checkout "
+        "with git instead."
+    ),
+    OwnershipKind.AMBIGUOUS: (
+        "Velune could not confirm how it was installed, so no update command is "
+        "suggested. Run 'velune doctor' for details, or reinstall with the official "
+        "installer (see the Install section of the README)."
+    ),
+    OwnershipKind.INDETERMINATE: (
+        "Velune could not determine how it was installed, so no update command is "
+        "suggested. Run 'velune doctor' for details, or reinstall with the official "
+        "installer (see the Install section of the README)."
+    ),
+}
+
+
+def _next_action(report: OwnershipReport, latest: Any, platform: str) -> tuple[str | None, str]:
+    """``(command, guidance)`` for moving to *latest*. Never executed by Velune.
+
+    The command is ``None`` unless the installation is a confirmed uv tool.
+    """
+    if report.kind is not OwnershipKind.UV_TOOL:
+        return None, _NOT_UV_GUIDANCE[report.kind]
     if latest.is_prerelease:
         # `uv tool upgrade` is not shown to honour pre-release opt-in; an exact
         # install is the form the spike verified.
@@ -61,8 +92,17 @@ def _next_action(report: OwnershipReport, latest: Any, platform: str) -> tuple[s
     return command, guidance
 
 
-def _warnings(report: OwnershipReport, latest: Any, environ: Mapping[str, str]) -> list[str]:
+def _common_warnings(report: OwnershipReport, environ: Mapping[str, str]) -> list[str]:
     notes = index_override_warnings(environ)
+    if report.kind in (OwnershipKind.AMBIGUOUS, OwnershipKind.INDETERMINATE):
+        notes.append("Ownership could not be confirmed; this installation will not be changed.")
+    return notes
+
+
+def _warnings(report: OwnershipReport, latest: Any, environ: Mapping[str, str]) -> list[str]:
+    notes = _common_warnings(report, environ)
+    if report.kind is not OwnershipKind.UV_TOOL:
+        return notes
     if report.specifier:
         notes.append(
             f"This installation is pinned ({printable(report.specifier)}), so "
@@ -96,7 +136,6 @@ def run_update_check(
     try:
         report = detect()
         installation = report.installation
-        require_uv_tool(report)
 
         tools = load_tools()
         installed = parse_installed(tools, report.version)
@@ -133,7 +172,7 @@ def run_update_check(
                 result=data,
                 warnings=tuple(_warnings(report, latest, env)),
             )
-        notes = tuple(index_override_warnings(env))
+        notes = tuple(_common_warnings(report, env))
         if outcome == "same":
             message = f"Velune {installed} is up to date (latest on {INDEX_HOST}: {latest})."
         else:
