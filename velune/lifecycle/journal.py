@@ -6,7 +6,8 @@ because uv overwrites its own receipt on reinstall (P2.0), so the previous
 version, pin and extras would otherwise be lost.
 
 This module is the data model and persistence only. It does not run uv, decide
-what to do after an interruption, or roll anything back.
+what to do after an interruption, or roll anything back. A command may advance
+the phase of, or clear, only the journal it wrote itself.
 
 Durability, stated honestly
 ---------------------------
@@ -27,7 +28,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,79 @@ def _refuse_if_secret(data: dict[str, Any]) -> None:
                 raise ValueError(f"journal field {key!r} looks like a credential; not persisted")
 
 
+def _stage(target: Path, data: dict[str, Any]) -> Path:
+    """Write *data* to a fsynced temporary file next to *target*; return its path."""
+    handle, tmp_name = tempfile.mkstemp(prefix=".journal-", suffix=".tmp", dir=target.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(data, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return tmp
+
+
+def retained_error(path: Path, read: JournalRead | None = None) -> LifecycleError:
+    """The REFUSED error for "a journal from an earlier operation is still there".
+
+    Explains *why* nothing will run, what the journal says, and what a person can
+    safely check. It never tells anyone to delete the file unconditionally, and it
+    does not claim any command (there is no ``repair`` yet) can inspect it.
+    """
+    read = read or read_journal(path)
+    entry = read.entry
+    details: dict[str, Any] = {"reason": "journal_exists", "journal": str(path)}
+    if entry is None:
+        details["journal_state"] = read.state
+        what = (
+            f"The record of the earlier operation could not be read ({read.problem or read.state}), "
+            "so what it was doing is unknown."
+        )
+    else:
+        details |= {
+            "journal_state": "ok",
+            "operation": entry.operation,
+            "phase": entry.phase,
+            "started_at": entry.started_at,
+            "from_version": entry.from_version,
+            "to_version": entry.to_version,
+        }
+        span = f"{entry.from_version or '?'} -> {entry.to_version or '?'}"
+        if entry.phase == "planned":
+            what = (
+                f"It was recorded at {entry.started_at} ({entry.operation}, {span}) but stopped "
+                "before uv was started, so it should not have changed the installation."
+            )
+        else:
+            what = (
+                f"It was recorded at {entry.started_at} ({entry.operation}, {span}). uv may have "
+                "run, and the result was not confirmed, so the installation may be partly updated."
+            )
+    versions = " or ".join(
+        v for v in (entry and entry.from_version, entry and entry.to_version) if v
+    )
+    return LifecycleError(
+        ExitCode.REFUSED,
+        "An earlier lifecycle operation did not finish, so Velune will not start another one "
+        f"until it is looked at. {what} Nothing was changed.",
+        recovery=(
+            "Check before doing anything else: (1) no other Velune or uv process is running; "
+            "(2) 'uv tool list' shows velune-cli"
+            + (f" at {versions}" if versions else "")
+            + ", and 'velune --version' runs. If both hold, the journal is stale: remove the "
+            f"file at {path} yourself and run the command again. If velune-cli is missing, at "
+            "another version, or does not run, reinstall it first with "
+            "'uv tool install --force velune-cli' (add your extras if you use any), re-check, "
+            "then remove the journal. Do not delete it before checking."
+        ),
+        details=details,
+    )
+
+
 def write_journal(entry: JournalEntry, path: Path | None = None) -> Path:
     """Persist *entry*; refuse to replace anything already at *path*.
 
@@ -127,23 +201,11 @@ def write_journal(entry: JournalEntry, path: Path | None = None) -> Path:
     _refuse_if_secret(data)
 
     if os.path.lexists(target):
-        raise LifecycleError(
-            ExitCode.REFUSED,
-            "An earlier lifecycle operation did not finish (a journal file already exists). "
-            "Nothing was changed.",
-            recovery="Run 'velune doctor' to inspect it before trying again.",
-            details={"reason": "journal_exists"},
-        )
+        raise retained_error(target)
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    handle, tmp_name = tempfile.mkstemp(prefix=".journal-", suffix=".tmp", dir=target.parent)
-    tmp = Path(tmp_name)
+    tmp = _stage(target, data)
     try:
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(data, stream, indent=2, sort_keys=True)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
         if os.path.lexists(target):  # lost a race with another writer
             raise LifecycleError(
                 ExitCode.BUSY,
@@ -215,3 +277,51 @@ def read_journal(path: Path | None = None) -> JournalRead:
     except TypeError as exc:
         return JournalRead("malformed", problem=str(exc))
     return JournalRead("ok", entry=entry)
+
+
+def _is_ours(path: Path, expected: JournalEntry) -> bool:
+    """True only if the journal on disk is the one this operation wrote."""
+    current = read_journal(path)
+    return (
+        current.state == "ok"
+        and current.entry is not None
+        and (current.entry.operation, current.entry.started_at, current.entry.from_version)
+        == (expected.operation, expected.started_at, expected.from_version)
+    )
+
+
+def advance_phase(entry: JournalEntry, phase: str, path: Path | None = None) -> JournalEntry:
+    """Move the journal *entry* wrote to *phase*. Refuses if the file is not that journal."""
+    target = path or default_journal_path()
+    if phase not in PHASES:
+        raise ValueError(f"unknown journal phase: {phase!r}")
+    if not _is_ours(target, entry):
+        raise LifecycleError(
+            ExitCode.REFUSED,
+            "The lifecycle journal changed while the operation was starting, so Velune stopped "
+            "before running anything. Nothing was changed.",
+            recovery=(
+                "Another Velune process may be running a lifecycle operation. Wait for it to "
+                "finish, then try again. Do not delete the journal while it may be in use."
+            ),
+            details={"reason": "journal_not_ours"},
+        )
+    updated = replace(entry, phase=phase)
+    tmp = _stage(target, updated.to_json_dict())
+    try:
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return updated
+
+
+def clear_journal(entry: JournalEntry, path: Path | None = None) -> bool:
+    """Delete the journal if (and only if) it is the one *entry* wrote. True if removed."""
+    target = path or default_journal_path()
+    if not _is_ours(target, entry):
+        return False
+    try:
+        target.unlink()
+    except OSError:
+        return False
+    return True

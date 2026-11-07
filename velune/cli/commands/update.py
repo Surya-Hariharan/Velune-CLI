@@ -1,8 +1,8 @@
 """``velune update --check`` — is a newer release available? (read-only)
 
-Thin CLI surface over :mod:`velune.lifecycle.check`. Applying updates is not
-implemented yet: without ``--check`` the command says so and exits with the
-usage code instead of doing anything.
+Thin CLI surface. ``--check`` is :mod:`velune.lifecycle.check` (read-only, any
+installation). Without it, :mod:`velune.lifecycle.apply` updates a confirmed
+uv-managed tool and refuses everything else before changing anything.
 """
 
 from __future__ import annotations
@@ -26,29 +26,37 @@ def update_cmd(
     check: bool = typer.Option(
         False,
         "--check",
-        help="Check whether a newer release exists. Read-only; changes nothing.",
+        help="Only check whether a newer release exists. Read-only; changes nothing.",
     ),
     pre: bool = typer.Option(
         False, "--pre", help="Also consider pre-releases (for this check only)."
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the result as JSON."),
 ) -> None:
-    """Check whether a newer Velune release is available.
+    """Check for, or apply, a newer Velune release.
 
-    Exit codes: 0 up to date, 10 update available, 3 this installation is not a
-    uv-managed tool (nothing checked), 4 the package index could not be read,
-    1 other error, 2 bad usage.
+    With --check nothing is changed. Without it, a uv-managed installation is
+    updated with 'uv tool upgrade' (never on Windows: update manually there).
+
+    Exit codes: 0 up to date / updated, 10 update available (--check), 3 refused (not
+    a confirmed uv tool, pinned, Windows, unfinished journal), 4 the package index could
+    not be read, 1 other error or unverifiable result, 2 bad usage, 130 cancelled.
     """
     if not check:
-        _emit(
-            LifecycleResult(
-                "update",
-                exit_code=ExitCode.USAGE,
-                message="Applying updates is not available yet.",
-                recovery="Use 'velune update --check' to see whether a newer release exists.",
-            ),
-            json_output,
-        )
+        if pre:
+            _emit(
+                LifecycleResult(
+                    "update",
+                    exit_code=ExitCode.USAGE,
+                    message="--pre only works with --check; applying a pre-release is not supported.",
+                    recovery="Use 'velune update --check --pre' to see whether one exists.",
+                ),
+                json_output,
+            )
+            return
+        from velune.lifecycle.apply import run_update
+
+        _emit(run_update(), json_output)
         return
 
     from velune.lifecycle.check import run_update_check

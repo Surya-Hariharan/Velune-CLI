@@ -386,7 +386,8 @@ velune health     # Provider reachability and response time
 
 ```bash
 velune doctor                         # Diagnose the installation (alias: doctor check)
-velune update --check [--pre] [--json] # Is a newer release on PyPI? Read-only; prints the command to run (exit 10 = update available)
+velune update --check [--pre] [--json] # Is a newer release on PyPI? Read-only, works for any install; prints a uv command only for uv-installed copies (exit 10 = update available)
+velune update [--json]                 # Apply the update to a uv-installed copy via `uv tool upgrade` (refused for pip/editable/pinned installs and on Windows, where it stays manual)
 velune doctor providers|network
 velune logs [recent|live]
 velune status                         # Index freshness + workspace health

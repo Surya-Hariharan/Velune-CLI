@@ -198,26 +198,153 @@ def test_missing_packaging_does_not_leak_import_error_text(monkeypatch):
 # ---- ownership --------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "kind",
-    [
-        OwnershipKind.NOT_UV,
-        OwnershipKind.EDITABLE,
-        OwnershipKind.AMBIGUOUS,
-        OwnershipKind.INDETERMINATE,
-    ],
+NON_UV_KINDS = [
+    OwnershipKind.NOT_UV,
+    OwnershipKind.EDITABLE,
+    OwnershipKind.AMBIGUOUS,
+    OwnershipKind.INDETERMINATE,
+]
+ALL_KINDS = [OwnershipKind.UV_TOOL, *NON_UV_KINDS]
+_MUTATING = (
+    "uv tool upgrade",
+    "uv tool install",
+    "uv tool uninstall",
+    "pip install",
+    "pipx upgrade",
+    "--force",
 )
-def test_anything_but_a_confirmed_uv_tool_is_refused_before_any_work(kind):
-    fetched, loaded = [], []
-    result = check_mod.run_update_check(
-        detect=lambda: uv_report(kind=kind),
-        load_tools=lambda: loaded.append(1),
-        fetch=lambda: fetched.append(1) or {},
-    )
-    assert result.exit_code is ExitCode.REFUSED and result.exit_code == 3
-    assert "Nothing was changed" in (result.recovery or "")
-    assert result.installation["owned"] is False and result.installation["kind"] == kind.value
-    assert fetched == [] and loaded == []
+
+
+@pytest.mark.parametrize("kind", ALL_KINDS)
+def test_the_check_runs_for_every_ownership_status(kind):
+    needs_packaging()
+    result, calls = run(uv_report(kind=kind), rel("0.9.9"))
+    assert result.exit_code is ExitCode.OK and calls["fetch"] == 1
+    assert result.installation["kind"] == kind.value
+    assert result.installation["owned"] is (kind is OwnershipKind.UV_TOOL)
+    assert result.result["latest_version"] == "0.9.9"
+
+
+@pytest.mark.parametrize("kind", ALL_KINDS)
+def test_json_schema_is_identical_for_every_ownership_status(kind):
+    needs_packaging()
+    base = set(run(uv_report(), rel("0.9.10"))[0].to_dict())
+    data = run(uv_report(kind=kind), rel("0.9.10"))[0].to_dict()
+    assert set(data) == base
+    assert set(data["result"]) == {
+        "installed_version",
+        "latest_version",
+        "update_available",
+        "include_prereleases",
+        "index",
+    }
+    assert data["status"] == "update_available" and data["exit_code"] == 10
+
+
+@pytest.mark.parametrize("kind", NON_UV_KINDS)
+def test_non_uv_installs_get_the_answer_but_never_a_command(kind):
+    needs_packaging()
+    result, _ = run(uv_report(kind=kind), rel("0.9.9", "0.9.10"), platform="linux")
+    assert result.exit_code is ExitCode.UPDATE_AVAILABLE
+    assert result.manual_command is None
+    text = result.render_text().lower()
+    assert "run:" not in text
+    assert not any(token in text for token in _MUTATING)
+    assert result.to_dict()["recovery"]["manual_command"] is None
+
+
+def test_not_uv_points_at_the_owning_tool():
+    needs_packaging()
+    text = run(uv_report(kind=OwnershipKind.NOT_UV), rel("0.9.10"))[0].recovery
+    assert "tool that installed it" in text and "not installed as a uv tool" in text
+
+
+def test_editable_points_at_the_development_checkout():
+    needs_packaging()
+    text = run(uv_report(kind=OwnershipKind.EDITABLE), rel("0.9.10"))[0].recovery
+    assert "development" in text and "git" in text
+
+
+@pytest.mark.parametrize("kind", [OwnershipKind.AMBIGUOUS, OwnershipKind.INDETERMINATE])
+def test_unconfirmed_ownership_is_said_plainly_and_never_claims_uv(kind):
+    needs_packaging()
+    for releases in (rel("0.9.10"), rel("0.9.9")):  # update available, and up to date
+        result, _ = run(uv_report(kind=kind), releases)
+        assert any("could not be confirmed" in w for w in result.warnings)
+        assert result.installation["owned"] is False
+    update = run(uv_report(kind=kind), rel("0.9.10"))[0]
+    assert "could not" in update.recovery and "uv tool" not in update.recovery.lower()
+
+
+def test_confirmed_uv_tool_still_gets_the_exact_command():
+    needs_packaging()
+    result, _ = run(uv_report(), rel("0.9.10"))
+    assert result.manual_command == "uv tool upgrade velune-cli"
+    assert not any("could not be confirmed" in w for w in result.warnings)
+
+
+@pytest.mark.parametrize("kind", NON_UV_KINDS)
+def test_uv_only_notes_are_not_shown_for_other_installs(kind):
+    needs_packaging()
+    report = uv_report(kind=kind, specifier="==0.9.8", installed_from_local_file=True)
+    result, _ = run(report, rel("0.9.10"), platform="win32")
+    text = " ".join(result.warnings) + (result.recovery or "")
+    assert "pinned" not in text and "local file" not in text
+    assert "uv tool upgrade" not in text and "--force" not in text
+    assert "Windows" not in text
+
+
+@pytest.mark.parametrize("kind", NON_UV_KINDS)
+def test_a_network_failure_is_still_reported_for_every_status(kind):
+    def down():
+        raise LifecycleError(ExitCode.NETWORK, "no route. Nothing was changed.")
+
+    result, _ = run(uv_report(kind=kind), fetch=down)
+    assert result.exit_code is ExitCode.NETWORK
+    assert result.installation["kind"] == kind.value
+
+
+# ---- mutation safety is unchanged (regression) -------------------------------
+
+
+@pytest.mark.parametrize("kind", NON_UV_KINDS)
+def test_mutation_is_still_refused_for_every_non_uv_status(kind):
+    from velune.lifecycle.ownership import require_uv_tool
+
+    report = uv_report(kind=kind)
+    assert report.mutation_allowed is False
+    with pytest.raises(LifecycleError) as caught:
+        require_uv_tool(report)
+    assert caught.value.code is ExitCode.REFUSED
+    assert "Nothing was changed" in (caught.value.recovery or "")
+
+
+def test_only_a_confirmed_uv_tool_passes_the_mutation_gate():
+    from velune.lifecycle.ownership import require_uv_tool
+
+    report = uv_report()
+    assert report.mutation_allowed is True and require_uv_tool(report) is report
+
+
+def test_windows_still_refuses_to_mutate_the_running_installation():
+    from velune.lifecycle.safety import check_not_self_mutation
+
+    report = uv_report(prefix="C:/tools/velune-cli")
+    for operation in ("update", "repair", "uninstall"):
+        with pytest.raises(LifecycleError) as caught:
+            check_not_self_mutation(
+                operation, report, platform="win32", current_prefix="C:/tools/velune-cli"
+            )
+        assert caught.value.code is ExitCode.REFUSED
+        assert caught.value.manual_command
+    # a different environment is the only thing allowed through
+    check_not_self_mutation("update", report, platform="win32", current_prefix="C:/elsewhere/venv")
+
+
+def test_the_check_never_calls_the_mutation_gates():
+    source = Path(check_mod.__file__).read_text(encoding="utf-8")
+    assert "require_uv_tool" not in source.split('"""', 2)[2]
+    assert "check_not_self_mutation" not in source.split('"""', 2)[2]
 
 
 def test_detection_crash_is_an_error_not_a_traceback():
@@ -397,7 +524,9 @@ def _tree_digest(root: Path) -> dict[str, str]:
     }
 
 
-def test_check_changes_nothing_on_disk_and_starts_no_process(tmp_path, monkeypatch):
+def test_check_changes_nothing_on_disk_and_starts_no_process_for_any_ownership(
+    tmp_path, monkeypatch
+):
     needs_packaging()
     env_dir = tmp_path / "tools" / "velune-cli"
     env_dir.mkdir(parents=True)
@@ -431,13 +560,15 @@ def test_check_changes_nothing_on_disk_and_starts_no_process(tmp_path, monkeypat
     monkeypatch.setattr(journal, "write_journal", forbidden)
 
     before = _tree_digest(tmp_path)
-    for releases in (rel("0.9.10"), rel("0.9.9"), {}):
-        run(releases=releases)
+    for kind in ALL_KINDS:
+        for releases in (rel("0.9.10"), rel("0.9.9"), {}):
+            run(uv_report(kind=kind), releases)
     after = _tree_digest(tmp_path)
 
     assert after == before
     assert not journal.default_journal_path().exists()
     assert not (data / "lifecycle").exists()
+    assert not (tmp_path / ".git").exists()  # no repository was created or touched
 
 
 def test_the_check_module_has_no_mutating_uv_calls():
@@ -460,14 +591,32 @@ def _cli() -> typer.Typer:
     return app
 
 
-def test_without_check_nothing_runs_and_exit_is_usage(monkeypatch):
+def test_without_check_the_apply_path_runs_and_the_check_does_not(monkeypatch):
+    from velune.lifecycle import apply as apply_mod
+    from velune.lifecycle.errors import LifecycleResult
+
     def forbidden(**k):
-        raise AssertionError("must not run the check")
+        raise AssertionError("must not run the read-only check directly")
 
     monkeypatch.setattr(check_mod, "run_update_check", forbidden)
+    monkeypatch.setattr(
+        apply_mod,
+        "run_update",
+        lambda **k: LifecycleResult("update", exit_code=ExitCode.REFUSED, message="refused"),
+    )
     res = CliRunner().invoke(_cli(), [])
-    assert res.exit_code == 2
-    assert "not available yet" in res.output and "--check" in res.output
+    assert res.exit_code == 3 and "refused" in res.output
+
+
+def test_pre_without_check_is_a_usage_error_and_runs_nothing(monkeypatch):
+    from velune.lifecycle import apply as apply_mod
+
+    def forbidden(**k):
+        raise AssertionError("must not apply")
+
+    monkeypatch.setattr(apply_mod, "run_update", forbidden)
+    res = CliRunner().invoke(_cli(), ["--pre"])
+    assert res.exit_code == 2 and "--check" in res.output
 
 
 def test_cli_maps_results_to_exit_codes_and_streams(monkeypatch):
@@ -548,5 +697,7 @@ def test_real_cli_wiring_help_and_usage_error():
     }
     helped = subprocess.run(base + ["update", "--help"], **kwargs)
     assert helped.returncode == 0 and "--check" in helped.stdout
-    bare = subprocess.run(base + ["update"], **kwargs)
-    assert bare.returncode == 2 and "not available yet" in (bare.stdout + bare.stderr)
+    # `--pre` without `--check` is a usage error that returns before any apply logic;
+    # a bare `velune update` is deliberately NOT run here (it would update a real install).
+    bare = subprocess.run(base + ["update", "--pre"], **kwargs)
+    assert bare.returncode == 2 and "--check" in (bare.stdout + bare.stderr)
