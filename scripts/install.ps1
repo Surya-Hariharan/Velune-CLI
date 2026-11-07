@@ -13,10 +13,54 @@
 #   VELUNE_PYTHON          Python version for the environment (default: 3.12)
 #   VELUNE_NO_MODIFY_PATH  set to 1 to leave the user PATH untouched
 
+# Before downloading anything the installer checks the CPU architecture and
+# stops with an explanation on a platform Velune does not support (see
+# "Platform support" in the README).
+
+# Returns why the platform is unsupported, or $null when it is supported.
+# Architecture is a .NET RuntimeInformation name (X64, Arm64, X86, ...) or a
+# PROCESSOR_ARCHITECTURE value (AMD64, ARM64, x86, ...).
+function Get-VeluneUnsupportedPlatformReason {
+    param(
+        [string]$Architecture,
+        [bool]$IsWindowsOs = $true
+    )
+    if (-not $IsWindowsOs) {
+        return 'this is not Windows; on macOS / Linux / WSL use scripts/install.sh instead'
+    }
+    switch -Regex ($Architecture) {
+        '^(x64|amd64)$' { return $null }
+        '^(arm64|aarch64)$' {
+            return 'Windows on ARM64 is not supported: required dependencies (cryptography, tiktoken) publish no Windows ARM64 wheels'
+        }
+        default { return "unsupported CPU architecture: $Architecture" }
+    }
+}
+
+# The architecture of the operating system, not of this PowerShell process: a
+# 32-bit or x64-emulated shell on an ARM64 machine still reports the OS value.
+function Get-VeluneHostArchitecture {
+    try {
+        $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+        if ($arch) { return $arch }
+    } catch { }
+    if ($env:PROCESSOR_ARCHITEW6432) { return $env:PROCESSOR_ARCHITEW6432 }
+    return $env:PROCESSOR_ARCHITECTURE
+}
+
 # Everything runs inside a function: under `irm | iex` a top-level `exit`
 # would close the user's terminal, so failures `throw` instead.
 function Install-Velune {
     $ErrorActionPreference = 'Stop'
+
+    # $IsWindows only exists in PowerShell 7+; Windows PowerShell 5.1 is Windows-only.
+    $onWindows = if ($PSVersionTable.PSEdition -eq 'Core') { [bool]$IsWindows } else { $true }
+    $reason = Get-VeluneUnsupportedPlatformReason -Architecture (Get-VeluneHostArchitecture) -IsWindowsOs $onWindows
+    if ($reason) {
+        throw ("$reason.`nSupported platforms and manual install options: " +
+            "https://github.com/Surya-Hariharan/Velune-CLI#platform-support`n" +
+            'Nothing was downloaded or installed.')
+    }
 
     $package = if ($env:VELUNE_PACKAGE) { $env:VELUNE_PACKAGE } else { 'velune-cli' }
     $pythonVersion = if ($env:VELUNE_PYTHON) { $env:VELUNE_PYTHON } else { '3.12' }
@@ -63,4 +107,7 @@ function Install-Velune {
     }
 }
 
-Install-Velune
+# Tests dot-source this file to exercise the functions above without installing.
+if ($env:VELUNE_INSTALLER_SOURCE_ONLY -ne '1') {
+    Install-Velune
+}
