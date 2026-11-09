@@ -8,6 +8,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Security
+
+- **Windows: a program planted in the current directory is no longer run by bare name.** Velune runs
+  `git` and other tools without a path, and Windows searched the current directory first, so a
+  `git.exe` committed to a repository you cloned and opened Velune in would run. Velune now disables
+  that search for its process (`NoDefaultCurrentDirectoryInExePath`). Confirmed on Python 3.11, 3.14
+  and 3.15.
+- **Credential files are private from creation.** The encrypted credential store and the persisted
+  master-passphrase file were written with the default permissions and restricted afterwards; they are
+  now created `0600` / ACL-restricted before any data is written, never through a stale file or
+  symlink, and `icacls` runs from the system directory.
+- **Restoring a backup no longer follows links inside the archive** on Python versions without the tar
+  `data` filter, and a `TypeError` during extraction is no longer retried without the filter.
+- The SQL identifier check for the Postgres connector is a full match (a trailing newline was accepted).
+- **CI/CD:** every action is pinned to a commit SHA; the release workflow's token is read-only except
+  for the two jobs that need more, it no longer uses a pip cache, and the gitleaks download is
+  checksum-verified. Dependabot waits seven days before proposing a new release. See
+  [SECURITY.md](SECURITY.md#supply-chain-ci-and-releases) for the remaining accepted risks.
+
 ---
 
 ## [0.9.9] - 2026-11-07

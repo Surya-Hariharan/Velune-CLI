@@ -147,6 +147,18 @@ isolation is available as an opt-in — see
 > Treat command execution as "code you have allowed to run," not as a hard isolation
 > boundary — unless the Docker sandbox below is enabled.
 
+### Executable search path (Windows)
+
+On Windows, `CreateProcess` looks in the *current directory* before `PATH` for a command given
+without a path. Velune runs `git` and other tools by bare name and is routinely started inside
+repositories it did not write, so a `git.exe` committed to a cloned repository would run as soon as
+Velune started there. `velune`'s entry point therefore sets `NoDefaultCurrentDirectoryInExePath`
+for the process (verified on Python 3.11, 3.14 and 3.15, where Velune's own `subprocess` calls then
+ignore a planted `git.exe`). The variable is inherited by child processes; use an explicit path such
+as `.	ool.exe` to run a program from the current directory. Code that imports Velune as a library does not
+get this protection and should set the variable itself. The lifecycle commands additionally resolve
+`uv` with their own trusted lookup (see [docs/lifecycle.md](docs/lifecycle.md)).
+
 ### Optional Docker sandbox
 
 For real OS-level isolation, `velune/execution/docker_sandbox.py` provides a
@@ -243,6 +255,22 @@ are choosing to run.
   servers, Docker, CI), and only as a last resort a weak machine-derived key so
   credentials are never written in the clear. That last case logs a one-time warning
   urging you to set `VELUNE_MASTER_PASSPHRASE`.
+- **Secret files are private from the moment they exist.** The credential store and the persisted
+  master-passphrase file are created exclusively with mode `0600` (and, on Windows, an ACL
+  restricted to the current user *before* any data is written), replacing any stale file or
+  symlink at that name instead of writing through it, then renamed into place
+  (`velune/core/privatefile.py`). Earlier versions wrote the file first and tightened the
+  permissions afterwards, leaving a short window with the default umask. `icacls` is run from
+  `%SystemRoot%\System32`, not looked up by name.
+- **Known limits of the key protection (accepted, documented).**
+  - The machine-derived fallback key comes from the network adapter's MAC address and a constant. It is
+    obfuscation against casual reading, not a secret, and anyone who can read that file can derive it.
+    On Windows the persisted passphrase is protected by DPAPI instead; elsewhere, without an OS
+    keyring, the file mode is the only real protection. Prefer a keyring or `VELUNE_MASTER_PASSPHRASE`.
+  - The passphrase-derived key uses PBKDF2-HMAC-SHA256 at 390,000 iterations with a fixed,
+    versioned salt, so two users who choose the same passphrase derive the same key. Raising the
+    iteration count or randomising the salt would make every existing store undecryptable, so it
+    needs a versioned migration and is not done here. Use a long random passphrase.
 - **Log redaction** (`velune/core/redaction.py`): a logging filter scrubs known key
   shapes (`sk-…`, `sk-ant-…`, `xai-…`, `gsk_…`, `hf_…`, `AIza…`, OpenRouter, Fireworks,
   Replicate), `Authorization: Bearer/Token` headers, and the live values of configured
@@ -270,6 +298,14 @@ the clear:
   above, so the archive stays restorable on a machine with no keyring entry. The
   passphrase itself is never stored; it must be supplied again on `velune restore` to
   decrypt.
+
+**Restoring an archive is a trust decision.** A backup carries the workspace trust list and
+configuration, which can enable hooks. Restore only archives you made yourself; an archive from an
+untrusted source can mark directories trusted. Extraction refuses members that escape the target
+directory, and on interpreters without the tar `data` filter it also refuses symlink, hard-link and
+special-file members (a link cannot be seen by the path check because it is not on disk yet). Velune's
+own backups contain only regular files and directories. A hostile archive can still be large; no size
+limit is enforced on extraction.
 
 ### Workspace / memory isolation
 
@@ -315,6 +351,24 @@ to a GitHub issue themselves if they choose to. See
   if it drifts out of sync with `pyproject.toml`, so what CI audits and
   scans is guaranteed to be what actually gets installed.
 
+### Supply chain: CI and releases
+
+- Every third-party action is pinned to a full commit SHA (with the tag in a comment); Dependabot
+  proposes updates after a 7-day cooldown. `GITHUB_TOKEN` is read-only by default in both workflows.
+  `release.yml` grants `contents: write` only to the job that creates the GitHub Release and
+  `id-token: write` only to the publish job. Checkouts do not persist credentials, and no workflow
+  uses `pull_request_target`, so code from a fork never runs with secrets. The release workflow does
+  not use a pip cache, has a per-tag concurrency group that never cancels a publish, and passes
+  tag-derived values to scripts through `env:` rather than expanding them into the script text.
+- The gitleaks binary used in CI is verified against a pinned SHA-256 before it is run.
+- **Accepted risks.** The PyPI upload still authenticates with the `PYPI_TOKEN` secret; switching to
+  Trusted Publishing (OIDC, no stored token) needs a PyPI-side setting and is recommended.
+  Release tooling (`build`, `twine`) is pinned by version, not by hash. The one-line installers fetch
+  from the mutable `main` branch and pipe uv's own installer from `astral.sh` into the shell, as uv
+  documents; inspect the script first if that trust is not acceptable. Subprocess rules B404, B603 and
+  B607 are skipped in Bandit's configuration: every call site was reviewed, none uses `shell=True`,
+  and the reviewed exceptions are enumerated by the `create_subprocess_shell` allowlist check in CI.
+
 ### Static analysis (Bandit)
 
 Every PR is gated on `bandit -c pyproject.toml -r velune/ --severity-level
@@ -322,13 +376,13 @@ medium --confidence-level medium` — any medium+ severity/confidence finding
 fails the build. A full low-severity report also runs (for visibility) but
 does not gate the build directly; instead, a separate regression-baseline
 step fails the build if the low-severity count *grows* past a checked-in
-baseline (183 as of writing).
+baseline (184 as of writing).
 
 This is a deliberate choice, not an oversight: the existing low-severity
 findings are overwhelmingly broad `try/except: pass` patterns used
 throughout the codebase as an intentional resilience strategy (a failed
 best-effort background probe, cache write, or telemetry span must never
-crash the interactive session) — triaging and rewriting all ~183 in one pass
+crash the interactive session) — triaging and rewriting all ~184 in one pass
 isn't a security fix, it's a mass refactor with its own regression risk, and
 blocking every unrelated PR on it would just train reviewers to bypass the
 gate. The baseline instead makes sure the count only ever goes down or stays
