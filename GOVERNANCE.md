@@ -27,6 +27,13 @@ consists of a `vX.Y.Z` Git tag, the GitHub Release for that tag, and the
 matching `velune-cli` package version on PyPI. The release workflow checks
 that the tag matches the package version.
 
+## Security and conduct reports
+
+Vulnerabilities are reported privately as described in
+[SECURITY.md](SECURITY.md). Conduct concerns are reported to the maintainer as
+described in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). The maintainer handles
+both.
+
 ## Changes in maintainership
 
 If maintainership changes, the change will be announced in this repository

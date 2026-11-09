@@ -27,16 +27,9 @@ process.*
 
 ## Development setup
 
-```mermaid
-flowchart LR
-    A[Clone repo] --> B[Create venv]
-    B --> C[Activate venv]
-    C --> D[Install deps]
-    D --> E[Verify setup]
-
-    classDef step fill:#0a3d62,stroke:#3c6382,stroke-width:2px,color:#fff;
-    class A,B,C,D,E step;
-```
+Velune CLI supports Python 3.10 to 3.14. For the module layout, bootstrap
+sequence and extension points, read [docs/development.md](docs/development.md)
+before your first change.
 
 ```bash
 git clone https://github.com/Surya-Hariharan/Velune-CLI.git
@@ -50,8 +43,10 @@ pip install -e ".[dev]"
 ```
 
 `[dev]` installs `ruff`, `pyright`, `pre-commit`, `pip-audit`,
-`bandit[toml]`, `build`, `twine`, `pytest`, and `pytest-asyncio` — everything
-CI runs.
+`bandit[toml]`, `build`, `twine`, `pytest`, `pytest-asyncio`, and the
+pseudo-terminal helpers used by `tests/tui` (`pywinpty` on Windows,
+`ptyprocess` elsewhere, and `pyte`). CI also installs the optional extras
+(`pip install -e ".[all,dev]"`) so that every feature is tested.
 
 `uv.lock` pins the exact resolved dependency graph (versions + hashes) on top
 of `pyproject.toml`'s version floors, so a dev machine, CI, and a release
@@ -62,7 +57,8 @@ the build if the two have gone out of sync. If you change a dependency in
 
 ```bash
 pip install uv   # or: pipx install uv
-uv lock
+uv lock          # regenerate; never edit uv.lock by hand
+uv lock --check  # what CI runs; exits non-zero if the lock is out of date
 ```
 
 Optionally, install the pre-commit hooks so lint/format run automatically on

@@ -30,9 +30,10 @@ accepted contributions are distributed under the project's Apache-2.0 license
 A contribution — even a large one — does not by itself make someone an owner
 of the overall Velune CLI project, its name, or its canonical repository.
 
-A small number of commits in the history were produced by automation
-(Dependabot dependency updates and GitHub Copilot coding-agent changes).
-They were merged into the repository by the maintainer.
+Some commits in the history were produced or assisted by automation and AI
+tools: Dependabot dependency updates, GitHub Copilot coding-agent changes, and
+many commits whose messages carry `Co-Authored-By` trailers naming Anthropic's
+Claude models. These changes were merged into the repository by the maintainer.
 
 ## Open source and authorship
 

@@ -71,9 +71,11 @@ also when an individual is officially representing the project in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behaviour may be
-reported to the maintainer at the contact information listed in
-[SECURITY.md](SECURITY.md). All complaints will be reviewed and investigated
-promptly and fairly.
+reported to the maintainer, Surya HA, by email at
+`suryahariharan2006@gmail.com`. Put "Code of Conduct" in the subject line. All
+complaints will be reviewed and investigated promptly and fairly, and the
+maintainer will respect the privacy and security of the person who reports an
+incident.
 
 Maintainers who do not follow or enforce the Code of Conduct in good faith may
 face temporary or permanent repercussions as determined by other project
