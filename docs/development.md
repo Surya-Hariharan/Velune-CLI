@@ -3,8 +3,14 @@
 *How the codebase is put together at the framework level, how CI validates it, and how to reason about
 changes that cross subsystem boundaries.*
 
-For "how do I set up a venv and open a PR," see [CONTRIBUTING.md](../CONTRIBUTING.md) — that doc owns the
-step-by-step contributor workflow; this one owns the *why* behind the structure so those steps make sense.
+For "how do I set up a venv and open a PR," see [CONTRIBUTING.md](../CONTRIBUTING.md). That document owns
+the step-by-step contributor workflow; this one owns the *why* behind the structure so those steps make
+sense.
+
+**How to read this guide.** If you are new to the codebase, read sections 1 and 2 first: they explain how
+the process starts up and which packages depend on which. Section 3 covers testing conventions and
+section 4 covers what CI checks, so you know what must pass before a pull request can merge. Sections 5 to
+7 are reference material to come back to when you add an extension or chase a bug.
 
 ---
 
@@ -46,6 +52,17 @@ kernel in `velune/kernel/`:
 - **CLI bootstrap levels** — independently of subsystem tiers, `velune/cli/registry.py:CommandSpec.
   bootstrap` is `"light"` (Tier 0 only — e.g. `velune config show`) or `"full"` (Tier 0 and Tier 1).
   `velune --version` and `--help` never build a runtime at all.
+
+The startup sequence, in short:
+
+```mermaid
+flowchart TD
+    A["velune (console script)<br/>velune/main.py"] --> B["Typer app built only when a command runs<br/>velune/cli/app.py"]
+    B --> C{"Which command?"}
+    C -->|"--version, --help"| D["No runtime built"]
+    C -->|"light command<br/>e.g. config show"| E["Tier 0 only<br/>providers, models, event bus, observability"]
+    C -->|"full command or REPL"| F["Tier 0, then Tier 1 in the background<br/>memory, retrieval, repository cognition,<br/>tools, council, knowledge graph"]
+```
 
 **Practical implication:** if you add a subsystem, give it a factory in its package's `subsystems.py` and
 register the module list with the bootstrapper, rather than instantiating it inline where it is used.
@@ -143,7 +160,8 @@ aggregation job:
 | **One-line Installer** | runs `scripts/install.sh` (Linux/macOS, plus `shellcheck`) and `scripts/install.ps1` (Windows) on clean runners against the built wheel |
 | **CI Pass** | fails if any of the above failed — the single required status check |
 
-CodeQL runs separately. `.github/workflows/release.yml` handles publishing (tag-triggered; it verifies the
+`.github/workflows` defines no CodeQL workflow; any code-scanning configured on GitHub itself is outside
+this repository. `.github/workflows/release.yml` handles publishing (tag-triggered; it verifies the
 tag matches the package version, builds, publishes to PyPI and creates the GitHub release) — read that file
 for the exact steps.
 
@@ -201,6 +219,13 @@ Where each one lives:
 | Resource connectors | `velune.toml [resources.*]` | `resources/` |
 
 Prefer extending one of these registries over inventing a new loading mechanism.
+
+**Trust matters for extensions.** Project-level hooks (`.velune/hooks.json` and `velune.toml [hooks]`) and
+project `.mcp.json` servers load only for directories the user has trusted (`velune/core/trust.py`).
+User-level files under `~/.velune/` are always loaded. When you add a new extension source that can run
+commands or change where credentials are sent, put it behind the same trust check, and read
+[SECURITY.md](../SECURITY.md#network-and-mcp-security) first. TOML slash commands of type `shell` run
+through the host shell when invoked and are not currently gated by directory trust.
 
 ---
 
