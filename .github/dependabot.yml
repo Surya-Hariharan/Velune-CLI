@@ -7,6 +7,10 @@ updates:
       day: "monday"
       time: "03:00"
     open-pull-requests-limit: 10
+    # Wait a week before proposing a freshly published release, so a compromised or yanked
+    # version is usually withdrawn before it reaches a PR. Security updates are not delayed.
+    cooldown:
+      default-days: 7
     reviewers:
       - "Surya-Hariharan"
     allow:
@@ -43,6 +47,8 @@ updates:
       day: "monday"
       time: "04:00"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     reviewers:
       - "Surya-Hariharan"
     groups:

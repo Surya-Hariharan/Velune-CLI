@@ -5,9 +5,18 @@ on:
     tags:
       - 'v*.*.*'
 
+# Least privilege: nothing is writable by default. The jobs that need more (publish: OIDC; release:
+# contents: write) declare it themselves, so the job that installs dependencies and runs the
+# tests never holds a write-capable token.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
+
+# One release per tag at a time, and never cancel a publish half way. The group name is deliberately
+# not "${{ github.workflow }}-...": the reused ci.yml resolves that to this workflow's name and
+# would share the group, deadlocking the run.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 # Node.js 24 became the default on 2026-06-16. Force it explicitly so the
 # pinned @v4/@v5 action tags use Node 24 runtimes consistently.
@@ -18,14 +27,18 @@ jobs:
   ci:
     name: Run CI Pipeline
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
+          # No `cache: pip` here: this workflow publishes release artifacts, and a restored
+          # cache entry is an input an unrelated run could have written.
           python-version: "3.11"
-          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -78,20 +91,23 @@ jobs:
     name: Build Package
     needs: [ci, full-ci]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.11"
 
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build twine
+          # Pinned: this tooling produces the files that get published.
+          pip install build==1.6.1 twine==7.0.0
 
       - name: Verify tag matches package version
         run: |
@@ -129,14 +145,14 @@ jobs:
       # Release artifacts therefore carry a "release-" prefix; reusing "dist"
       # would make this upload fail with a name conflict.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-dist
           path: dist/
           if-no-files-found: error
 
       - name: Upload checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-checksums
           path: checksums/SHA256SUMS
@@ -146,18 +162,19 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      id-token: write
+      id-token: write  # PyPI Trusted Publishing (OIDC) fallback if PYPI_TOKEN is empty; drop once token auth is retired
     environment:
       name: pypi
       url: https://pypi.org/project/velune-cli
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-dist
           path: dist/
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-checksums
           path: checksums/
@@ -170,7 +187,7 @@ jobs:
           test "$(ls dist | wc -l)" -eq "$(wc -l < checksums/SHA256SUMS)"
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist/
           # Uses the PYPI_TOKEN repo secret for API token auth.
@@ -181,17 +198,22 @@ jobs:
     name: Create GitHub Release
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the GitHub Release and upload its assets; the only write this workflow makes
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-dist
           path: dist/
 
       - name: Download checksums
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-checksums
           path: checksums/
@@ -207,8 +229,9 @@ jobs:
 
       - name: Extract changelog
         id: changelog
+        env:
+          CLEAN_VERSION: ${{ steps.get_version.outputs.clean_version }}
         run: |
-          CLEAN_VERSION="${{ steps.get_version.outputs.clean_version }}"
           python3 - "$CLEAN_VERSION" > /tmp/changelog_body.txt << 'PYEOF'
           import os, re, sys
           from pathlib import Path
@@ -250,7 +273,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: "Velune CLI ${{ steps.get_version.outputs.clean_version }}"
           tag_name: ${{ steps.get_version.outputs.version }}

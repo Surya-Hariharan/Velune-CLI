@@ -27,11 +27,14 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.11"
           cache: "pip"
@@ -53,13 +56,15 @@ jobs:
   security:
     name: Security
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           fetch-depth: 0  # gitleaks needs full history to resolve push commit ranges
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.11"
           cache: "pip"
@@ -141,8 +146,12 @@ jobs:
           SCAN_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.after }}
         run: |
           GITLEAKS_VERSION="8.30.1"
-          curl -sSL -o gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          # SHA-256 of gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz, taken from the release's own
+          # checksum file and re-verified against the downloaded tarball. The binary is executed
+          # below, so it must be the exact file reviewed. Update both values together.
+          GITLEAKS_SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          curl -fsSL -o gitleaks.tar.gz             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
           tar -xzf gitleaks.tar.gz gitleaks
           if [ -n "$SCAN_BASE" ] && [ "$SCAN_BASE" != "0000000000000000000000000000000000000000" ]; then
             ./gitleaks detect --source . --redact -v --log-opts="${SCAN_BASE}..${SCAN_HEAD}"
@@ -194,6 +203,7 @@ jobs:
   test:
     name: Tests (py${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -203,10 +213,12 @@ jobs:
       PYTHONIOENCODING: utf-8
       PYTHONUTF8: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
@@ -225,7 +237,7 @@ jobs:
 
       - name: Upload TUI artifacts
         if: failure() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: tui-artifacts-py${{ matrix.python-version }}
           path: ${{ runner.temp }}/tui-artifacts
@@ -234,14 +246,16 @@ jobs:
   build:
     name: Build & Validate Artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           # Full history so SOURCE_DATE_EPOCH can be derived from the commit.
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.11"
           cache: "pip"
@@ -272,7 +286,7 @@ jobs:
           echo "✓ Pure-python wheel: $(ls dist/*.whl)"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist/
@@ -282,6 +296,7 @@ jobs:
     name: Wheel Install + REPL Smoke (${{ matrix.os }}, py${{ matrix.python-version }})
     needs: build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -291,12 +306,12 @@ jobs:
       PYTHONIOENCODING: utf-8
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Download built wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist/
@@ -337,6 +352,7 @@ jobs:
     name: Lowest Dependency Versions (${{ matrix.os }}, py${{ matrix.python-version }}${{ matrix.extras && format(', +{0}', matrix.extras) || '' }})
     needs: build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -352,15 +368,17 @@ jobs:
       PYTHONIOENCODING: utf-8
       PYTHONUTF8: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Download built wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist/
@@ -396,6 +414,7 @@ jobs:
     name: Install Over Stale Dependencies (${{ matrix.os }})
     needs: build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -404,12 +423,12 @@ jobs:
       PYTHONIOENCODING: utf-8
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
       - name: Download built wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist/
@@ -448,6 +467,7 @@ jobs:
     name: One-line Installer (${{ matrix.os }})
     needs: build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -456,10 +476,12 @@ jobs:
       PYTHONIOENCODING: utf-8
       VELUNE_NO_MODIFY_PATH: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Download built wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist/
@@ -482,6 +504,7 @@ jobs:
   ci-pass:
     name: CI Pass
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [lint, security, test, build, install-smoke, install-lowest, install-polluted, installer]
     if: always()
     steps:
