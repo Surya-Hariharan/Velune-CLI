@@ -37,7 +37,6 @@ import importlib.metadata as importlib_metadata
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -47,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from velune.lifecycle.errors import ExitCode, LifecycleError
+from velune.lifecycle.uvpath import find_uv, uv_problem_message
 
 try:
     import tomllib  # Python 3.11+
@@ -123,6 +123,9 @@ class OwnershipReport:
     python_base: str | None = None
     direct_url: str = "none"
     installed_from_local_file: bool = False
+    # Set only when uv itself could not be located or asked for its tool directory. The text
+    # is path-free and actionable, so refusals can show it instead of generic advice.
+    uv_problem: str | None = None
 
     @property
     def mutation_allowed(self) -> bool:
@@ -228,9 +231,12 @@ def resolve_uv_tool_dir(
     Runs the read-only command ``uv tool dir`` (argv list, no shell). This is
     the only place the lifecycle core may start uv; tests inject *run*.
     """
-    uv = uv_executable or shutil.which("uv")
+    uv = uv_executable
     if not uv:
-        return None, "uv was not found on PATH"
+        found = find_uv()  # never shutil.which: that can pick a planted ./uv.bat
+        if not found.path:
+            return None, uv_problem_message(found.reason)
+        uv = found.path
     try:
         completed = run(
             [uv, "tool", "dir"], capture_output=True, text=True, timeout=timeout, check=False
@@ -329,11 +335,14 @@ def evaluate_ownership(ev: OwnershipEvidence) -> OwnershipReport:
     environment; and the install is not marked editable.
     """
 
-    def report(kind: OwnershipKind, *reasons: str) -> OwnershipReport:
+    def report(
+        kind: OwnershipKind, *reasons: str, uv_problem: str | None = None
+    ) -> OwnershipReport:
         receipt = ev.receipt
         return OwnershipReport(
             kind=kind,
             reasons=tuple(reasons),
+            uv_problem=uv_problem,
             prefix=str(ev.prefix),
             version=ev.version,
             specifier=receipt.specifier if receipt else None,
@@ -405,6 +414,7 @@ def evaluate_ownership(ev: OwnershipEvidence) -> OwnershipReport:
         return report(
             OwnershipKind.INDETERMINATE,
             f"could not verify the uv tool directory ({ev.tool_dir_problem or 'unknown reason'})",
+            uv_problem=ev.tool_dir_problem or "uv could not be asked for its tool directory",
         )
 
     missing = []
@@ -465,6 +475,17 @@ def require_uv_tool(report: OwnershipReport) -> OwnershipReport:
     """Return *report* if mutation is authorised, else raise a REFUSED error."""
     if report.mutation_allowed:
         return report
+    if report.uv_problem:
+        # The installation looks like a uv tool but uv could not be used: say why, and do not
+        # advise reinstalling (the install is probably fine).
+        raise LifecycleError(
+            ExitCode.REFUSED,
+            f"Velune could not verify its uv installation ({report.uv_problem}), so it will "
+            "not be changed.",
+            recovery="Nothing was changed. Fix the problem above and run the command again; "
+            "'velune doctor' has more details.",
+            details={"ownership": report.kind.value, "reasons": list(report.reasons)},
+        )
     message, recovery = _REFUSAL[report.kind]
     raise LifecycleError(
         ExitCode.REFUSED,

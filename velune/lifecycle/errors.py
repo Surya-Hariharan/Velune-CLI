@@ -17,17 +17,30 @@ from velune.core.privacy import sanitize_diagnostics
 
 
 class ExitCode(IntEnum):
-    """Process exit codes shared by all lifecycle commands (Phase 2 design §9)."""
+    """Process exit codes shared by all lifecycle commands (Phase 2 design §9).
+
+    How to read them (full table in ``docs/lifecycle.md``):
+
+    * ``REFUSED`` (3), ``USAGE`` (2), ``NETWORK`` (4), ``BUSY`` (8): nothing was changed.
+    * ``ERROR`` (1): the command failed and the installation or data is *verified*
+      unchanged, or an unexpected error happened before any change started.
+    * ``UNCERTAIN`` (9): a change was started and its result is unverified or partial;
+      the journal is kept and a person must look.
+
+    Codes 5, 6 and 7 are reserved by the original design for validation and rollback
+    outcomes. Velune performs no rollback, so no command uses them.
+    """
 
     OK = 0  # success / already up to date / dry-run plan printed
-    ERROR = 1  # unexpected error
+    ERROR = 1  # failed with the state verified unchanged, or an unexpected pre-change error
     USAGE = 2  # bad flags, invalid version
     REFUSED = 3  # unsupported install kind, no ownership, unsafe to proceed
     NETWORK = 4  # network or index failure (nothing changed)
     VALIDATION_FAILED = 5  # candidate validation failed (live install untouched)
     APPLY_FAILED_ROLLED_BACK = 6  # apply failed, previous version restored and verified
     ROLLBACK_FAILED = 7  # apply failed and rollback failed (manual recovery printed)
-    BUSY = 8  # another lifecycle operation holds the lock
+    BUSY = 8  # another lifecycle operation holds the journal
+    UNCERTAIN = 9  # a change was started and its outcome is unverified or partial (journal kept)
     UPDATE_AVAILABLE = 10  # `update --check`: an update is available
     CANCELLED = 130  # cancelled by the user
 
@@ -44,6 +57,7 @@ class Category(str, Enum):
     APPLY_FAILED_ROLLED_BACK = "apply_failed_rolled_back"
     ROLLBACK_FAILED = "rollback_failed"
     BUSY = "busy"
+    UNCERTAIN = "uncertain"
     UPDATE_AVAILABLE = "update_available"
     CANCELLED = "cancelled"
 

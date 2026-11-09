@@ -38,9 +38,11 @@ def update_cmd(
     With --check nothing is changed. Without it, a uv-managed installation is
     updated with 'uv tool upgrade' (never on Windows: update manually there).
 
-    Exit codes: 0 up to date / updated, 10 update available (--check), 3 refused (not
-    a confirmed uv tool, pinned, Windows, unfinished journal), 4 the package index could
-    not be read, 1 other error or unverifiable result, 2 bad usage, 130 cancelled.
+    Exit codes: 0 up to date / updated, 10 update available (--check), 3 refused before any
+    change (not a confirmed uv tool, pinned, Windows, unfinished journal, uv missing), 4 the
+    package index could not be read, 8 another lifecycle command is running, 1 failed with
+    the installation verified unchanged, 9 outcome uncertain or partial (journal kept: stop
+    and read the recovery text), 2 bad usage, 130 cancelled.
     """
     if not check:
         if pre:

@@ -53,7 +53,6 @@ suite.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -72,6 +71,7 @@ from velune.lifecycle.ownership import (
     require_uv_tool,
 )
 from velune.lifecycle.safety import _requirement, check_not_self_mutation, manual_command
+from velune.lifecycle.uvpath import trusted_which
 from velune.lifecycle.versions import VersionTools, load_version_tools
 
 COMMAND = "update"
@@ -82,7 +82,10 @@ Runner = Callable[..., Any]
 
 
 def _stop(process: subprocess.Popen[Any]) -> None:
-    process.kill()
+    try:
+        process.kill()
+    except OSError:  # already exited: nothing to stop (must not look like "never started")
+        pass
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:  # pragma: no cover - kill is not catchable
@@ -99,6 +102,14 @@ def _run_uv(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[s
     ``KeyboardInterrupt`` is re-raised afterwards so the caller still reports the
     cancellation. A second interrupt, the grace expiring, or the overall timeout
     stops uv. Output is discarded at the OS level: it is never shown.
+
+    Runner contract (callers rely on it to know whether uv ran):
+
+    * ``OSError`` (for example ``FileNotFoundError`` or ``PermissionError``) is raised only
+      when the process could **not be started**.
+    * Returning means uv ran; the exit code may be non-zero.
+    * ``subprocess.TimeoutExpired``, other ``SubprocessError`` and ``KeyboardInterrupt``
+      mean uv **had started**.
     """
     process = subprocess.Popen(
         argv,
@@ -192,7 +203,7 @@ def run_update(
     load_tools: Callable[[], VersionTools] = load_version_tools,
     fetch: Callable[[], Mapping[str, Any]] | None = None,
     run: Runner = _run_uv,
-    which: Callable[[str], str | None] = shutil.which,
+    which: Callable[[str], str | None] = trusted_which,
     integrity: Callable[[], Integrity] = check_installation,
     journal_path: Path | None = None,
     python: tuple[int, int, int] | None = None,
@@ -227,8 +238,8 @@ def run_update(
         uv = which("uv")
         if not uv:
             raise LifecycleError(
-                ExitCode.ERROR,
-                "uv was not found on PATH, so the update cannot be applied. Nothing was changed.",
+                ExitCode.REFUSED,
+                "uv was not found in a trusted location on PATH. A uv in or under the current directory is never run (a security restriction, not necessarily a broken uv): run the command again from a directory that does not contain uv. Nothing was changed, so the update cannot be applied.",
                 recovery="Install uv or fix PATH, or run the command below yourself.",
                 manual_command=manual_command("update", report),
                 details={"reason": "uv_not_found"},
@@ -263,7 +274,14 @@ def run_update(
     except BaseException as exc:
         if isinstance(exc, SystemExit):
             raise
-        return LifecycleResult.from_exception(COMMAND, exc, installation=installation)
+        # uv may already have changed things: an unexpected error here is not 'unchanged'.
+        return _unknown(
+            entry,
+            installation,
+            cancelled,
+            why="an unexpected error interrupted the update.",
+            path=path,
+        )
 
     def survive(step: Callable[[], Any]) -> Any:
         """Run a read-only check; an interrupt marks the cancel and retries the check."""
@@ -382,7 +400,7 @@ def _unknown(
     detail = f" {why}" if why else ""
     return LifecycleResult(
         COMMAND,
-        exit_code=ExitCode.CANCELLED if cancelled else ExitCode.ERROR,
+        exit_code=ExitCode.UNCERTAIN,  # unverified outcome wins over 'cancelled'
         message=(
             ("Update cancelled, but " if cancelled else "")
             + "Velune could not verify its installation after running uv, so it may be "

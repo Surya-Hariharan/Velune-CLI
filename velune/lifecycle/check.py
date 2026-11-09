@@ -74,6 +74,11 @@ def _next_action(report: OwnershipReport, latest: Any, platform: str) -> tuple[s
 
     The command is ``None`` unless the installation is a confirmed uv tool.
     """
+    if report.uv_problem:
+        return None, (
+            f"Velune could not verify its uv installation ({report.uv_problem}), so no "
+            "update command is suggested. Fix the problem above and run the check again."
+        )
     if report.kind is not OwnershipKind.UV_TOOL:
         return None, _NOT_UV_GUIDANCE[report.kind]
     if latest.is_prerelease:
