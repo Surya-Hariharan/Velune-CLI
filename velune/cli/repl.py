@@ -114,6 +114,8 @@ class VeluneREPL:
         # "always allow" for this session.
         self._tools_unsupported_models: set[str] = set()
         self._tool_session_grants: set[str] = set()
+        # File changes made by the last agent turn, for /rewind.
+        self._last_turn_journal = None
         from velune.orchestration.role_assignments import CouncilRoleMap
 
         self._assignments_path = Path.home() / ".velune" / "council_roles.json"
@@ -2002,6 +2004,11 @@ class VeluneREPL:
         from velune.cli.handlers.git import cmd_undo
 
         await cmd_undo(self, args)
+
+    async def _cmd_rewind(self, args: str) -> None:
+        from velune.cli.handlers.git import cmd_rewind
+
+        await cmd_rewind(self, args)
 
     async def _cmd_retry(self, args: str) -> None:
         from velune.cli.handlers.retry import cmd_retry

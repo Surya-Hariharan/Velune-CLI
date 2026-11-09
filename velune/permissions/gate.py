@@ -198,6 +198,11 @@ def reset_active_boundary(token: contextvars.Token) -> None:
     _ACTIVE_BOUNDARY.reset(token)
 
 
+def active_boundary() -> Boundary | None:
+    """The boundary authorizing the current tool call, if a gated call is running."""
+    return _ACTIVE_BOUNDARY.get()
+
+
 def resolve_tool_path(raw: str | Path, workspace: Path, label: str = "path") -> Path:
     """Resolve a tool's path argument against the session boundary.
 

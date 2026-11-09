@@ -13,11 +13,25 @@ from velune.core.types.inference import InferenceRequest, InferenceResponse, Str
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
 from velune.providers.adapters._messages import openai_messages
+from velune.providers.adapters._toolcalls import (
+    OpenAIStreamToolAccumulator,
+    attach_openai_tools,
+    parse_openai_tool_calls,
+)
 from velune.providers.base import ModelProvider
 
 
 class LMStudioProvider(ModelProvider):
-    """LM Studio provider for local OpenAI-compatible endpoints."""
+    """LM Studio provider for local OpenAI-compatible endpoints.
+
+    LM Studio serves the OpenAI chat-completions format, including ``tools`` and
+    streamed ``delta.tool_calls`` fragments (for models it loads with tool-use
+    support), so tool calling uses the shared OpenAI wire helpers.
+    """
+
+    # stream() accumulates delta.tool_calls fragments and emits a final
+    # metadata["tool_calls"] chunk, which the tool loop requires for streaming.
+    SUPPORTS_STREAMING_TOOL_CALLS = True
 
     def __init__(self, base_url: str = "http://localhost:1234/v1") -> None:
         self._base_url = base_url
@@ -89,18 +103,25 @@ class LMStudioProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["stop"] = request.stop_sequences
+            attach_openai_tools(payload, request)
 
             response = await self.client.post("/chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
             latency = (time.perf_counter() - start) * 1000.0
 
+            choice = data["choices"][0]
+            message = choice["message"]
+            tool_calls = parse_openai_tool_calls(message)
             return InferenceResponse(
-                content=data["choices"][0]["message"]["content"],
+                content=message.get("content") or "",
                 model_id=request.model_id,
-                finish_reason=data["choices"][0]["finish_reason"] or "stop",
-                tokens_used=data.get("usage", {}).get("total_tokens", 0),
+                finish_reason="tool_calls"
+                if tool_calls
+                else (choice.get("finish_reason") or "stop"),
+                tokens_used=(data.get("usage") or {}).get("total_tokens", 0),
                 latency_ms=latency,
+                tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
             raise InferenceError(f"LM Studio completion failed: {e}")
@@ -109,6 +130,7 @@ class LMStudioProvider(ModelProvider):
         """Streaming chat completions."""
         await self.initialize()
         assert self.client is not None
+        accumulator = OpenAIStreamToolAccumulator()
         try:
             payload = {
                 "model": request.model_id,
@@ -120,6 +142,7 @@ class LMStudioProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["stop"] = request.stop_sequences
+            attach_openai_tools(payload, request)
 
             async with self.client.stream("POST", "/chat/completions", json=payload) as response:
                 response.raise_for_status()
@@ -131,12 +154,21 @@ class LMStudioProvider(ModelProvider):
                         try:
                             data = json.loads(data_str)
                             delta = data["choices"][0]["delta"]
+                            accumulator.add(delta.get("tool_calls"))
                             yield StreamChunk(
-                                content=delta.get("content", ""),
+                                content=delta.get("content") or "",
                                 finish_reason=data["choices"][0].get("finish_reason"),
                             )
-                        except (json.JSONDecodeError, KeyError):
+                        except (json.JSONDecodeError, KeyError, IndexError):
                             continue
+
+            tool_calls = accumulator.finalize()
+            if tool_calls:
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": tool_calls},
+                )
         except httpx.HTTPError as e:
             raise InferenceError(f"LM Studio stream failed: {e}")
 

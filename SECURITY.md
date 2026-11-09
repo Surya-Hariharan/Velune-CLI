@@ -272,6 +272,18 @@ beyond that mount. It is **opt-in and off by default**:
   symlinks) and requires the result to stay inside the workspace root. This blocks
   `../` traversal, absolute-path escapes and symlink escapes. Access outside the
   workspace requires approval.
+- Changing a file that can make other programs run code is high-risk in every
+  mode and is never covered by a session-wide "always allow": anything under
+  `.git/` (hooks, config), `.velune/hooks.json` and `velune.toml`
+  (`protected_reason` in `velune/permissions/boundary.py`). Reading them is
+  ordinary.
+- File changes go through one layer (`velune/tools/filesystem/mutation.py`):
+  content is written to a temporary file in the same folder, `fsync`-ed and
+  swapped in with `os.replace`, so a failure leaves the old file intact. The
+  folder entry is not `fsync`-ed, so a power loss right after a write can still
+  lose the rename. The target's boundary is re-checked immediately before the
+  swap. A file that changed on disk since the agent last read it is not
+  overwritten (conflict detection), and every write is verified by hash.
 - In Manual mode, writes, creations and deletions are shown through `DiffPreview`
   and are applied only after you confirm. In Auto mode, changes inside the project
   are applied without a per-change prompt; the path guard and the high-risk
@@ -520,6 +532,13 @@ not treated as new vulnerabilities.
   described in [Filesystem and execution protections](#filesystem-and-execution-protections).
 - In Auto mode, changes and commands inside the project run without a per-change
   prompt.
+- The protected-path rule for `.git/` and Velune's hook configuration applies to
+  the file tools. A shell command run through `execute_command` is governed by
+  the command policy, not by that rule.
+- Conflict detection covers files the agent has read or written in the session;
+  a file it never looked at is changed from its current content without a
+  version check. `/rewind` keeps its record in memory for the last turn only and
+  does not keep files or folder trees larger than 20 MB.
 
 **Same-user attackers and filesystem races.** Nothing in this document protects
 against an attacker running as you. Someone who can already modify Velune's data

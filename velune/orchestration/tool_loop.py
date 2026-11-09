@@ -289,8 +289,9 @@ class ToolLoopRunner:
         # transcript that omits them would be a lie about what happened.
         self._executed_invocations = invocations
         tokens_used = 0
-        # Identical calls that already failed, and how often they were re-requested.
-        failed_calls: set[tuple[str, str]] = set()
+        # Identical calls that already failed (→ the path they targeted), and how often
+        # they were re-requested.
+        failed_calls: dict[tuple[str, str], str | None] = {}
         repeated = 0
 
         for turn in range(1, self._max_turns + 1):
@@ -345,7 +346,15 @@ class ToolLoopRunner:
                     else:
                         invocation = await self._execute_call(call)
                         if invocation.error:
-                            failed_calls.add(key)
+                            failed_calls[key] = _call_target(call)
+                        else:
+                            # A successful call on a path (typically a re-read after a
+                            # conflict) means its state has been looked at again: an
+                            # identical call that failed on that path may now succeed.
+                            target = _call_target(call)
+                            if target is not None:
+                                for stale in [k for k, t in failed_calls.items() if t == target]:
+                                    del failed_calls[stale]
                     invocations.append(invocation)
                     messages.append(
                         {
@@ -579,6 +588,16 @@ class ToolLoopRunner:
 
 # Identical failing calls the model may re-request before the loop stops.
 _MAX_REPEATED_FAILURES = 3
+
+
+def _call_target(call: ToolCall) -> str | None:
+    """The file or folder a call acts on, when it names one."""
+    args = call.arguments if isinstance(call.arguments, dict) else {}
+    for key in ("file_path", "path", "source", "directory_path"):
+        value = args.get(key)
+        if isinstance(value, str) and value:
+            return value.replace("\\", "/").strip("/") or "."
+    return None
 
 
 def _call_key(call: ToolCall) -> tuple[str, str]:

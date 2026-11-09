@@ -29,6 +29,8 @@ def _create_tool_registry(env: RuntimeEnvironment):
     )
     from velune.tools.base.registry import ToolRegistry
     from velune.tools.filesystem.dirs import CreateDirectory, DeleteDirectory, MovePath
+    from velune.tools.filesystem.edit import EditFile
+    from velune.tools.filesystem.mutation import FileVersionTracker
     from velune.tools.plan import WritePlan
 
     logger = logging.getLogger("velune.tools.module")
@@ -47,18 +49,22 @@ def _create_tool_registry(env: RuntimeEnvironment):
         job_registry=job_registry,
     )
     ws = env.workspace
+    # One tracker for the session: what read_file saw is what write/edit compare against,
+    # so a file changed by someone else after the agent read it is caught as a conflict.
+    tracker = FileVersionTracker()
     default_tools = [
-        ReadFile(workspace=ws),
+        ReadFile(workspace=ws, tracker=tracker),
         ReadDirectory(workspace=ws),
         # confirm=False: the REPL tool loop's approver owns preview/approval;
         # the tools' own console preview would render to detached raw stdout
         # and its blocking prompt would collide with the fullscreen app.
-        WriteFile(workspace=ws, confirm=False),
-        CreateFile(workspace=ws, confirm=False),
-        DeleteFile(workspace=ws, confirm=False),
-        CreateDirectory(workspace=ws),
-        DeleteDirectory(workspace=ws),
-        MovePath(workspace=ws),
+        WriteFile(workspace=ws, confirm=False, tracker=tracker),
+        EditFile(workspace=ws, tracker=tracker),
+        CreateFile(workspace=ws, confirm=False, tracker=tracker),
+        DeleteFile(workspace=ws, confirm=False, tracker=tracker),
+        CreateDirectory(workspace=ws, tracker=tracker),
+        DeleteDirectory(workspace=ws, tracker=tracker),
+        MovePath(workspace=ws, tracker=tracker),
         WritePlan(workspace=ws),
         GrepFiles(workspace=ws),
         FindFiles(workspace=ws),

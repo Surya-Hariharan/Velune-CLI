@@ -1,7 +1,7 @@
 # Slash Commands
 
 *The full reference for everything you can type inside the Velune CLI REPL —
-55 commands across 12 categories.*
+56 commands across 12 categories.*
 
 For commands run in the terminal *before* the REPL starts (`velune run`,
 `velune doctor`, …), see the [README command table](../README.md#commands)
@@ -266,6 +266,7 @@ Git and forge (GitHub/GitLab) integration, plus the execution sandbox.
 | --- | --- | --- | --- |
 | `diff` | `d` | `/diff` | Show uncommitted file changes from the last council run |
 | `undo` | `u` | `/undo` | Revert the last Velune git commit — not a conversation undo (keeps changes staged) |
+| `rewind` | *(none)* | `/rewind` | Undo the file changes the agent made in its last turn (skips files changed since) |
 | `hunk` | `hunks` | `/hunk` | Toggle hunk-by-hunk review mode — approve each change before it's applied |
 | `push` | `gp` | `/push [--force]` | Push current branch to remote origin |
 | `pr` | `pull-request`, `mr` | `/pr <title> [--base <branch>] [--draft]` | Create a pull request / merge request on GitHub or GitLab |

@@ -55,12 +55,44 @@ class EditBlockApplier:
         return results
 
     def write(self, target: Path, content: str) -> None:
-        """Write *content* to *target*, creating parent directories if needed."""
-        target.parent.mkdir(parents=True, exist_ok=True)
+        """Write *content* to *target* (empty content deletes it).
+
+        Goes through the same safe-mutation layer as the agent's file tools
+        (velune/tools/filesystem/mutation.py): the target must stay inside the
+        workspace, an existing file keeps its encoding and line endings, the swap is
+        atomic, the result is verified, and the change is journaled for /rewind.
+        """
+        from velune.execution.path_guard import resolve_in_workspace
+        from velune.tools.filesystem import mutation as mut
+
+        target = resolve_in_workspace(target, self.workspace_path, label="council edit")
         if content == "":
             if target.exists():
+                before, kept = mut.read_before_image(target)
                 target.unlink()
+                if kept:
+                    mut.journal(mut.FileChange(target, before or b"", mut.ABSENT))
+                else:
+                    mut.journal_irreversible(f"deleted {target}")
                 logger.info("Deleted: %s", target)
+            return
+
+        if target.exists():
+            try:
+                current = mut.load_text(target)
+            except ValueError:  # binary: replaced wholesale
+                current = None
         else:
-            target.write_text(content, encoding="utf-8")
-            logger.info("Written: %s", target)
+            current = None
+        if current is not None:
+            text = mut.to_newline(content, current.newline) if current.style != "none" else content
+            data = mut.encode_text(text, current.encoding, current.bom)
+            before, expected = current.raw, current.sha256
+        else:
+            data = content.encode("utf-8")
+            before, _kept = mut.read_before_image(target)
+            expected = mut.file_sha256(target)
+        new_sha = mut.atomic_write(target, data, expected_sha256=expected)
+        mut.verify_written(target, new_sha)
+        mut.journal(mut.FileChange(target, before, new_sha))
+        logger.info("Written: %s", target)

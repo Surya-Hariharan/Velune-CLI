@@ -48,6 +48,26 @@ def is_secret_path(path: Path) -> bool:
     return any(part.lower() in _SECRET_DIR_NAMES for part in path.parts)
 
 
+def protected_reason(path: Path) -> str:
+    """Why changing *path* is high-risk even inside the workspace ("" if it is not).
+
+    These files can make other programs run code: git runs ``.git/hooks/*`` and
+    honours ``.git/config`` (aliases, ``core.fsmonitor``, ``core.hooksPath``);
+    Velune runs the commands in its hook configuration. Changing them is not
+    forbidden — it is confirmed by the user in every mode, and never covered by a
+    session-wide "always allow". Reading them is ordinary.
+    """
+    parts = [part.lower() for part in path.parts]
+    if ".git" in parts:
+        return "changes git internals (.git/ — hooks and config there can run code)"
+    name = parts[-1] if parts else ""
+    if name == "hooks.json" and len(parts) > 1 and parts[-2] == ".velune":
+        return "changes Velune hook configuration (hooks run commands)"
+    if name == "velune.toml":
+        return "changes Velune configuration (it can define hooks that run commands)"
+    return ""
+
+
 @dataclass
 class Boundary:
     """The workspace root plus any extra roots the user granted for this task."""
@@ -100,13 +120,17 @@ def path_action(
     detail: str = "",
 ):
     """Build an :class:`Action` for a path argument, with boundary/secret flags set."""
-    from velune.permissions.actions import Action, Risk
+    from velune.permissions.actions import MUTATING_TYPES, Action, Risk
 
     resolved = boundary.resolve(raw)
     secret = is_secret_path(resolved)
     outside = not boundary.inside(resolved)
     if risk is None:
         risk = Risk.HIGH if secret else Risk.LOW
+    protected = protected_reason(resolved) if action_type in MUTATING_TYPES else ""
+    if protected:
+        risk = Risk.HIGH
+        reason = f"{reason}: {protected}" if reason else protected
     return Action(
         action_type,
         str(resolved),

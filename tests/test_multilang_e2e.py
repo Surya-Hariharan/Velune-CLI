@@ -323,7 +323,8 @@ class ScriptedFixer:
             ]
         else:
             write_output = request.messages[-1]["content"]
-            assert "Successfully wrote" in write_output, write_output
+            assert write_output.startswith("write_file OK"), write_output
+            assert " verified " in write_output, write_output
             return InferenceResponse(
                 content="Fixed the add() implementation.",
                 model_id="scripted",
@@ -356,7 +357,8 @@ async def test_agentic_fix_loop(lang, tmp_path):
     registry = ToolRegistry()
     registry.register(ReadFile(workspace=root))
     registry.register(GrepFiles(workspace=root))
-    registry.register(WriteFile(workspace=root, console=console))
+    # confirm=False: the production configuration (velune/tools/subsystems.py).
+    registry.register(WriteFile(workspace=root, console=console, confirm=False))
 
     set_auto_accept(True)
     try:
