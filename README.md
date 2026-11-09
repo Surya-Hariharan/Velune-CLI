@@ -388,6 +388,10 @@ velune health     # Provider reachability and response time
 velune doctor                         # Diagnose the installation (alias: doctor check)
 velune update --check [--pre] [--json] # Is a newer release on PyPI? Read-only, works for any install; prints a uv command only for uv-installed copies (exit 10 = update available)
 velune update [--json]                 # Apply the update to a uv-installed copy via `uv tool upgrade` (refused for pip/editable/pinned installs and on Windows, where it stays manual)
+velune repair [--json]                 # Reinstall the CURRENT version of a uv-installed copy (`uv tool install --force "velune-cli[extras]==<version>"`); never updates. Refused for pip/editable, local-file/URL, version-range installs and on Windows (manual). Pins an unpinned install to its current version. Verifies files, does not run the CLI; keeps the lifecycle journal if the result is uncertain
+velune uninstall [--yes] [--json]      # Remove ONLY the program from a uv-installed copy (`uv tool uninstall velune-cli`) after confirmation; keeps config, credentials, memory, skills, projects, uv cache and other uv tools. No purge option. Refused for pip/editable/ambiguous installs and on Windows (manual there); refuses without a terminal unless --yes
+velune purge-data [-c CATEGORY]... [--execute] [--json]  # Separate from uninstall. No args: read-only inventory. With -c: preview. --execute + typed phrase (or the public, scriptable `--confirm-phrase`: not a human confirmation, see docs/lifecycle.md) deletes ONLY the named categories (cache, logs, state, config, sessions, skills, credentials, memory); never the program, projects or uv cache. See docs/data-inventory.md
+# Lifecycle contract, exit codes, Windows/POSIX notes and verification status: docs/lifecycle.md
 velune doctor providers|network
 velune logs [recent|live]
 velune status                         # Index freshness + workspace health
