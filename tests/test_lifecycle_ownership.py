@@ -17,6 +17,7 @@ import pytest
 from velune.lifecycle import ownership as own
 from velune.lifecycle.errors import ExitCode, LifecycleError
 from velune.lifecycle.ownership import OwnershipKind
+from velune.lifecycle.uvpath import UvLookup
 
 RECEIPT = """\
 [tool]
@@ -339,6 +340,6 @@ def test_resolve_uv_tool_dir_when_uv_cannot_start():
 
 
 def test_resolve_uv_tool_dir_without_uv(monkeypatch):
-    monkeypatch.setattr(own.shutil, "which", lambda name: None)
+    monkeypatch.setattr(own, "find_uv", lambda: UvLookup(None, "not_found"))
     path, problem = own.resolve_uv_tool_dir()
     assert path is None and "not found" in (problem or "")

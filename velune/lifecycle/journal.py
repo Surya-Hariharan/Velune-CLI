@@ -21,12 +21,23 @@ partial or malformed file; :func:`read_journal` never raises on bad content.
 A journal is never overwritten silently: an existing file means an earlier
 operation may not have finished, and the next step is a human or ``repair``
 decision, not a new write.
+
+Concurrency: unsupported, but guarded
+-------------------------------------
+Two lifecycle commands must not run at once. The journal is created with an
+*exclusive* filesystem operation (a hard link, or ``O_CREAT | O_EXCL`` where hard
+links are unavailable), so exactly one writer can ever create it; the other gets
+a ``BUSY`` refusal and nothing is changed. It is not a lock: there is no lock file
+to go stale. A crash leaves the journal where it is for a person to look at.
+Each journal also carries a random ``token`` so two operations that start in the
+same second are still told apart.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import secrets
 import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -60,10 +71,15 @@ class JournalEntry:
     to_version: str | None = None
     installer: str = "uv"
     schema_version: int = field(default=SCHEMA_VERSION)
+    # Random per-operation id (None in journals written before it existed). Not part of
+    # equality: it identifies *which* operation wrote a file, see ``_is_ours``.
+    token: str | None = field(default=None, compare=False)
 
     def to_json_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["extras"] = list(self.extras)
+        if data.get("token") is None:
+            data.pop("token", None)
         return data
 
 
@@ -105,12 +121,15 @@ def new_entry(
         python_version=python_version,
         python_base=report.python_base,
         to_version=to_version,
+        token=secrets.token_hex(16),
     )
 
 
 def _refuse_if_secret(data: dict[str, Any]) -> None:
     """Never persist anything that looks like a credential."""
     for key, value in data.items():
+        if key == "token":  # our own random operation id, never user or provider text
+            continue
         values = value if isinstance(value, list) else [value]
         for item in values:
             if isinstance(item, str) and redact_secrets(item) != item:
@@ -128,17 +147,59 @@ def _stage(target: Path, data: dict[str, Any]) -> Path:
             stream.flush()
             os.fsync(stream.fileno())
     except BaseException:
-        tmp.unlink(missing_ok=True)
+        _discard(tmp)
         raise
     return tmp
+
+
+def _discard(tmp: Path) -> None:
+    """Remove a staging file. Best effort: a leftover temp file is harmless, and cleanup
+    must never turn an operation that already succeeded (or already failed) into a new error."""
+    try:
+        tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _publish_exclusive(tmp: Path, target: Path) -> None:
+    """Make the staged file appear at *target* only if nothing is there already.
+
+    Raises :class:`FileExistsError` if *target* exists, whoever created it and however
+    narrowly: the check and the creation are one filesystem operation, not two.
+
+    * ``os.link`` fails with ``EEXIST`` instead of replacing, is atomic on POSIX and NTFS,
+      and makes the complete, fsynced content appear at once.
+    * Where hard links do not exist (some network and FAT-style filesystems) the fallback is
+      ``O_CREAT | O_EXCL``: still exclusive, but the content is written after the file
+      appears, so a crash in between leaves a partial file. :func:`read_journal` reports it
+      as malformed and it blocks further operations, which is the safe direction.
+    """
+    try:
+        os.link(tmp, target)
+        return
+    except FileExistsError:
+        raise
+    except (OSError, NotImplementedError):
+        pass  # no hard links here: fall back to O_EXCL below
+    payload = tmp.read_bytes()
+    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)  # FileExistsError if taken
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        _discard(target)  # we created it a moment ago and it is incomplete
+        raise
 
 
 def retained_error(path: Path, read: JournalRead | None = None) -> LifecycleError:
     """The REFUSED error for "a journal from an earlier operation is still there".
 
     Explains *why* nothing will run, what the journal says, and what a person can
-    safely check. It never tells anyone to delete the file unconditionally, and it
-    does not claim any command (there is no ``repair`` yet) can inspect it.
+    safely check, in terms of the operation that wrote it (an interrupted uninstall
+    must not be described as a half-finished update). It never tells anyone to delete
+    the file unconditionally, and no command inspects or clears it for them.
     """
     read = read or read_journal(path)
     entry = read.entry
@@ -165,18 +226,30 @@ def retained_error(path: Path, read: JournalRead | None = None) -> LifecycleErro
                 "before uv was started, so it should not have changed the installation."
             )
         else:
+            state = {
+                "update": "partly updated",
+                "repair": "still damaged",
+                "uninstall": "partly removed",
+            }.get(entry.operation, "in an unknown state")
             what = (
                 f"It was recorded at {entry.started_at} ({entry.operation}, {span}). uv may have "
-                "run, and the result was not confirmed, so the installation may be partly updated."
+                f"run, and the result was not confirmed, so the installation may be {state}."
             )
     versions = " or ".join(
         v for v in (entry and entry.from_version, entry and entry.to_version) if v
     )
-    return LifecycleError(
-        ExitCode.REFUSED,
-        "An earlier lifecycle operation did not finish, so Velune will not start another one "
-        f"until it is looked at. {what} Nothing was changed.",
-        recovery=(
+    if entry is not None and entry.operation == "uninstall":
+        recovery = (
+            "Check before doing anything else: (1) no other Velune or uv process is running; "
+            "(2) 'uv tool list' no longer shows velune-cli and 'velune' is no longer found. If "
+            "both hold, the uninstall finished and the journal is stale: remove the file at "
+            f"{path} yourself. If velune-cli is still listed or 'velune' still runs, run "
+            "'uv tool uninstall velune-cli' in a fresh terminal, re-check, then remove the "
+            "journal. Your data was not removed by uninstall. Do not delete the journal "
+            "before checking."
+        )
+    else:
+        recovery = (
             "Check before doing anything else: (1) no other Velune or uv process is running; "
             "(2) 'uv tool list' shows velune-cli"
             + (f" at {versions}" if versions else "")
@@ -185,7 +258,12 @@ def retained_error(path: Path, read: JournalRead | None = None) -> LifecycleErro
             "another version, or does not run, reinstall it first with "
             "'uv tool install --force velune-cli' (add your extras if you use any), re-check, "
             "then remove the journal. Do not delete it before checking."
-        ),
+        )
+    return LifecycleError(
+        ExitCode.REFUSED,
+        "An earlier lifecycle operation did not finish, so Velune will not start another one "
+        f"until it is looked at. {what} Nothing was changed.",
+        recovery=recovery,
         details=details,
     )
 
@@ -194,7 +272,12 @@ def write_journal(entry: JournalEntry, path: Path | None = None) -> Path:
     """Persist *entry*; refuse to replace anything already at *path*.
 
     Raises :class:`LifecycleError` (REFUSED) if a journal already exists or the
-    path is not a regular file, and ``ValueError`` if a field looks like a secret.
+    path is not a regular file, :class:`LifecycleError` (BUSY) if another writer
+    creates it first, and ``ValueError`` if a field looks like a secret.
+
+    The early ``lexists`` check only produces the friendly "earlier operation did not
+    finish" message. Exclusivity comes from :func:`_publish_exclusive`, so two writers
+    that both pass the check still cannot both succeed.
     """
     target = path or default_journal_path()
     data = entry.to_json_dict()
@@ -206,15 +289,20 @@ def write_journal(entry: JournalEntry, path: Path | None = None) -> Path:
 
     tmp = _stage(target, data)
     try:
-        if os.path.lexists(target):  # lost a race with another writer
-            raise LifecycleError(
-                ExitCode.BUSY,
-                "Another lifecycle operation just created a journal. Nothing was changed.",
-                details={"reason": "journal_race"},
-            )
-        os.replace(tmp, target)
+        _publish_exclusive(tmp, target)
+    except FileExistsError:  # lost the race: someone else's journal is in place, untouched
+        raise LifecycleError(
+            ExitCode.BUSY,
+            "Another lifecycle operation holds the journal, so Velune did not start this one. "
+            "Nothing was changed.",
+            recovery=(
+                "Lifecycle commands cannot run at the same time. Wait for the other one to "
+                "finish, then try again. Do not delete the journal while it may be in use."
+            ),
+            details={"reason": "journal_race"},
+        ) from None
     finally:
-        tmp.unlink(missing_ok=True)
+        _discard(tmp)
     return target
 
 
@@ -262,6 +350,7 @@ def read_journal(path: Path | None = None) -> JournalRead:
         installer = data.get("installer", "uv")
         if not isinstance(installer, str):
             raise TypeError("installer must be a string")
+        token = _str_or_none(data.get("token"))
         entry = JournalEntry(
             operation=data["operation"],
             phase=data["phase"],
@@ -273,6 +362,7 @@ def read_journal(path: Path | None = None) -> JournalRead:
             python_base=_str_or_none(data.get("python_base")),
             to_version=_str_or_none(data.get("to_version")),
             installer=installer,
+            token=token,
         )
     except TypeError as exc:
         return JournalRead("malformed", problem=str(exc))
@@ -282,11 +372,14 @@ def read_journal(path: Path | None = None) -> JournalRead:
 def _is_ours(path: Path, expected: JournalEntry) -> bool:
     """True only if the journal on disk is the one this operation wrote."""
     current = read_journal(path)
-    return (
-        current.state == "ok"
-        and current.entry is not None
-        and (current.entry.operation, current.entry.started_at, current.entry.from_version)
-        == (expected.operation, expected.started_at, expected.from_version)
+    if current.state != "ok" or current.entry is None:
+        return False
+    if expected.token is not None:  # the random id tells same-second operations apart
+        return current.entry.token == expected.token
+    return (current.entry.operation, current.entry.started_at, current.entry.from_version) == (
+        expected.operation,
+        expected.started_at,
+        expected.from_version,
     )
 
 
@@ -311,7 +404,7 @@ def advance_phase(entry: JournalEntry, phase: str, path: Path | None = None) -> 
     try:
         os.replace(tmp, target)
     finally:
-        tmp.unlink(missing_ok=True)
+        _discard(tmp)
     return updated
 
 
