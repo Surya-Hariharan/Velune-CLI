@@ -24,6 +24,7 @@ question, not a guarantee that in-place replacement is safe there.
 
 from __future__ import annotations
 
+import ntpath
 import os
 import re
 import sys
@@ -37,6 +38,15 @@ _EXTRA_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def _norm(path: str | Path) -> str:
+    """Comparable form of a Windows installation path (case, slashes and ``..`` folded).
+
+    On Windows the path is resolved first. Anywhere else it is a Windows-style path being compared
+    on a non-Windows host (the guard is asked about ``platform="win32"``), where the host's
+    ``Path`` would treat ``C:/x`` as relative and ``normcase`` would not fold case, so it is
+    normalised with ``ntpath`` instead.
+    """
+    if os.name != "nt":
+        return ntpath.normcase(ntpath.normpath(str(path)))
     p = Path(path)
     try:
         resolved = p.resolve(strict=False)

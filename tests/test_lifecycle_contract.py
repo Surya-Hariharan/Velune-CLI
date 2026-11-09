@@ -291,7 +291,9 @@ def test_uninstall_has_no_deletion_primitives_at_all():
 
 def test_lifecycle_modules_stay_importable_without_third_party_modules():
     """The commands must work in a damaged environment, so they may not need heavy deps."""
-    allowed_third_party = {"httpx", "packaging", "platformdirs", "tomli", "typer"}
+    # tomllib is stdlib from Python 3.11; ownership.py falls back to tomli (a declared dependency)
+    # on 3.10, so the name is legitimate there even though 3.10's stdlib list lacks it.
+    allowed_third_party = {"httpx", "packaging", "platformdirs", "tomli", "tomllib", "typer"}
     stdlib = __import__("sys").stdlib_module_names
     for source in LIFECYCLE.glob("*.py"):
         tree = ast.parse(source.read_text(encoding="utf-8"))
