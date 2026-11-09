@@ -46,6 +46,7 @@ from typing import Any
 from platformdirs import user_config_dir
 
 from velune._compat import StrEnum
+from velune.core import privatefile
 from velune.core.filelock import FileLockTimeout, locked
 from velune.providers.crypto import (
     DecryptionError,
@@ -179,43 +180,9 @@ def _prefer_env() -> bool:
     return os.getenv(PREFER_ENV_VAR, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _restrict_to_current_user_windows(path: Path) -> None:
-    """Best-effort Windows equivalent of ``chmod 600`` for *path*.
-
-    ``Path.chmod`` is a no-op for real ACL enforcement on Windows, so the
-    encrypted credential file otherwise keeps whatever (often broader) ACL
-    it inherited from its parent directory. This strips inherited entries
-    and grants Full Control to the current user only, via ``icacls`` (no
-    extra dependency needed). Never allowed to block a credential save: a
-    failure here — e.g. ``icacls`` unavailable, or a filesystem without ACL
-    support — just leaves the file at its default permissions.
-    """
-    import subprocess
-
-    domain = os.environ.get("USERDOMAIN", "")
-    user = os.environ.get("USERNAME", "")
-    if not user:
-        return
-    account = f"{domain}\\{user}" if domain else user
-    try:
-        subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:F"],
-            shell=False,
-            capture_output=True,
-            timeout=5,
-            check=False,
-        )
-    except Exception:
-        logger.debug("Could not restrict ACL on %s (non-fatal)", path, exc_info=True)
-
-
 def _restrict(path: Path) -> None:
-    if not path.exists():
-        return
-    if os.name != "nt":
-        path.chmod(0o600)
-    else:
-        _restrict_to_current_user_windows(path)
+    """Restrict *path* to the current user (``chmod 600`` / a Windows ACL)."""
+    privatefile.restrict_to_current_user(path)
 
 
 class CredentialManager:
@@ -424,7 +391,9 @@ class CredentialManager:
             # Atomic write sequence: temp file -> fsync -> rename.
             temp_file = self._credentials_file.with_suffix(".tmp")
             try:
-                with open(temp_file, "wb") as f:
+                # Private from creation: exclusive 0600 file, ACL restricted before any
+                # ciphertext is written, no stale file or symlink reused.
+                with privatefile.open_private(temp_file) as f:
                     f.write(encrypted_data)
                     f.flush()
                     os.fsync(f.fileno())

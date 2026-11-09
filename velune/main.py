@@ -166,6 +166,21 @@ def _force_utf8_stdio() -> None:
             pass
 
 
+def _harden_executable_search() -> None:
+    """Stop Windows from running a bare-named program found in the current directory.
+
+    ``CreateProcess`` searches the current directory first for a name without a path (``git``,
+    ``nvidia-smi``...). Velune runs such tools automatically, and it is routinely started inside
+    a repository it did not write, so a planted ``git.exe`` there would run without anyone typing
+    it. ``NoDefaultCurrentDirectoryInExePath`` switches that search off for this process and its
+    children; explicit paths such as ``.\tool.exe`` still work. A no-op on other platforms.
+    """
+    if sys.platform == "win32":
+        import os
+
+        os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
+
+
 def main() -> None:
     """Console-script entry point.
 
@@ -173,6 +188,7 @@ def main() -> None:
     importing ``velune.cli`` or any subsystem, then delegates everything else
     to the lazily-built Typer application.
     """
+    _harden_executable_search()
     _force_utf8_stdio()
     _install_crash_hook()
     argv = sys.argv[1:]

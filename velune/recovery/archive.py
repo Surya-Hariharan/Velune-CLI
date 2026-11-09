@@ -513,6 +513,10 @@ def archive_has_encrypted_secrets(archive: Path) -> bool:
         return any(name.endswith(suffix) for name in tar.getnames())
 
 
+#: Python 3.12+ (and the 3.8-3.11 security backports) can extract with the ``"data"`` filter.
+_HAS_EXTRACTION_FILTER = hasattr(tarfile, "data_filter")
+
+
 def _safe_extract(tar: tarfile.TarFile, dest: Path) -> None:
     """Extract *tar* into *dest*, refusing any member that escapes *dest*."""
     dest = dest.resolve()
@@ -526,12 +530,18 @@ def _safe_extract(tar: tarfile.TarFile, dest: Path) -> None:
         # `PathGuard.validate()` uses instead (velune/execution/path_guard.py).
         if member_path != dest and dest not in member_path.parents:
             raise ValueError(f"Unsafe path in archive: {member.name}")
-    try:
-        # Python 3.12+ supports the "data" extraction filter; members are also
-        # validated above for older runtimes that lack the kwarg.
-        tar.extractall(dest, filter="data")  # nosec B202 - members validated above
-    except TypeError:
-        tar.extractall(dest)  # nosec B202 - members validated above
+    if _HAS_EXTRACTION_FILTER:
+        # The "data" filter also rejects absolute and escaping links. It is called directly, with
+        # no fallback: a TypeError raised *during* extraction must never be retried unfiltered.
+        tar.extractall(dest, filter="data")  # nosec B202 - members validated above, data filter
+        return
+    # Interpreters without extraction filters extract blindly, and the name check above cannot
+    # see a link member (it is not on disk yet), so `a -> /elsewhere` followed by `a/x` would write
+    # outside *dest*. Velune's own backups hold only regular files and directories.
+    for member in tar.getmembers():
+        if not (member.isreg() or member.isdir()):
+            raise ValueError(f"Refusing link or special member in archive: {member.name}")
+    tar.extractall(dest)  # nosec B202 - only regular files and directories, names validated above
 
 
 # ── Misc ─────────────────────────────────────────────────────────────────────

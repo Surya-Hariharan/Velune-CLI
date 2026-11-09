@@ -267,7 +267,7 @@ class SQLConnector(ResourceConnector):
 
     def _validate_identifier(self, name: str) -> bool:
         """True if *name* is a safe SQL identifier (letters/digits/underscore)."""
-        return bool(name) and bool(_IDENTIFIER.match(name))
+        return bool(name) and bool(_IDENTIFIER.fullmatch(name))
 
     def redacted_config(self) -> dict[str, Any] | None:
         """The stored config with secrets masked — safe to display."""

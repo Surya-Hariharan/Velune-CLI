@@ -26,6 +26,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from platformdirs import user_config_dir
 
+from velune.core import privatefile
+
 logger = logging.getLogger("velune.providers.crypto")
 
 _SERVICE = "velune"
@@ -264,38 +266,18 @@ def _stored_passphrase() -> str | None:
 
 
 def _persist_passphrase(passphrase: str) -> None:
-    """Save *passphrase*, encrypted at rest, so future processes don't re-prompt."""
+    """Save *passphrase*, encrypted at rest, so future processes don't re-prompt.
+
+    Written through :func:`velune.core.privatefile.write_private_bytes`: the file is created
+    mode 0600 / ACL-restricted *before* any data is written and then renamed into place, so the
+    (machine-key-encrypted, on POSIX) blob is never readable by another user, even briefly.
+    """
     path = _passphrase_file_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(_protect_passphrase(passphrase))
-        if os.name == "nt":
-            _restrict_passphrase_file_windows(path)
-        else:
-            path.chmod(0o600)
+        privatefile.write_private_bytes(path, _protect_passphrase(passphrase))
     except OSError as e:
         logger.debug("Could not persist master passphrase (non-fatal): %s", e)
-
-
-def _restrict_passphrase_file_windows(path: Path) -> None:
-    """Best-effort Windows ACL restriction, mirroring keystore.py's credential guard."""
-    import subprocess
-
-    domain = os.environ.get("USERDOMAIN", "")
-    user = os.environ.get("USERNAME", "")
-    if not user:
-        return
-    account = f"{domain}\\{user}" if domain else user
-    try:
-        subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:F"],
-            shell=False,
-            capture_output=True,
-            timeout=5,
-            check=False,
-        )
-    except Exception:
-        logger.debug("Could not restrict ACL on %s (non-fatal)", path, exc_info=True)
 
 
 def _credentials_file_exists() -> bool:
