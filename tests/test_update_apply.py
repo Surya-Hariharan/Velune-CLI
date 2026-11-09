@@ -304,9 +304,9 @@ def test_existing_journal_is_never_overwritten(world):
     assert world.calls == []
 
 
-def test_uv_missing_is_an_error_before_the_journal(world):
+def test_uv_missing_is_a_refusal_before_the_journal(world):
     result = world.go(which=lambda name: None)
-    assert result.exit_code is ExitCode.ERROR
+    assert result.exit_code is ExitCode.REFUSED
     assert result.manual_command == "uv tool upgrade velune-cli"
     assert world.calls == [] and not world.journal.exists()
 
@@ -357,7 +357,7 @@ def test_failure_that_damages_the_install_keeps_the_journal_and_does_not_roll_ba
     world.on_uv = damage
     world.uv_result = SimpleNamespace(returncode=1, stdout="", stderr="token=SECRET123")
     result = world.go()
-    assert result.exit_code is ExitCode.ERROR and result.result["applied"] is None
+    assert result.exit_code is ExitCode.UNCERTAIN and result.result["applied"] is None
     assert "could not verify" in result.message and "No automatic recovery" in result.message
     assert result.manual_command == "uv tool install --force velune-cli"
     assert "rolled back" not in result.message.lower()
@@ -370,7 +370,7 @@ def test_failure_that_damages_the_install_keeps_the_journal_and_does_not_roll_ba
 def test_ownership_lost_after_uv_is_unknown_not_success(world):
     world.on_uv = lambda: setattr(world, "state", report(OwnershipKind.AMBIGUOUS, version="0.9.10"))
     result = world.go()
-    assert result.exit_code is ExitCode.ERROR and result.result["applied"] is None
+    assert result.exit_code is ExitCode.UNCERTAIN and result.result["applied"] is None
     assert journal_mod.read_journal(world.journal).state == "ok"
 
 
@@ -383,7 +383,7 @@ def test_unreadable_version_after_uv_is_unknown(world):
 def test_downgrade_after_uv_is_not_success(world):
     world.upgrade_to("0.9.0")
     result = world.go()
-    assert result.exit_code is ExitCode.ERROR and result.result["applied"] is None
+    assert result.exit_code is ExitCode.UNCERTAIN and result.result["applied"] is None
 
 
 def test_detection_crash_after_uv_is_unknown_and_journal_kept(world):
@@ -425,7 +425,7 @@ def test_cancel_that_leaves_a_broken_install_keeps_the_journal(world):
     world.on_uv = lambda: setattr(world, "state", report(OwnershipKind.INDETERMINATE, version=None))
     world.uv_raises = KeyboardInterrupt()
     result = world.go()
-    assert result.exit_code is ExitCode.CANCELLED and result.result["applied"] is None
+    assert result.exit_code is ExitCode.UNCERTAIN and result.result["applied"] is None
     assert world.journal.exists()
 
 

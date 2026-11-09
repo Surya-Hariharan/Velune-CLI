@@ -53,7 +53,7 @@ def test_newer_version_with_unconfirmed_files_is_not_success(world, record, prob
     world.upgrade_to("0.9.10")
     damage_after_uv(world, record=record, problems=problems)
     result = world.go()
-    assert result.exit_code is ExitCode.ERROR and result.result["applied"] is None
+    assert result.exit_code is ExitCode.UNCERTAIN and result.result["applied"] is None
     assert "reads 0.9.10, but its files could not be confirmed" in result.message
     assert expect in result.message and "No automatic recovery" in result.message
     assert "rolled back" not in result.message.lower()
@@ -64,7 +64,7 @@ def test_newer_version_with_unconfirmed_files_is_not_success(world, record, prob
 def test_unchanged_version_with_damaged_files_keeps_the_journal(world):
     damage_after_uv(world, record="damaged", problems=("1 file(s) changed (e.g. velune/x.py)",))
     result = world.go()  # uv "does nothing": the version stays 0.9.9
-    assert result.exit_code is ExitCode.ERROR and result.result["applied"] is None
+    assert result.exit_code is ExitCode.UNCERTAIN and result.result["applied"] is None
     assert "still 0.9.9" in result.message and "does not show uv left" in result.message
     assert "1 file(s) changed" in result.message
     assert world.journal.exists() and len(world.calls) == 1
@@ -129,8 +129,10 @@ def test_journal_contents_carry_no_paths_or_secrets(world):
         "to_version",
         "installer",
         "schema_version",
+        "token",  # random operation id (M1): 32 hex characters, never user or provider text
     }
-    assert str(world.journal.parent) not in seen[0] and "token" not in seen[0].lower()
+    assert len(data["token"]) == 32 and set(data["token"]) <= set("0123456789abcdef")
+    assert str(world.journal.parent) not in seen[0]
 
 
 # ---- interrupts around the post-update check -----------------------------------------------
@@ -163,7 +165,7 @@ def test_persistent_interrupts_in_the_post_check_keep_the_journal(world):
         return world.state
 
     result = world.go(detect=detect)
-    assert result.exit_code is ExitCode.CANCELLED and result.result["applied"] is None
+    assert result.exit_code is ExitCode.UNCERTAIN and result.result["applied"] is None
     assert world.journal.exists() and len(world.calls) == 1
 
 
