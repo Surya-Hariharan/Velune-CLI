@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,22 @@ from velune.lifecycle import repair as repair_mod
 from velune.lifecycle.errors import ExitCode
 from velune.lifecycle.integrity import Integrity
 from velune.lifecycle.ownership import OwnershipKind, OwnershipReport
+
+# Typer forces styled terminal output when GITHUB_ACTIONS is set, and Rich's NO_COLOR keeps bold
+# escapes that can fall between "--" and the option name. Child processes get an environment
+# without the forcing variables, and assertions read the text with escapes removed.
+_FORCE_TERMINAL_VARS = ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS")
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def _plain(text: str) -> str:
+    return _ANSI.sub("", text)
+
+
+def _cli_env() -> dict[str, str]:
+    base = {k: v for k, v in os.environ.items() if k not in _FORCE_TERMINAL_VARS}
+    return {**base, "NO_COLOR": "1", "COLUMNS": "200", "PYTHONIOENCODING": "utf-8"}
+
 
 UV = "/usr/bin/uv"
 DISTS = (("velune-cli", "0.9.9"), ("click", "8"))
@@ -530,7 +547,7 @@ def test_real_cli_help_runs_without_uv_or_changes():
         text=True,
         encoding="utf-8",
         errors="replace",
-        env={**os.environ, "NO_COLOR": "1", "COLUMNS": "200", "PYTHONIOENCODING": "utf-8"},
+        env=_cli_env(),
         timeout=120,
     )
-    assert done.returncode == 0 and "--json" in done.stdout
+    assert done.returncode == 0 and "--json" in _plain(done.stdout)

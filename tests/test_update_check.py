@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,22 @@ from velune.lifecycle import check as check_mod
 from velune.lifecycle import versions
 from velune.lifecycle.errors import ExitCode, LifecycleError
 from velune.lifecycle.ownership import OwnershipKind, OwnershipReport
+
+# Typer forces styled terminal output when GITHUB_ACTIONS is set, and Rich's NO_COLOR keeps bold
+# escapes that can fall between "--" and the option name. Child processes get an environment
+# without the forcing variables, and assertions read the text with escapes removed.
+_FORCE_TERMINAL_VARS = ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS")
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def _plain(text: str) -> str:
+    return _ANSI.sub("", text)
+
+
+def _cli_env() -> dict[str, str]:
+    base = {k: v for k, v in os.environ.items() if k not in _FORCE_TERMINAL_VARS}
+    return {**base, "NO_COLOR": "1", "COLUMNS": "200", "PYTHONIOENCODING": "utf-8"}
+
 
 PY = (3, 12, 4)
 REAL_CHECK = check_mod.run_update_check  # tests below replace the module attribute
@@ -686,7 +703,7 @@ def test_registered_in_the_command_table():
 def test_real_cli_wiring_help_and_usage_error():
     """End to end through the lazy registry. Neither call can reach the network or uv."""
     base = [sys.executable, "-m", "velune"]
-    env = {**os.environ, "NO_COLOR": "1", "COLUMNS": "200", "PYTHONIOENCODING": "utf-8"}
+    env = _cli_env()
     kwargs = {
         "capture_output": True,
         "text": True,
@@ -696,8 +713,8 @@ def test_real_cli_wiring_help_and_usage_error():
         "timeout": 120,
     }
     helped = subprocess.run(base + ["update", "--help"], **kwargs)
-    assert helped.returncode == 0 and "--check" in helped.stdout
+    assert helped.returncode == 0 and "--check" in _plain(helped.stdout)
     # `--pre` without `--check` is a usage error that returns before any apply logic;
     # a bare `velune update` is deliberately NOT run here (it would update a real install).
     bare = subprocess.run(base + ["update", "--pre"], **kwargs)
-    assert bare.returncode == 2 and "--check" in (bare.stdout + bare.stderr)
+    assert bare.returncode == 2 and "--check" in _plain(bare.stdout + bare.stderr)
