@@ -89,6 +89,29 @@ output, repository contents, web/MCP responses) cannot escalate into arbitrary c
 execution, credential theft, or cross-project data bleed without an explicit, visible
 user action. The controls below are the per-surface implementation of that guarantee.
 
+### Local filesystem threat model
+
+Velune protects against untrusted LLM-generated input and against unsafe lifecycle
+paths: for example, `velune update`/`repair`/`uninstall` never run a `uv` found in the
+current directory (including alias spellings of it), and `velune purge-data` deletes only
+inventoried files and refuses links and junctions. It does **not** isolate Velune from a
+same-user attacker. Someone who can already modify Velune's own data directories, the
+directories on your `PATH`, or the `uv` executable itself may still create filesystem races:
+
+- `velune purge-data` re-validates the whole path immediately before each deletion, which
+  narrows the check-then-delete window but is **not** guaranteed race-free.
+- The `uv` executable is resolved first and run afterwards; replacing it in between is not
+  detected.
+- `velune purge-data --execute --confirm-phrase "delete my velune data"` and
+  `velune uninstall --yes` run without a person at a prompt. The phrase is public, so this is
+  not equivalent to interactive confirmation: any script or AI agent that can run shell
+  commands can use it to delete data (credentials and memory included) or the program. Do not
+  use these flags in unattended automation or let an agent run them unreviewed.
+- Two lifecycle commands started at once are refused by an exclusive journal (exit 8), not
+  serialised; this guards accidents, not a same-user attacker.
+
+Nothing above should be read as protection against an attacker running as you.
+
 ### Managed command execution
 
 Velune CLI runs shell commands through `SubprocessSandbox`
