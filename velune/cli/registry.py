@@ -281,6 +281,33 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "Check whether a newer Velune release is available (read-only).",
         bootstrap="light",
     ),
+    CommandSpec(
+        "repair",
+        "command",
+        "velune.cli.commands.repair",
+        "repair_cmd",
+        _DIAG,
+        "Reinstall the current version of a uv-managed Velune (never updates).",
+        bootstrap="light",
+    ),
+    CommandSpec(
+        "uninstall",
+        "command",
+        "velune.cli.commands.uninstall",
+        "uninstall_cmd",
+        _DIAG,
+        "Uninstall the Velune program from a uv-managed install (keeps your data).",
+        bootstrap="light",
+    ),
+    CommandSpec(
+        "purge-data",
+        "command",
+        "velune.cli.commands.purge_data",
+        "purge_data_cmd",
+        _DIAG,
+        "Preview or delete selected Velune user data (separate from uninstall).",
+        bootstrap="light",
+    ),
     # ── Trust & Recovery — never lose work ───────────────────────────────
     CommandSpec(
         "backup",
