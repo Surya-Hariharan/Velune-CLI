@@ -9,6 +9,26 @@ security-policy framing of the trust boundary described in [§4](#4-trust-gating
 see [SECURITY.md § MCP trust gating](../SECURITY.md#mcp-trust-gating). See
 also [README.md](../README.md) for the rest of the project.
 
+```mermaid
+flowchart LR
+    subgraph Server["Velune as an MCP server (section 1)"]
+        direction LR
+        Editor["Claude Desktop, VS Code,<br/>other MCP clients"] -->|"stdio"| Serve["velune mcp serve"]
+    end
+    subgraph Client["Velune as an MCP client (sections 2 to 4)"]
+        direction LR
+        Repl["Velune REPL"] -->|"stdio, SSE, HTTP, WebSocket"| Ext["External MCP servers"]
+    end
+```
+
+**Which entry point do I want?**
+
+| I want to... | Use |
+| --- | --- |
+| Call Velune's tools from an editor or desktop app | `velune mcp serve` ([section 1](#1-running-velune-cli-as-a-server)) |
+| Try an SSE server once and list its tools | `velune mcp connect <url> <name>` ([section 2](#2-connecting-to-an-external-mcp-server)) |
+| Use an external server regularly, over any transport | Declare it in `.mcp.json`, then `/mcp connect <name>` ([section 3](#3-declaring-servers-in-mcpjson)) |
+
 ---
 
 ## Contents
@@ -33,7 +53,19 @@ without sending your code to a third party:
 velune mcp serve
 ```
 
-This runs `velune/mcp/server.py:VeluneMCPServer` over **stdio**, using the
+Most MCP clients launch the server themselves from a command. In a client that uses
+the common `mcpServers` JSON configuration (the exact file and format belong to the client),
+that looks like:
+
+```json
+{
+  "mcpServers": {
+    "velune": { "command": "velune", "args": ["mcp", "serve"] }
+  }
+}
+```
+
+`velune mcp serve` runs `velune/mcp/server.py:VeluneMCPServer` over **stdio**, using the
 `mcp` SDK's own `mcp.server.stdio.stdio_server()` transport — the standard
 transport for editor/desktop-app integrations, where the client launches
 Velune CLI as a subprocess and talks over its stdin/stdout. This is the only
@@ -44,7 +76,7 @@ transport `velune mcp serve` currently starts.
 > `mcp` SDK's own HTTP transport) that binds to `127.0.0.1:7777` by default,
 > refuses to bind to a non-loopback host unless `allow_remote=True` is
 > passed, and requires a bearer token (`Authorization: Bearer <token>` or
-> `X-Velune CLI-Token`, checked with `secrets.compare_digest`) on every request
+> `X-Velune-Token`, checked with `secrets.compare_digest`) on every request
 > to its `/sse` and `/tools` routes. Nothing in `velune mcp serve` or the
 > rest of the CLI currently calls `run_http()` — it exists as a method on
 > the class, callable programmatically, but there's no `--http` /
@@ -58,7 +90,7 @@ tool registry are exposed to external MCP clients with
 `allow_mutations=True` is passed to `VeluneMCPServer`) — so connecting
 Claude Desktop to your Velune CLI server doesn't, by default, hand it the
 ability to write files or run commands on your machine. The four
-Velune CLI-native tools (`velune_ask`, `velune_search_memory`,
+Velune-native tools (`velune_ask`, `velune_search_memory`,
 `velune_get_symbols`, `velune_estimate_blast_radius`) are always available
 regardless of this flag; they're read-only by construction.
 
@@ -296,7 +328,7 @@ which takes a raw SSE URL and doesn't touch config at all (see
   metadata endpoint or a URL with embedded credentials, or the host isn't
   on your configured allowlist). This is a security control, not a bug —
   fix the URL rather than looking for a way around the check.
-- **Velune CLI-as-server isn't editing files even though it's connected** —
+- **Velune-as-server isn't editing files even though it's connected** —
   check whether `VELUNE_MCP_ALLOW_MUTATIONS` is set in the environment the
   server process runs in; by default it's read-only.
 - **`velune mcp serve` only seems to work over stdio** — that's current

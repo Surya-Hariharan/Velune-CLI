@@ -24,7 +24,7 @@ body:
       label: Steps to reproduce
       description: Exact steps to reproduce the behaviour.
       placeholder: |
-        1. Run `velune workspace init`
+        1. Run `velune init`
         2. Run `velune run "refactor X"`
         3. See error
     validations:

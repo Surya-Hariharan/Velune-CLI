@@ -1,2 +1,180 @@
+# Velune CLI configuration reference
+# ==================================
+#
+# Velune looks for `velune.toml` in the workspace, then in parent directories
+# of the current directory, then at `~/.velune/velune.toml`. A value set here
+# takes precedence over a `VELUNE_*` environment variable; nested keys use a
+# double underscore in the variable name (`VELUNE_EXECUTION__MODE=plan`).
+# `velune config show` prints the file that is actually in effect.
+#
+# In this repository only `default_provider` below is active. Every other
+# setting appears commented out at its built-in default, so the file doubles as
+# a reference. To change one, remove the leading `#` (lines that start with
+# `#` followed directly by a key or table name are settings; lines that start
+# with `# ` are explanations).
+#
+# Do not put API keys in this file. Store them with `velune setup` or
+# `velune provider add <id>` (encrypted, outside the repository), or supply
+# them through the provider's environment variable.
+#
+# Security: project-level `base_url` overrides, `.mcp.json` servers and hooks
+# are honored only for directories you have trusted (`velune trust add`). See
+# SECURITY.md.
+
+# ── Providers ────────────────────────────────────────────────────────────────
+
 [providers]
+# Provider used when no model is chosen explicitly. The built-in default is
+# "openai"; this repository uses "groq".
 default_provider = "groq"
+#fallback_providers = ["anthropic", "ollama"]
+# Let a council seat whose local model failed retry on a cloud provider from
+# `fallback_providers`. Off by default because the retried prompt can contain
+# repository code.
+#allow_cloud_fallback_from_local = false
+# Ask for confirmation before a cloud call estimated to cost more than this
+# (USD). 0 means always ask.
+#cost_threshold_usd = 0.01
+# Maximum in-flight requests per provider; further calls queue.
+#max_concurrent_requests = 4
+
+# Per-provider endpoint overrides. Only `base_url` is read; keys come from the
+# credential store or the provider's standard environment variable
+# (for example OPENAI_API_KEY), never from this file. A project-level `base_url`
+# is honored only in a trusted directory.
+#[providers.openai]
+#base_url = "https://api.openai.com/v1"
+#
+#[providers.anthropic]
+#base_url = "https://api.anthropic.com"
+#
+#[providers.ollama]
+#base_url = "http://localhost:11434"
+#
+#[providers.lmstudio]
+#base_url = "http://localhost:1234/v1"
+#
+#[providers.openai_compat]
+#base_url = "http://localhost:8000/v1"
+#
+#[providers.huggingface]
+#base_url = "https://api-inference.huggingface.co"
+
+# ── Execution and permissions ───────────────────────────────────────────────
+
+#[execution]
+# Default execution mode for new sessions: "manual" asks before every change,
+# "plan" writes a plan and changes nothing until approved, "auto" changes the
+# workspace without asking. High-risk and outside-workspace actions still ask
+# in every mode. `velune --mode` overrides this for one run.
+#mode = "manual"
+# Models that support function calling may call workspace tools during chat.
+# Read-only tools run without a prompt; write and execute tools follow the
+# approval mode.
+#native_tools = true
+#max_tool_turns = 10
+#hunk_review_default = false
+# Commit the files a council edit session changed. Off by default because a
+# commit is a durable change to your history.
+#council_auto_commit = false
+#low_resource_mode = false
+# Run agent commands inside a per-session Docker container instead of directly
+# on the host. Needs the `docker` extra and a running Docker daemon.
+#docker_sandbox = false
+#docker_image = "python:3.12-slim"
+# Executables the command runner may start (matched by basename, and the
+# resolved binary must be in a trusted path). Interpreters and build tools on
+# this list can run any file in the workspace with your privileges, so treat
+# additions as granting code execution.
+#allowed_executables = [
+#"python", "python3", "pytest", "ruff", "mypy", "git", "node", "npm",
+#"cargo", "go", "make", "cmake", "gcc", "clang", "echo", "cat", "ls",
+#"find", "grep",
+#]
+
+# ── Workspace, context, memory and retrieval ────────────────────────────────
+
+#[workspace]
+#index_on_init = true
+#watch_files = true
+#git_aware = true
+
+#[context]
+#max_tokens = 128000
+
+#[memory]
+#working_memory_ttl = 3600        # seconds
+#episodic_retention_days = 30
+#semantic_threshold = 0.85
+#graph_enabled = true
+
+# Relative weights for hybrid retrieval.
+#[retrieval]
+#vector_weight = 0.5
+#lexical_weight = 0.3
+#graph_weight = 0.2
+#rerank_top_k = 10
+
+# ── Agents ───────────────────────────────────────────────────────────────────
+
+#[cognition]
+# Highest council tier a task may use: instant, minimal, standard or full.
+#max_council_tier = "full"
+# "auto" classifies each task; or pin one tier.
+#default_tier_override = "auto"
+
+# Experimental engines (`velune native` and an alternative council engine) are
+# opt-in and deliberately not listed in this file, so that a copy of it cannot
+# enable them by accident. See docs/native-engine.md.
+
+# ── Hooks ───────────────────────────────────────────────────────────────────
+
+# External commands run on lifecycle events (for example SessionStart). They run
+# through your shell with your privileges, and project-level hooks load only in
+# trusted directories. See docs/usage-guide.md.
+#[hooks]
+#SessionStart = ["python3 start.py"]
+
+# ── MCP, resource connectors and telemetry ─────────────────────────────────
+
+#[mcp]
+# When non-empty, Velune connects only to the listed MCP hosts. Cloud-metadata
+# and link-local addresses are always blocked.
+#allowed_hosts = []
+
+#[resources.docker]
+#enabled = true
+#auto_connect = false
+#
+#[resources.postgres]
+#enabled = true
+#auto_connect = false
+#
+#[resources.mysql]
+#enabled = true
+#auto_connect = false
+#
+#[resources.supabase]
+#enabled = true
+#auto_connect = false
+
+#[telemetry]
+# Local token, cost and latency tracking. Nothing is sent to Velune or any
+# analytics service.
+#enabled = true
+#export_otlp = false
+#log_level = "INFO"
+# Write a redacted crash snapshot to ~/.velune/crash_reports/ (local only).
+#crash_reports_enabled = false
+
+# ── Display ──────────────────────────────────────────────────────────────────
+
+#[display]
+#colorblind_mode = false
+#reduced_motion = false
+#composer_min_lines = 3
+#composer_max_lines = 8
+#math_rendering = true
+
+#[theme]
+#active = "velune"

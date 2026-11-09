@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "velune-cli"
 dynamic = ["version"]
-description = "Local-first multi-model AI developer CLI — council-based agents, persistent memory, repository cognition"
+description = "Local-first, multi-model AI developer CLI with council-based agents, persistent memory, and repository cognition"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -18,19 +18,26 @@ maintainers = [
 ]
 keywords = [
   "ai", "cli", "llm", "ollama", "local-ai",
-  "coding-assistant", "multi-agent", "terminal",
+  "coding-assistant", "multi-agent", "terminal", "mcp",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
-  "Operating System :: OS Independent",
+  # The wheel is pure Python, but only these three operating systems are
+  # covered by CI (see the README's "Platform support" table).
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development",
   "Topic :: Terminals",
   "Typing :: Typed",
@@ -191,6 +198,7 @@ Repository = "https://github.com/Surya-Hariharan/Velune-CLI"
 Documentation = "https://github.com/Surya-Hariharan/Velune-CLI#readme"
 Issues = "https://github.com/Surya-Hariharan/Velune-CLI/issues"
 Changelog = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md"
+Security = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/SECURITY.md"
 
 [tool.hatch.version]
 path = "velune/__init__.py"
@@ -205,15 +213,22 @@ reproducible = true
 packages = ["velune"]
 
 [tool.hatch.build.targets.sdist]
+# Patterns are gitignore-style; the leading slash anchors each file to the
+# project root so that, for example, "README.md" does not also match
+# tests/tui/README.md.
 include = [
-  "velune/",
-  "README.md",
-  "LICENSE",
-  "NOTICE",
-  "AUTHORS.md",
-  "GOVERNANCE.md",
-  "CHANGELOG.md",
-  "pyproject.toml",
+  "/velune/",
+  "/README.md",
+  "/LICENSE",
+  "/NOTICE",
+  "/AUTHORS.md",
+  "/GOVERNANCE.md",
+  "/CHANGELOG.md",
+  "/SECURITY.md",
+  "/CONTRIBUTING.md",
+  "/CODE_OF_CONDUCT.md",
+  "/docs/*.md",
+  "/pyproject.toml",
 ]
 
 [tool.pytest.ini_options]
@@ -227,10 +242,6 @@ markers = [
     "tui: real-PTY end-to-end terminal tests (tests/tui); spawn the actual CLI, slower",
     "live: opt-in tests that call a real provider; they run only with VELUNE_LIVE_TESTS=1",
 ]
-
-[tool.black]
-line-length = 100
-target-version = ["py310", "py311", "py312"]
 
 [tool.ruff]
 line-length = 100

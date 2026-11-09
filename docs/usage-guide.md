@@ -1,24 +1,60 @@
 # Usage Guide
 
-*Practical guidance for getting good results out of Velune CLI day-to-day.*
+*Practical guidance for getting good results out of Velune CLI day to day.*
 
-For what each command does, see [Slash Commands](slash-commands.md); for how the codebase is put
-together, see the [Development Guide](development.md). Back to [README](../README.md).
+This guide explains how to work with Velune: what to do first on a new project, how to
+choose a model and a level of autonomy, how to review changes, and what to check when
+something looks wrong. It assumes Velune is already installed (see the
+[README](../README.md#installation)). For the exact syntax of every REPL command, see
+[Slash Commands](slash-commands.md); for how the codebase is put together, see the
+[Development Guide](development.md).
 
 ---
 
 ## Contents
 
+- [The shape of a session](#the-shape-of-a-session)
 - [1. First session on a new project](#1-first-session-on-a-new-project)
 - [2. Picking a model](#2-picking-a-model)
-- [3. Choosing how a task runs](#3-choosing-how-a-task-runs)
-- [4. Reviewing what changed](#4-reviewing-what-changed)
-- [5. Making Velune CLI remember your codebase](#5-making-velune-cli-remember-your-codebase)
-- [6. Working across multiple projects](#6-working-across-multiple-projects)
-- [7. Extending Velune CLI for your team](#7-extending-velune-cli-for-your-team)
-- [8. Connecting external tools](#8-connecting-external-tools)
-- [9. Diagnosing problems](#9-diagnosing-problems)
-- [10. Recovering from a bad state](#10-recovering-from-a-bad-state)
+- [3. Choosing how much Velune may do](#3-choosing-how-much-velune-may-do)
+- [4. Choosing how a task runs](#4-choosing-how-a-task-runs)
+- [5. Reviewing what changed](#5-reviewing-what-changed)
+- [6. Making Velune remember your codebase](#6-making-velune-remember-your-codebase)
+- [7. Working across multiple projects](#7-working-across-multiple-projects)
+- [8. Extending Velune for your team](#8-extending-velune-for-your-team)
+- [9. Connecting external tools](#9-connecting-external-tools)
+- [10. Diagnosing problems](#10-diagnosing-problems)
+- [11. Recovering from a bad state](#11-recovering-from-a-bad-state)
+
+---
+
+## The shape of a session
+
+Most sessions follow the same loop. Each step has a section below, and you can skip steps
+you do not need: a quick question needs neither an index nor a council.
+
+```mermaid
+flowchart LR
+    A["Set up once<br/>velune init, connect a model"] --> B["Index when useful<br/>/index quick, standard, deep"]
+    B --> C["Choose autonomy<br/>/manual, /plan, /auto"]
+    C --> D["Give a task<br/>/run, or just chat"]
+    D --> E["Review<br/>/diff, /hunk, /undo"]
+    E --> D
+    E --> F["Memory carries over<br/>to the next session"]
+```
+
+A short example of the loop, in the REPL:
+
+```text
+/index standard            # build the symbol index (one time, then kept fresh)
+/model use <id>            # pick a model you have connected
+/run add input validation to the signup handler
+/diff                      # see what changed on disk
+/undo                      # revert the last Velune-authored commit, if you do not want it
+```
+
+In the default Manual mode, Velune shows each change and waits for your approval before it
+touches a file, so `/diff` mostly confirms what you already accepted.
 
 ---
 
@@ -30,237 +66,270 @@ velune init      # one-time: registers the workspace, trust prompt if new
 velune           # opens the REPL
 ```
 
-Velune CLI does **not** index your repository automatically — the REPL opens
-instantly with no symbol index built. This is deliberate: indexing a large
-repo can take real time and CPU, and most sessions (a quick question, a
-one-file edit) don't need it. Build the index explicitly, sized to what
-you're about to do:
+Velune does **not** index your repository automatically. The REPL opens immediately, with
+no symbol index built. This is deliberate: indexing a large repository can take real time
+and CPU, and most sessions (a quick question, a one-file edit) do not need it. Build the
+index explicitly, sized to what you are about to do:
 
 | Command | Cost | Use for |
 | --- | --- | --- |
-| `/index quick` | Seconds | Manifest-only scan — quick orientation, "what's in this repo" |
-| `/index standard` | Depends on repo size | Full symbol index — most day-to-day work |
-| `/index deep` | Slowest | Symbols + import graph + relationships — refactors, blast-radius questions |
+| `/index quick` | Seconds | Manifest-only scan: quick orientation, "what is in this repo" |
+| `/index standard` | Depends on repository size | Full symbol index: most day-to-day work |
+| `/index deep` | Slowest | Symbols, import graph and relationships: refactors, blast-radius questions |
 
-> `/index` is the primary command; `/cognition` and `/cog` still work as
-> aliases for backward compatibility. `/index status` shows freshness,
-> `/index rebuild` forces a full rescan.
+> `/index` is the primary command; `/cognition` and `/cog` still work as aliases for
+> backward compatibility. `/index status` shows freshness, and `/index rebuild` forces a
+> full rescan.
 
-If you skip this step, `/run` still works — the council just has less
-repository context to draw on, and complex tasks may get misclassified to a
-lower tier than they deserve (see below).
+If you skip this step, `/run` still works. The council just has less repository context to
+draw on, and complex tasks may be classified into a lower tier than they deserve (see
+[Choosing how a task runs](#4-choosing-how-a-task-runs)).
 
-Once you've indexed, most of the work happens off the prompt path: a
-background engine watches the filesystem and keeps the index current
-incrementally, without re-scanning the whole repo on every turn. `velune status` and `velune context`
-show what is indexed and how fresh it is.
+Once you have indexed, most of the upkeep happens off the prompt path: a background engine
+watches the filesystem and keeps the index current incrementally, without re-scanning the
+whole repository on every turn. `velune status` and `velune context` show what is indexed
+and how fresh it is.
 
 ---
 
 ## 2. Picking a model
 
-Run `/model discover` to find what's already available locally (Ollama, LM Studio), or `/connect` to
-add a cloud provider key (also `velune provider add <id>` from the terminal). Keys are stored encrypted
-(AES-GCM) in your user config directory — the encryption key lives in your OS keyring, or is derived from
-`VELUNE_MASTER_PASSPHRASE` on headless machines — never in `velune.toml`. Then `/model use <id>` (or the
-`/model` palette, or Alt+↑/↓) to switch.
+Run `/model discover` to find what is already available locally (Ollama, LM Studio), or
+`/connect` to add a cloud provider key (also `velune provider add <id>` from the terminal).
+Keys are stored encrypted (AES-GCM) in your user config directory. The encryption key lives
+in your OS keyring, or is derived from `VELUNE_MASTER_PASSPHRASE` on headless machines. Keys
+are never written to `velune.toml`. Then `/model use <id>` (or the `/model` palette, or
+Alt+Up/Down) switches the active model.
 
-**When something isn't reachable.** Velune tells apart *the key was rejected* from everything else
-(offline, timed out, rate-limited, provider down, key not allowed to list models). Only a rejected key is
-refused; otherwise the key is saved and re-checked automatically. A local model whose server is stopped
-or whose drive is unplugged stays in the list, marked unavailable with the reason:
+**When something is not reachable.** Velune tells apart "the key was rejected" from
+everything else (offline, timed out, rate-limited, provider down, key not allowed to list
+models). Only a rejected key is refused; otherwise the key is saved and re-checked
+automatically. A local model whose server is stopped or whose drive is unplugged stays in
+the list, marked unavailable with the reason. These commands handle those cases:
 
 | Command | Use it to |
 | --- | --- |
-| `/model status` | See whether the active model is available, its endpoint/storage path, and which key is in use |
+| `/model status` | See whether the active model is available, its endpoint or storage path, and which key is in use |
 | `/model recheck [id]` | Re-test now (after reconnecting a drive or starting `ollama serve`); for a cloud model, re-verifies the key |
 | `/model relocate <id> <path>` | Point a model at its new location when a drive mounts under a different path |
-| `/model register <path>` | Add an Ollama store folder (in place), or import a `.gguf` file / safetensors folder into Ollama (copies it — you'll be asked first) |
+| `/model register <path>` | Add an Ollama store folder (in place), or import a `.gguf` file or safetensors folder into Ollama (this copies it, and you are asked first) |
 | `/model remove <id>` | Forget a model registration (model files are never touched) |
 
-**Rule of thumb:** local models are fine for `INSTANT`/`STANDARD`-tier work
-(explaining code, small edits); reserve your biggest/most expensive model
-for `FULL`-tier tasks (security review, cross-cutting refactors) via
-`/max` or `/council`, so you're not paying full-council cost for a
-one-line question.
+**Rule of thumb.** Local models are fine for `INSTANT` and `STANDARD` tier work (explaining
+code, small edits). Reserve your largest or most expensive model for `FULL` tier tasks
+(security review, cross-cutting refactors) through `/max` or `/council`, so you are not
+paying full-council cost for a one-line question.
+
+Remember that a cloud model receives your prompt and the repository context Velune attaches
+to it. The [README](../README.md#local-and-cloud-providers) explains which providers keep
+your data on your machine.
 
 ---
 
-## 3. Choosing how a task runs
+## 3. Choosing how much Velune may do
 
-Every `/run` goes through automatic tier classification — it's not "always
-full council," and it's not "always the fast path" either:
+Velune can create, edit and delete files and run commands in your project. The **execution
+mode** decides what it may do without asking. Press Shift+Tab to cycle modes, use the slash
+commands, or start with `velune --mode manual|plan|auto`.
 
-- Explaining, describing, or answering "what is X" style prompts → `INSTANT`.
-- Ordinary edits and small features → `STANDARD`/`MINIMAL`.
-- Refactors, security-sensitive changes, migrations → `FULL`.
-- **Regardless of keywords**, if a file you mention has dependents in the repository's import graph,
-  Velune CLI raises the tier automatically (1+ dependents: at least `MINIMAL`; 3+: at least `STANDARD`;
-  5+: `FULL`) — a one-line prompt touching a widely-imported file gets full council treatment even if it
-  doesn't sound like a "refactor."
+| Mode | Command | What happens |
+| --- | --- | --- |
+| **Manual** (default) | `/manual` | Reads and analyzes freely, and asks before every change. Related changes are shown together for one approval. |
+| **Plan** | `/plan [task]` | Investigates and writes a plan to `.velune/plans/<name>.md` without changing project files. Revise the plan as often as you like, then reply "approve" to run it. |
+| **Auto** | `/auto` | Creates, edits and deletes files and runs commands inside the project without asking, iterating (edit, test, fix) until the task is done. |
 
-This escalation only requires an index (`/index standard` or deeper) —
-without one, Velune CLI has no fan-in data to escalate on, so it's worth
-indexing before a task that touches a central file.
+Which mode to use:
+
+- **Manual** when you are learning how Velune behaves or working in code you care about.
+- **Plan** for larger or riskier work where you want to agree on the approach first.
+- **Auto** for well-understood tasks in a repository with good tests and version control,
+  where you will review the result afterwards.
+
+In every mode Velune still asks before touching anything outside the project folder, before
+high-risk operations (such as `git reset --hard`, `git clean`, force-push or recursive
+deletes), and before reading or changing secrets. These rules are enforced in the tool
+layer, not only requested of the model. See [SECURITY.md](../SECURITY.md) for the details
+and the limits.
+
+`/approve safe|ask|block` is a separate, session-scoped control over individual tool calls:
+
+- `safe`: known read-only calls run without asking; writes and commands prompt.
+- `ask` (default): you see everything non-trivial.
+- `block`: calls are rejected, which suits stepping through a task you are not sure about
+  or working in a sensitive repository.
+
+---
+
+## 4. Choosing how a task runs
+
+Every `/run` goes through automatic tier classification. It is not "always full council",
+and it is not "always the fast path" either:
+
+- Explaining, describing, or answering "what is X" style prompts: `INSTANT`.
+- Ordinary edits and small features: `STANDARD` or `MINIMAL`.
+- Refactors, security-sensitive changes, migrations: `FULL`.
+- **Regardless of keywords**, if a file you mention has dependents in the repository's import
+  graph, Velune raises the tier automatically (1 or more dependents: at least `MINIMAL`;
+  3 or more: at least `STANDARD`; 5 or more: `FULL`). A one-line prompt touching a
+  widely imported file gets full council treatment even if it does not sound like a
+  "refactor".
+
+This escalation only works with an index (`/index standard` or deeper). Without one, Velune
+has no dependency data to escalate on, so it is worth indexing before a task that touches a
+central file.
 
 Override the classifier directly when you know better:
 
-- `/council <task>` — force full council regardless of what the classifier
-  would pick.
-- `/fast` — pin everything to instant tier / smallest model / 4k context
-  for a whole session (good for a burst of quick Q&A).
-- `/max` — pin full council / largest model / 128k context for a whole
-  session (good before a big refactor pass).
-- `/normal` — back to auto-classification (16k context, adapts further to
-  your hardware profile).
+- `/council <task>` forces the full council regardless of what the classifier would pick.
+- `/fast` pins everything to the instant tier, the smallest model and a 4k context for the
+  whole session (good for a burst of quick questions).
+- `/max` pins the full council, the largest model and a 128k context for the whole session
+  (good before a big refactor pass).
+- `/normal` returns to automatic classification (16k context, adapting further to your
+  hardware profile).
 
-For anything that will take a while, `/run --bg <task>` submits it to a
-background job and returns your prompt immediately; `/jobs` and
-`/dashboard` track progress, and the status bar shows a live `bg:N`
-counter.
+For anything that will take a while, `/run --bg <task>` submits it as a background job and
+returns your prompt immediately. `/jobs` and `/dashboard` track progress, and the status bar
+shows a live `bg:N` counter.
 
 ---
 
-## 4. Reviewing what changed
+## 5. Reviewing what changed
 
-Velune CLI edits files directly rather than pasting diffs into chat. After a
-run:
+Velune edits files on disk rather than pasting diffs into chat. After a run:
 
-- `/diff` — see what actually changed on disk from the last council run.
-- `/hunk` — switch to hunk-by-hunk review before accepting edits, if you
-  want more granular control than "accept everything."
-- `/undo` — revert the last Velune CLI-authored git commit (the changes stay
-  staged, so you can inspect them before deciding what to do next).
+- `/diff` shows what actually changed on disk from the last council run.
+- `/hunk` switches to hunk-by-hunk review before edits are accepted, for finer control than
+  "accept everything".
+- `/undo` reverts the last Velune-authored git commit. The changes stay staged, so you can
+  inspect them before deciding what to do next.
 
-Set `/approve` up front based on how much you trust the task: `safe` for
-routine work (auto-runs reads, prompts on writes/exec), `ask` if you want
-visibility into everything non-trivial, `block` for anything you want to
-step through command-by-command (e.g. a task you're not fully sure about,
-or one running against a sensitive repo).
+A council improves the odds of a good answer but does not guarantee one. Read the diff
+before you accept it, especially in Auto mode.
 
 ---
 
-## 5. Making Velune CLI remember your codebase
+## 6. Making Velune remember your codebase
 
-The five-tier memory system (working → episodic → semantic → graph →
-lineage) means context accumulates across sessions without you re-explaining
-it — but it only has something to draw on once you've used the tool for a
-while:
+The five-tier memory system (working, episodic, semantic, graph, lineage) lets context
+accumulate across sessions without you re-explaining it. It only has something to draw on
+once you have used the tool for a while:
 
-- Episodic memory persists your conversation history per workspace.
-- Semantic memory lets "fix the auth thing from yesterday" resolve to the
-  actual prior conversation and files touched, once there's session history
-  to search.
-- Graph memory captures repository structure once indexed.
+- **Episodic** memory persists your conversation history per workspace.
+- **Semantic** memory lets "fix the auth thing from yesterday" resolve to the actual prior
+  conversation and files touched, once there is session history to search. It needs the
+  optional `rag` extra.
+- **Graph** memory captures repository structure once the repository is indexed.
 
-`/memory stats` shows what's actually populated; `/context` shows how much
-of your active context window is being spent on retrieved memory vs. your
-current conversation. If a prompt feels like it's ignoring history it
-should know about, check `/memory stats` before assuming the model is at
-fault — an empty or stale tier is a common cause.
+`/memory stats` shows what is actually populated. `/context` shows how much of your active
+context window is being spent on retrieved memory versus your current conversation. If a
+prompt feels like it is ignoring history it should know about, check `/memory stats` before
+assuming the model is at fault: an empty or stale tier is a common cause.
 
-`/memory clear` is destructive (drops persisted SQLite/Qdrant/LanceDB state
-for the workspace, not just the current turn) and prompts for confirmation
-— use it when memory has gone stale or wrong, not routinely.
+`/memory clear` is destructive. It drops the persisted SQLite, Qdrant and LanceDB state for
+the workspace, not just the current turn, and prompts for confirmation. Use it when memory
+has gone stale or wrong, not routinely.
 
-> What decides *which* sources feed a given answer — and how much of each —
-> is intent-aware retrieval, not a fixed mix: keyword (BM25), vector and graph results are fused with
-> weights chosen per intent (search-style prompts lean on keywords, refactors and dependency questions on
-> the graph), then reranked heuristically.
+> **How sources are chosen.** Which sources feed a given answer, and how much of each, is
+> decided by intent-aware retrieval rather than a fixed mix. Keyword (BM25), vector and
+> graph results are fused with weights chosen per intent (search-style prompts lean on
+> keywords; refactors and dependency questions lean on the graph), then reranked
+> heuristically.
 
-From the terminal (outside the REPL), the equivalent commands are
-`velune memory stats|inspect|clear|compact`.
+From the terminal, the equivalent commands are `velune memory stats|inspect|clear|compact`.
 
 ---
 
-## 6. Working across multiple projects
+## 7. Working across multiple projects
 
-`/project list` and `/project open <path>` switch workspaces without
-restarting the REPL — each workspace has its own index, memory, and MCP
-config. `/project add <path>` registers a workspace you want to switch to
-later without opening it immediately. Use `velune session list` /
-`velune session delete <id>` from the terminal (outside the REPL) to manage
-saved sessions in bulk.
-
----
-
-## 7. Extending Velune CLI for your team
-
-Three ways to add project- or team-specific behavior, roughly in order of
-how much you want to share:
-
-1. **File-based slash commands** — a TOML file in the workspace defines a
-   one-off command. Fastest to write, not portable outside the repo unless
-   committed alongside it.
-2. **Declarative plugins** — a `plugin.json` manifest bundling commands,
-   skills, hooks, and MCP servers as one unit under
-   `<workspace>/.velune/plugins/` (or `~/.velune/plugins/` for personal,
-   cross-project plugins). Best when you want to share a coherent bundle
-   with a team, since it's one thing to enable/disable (`/plugin`) rather
-   than several loose files.
-3. **Hooks** — external commands run on lifecycle events
-   (`PreToolUse`/`PostToolUse`/`SessionStart`/…), configured in
-   `velune.toml [hooks]` or `.velune/hooks.json`. Use this for things like
-   "run a linter after every file write" or "block commits to `main`" —
-   policy enforcement rather than new functionality.
-
-See the extension-points table in the [Development Guide](development.md#5-extension-points--the-design-pattern-behind-all-of-them)
-for where each config file lives.
+`/project list` and `/project open <path>` switch workspaces without restarting the REPL.
+Each workspace has its own index, memory and MCP configuration. `/project add <path>`
+registers a workspace you want to switch to later without opening it immediately. From the
+terminal, `velune session list` and `velune session delete <id>` manage saved sessions in
+bulk.
 
 ---
 
-## 8. Connecting external tools
+## 8. Extending Velune for your team
 
-- **MCP** — to use Velune CLI's tools from Claude Desktop, VS Code, or another
-  MCP-capable editor, run `velune mcp serve`. To pull tools *into* Velune CLI
-  from an external MCP server, declare it in `.mcp.json` and use `/mcp
-  connect <name>`. See [mcp.md](mcp.md) for trust gating and transport
-  details — outbound connections are trust-gated per workspace, so a repo
-  you haven't explicitly trusted won't silently load its `.mcp.json`.
-- **Resource connectors** — for Velune CLI to query a database or container
-  directly (Docker, Postgres, MySQL, Supabase), use `/resource discover`
-  then `/resource configure <id>` (database connectors). Credentials are encrypted at rest;
-  anything beyond a read requires an explicit approval prompt each time
-  (or per-session, depending on how you answer it) — this is intentional
-  friction for write/admin-tier actions against real infrastructure.
-- **GitHub/GitLab** — `/push`, `/pr`, `/issue` use the same git and REST integrations as the git tools;
-  no separate setup beyond having `git` configured and, for PR/issue commands, a token available to the
-  underlying REST client.
+There are three ways to add project- or team-specific behavior, roughly in order of how
+much you want to share:
 
----
+1. **File-based slash commands.** A TOML file defines a one-off command. This is the fastest
+   to write, and it is not portable outside the repository unless you commit it alongside
+   the code. A command whose action is `shell` runs through your shell with your
+   privileges when you invoke it, so review these files before you use a repository you did
+   not write.
+2. **Declarative plugins.** A `plugin.json` manifest bundles commands, skills, hooks and MCP
+   servers as one unit under `<workspace>/.velune/plugins/` (or `~/.velune/plugins/` for
+   personal, cross-project plugins). This is best when you want to share a coherent bundle,
+   because it is one thing to enable or disable (`/plugin`) rather than several loose files.
+3. **Hooks.** External commands run on lifecycle events
+   (`PreToolUse`, `PostToolUse`, `SessionStart`, and others), configured in
+   `velune.toml [hooks]` or `.velune/hooks.json`. Use them for policy, such as "run a linter
+   after every file write" or "block commits to `main`", rather than for new functionality.
+   Project-level hooks load only in directories you have trusted.
 
-## 9. Diagnosing problems
-
-Start with `/doctor` (in-REPL) or `velune doctor check` (terminal, more
-thorough — checks providers, storage, security posture, performance, and
-council role coverage in one pass, add `--fix` to auto-remediate what it
-safely can). Common specific checks:
-
-- `velune doctor providers` — connectivity to every configured provider.
-- `velune doctor network` — SSRF/reachability checks relevant to MCP and
-  resource connectors.
-- `velune logs` / `velune logs live` — recent or streaming execution events
-  read back from the trace log.
-- `velune status` — index freshness, file/symbol counts, and workspace
-  health, read from on-disk state.
-- `velune pipeline trace "<query>"` — trace a query through the retrieval pipeline (lexical / vector /
-  graph hit counts, timings, fusion).
-
-Both `velune status` and `velune logs` exist specifically so you can prove
-(to yourself or someone else) that indexing or a tool call really happened,
-not just that a command returned success.
-
-If Velune CLI feels like it's ignoring something you told it earlier in the
-session, check `/context` (is it being truncated out of the budget?) before
-`/memory stats` (was it ever persisted?).
+See the extension-points table in the
+[Development Guide](development.md#5-extension-points--the-design-pattern-behind-all-of-them)
+for where each configuration file lives.
 
 ---
 
-## 10. Recovering from a bad state
+## 9. Connecting external tools
 
-`velune backup` / `velune restore` / `velune recover` cover the "something
-went wrong" cases: `recover` is designed for the REPL-crash case (a
-per-turn autosave the REPL keeps automatically), while `backup`/`restore`
-are the manual, explicit path for moving or restoring the full state
-(sessions, config, providers, memory, trust) as one archive — useful before
-a risky operation like `/memory clear`, or before upgrading Velune CLI itself.
+- **MCP.** To use Velune's tools from Claude Desktop, VS Code or another MCP-capable editor,
+  run `velune mcp serve`. To pull tools *into* Velune from an external MCP server, declare
+  it in `.mcp.json` and use `/mcp connect <name>`. See [mcp.md](mcp.md) for trust gating and
+  transport details. Outbound connections are trust-gated per workspace, so a repository you
+  have not explicitly trusted will not silently load its `.mcp.json`.
+- **Resource connectors.** For Velune to query a database or container directly (Docker,
+  Postgres, MySQL, Supabase), use `/resource discover`, then `/resource configure <id>` for
+  the database connectors. Credentials are encrypted at rest. Anything beyond a read requires
+  an explicit approval prompt each time (or per session, depending on how you answer). This
+  friction is intentional for write and admin actions against real infrastructure.
+- **GitHub and GitLab.** `/push`, `/pr` and `/issue` use the same git and REST integrations
+  as the git tools. They need no separate setup beyond a configured `git` and, for pull
+  request and issue commands, a token available to the underlying REST client.
+
+---
+
+## 10. Diagnosing problems
+
+Start with `/doctor` (in the REPL) or `velune doctor check` (in the terminal). The terminal
+version is more thorough: it checks providers, storage, security posture, performance and
+council role coverage in one pass, and `--fix` remediates what it safely can. More specific
+checks:
+
+- `velune doctor providers` checks connectivity to every configured provider.
+- `velune doctor network` runs the SSRF and reachability checks relevant to MCP and resource
+  connectors.
+- `velune logs` and `velune logs live` show recent or streaming execution events read back
+  from the trace log. `velune trace --type permission` shows the approval decisions.
+- `velune status` shows index freshness, file and symbol counts, and workspace health, read
+  from on-disk state.
+- `velune pipeline trace "<query>"` traces a query through the retrieval pipeline (lexical,
+  vector and graph hit counts, timings, fusion).
+
+`velune status` and `velune logs` exist so you can show, to yourself or someone else, that
+indexing or a tool call really happened, and not only that a command returned success.
+
+**Which check first?** If Velune seems to be ignoring something you said earlier in the
+session, check `/context` first (was it truncated out of the budget?) and `/memory stats`
+second (was it ever persisted?).
+
+---
+
+## 11. Recovering from a bad state
+
+`velune backup`, `velune restore` and `velune recover` cover the "something went wrong"
+cases:
+
+- `recover` is designed for the REPL-crash case, using a per-turn autosave that the REPL
+  keeps automatically.
+- `backup` and `restore` are the manual, explicit path for moving or restoring the full
+  state (sessions, config, providers, memory, trust) as one archive. They are useful before
+  a risky operation such as `/memory clear`, or before upgrading Velune itself.
+
+Restore only archives you made yourself: an archive carries the workspace trust list. See
+[SECURITY.md](../SECURITY.md#backup-and-recovery-secrets).
