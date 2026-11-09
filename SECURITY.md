@@ -1,404 +1,589 @@
 # Security Policy
 
+This document describes how to report a vulnerability in Velune CLI, what the
+project does to protect its users, and where those protections stop. It
+separates controls that are implemented and enabled by default from controls
+that are optional, and it lists known limitations. It is not a guarantee that
+Velune CLI is free of vulnerabilities.
+
 ## Contents
 
 - [Supported versions](#supported-versions)
 - [Reporting a vulnerability](#reporting-a-vulnerability)
-- [Response timeline](#response-timeline)
-- [Vulnerability lifecycle](#vulnerability-lifecycle)
-- [Engineering safeguards](#engineering-safeguards)
-- [Credits](#credits)
+- [Private disclosure procedure](#private-disclosure-procedure)
+- [Information to include in a report](#information-to-include-in-a-report)
+- [Response and remediation expectations](#response-and-remediation-expectations)
+- [Security architecture](#security-architecture)
+- [Threat model and trust boundaries](#threat-model-and-trust-boundaries)
+- [Filesystem and execution protections](#filesystem-and-execution-protections)
+- [Credential protection](#credential-protection)
+- [Network and MCP security](#network-and-mcp-security)
+- [Dependency and supply-chain security](#dependency-and-supply-chain-security)
+- [Known limitations and accepted risks](#known-limitations-and-accepted-risks)
+- [Security acknowledgements](#security-acknowledgements)
 
 ---
 
 ## Supported versions
 
-Security fixes are triaged on `main`. Maintainers backport critical fixes to supported
-release branches where feasible. Users should upgrade to the latest release for timely
-protection.
+Velune CLI is pre-1.0 and maintained by one person. Security fixes are made on
+`main` first and released as a new version.
 
-| Branch / Release | Security support |
+| Version | Security fixes |
 | :--- | :--- |
-| `main` | ✅ Active — security fixes merged here first |
-| Latest tagged release | ✅ Active — critical backports when feasible |
-| Older releases | ⚠️ Best-effort; upgrade recommended |
+| `main` | Yes. Fixes land here first. |
+| Latest published release (see [PyPI](https://pypi.org/project/velune-cli/)) | Yes. Critical fixes are released as a patch version. |
+| Older releases | Not guaranteed. Upgrade to the latest release. |
+
+There are no long-lived release branches, so backports to older versions are not
+planned.
 
 ---
 
 ## Reporting a vulnerability
 
-> **Caution:** Do not open a public GitHub issue for security vulnerabilities.
+**Do not open a public GitHub issue, discussion or pull request for a security
+vulnerability.**
 
-### Primary channel
+- **Preferred:** open a private report with
+  [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new).
+  The maintainer can work with you there before anything is made public.
+- **If you cannot use GitHub:** email the maintainer at
+  `suryahariharan2006@gmail.com`, say that the message is a security report, and
+  ask for a private channel before sending details. Do not put exploit details in
+  a first message to a public mailing list or issue. The project does not
+  currently publish a PGP key.
 
-Use [GitHub Security Advisories](https://github.com/Surya-Hariharan/Velune-CLI/security/advisories/new)
-to open a private advisory. Maintainers can collaborate with you there before any
-public disclosure.
+Issues that are not vulnerabilities (bugs, hardening ideas, questions) belong in
+public [issues](https://github.com/Surya-Hariharan/Velune-CLI/issues).
 
-### Encrypted fallback
+---
 
-If you cannot use GitHub Security Advisories, reach out to a maintainer through
-their verified contact (`suryahariharan2006@gmail.com`) and request a secure channel. Do not post sensitive details
-in public.
+## Private disclosure procedure
 
-### What to include
+1. You report privately through one of the channels above.
+2. The maintainer acknowledges the report and assigns a triage owner.
+3. The maintainer reproduces the issue and assigns a severity. They may ask you
+   for more detail or a proof of concept.
+4. A fix is developed and tested on a private branch, with regression tests where
+   applicable.
+5. Disclosure is coordinated with you: a patched release, a published advisory,
+   release notes, and a CVE where appropriate.
+6. The advisory is closed and you are notified. You are credited unless you ask
+   not to be.
+
+Please allow a reasonable remediation window before disclosing publicly. The
+maintainer will not pursue legal action against researchers who act in good
+faith, avoid accessing other people's data, and follow this procedure. This is a
+statement of intent, not a formal safe-harbor agreement.
+
+---
+
+## Information to include in a report
 
 ```text
 Title:              Short summary of the issue
 Repository:         Surya-Hariharan/Velune-CLI
-Affected versions:  <git SHA or package version>
-Impact:             Brief note (RCE, data exposure, sandbox escape, etc.)
-Reproduction:       Step-by-step or minimal PoC (redact sensitive data)
-Environment:        OS, Python version, provider configuration
+Affected versions:  Package version or git SHA (output of `velune --version`)
+Impact:             What an attacker gains (code execution, data exposure, sandbox escape, ...)
+Reproduction:       Step-by-step instructions or a minimal proof of concept (redact secrets)
+Environment:        Operating system, Python version, install method, provider configuration
 ```
 
+`velune doctor --json` produces an environment report with home-directory paths
+shortened to `~`. Review it before attaching it.
+
 ---
 
-## Response timeline
+## Response and remediation expectations
 
-| Severity | Definition | Acknowledgement | Remediation target |
+| Severity | Typical examples | Acknowledgement target | Remediation target |
 | :--- | :--- | :--- | :--- |
-| **Critical** | RCE, sandbox escape, data exfiltration | ≤ 24 hours | Emergency patch ASAP |
-| **High** | Privilege escalation, significant data exposure | ≤ 72 hours | ≤ 30 days |
-| **Medium** | Limited impact or requires user interaction | ≤ 5 business days | ≤ 90 days |
-| **Low** | Informational, minor issues | ≤ 10 business days | Normal release cadence |
+| Critical | Remote code execution, sandbox escape, credential or data exfiltration | 24 hours | Emergency patch as soon as practical |
+| High | Privilege escalation, significant data exposure | 72 hours | 30 days |
+| Medium | Limited impact, or requires user interaction | 5 business days | 90 days |
+| Low | Informational or minor issues | 10 business days | Normal release cadence |
 
-These are guidelines — exact timelines depend on complexity and external dependencies.
-
----
-
-## Vulnerability lifecycle
-
-1. Receive report via private advisory or encrypted channel.
-2. Acknowledge and assign a triage owner.
-3. Reproduce the issue; assign a severity rating (may consult reporter for PoC details).
-4. Develop and test a patch on a private branch; add regression tests where applicable.
-5. Coordinate disclosure: publish advisory, release notes, and CVE (if appropriate).
-6. Close the advisory; notify the reporter; credit them in release notes.
-
-Reporters are asked to allow a reasonable remediation window before public disclosure.
-Reporters acting in good faith under responsible disclosure will not be pursued legally
-for reasonable research activity; this is not a formal safe-harbor guarantee.
+These are targets for a single-maintainer project, not commitments. Actual times
+depend on complexity, dependencies on upstream fixes and maintainer availability.
+If you have not received an acknowledgement within the target, follow up on the
+same channel.
 
 ---
 
-## Engineering safeguards
+## Security architecture
 
-Velune CLI is local-first by design: the central guarantee is that untrusted input (LLM
-output, repository contents, web/MCP responses) cannot escalate into arbitrary code
-execution, credential theft, or cross-project data bleed without an explicit, visible
-user action. The controls below are the per-surface implementation of that guarantee.
+Velune CLI is a local application. It has no server component of its own, and
+all of its state is stored on the machine where it runs. The design goal is that
+untrusted input (model output, repository contents, web and MCP responses) should
+not turn into code execution, credential disclosure or cross-project data
+leakage without an explicit and visible user action. The controls below work
+toward that goal; they reduce risk and do not eliminate it.
 
-### Local filesystem threat model
+| Control | Default | Where |
+| :--- | :--- | :--- |
+| Execution modes (Manual, Plan, Auto) and approval policy | Enabled; default mode is Manual | `velune/permissions/`, `velune/cli/execution_modes.py` |
+| Path guard (workspace containment, symlink resolution) | Enabled | `velune/execution/path_guard.py` |
+| Diff preview and approval of writes | Enabled in Manual mode; not applied in Auto mode for changes inside the project | `velune/execution/diff_preview.py` |
+| Managed command runner (no shell, allowlist, environment scrubbing, resource limits) | Enabled | `velune/execution/sandbox.py` |
+| OS-level isolation through a Docker container | **Optional, off by default** | `velune/execution/docker_sandbox.py` |
+| Outbound URL validation for web fetch and MCP | Enabled | `velune/tools/web/validator.py`, `velune/mcp/security.py` |
+| Workspace trust for project-level MCP servers, hooks and `base_url` overrides | Enabled | `velune/core/trust.py` |
+| Encrypted credential store | Enabled | `velune/providers/crypto.py` |
+| Log and traceback redaction of known key formats | Enabled | `velune/core/redaction.py` |
+| Opt-in local crash reports | **Off by default** | `velune/cli/crash_reporter.py` |
+| Git snapshot and rollback for plan-driven changes | Enabled | `velune/execution/rollback.py` |
 
-Velune protects against untrusted LLM-generated input and against unsafe lifecycle
-paths: for example, `velune update`/`repair`/`uninstall` never run a `uv` found in the
-current directory (including alias spellings of it), and `velune purge-data` deletes only
-inventoried files and refuses links and junctions. It does **not** isolate Velune from a
-same-user attacker. Someone who can already modify Velune's own data directories, the
-directories on your `PATH`, or the `uv` executable itself may still create filesystem races:
+### Execution modes
 
-- `velune purge-data` re-validates the whole path immediately before each deletion, which
-  narrows the check-then-delete window but is **not** guaranteed race-free.
-- The `uv` executable is resolved first and run afterwards; replacing it in between is not
-  detected.
-- `velune purge-data --execute --confirm-phrase "delete my velune data"` and
-  `velune uninstall --yes` run without a person at a prompt. The phrase is public, so this is
-  not equivalent to interactive confirmation: any script or AI agent that can run shell
-  commands can use it to delete data (credentials and memory included) or the program. Do not
-  use these flags in unattended automation or let an agent run them unreviewed.
-- Two lifecycle commands started at once are refused by an exclusive journal (exit 8), not
-  serialised; this guards accidents, not a same-user attacker.
+- **Manual** (default) asks before every change.
+- **Plan** writes a plan and changes no project files until you approve it.
+- **Auto** creates, edits and deletes files and runs commands inside the project
+  without asking. In every mode, actions outside the project folder, high-risk
+  operations (for example `git reset --hard`, `git clean`, force-push, recursive
+  deletes, global installs) and access to secrets still require approval, and
+  commands such as `sudo` and disk formatting are not run. These rules are
+  enforced in the tool layer rather than by instructions to the model, and each
+  decision is logged (`velune trace --type permission`).
+- `/approve safe|ask|block` is a separate, session-scoped control over whether
+  individual tool calls need confirmation (`ask`, the default), run unattended
+  when known to be read-only (`safe`), or are rejected (`block`).
 
-Nothing above should be read as protection against an attacker running as you.
+### Zero telemetry
+
+Velune CLI contains no analytics, usage reporting or remote crash reporting, and
+it sends no data to the maintainers. Token, cost and latency tracking is local.
+Network traffic is limited to what you direct it to: the model providers you
+configure, MCP servers, git hosts, web pages you ask it to fetch, and a request
+to the PyPI index when you run `velune update`.
+
+An opt-in, off-by-default local crash reporter (`telemetry.crash_reports_enabled`,
+or `/crashreports on`) writes a redacted JSON snapshot of an unhandled crash
+(exception, traceback, OS, Python and Velune versions; no local variables and no
+prompt or conversation content) to `~/.velune/crash_reports/` on your own machine.
+Nothing is transmitted; you may attach a report to an issue yourself.
+
+---
+
+## Threat model and trust boundaries
+
+**Assets protected:** your source code and the contents of your files, provider
+API keys, the files and processes on your machine, and the separation between
+your projects.
+
+**Trust boundaries.** Velune treats the following as untrusted input and applies
+the controls named in this document at each boundary:
+
+| Boundary | Untrusted input | Main controls |
+| :--- | :--- | :--- |
+| Model to tools | Model output and tool-call arguments | Execution modes, path guard, command runner, diff preview |
+| Repository to Velune | Files, `velune.toml`, `.mcp.json`, hooks of a repository you did not write | Workspace trust, path guard, `.veluneignore` |
+| Network to Velune | Web pages, MCP server responses, provider responses | URL validation, trust gating, read-only MCP server defaults |
+| Archive to Velune | Backup archives passed to `velune restore` | Path and link checks on extraction; restore only archives you made |
+
+**In scope:** a malicious or manipulated model response, a hostile repository
+that you open or clone, a malicious web page or MCP server, and accidental
+credential exposure through files, logs or backups.
+
+**Out of scope:**
+
+- An attacker who already runs code as your user, or who can already modify
+  Velune's data directories, the directories on your `PATH`, or the `uv`
+  executable. Velune does not defend against a same-user attacker.
+- The model provider. Anything sent to a cloud provider is subject to that
+  provider's handling and retention.
+- Vulnerabilities in third-party tools that Velune runs on your behalf, in your
+  operating system, or in dependencies that have no fixed release.
+
+---
+
+## Filesystem and execution protections
 
 ### Managed command execution
 
-Velune CLI runs shell commands through `SubprocessSandbox`
-(`velune/execution/sandbox.py`). To be precise about what this is: it is a **managed,
-resource-limited execution environment**, **not** an OS-level security sandbox by
-default. There is no namespace, seccomp, Job Object, or container isolation — commands
-run as the invoking user. The controls below constrain *what* can run and bound its
-resources; they do not isolate a process that is allowed to run. True OS-level
-isolation is available as an opt-in — see
-[Optional Docker sandbox](#optional-docker-sandbox) below.
+Velune runs shell commands through `SubprocessSandbox`
+(`velune/execution/sandbox.py`). This is a **managed, resource-limited execution
+environment**, and it is **not** an OS-level security sandbox. There is no
+namespace, seccomp, Job Object or container isolation; commands run as the
+invoking user. The controls below limit which programs can start and bound their
+resources. They do not isolate a program that is allowed to run. OS-level
+isolation is available only through the optional Docker sandbox described below.
 
-- **No shell** — commands run via `subprocess.Popen(argv, shell=False)`; the argv is
-  parsed with `shlex` and inline shell operators (`;`, `&&`, `|`, backticks, `$(...)`)
-  are rejected even in argument position.
-- **Executable allowlist** — only basenames on the configured allowlist may run, and
-  the resolved binary must live in a trusted system/venv path (PATH-hijack guard,
-  enforced on **both POSIX and Windows**). The validated absolute path is pinned to
-  close the TOCTOU window before execution.
-- **Interpreter inline-code blocking** — the allowlist includes interpreters
-  (`python`, `node`, …). Inline-code flags (`python -c`, `node -e`/`--eval`/`-p`,
-  including Python short-flag clusters like `-Ic`) are rejected so an agent cannot run
-  arbitrary program text without first writing a file — and any agent-authored file
-  must pass the `DiffPreview` write-approval flow before it can be run.
-- **Environment scrubbing** — `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `PYTHONPATH`,
-  `PYTHONSTARTUP`, `BASH_ENV`, and similar injection vectors are stripped from the
+- **No shell.** Commands run through `subprocess.Popen(argv, shell=False)`. The
+  argument vector is parsed with `shlex`, and inline shell operators (`;`, `&&`,
+  `|`, backticks, `$(...)`) are rejected, including in argument position.
+- **Executable allowlist.** Only basenames on the configured allowlist
+  (`execution.allowed_executables`) may run, and the resolved binary must be in a
+  trusted system or virtual-environment path (a PATH-hijack guard, enforced on
+  POSIX and on Windows). The validated absolute path is pinned to close the
+  time-of-check to time-of-use window before execution.
+- **Interpreter inline-code blocking.** The allowlist includes interpreters
+  (`python`, `node`, and others). Inline-code flags (`python -c`,
+  `node -e`/`--eval`/`-p`, including Python short-flag clusters such as `-Ic`) are
+  rejected, so an agent cannot run arbitrary program text without first writing a
+  file. In Manual mode an agent-authored file passes the diff-preview approval
+  before it can be run.
+- **Environment scrubbing.** `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `PYTHONPATH`,
+  `PYTHONSTARTUP`, `BASH_ENV` and similar injection vectors are removed from the
   child environment.
-- **Resource + lifetime limits** — wall-clock timeout and a memory ceiling, enforced
-  by killing the **entire process tree** (`psutil`) so descendants never outlive a
-  timeout or limit breach.
+- **Resource and lifetime limits.** A wall-clock timeout and a memory ceiling are
+  enforced by killing the entire process tree (`psutil`), so descendants do not
+  outlive a timeout or limit breach.
 
-> **Known limitation.** Allowlisted interpreters and build tools (`python`, `node`,
-> `go`, `make`, …) can execute files that exist in the workspace with your privileges.
-> Treat command execution as "code you have allowed to run," not as a hard isolation
-> boundary — unless the Docker sandbox below is enabled.
+**Shell-based exceptions.** Two code paths run user-configured commands through a
+shell by design, outside the runner above: lifecycle **hooks**
+(`velune/hooks/executor.py`) and **custom slash commands** defined in TOML files
+(`velune/cli/commands/file_commands.py`). Project-level hooks are loaded only for
+trusted directories. Custom slash commands are read from
+`~/.velune/commands/` and from `<workspace>/.velune/commands/`; a command of type
+`shell` runs with your privileges when you invoke it, and workspace-level
+definitions are not currently covered by directory trust. Review those files in
+repositories you do not control. CI allows only these two call sites to use a
+shell.
 
-### Executable search path (Windows)
-
-On Windows, `CreateProcess` looks in the *current directory* before `PATH` for a command given
-without a path. Velune runs `git` and other tools by bare name and is routinely started inside
-repositories it did not write, so a `git.exe` committed to a cloned repository would run as soon as
-Velune started there. `velune`'s entry point therefore sets `NoDefaultCurrentDirectoryInExePath`
-for the process (verified on Python 3.11, 3.14 and 3.15, where Velune's own `subprocess` calls then
-ignore a planted `git.exe`). The variable is inherited by child processes; use an explicit path such
-as `.	ool.exe` to run a program from the current directory. Code that imports Velune as a library does not
-get this protection and should set the variable itself. The lifecycle commands additionally resolve
-`uv` with their own trusted lookup (see [docs/lifecycle.md](docs/lifecycle.md)).
+> **Known limitation.** Allowlisted interpreters and build tools (`python`,
+> `node`, `go`, `make`, and others) can execute files that exist in the
+> workspace with your privileges. Treat command execution as "code you have
+> allowed to run", not as a hard isolation boundary, unless the Docker sandbox is
+> enabled.
 
 ### Optional Docker sandbox
 
-For real OS-level isolation, `velune/execution/docker_sandbox.py` provides a
-`DockerSandbox` that runs every command inside a per-session container with the
-workspace mounted as a volume, so agent-executed code cannot affect the host beyond
-that mount. It is **opt-in, not the default**:
+For OS-level isolation, `velune/execution/docker_sandbox.py` provides a
+`DockerSandbox` that runs commands inside a per-session container with the
+workspace mounted as a volume, so agent-executed code cannot affect the host
+beyond that mount. It is **opt-in and off by default**:
 
-- Requires the `[docker]` extra and a reachable Docker daemon; falls back to
-  `SubprocessSandbox` automatically if Docker is unavailable.
-- Enable for all agent execution by setting `execution.docker_sandbox = true` in
-  `velune.toml`, or start/inspect it directly with `/sandbox docker` /
-  `/sandbox status` in the REPL.
-- Each session gets its own container (`velune-<random>`), stopped and removed at
-  session end; state does not persist across sessions.
+- It requires the `docker` extra and a reachable Docker daemon, and falls back to
+  the managed runner automatically if Docker is unavailable.
+- Enable it for all agent execution with `execution.docker_sandbox = true` in
+  `velune.toml`, or start and inspect it with `/sandbox docker` and
+  `/sandbox status`.
+- Each session gets its own container (`velune-<random>`), which is stopped and
+  removed at the end of the session. State does not persist across sessions.
+- The workspace mount is writable, so the sandbox protects the rest of the host,
+  not the workspace itself, and the container uses Docker's default bridge
+  network, so commands inside it can still reach the network.
 
 ### Filesystem protection
 
 - Every filesystem and git tool resolves paths through `PathGuard`
-  (`velune/execution/path_guard.py`), which canonicalizes (resolving symlinks) and
-  asserts the result stays within the workspace root — blocking `../` traversal,
-  absolute-path escapes, and symlink escapes.
-- All writes/creates/deletes go through a `DiffPreview` **approval flow**; nothing
-  touches disk until the change is confirmed.
+  (`velune/execution/path_guard.py`), which canonicalizes the path (resolving
+  symlinks) and requires the result to stay inside the workspace root. This blocks
+  `../` traversal, absolute-path escapes and symlink escapes. Access outside the
+  workspace requires approval.
+- In Manual mode, writes, creations and deletions are shown through `DiffPreview`
+  and are applied only after you confirm. In Auto mode, changes inside the project
+  are applied without a per-change prompt; the path guard and the high-risk
+  approvals described above still apply.
+- Plan-driven changes create a git stash or branch snapshot before any edit, and
+  the workspace is restored to that snapshot if execution fails. Velune does not
+  commit council edits unless `execution.council_auto_commit = true`.
+
+### Workspace and memory isolation
+
+- Per-project state (the SQLite cognitive core, vector and semantic stores) is
+  stored under `<app-data>/workspaces/<name>-<hash-of-absolute-path>/`
+  (`velune/core/paths.py`), so two projects do not share a cognitive core,
+  embeddings, retrieval index or sessions. Same-named folders at different paths
+  are distinguished by the path hash.
+- Switching workspaces closes the old storage handles before the services are
+  bound to the new root.
+
+### Local lifecycle commands
+
+`velune update`, `repair` and `uninstall` never run a `uv` found in the current
+directory (including alias spellings of it), and `velune purge-data` deletes only
+inventoried files and refuses links and junctions. Velune does **not** isolate
+itself from a same-user attacker; see
+[Known limitations](#known-limitations-and-accepted-risks) for the specific
+races.
+
+### Executable search path (Windows)
+
+On Windows, `CreateProcess` looks in the current directory before `PATH` for a
+command given without a path. Velune runs `git` and other tools by bare name and
+is often started inside repositories it did not write, so a `git.exe` committed
+to a cloned repository could otherwise run as soon as Velune starts there.
+Velune's entry point therefore sets `NoDefaultCurrentDirectoryInExePath` for the
+process (verified on Python 3.11, 3.14 and 3.15, where Velune's own `subprocess`
+calls then ignore a planted `git.exe`). The variable is inherited by child
+processes; use an explicit path such as `.\tool.exe` to run a program from the
+current directory. Code that imports Velune as a library does not get this
+protection and should set the variable itself. The lifecycle commands also
+resolve `uv` with their own trusted lookup (see
+[docs/lifecycle.md](docs/lifecycle.md)).
+
+### Plugins
+
+Plugins are declarative: markdown commands, `SKILL.md` context injection,
+subprocess lifecycle hooks (`velune.hooks.HookDispatcher`) and MCP server
+registration (`velune/plugins/manager.py`, `velune/plugins/declarative/`). There
+is no loader for arbitrary plugin Python code; an earlier experimental
+code-plugin loader was disabled by default, unreachable from any shipped command,
+and has been removed. Treat plugin hook scripts as arbitrary code that you choose
+to run.
+
+---
+
+## Credential protection
+
+- **Storage.** API keys are bring-your-own and are stored AES-GCM-encrypted on
+  disk (`velune/providers/crypto.py`). They are never written into the workspace.
+  Each provider also supports an environment-variable fallback (for example
+  `GROQ_API_KEY`). A key saved through Velune takes precedence over an
+  environment variable unless `VELUNE_PREFER_ENV_KEYS=1` is set; `/model status`
+  and `velune provider test` report which one is in use, never its value.
+- **Master key.** The encryption key is taken, in order of preference, from an
+  existing OS keyring entry; a newly generated key stored in the keyring; a key
+  derived from `VELUNE_MASTER_PASSPHRASE` (PBKDF2-HMAC-SHA256, 390,000
+  iterations, for headless servers, Docker and CI); and, as a last resort, a weak
+  machine-derived key, so that credentials are never written in the clear. The
+  last case logs a one-time warning that recommends setting
+  `VELUNE_MASTER_PASSPHRASE`.
+- **Credential store integrity.** Writes are atomic, serialised by a
+  cross-process lock, and read back and compared before success is reported;
+  failure raises an error. An unreadable store (changed keyring or passphrase,
+  truncation) is never overwritten: Velune reads `credentials.json.bak` in
+  place, refuses to write, and says so at startup. `velune provider repair` moves
+  an unreadable file aside (`credentials.json.unreadable-<time>`) instead of
+  deleting it, and does nothing when the file is intact but the keyring is locked
+  (the message then says to unlock the keyring, and Velune picks the keys up
+  again without a restart). A transient keyring read failure never re-encrypts
+  the store with the weaker machine-derived key and never generates a replacement
+  master key.
+- **A 403 is not a bad key.** Only a 401 (invalid, expired or revoked) marks a
+  stored key invalid. Timeouts, rate limits, outages and permission errors leave
+  it intact, and it is checked again automatically.
+- **Private files from creation.** The credential store and the persisted
+  master-passphrase file are created exclusively with mode `0600` (on Windows,
+  with an ACL restricted to the current user before any data is written),
+  replacing any stale file or symlink at that name instead of writing through it,
+  and are then renamed into place (`velune/core/privatefile.py`). Earlier versions
+  wrote the file first and tightened permissions afterwards, leaving a short
+  window with the default umask. `icacls` runs from `%SystemRoot%\System32`, not
+  by name lookup.
+- **Log redaction** (`velune/core/redaction.py`). A logging filter scrubs known
+  key shapes (`sk-…`, `sk-ant-…`, `xai-…`, `gsk_…`, `hf_…`, `AIza…`, OpenRouter,
+  Fireworks, Replicate), `Authorization: Bearer` and `Token` headers, and the
+  live values of configured provider environment variables from emitted log
+  records and JSON exception traces. This covers known formats and cannot
+  recognize every secret.
+- **Indexing exclusions.** The `.veluneignore` template excludes `.env`, `*.pem`,
+  `*.key` and other credential files from indexing. Runtime artifacts
+  (`*.db-wal`, `*.db-shm`, `velune.local.toml`) are excluded from commits and
+  indexing.
+- **Secret scanning.** `gitleaks` runs on every push and pull request in CI
+  (`.github/workflows/ci.yml`), scanning only the commits introduced. Contributors
+  can opt in to a local pre-push scan (`pre-commit install --hook-type pre-push`;
+  see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+### Backup and recovery secrets
+
+`velune backup` (`velune/recovery/archive.py`) never writes API keys to an
+archive in the clear:
+
+- By default, provider keys are excluded; the exported `providers.json` carries
+  only masked (`"***"`) key fields.
+- `velune backup --with-secrets` requires a passphrase and AES-GCM-encrypts the
+  key values into a separate `providers.json.enc` payload, using a key derived
+  only from that passphrase (`encrypt_with_passphrase`). It is independent of the
+  OS-keyring key, so the archive can be restored on a machine without that
+  keyring entry. The passphrase is not stored and must be supplied again on
+  `velune restore`.
+
+**Restoring an archive is a trust decision.** A backup carries the workspace
+trust list and configuration, which can enable hooks. Restore only archives you
+made yourself; an archive from an untrusted source can mark directories as
+trusted. Extraction refuses members that escape the target directory and, on
+interpreters without the tar `data` filter, also refuses symlink, hard-link and
+special-file members (a link cannot be detected by the path check because it is
+not on disk yet). Velune's own backups contain only regular files and
+directories. A hostile archive can still be large; no size limit is enforced on
+extraction.
+
+---
+
+## Network and MCP security
 
 ### SSRF and network hygiene
 
-The web-fetch guard (`velune/tools/web/validator.py`) validates every outbound URL:
+The web-fetch guard (`velune/tools/web/validator.py`) validates every outbound
+URL:
 
-- Blocks loopback, RFC 1918 private ranges, link-local (`169.254.0.0/16`, `fe80::/10`),
-  carrier-grade NAT (`100.64.0.0/10`), IPv6 ULA (`fc00::/7`), reserved, multicast, and
-  the `0.0.0.0/8` range.
-- Blocks cloud-instance **metadata endpoints** (AWS/Azure/GCP `169.254.169.254`, ECS
-  `169.254.170.2`, GCP `metadata.google.internal`, Alibaba `100.100.100.200`, IPv6 IMDS).
-- Resolves hostnames via `getaddrinfo` and checks **all** returned addresses, defeating
-  DNS-rebinding and CNAME tricks; rejects numeric-escape IP forms (hex/octal/decimal),
-  embedded credentials, and non-HTTP(S) schemes.
+- It blocks loopback, RFC 1918 private ranges, link-local (`169.254.0.0/16`,
+  `fe80::/10`), carrier-grade NAT (`100.64.0.0/10`), IPv6 unique-local
+  (`fc00::/7`), reserved and multicast ranges, and `0.0.0.0/8`.
+- It blocks cloud-instance metadata endpoints (AWS, Azure and GCP
+  `169.254.169.254`, ECS `169.254.170.2`, GCP `metadata.google.internal`,
+  Alibaba `100.100.100.200`, and the IPv6 metadata address).
+- It resolves hostnames with `getaddrinfo` and checks all returned addresses
+  (defeating DNS-rebinding and CNAME tricks), and rejects numeric-escape IP forms
+  (hexadecimal, octal, decimal), embedded credentials and non-HTTP(S) schemes.
 
 ### MCP trust gating
 
 External MCP servers are an outbound trust boundary. `velune/mcp/security.py`
 validates every server URL before the client connects:
 
-- Rejects embedded credentials and non-HTTP(S) schemes.
-- **Always** blocks cloud-metadata and link-local targets (DNS-resolved, so rebinding
-  cannot bypass it). Loopback/LAN remain permitted because local MCP servers are the
-  common, legitimate case.
-- Optional **host allowlist** (`[mcp] allowed_hosts` in `velune.toml`): when set, only
-  listed hosts may be connected to — deny-by-default for everything else.
+- It rejects embedded credentials and non-HTTP(S) schemes.
+- It always blocks cloud-metadata and link-local targets (resolved through DNS,
+  so rebinding does not bypass the check). Loopback and LAN addresses remain
+  allowed, because local MCP servers are the common and legitimate case.
+- An optional host allowlist (`[mcp] allowed_hosts` in `velune.toml`) restricts
+  connections to the listed hosts only; when it is set, every other host is
+  denied.
 
-### Workspace / project trust
+The MCP server that Velune exposes (`velune mcp serve`) uses stdio and offers
+read-only tools unless `VELUNE_MCP_ALLOW_MUTATIONS=1` is set. See
+[docs/mcp.md](docs/mcp.md).
 
-Separately from the URL-level checks above, `velune trust add|list|forget`
-(`velune/core/trust.py`) gates whether a *directory's* project-level config is honored
-at all. A trusted directory's `.mcp.json` / `velune.toml` may be loaded — which can
-spawn local MCP server processes and override provider `base_url`s; an untrusted
-directory falls back to user-level config only. Inside the REPL, `/approve
-[safe|ask|block]` is a separate, session-scoped control over whether individual
-tool/command calls need confirmation (`ask`, the default), run unattended when known
-read-only (`safe`), or are rejected outright (`block`).
+### Workspace and project trust
 
-### Plugin trust model
+Separately from URL-level checks, `velune trust add|list|forget`
+(`velune/core/trust.py`) records which directories you trust. Project-level
+`.mcp.json` servers (which can start local processes), project hooks
+(`.velune/hooks.json`) and `base_url` overrides in a project `velune.toml` (which
+can redirect authenticated API traffic) are honored only for trusted directories.
+For an untrusted directory they are skipped and user-level configuration applies.
+The rest of a project `velune.toml` is still read. Setting `VELUNE_TRUST_ALL=1`
+disables this gate; it is intended for CI and containers whose workspace is
+already known to be safe and should not be set otherwise.
 
-Plugins are declarative (markdown commands, `SKILL.md` context injection, subprocess
-lifecycle hooks via `velune.hooks.HookDispatcher`, and MCP server registration —
-`velune/plugins/manager.py` + `velune/plugins/declarative/`). There is no in-process or
-subprocess loader for arbitrary plugin Python code: a prior experimental code-plugin
-loader (`PluginLoader`/`PluginSandbox`, disabled by default and never reachable from any
-shipped CLI command) was removed rather than finished, since the declarative system
-covers the same needs without running third-party code inside or alongside the CLI
-process. Treat plugin hook scripts (subprocess lifecycle hooks) as arbitrary code you
-are choosing to run.
+---
 
-### Secrets protection
+## Dependency and supply-chain security
 
-- API keys are bring-your-own and stored AES-GCM-encrypted on disk (master key in the OS keyring), with
-  per-provider environment-variable fallback (e.g. `GROQ_API_KEY`); they are never written into the
-  workspace. A key saved through Velune takes precedence over an environment variable unless
-  `VELUNE_PREFER_ENV_KEYS=1` is set; `/model status` and `velune provider test` report which one is in
-  use, never its value.
-- **Credential store integrity.** Writes are atomic, serialised by a cross-process lock, and read back
-  and compared before success is reported (a failure raises instead). An unreadable store (changed
-  keyring or passphrase, truncation) is never overwritten: Velune reads `credentials.json.bak` in
-  place, refuses to write, and says so at startup. `velune provider repair` moves an unreadable file
-  aside (`credentials.json.unreadable-<time>`) instead of deleting it, and does nothing when the file is intact but the keyring is locked (the message
-  then says to unlock the keyring, and Velune picks the keys up again without a restart). A transient
-  keyring read failure also never re-encrypts the store with the weaker machine-derived key, and
-  never generates a replacement master key.
-- **A 403 is not a bad key.** Only a 401 (invalid/expired/revoked) marks a stored key invalid; timeouts,
-  rate limits, outages and permission errors leave it intact and it is re-checked automatically.
-- On disk, keys are AES-GCM encrypted (`velune/providers/crypto.py`) under a master
-  key sourced with a strength-first fallback: an existing OS keyring entry, else a
-  newly generated one stored in the keyring, else a key derived from
-  `VELUNE_MASTER_PASSPHRASE` (PBKDF2-HMAC-SHA256, 390k iterations — for headless
-  servers, Docker, CI), and only as a last resort a weak machine-derived key so
-  credentials are never written in the clear. That last case logs a one-time warning
-  urging you to set `VELUNE_MASTER_PASSPHRASE`.
-- **Secret files are private from the moment they exist.** The credential store and the persisted
-  master-passphrase file are created exclusively with mode `0600` (and, on Windows, an ACL
-  restricted to the current user *before* any data is written), replacing any stale file or
-  symlink at that name instead of writing through it, then renamed into place
-  (`velune/core/privatefile.py`). Earlier versions wrote the file first and tightened the
-  permissions afterwards, leaving a short window with the default umask. `icacls` is run from
-  `%SystemRoot%\System32`, not looked up by name.
-- **Known limits of the key protection (accepted, documented).**
-  - The machine-derived fallback key comes from the network adapter's MAC address and a constant. It is
-    obfuscation against casual reading, not a secret, and anyone who can read that file can derive it.
-    On Windows the persisted passphrase is protected by DPAPI instead; elsewhere, without an OS
-    keyring, the file mode is the only real protection. Prefer a keyring or `VELUNE_MASTER_PASSPHRASE`.
-  - The passphrase-derived key uses PBKDF2-HMAC-SHA256 at 390,000 iterations with a fixed,
-    versioned salt, so two users who choose the same passphrase derive the same key. Raising the
-    iteration count or randomising the salt would make every existing store undecryptable, so it
-    needs a versioned migration and is not done here. Use a long random passphrase.
-- **Log redaction** (`velune/core/redaction.py`): a logging filter scrubs known key
-  shapes (`sk-…`, `sk-ant-…`, `xai-…`, `gsk_…`, `hf_…`, `AIza…`, OpenRouter, Fireworks,
-  Replicate), `Authorization: Bearer/Token` headers, and the live values of configured
-  provider env vars from every emitted log record and JSON exception trace.
-- The `.veluneignore` template excludes `.env`, `*.pem`, `*.key`, and other credential
-  files from indexing; runtime artifacts (`*.db-wal`, `*.db-shm`, `velune.local.toml`)
-  are excluded from commits and indexing.
-- **Secret scanning**: `gitleaks` runs on every push/PR in CI (`.github/workflows/ci.yml`,
-  scanning only the commits actually introduced, not full history) as the real gate.
-  Contributors can additionally opt in to a local pre-push scan
-  (`pre-commit install --hook-type pre-push`; see CONTRIBUTING.md) that catches a
-  secret before it ever leaves their machine, instead of only after it's already
-  on the remote.
+### Dependencies
 
-### Backup and recovery secrets
-
-`velune backup` (`velune/recovery/archive.py`) never writes API keys to an archive in
-the clear:
-
-- By default, provider keys are **excluded** from the backup entirely — the exported
-  `providers.json` carries only masked (`"***"`) key fields.
-- `velune backup --with-secrets` requires a passphrase and AES-GCM encrypts the real
-  key values into a separate `providers.json.enc` payload, using a key derived solely
-  from that passphrase (`encrypt_with_passphrase`) — independent of the OS-keyring key
-  above, so the archive stays restorable on a machine with no keyring entry. The
-  passphrase itself is never stored; it must be supplied again on `velune restore` to
-  decrypt.
-
-**Restoring an archive is a trust decision.** A backup carries the workspace trust list and
-configuration, which can enable hooks. Restore only archives you made yourself; an archive from an
-untrusted source can mark directories trusted. Extraction refuses members that escape the target
-directory, and on interpreters without the tar `data` filter it also refuses symlink, hard-link and
-special-file members (a link cannot be seen by the path check because it is not on disk yet). Velune's
-own backups contain only regular files and directories. A hostile archive can still be large; no size
-limit is enforced on extraction.
-
-### Workspace / memory isolation
-
-- Heavy per-project state (SQLite cognitive core, vector/semantic stores) is stored
-  under `<app-data>/workspaces/<name>-<hash-of-absolute-path>/` (`velune/core/paths.py`),
-  so two projects can never share a cognitive core, embeddings, retrieval index, or
-  sessions. Same-named folders at different paths are disambiguated by a path hash.
-- Live workspace switching shuts down old storage handles **before** rebinding services
-  to the new root, so connections never leak and no cross-project memory bleed occurs.
-
-### Transactional git-backed execution
-
-- Plan-driven changes create a git stash or branch snapshot before any edit.
-- On failure, the workspace is automatically restored to the pre-execution snapshot.
-
-### Zero telemetry
-
-No analytics, crash reports, or code snippets are transmitted to external servers.
-All indexes and logs live exclusively in local, non-synced application storage.
-
-An opt-in, off-by-default local crash reporter (`telemetry.crash_reports_enabled`,
-or `/crashreports on`) writes a redacted JSON snapshot of an unhandled crash —
-exception, traceback, OS/Python/Velune versions; explicitly no local
-variables and no prompt/conversation content — to `~/.velune/crash_reports/`
-on the user's own machine. This does not transmit anything anywhere; there is
-no server for it to send to. It exists purely so a user can attach a report
-to a GitHub issue themselves if they choose to. See
-`velune/cli/crash_reporter.py`.
-
-### Dependency security
-
-- `mcp>=1.30.0` is pinned in `pyproject.toml` to floor out CVE-2026-59950 and the
-  later Dependabot-reported `mcp` advisories fixed in 1.30.0.
-- `[tool.uv] constraint-dependencies` floors transitive packages with advisories
-  (`msgpack>=1.2.3`, `certifi>=2026.10.18`, `virtualenv>=21.14.9`); `uv.lock` pins
-  patched `filelock`, `opentelemetry-*` and the rest.
-- The former `[llamacpp]` extra was **permanently removed**: `llama-cpp-python` pulls
-  in `diskcache ≤ 5.6.3`, which has an unpatched unsafe pickle-deserialization RCE
-  risk with no fixed version available. See [Optional extras](README.md#optional-extras)
-  in the README for the current extras list.
-- `uv.lock` pins the exact resolved dependency graph (versions + hashes); CI's
-  `Verify lockfile reproducibility` step (`uv lock --check`) fails the build
-  if it drifts out of sync with `pyproject.toml`, so what CI audits and
-  scans is guaranteed to be what actually gets installed.
+- `mcp>=1.30.0` is declared in `pyproject.toml` to floor out CVE-2026-59950 and
+  the later `mcp` advisories fixed in 1.30.0. The upper bound `<2.0.0` exists
+  because 2.0 changed the server API that `velune/mcp/server.py` uses.
+- `[tool.uv] constraint-dependencies` sets floors for transitive packages that
+  had advisories (`msgpack>=1.2.3`, `certifi>=2026.10.18`,
+  `virtualenv>=21.14.9`), and `uv.lock` pins patched versions of `filelock`,
+  `opentelemetry-*` and the other dependencies.
+- The former `llamacpp` extra was permanently removed: `llama-cpp-python` pulls
+  in `diskcache` 5.6.3 or earlier, which deserializes cache entries with `pickle`
+  (code execution if an attacker can write to the cache directory), and no fixed
+  release exists. See [Optional extras](README.md#optional-extras) in the README.
+- `uv.lock` pins the resolved dependency graph, including versions and hashes.
+  The CI step `Verify lockfile reproducibility` (`uv lock --check`) fails if the
+  lock falls out of sync with `pyproject.toml`, and `pip-audit` checks the
+  installed dependency closure.
 
 ### Supply chain: CI and releases
 
-- Every third-party action is pinned to a full commit SHA (with the tag in a comment); Dependabot
-  proposes updates after a 7-day cooldown. `GITHUB_TOKEN` is read-only by default in both workflows.
-  `release.yml` grants `contents: write` only to the job that creates the GitHub Release and
-  `id-token: write` only to the publish job. Checkouts do not persist credentials, and no workflow
-  uses `pull_request_target`, so code from a fork never runs with secrets. The release workflow does
-  not use a pip cache, has a per-tag concurrency group that never cancels a publish, and passes
-  tag-derived values to scripts through `env:` rather than expanding them into the script text.
-- The gitleaks binary used in CI is verified against a pinned SHA-256 before it is run.
-- **Accepted risks.** The PyPI upload still authenticates with the `PYPI_TOKEN` secret; switching to
-  Trusted Publishing (OIDC, no stored token) needs a PyPI-side setting and is recommended.
-  Release tooling (`build`, `twine`) is pinned by version, not by hash. The one-line installers fetch
-  from the mutable `main` branch and pipe uv's own installer from `astral.sh` into the shell, as uv
-  documents; inspect the script first if that trust is not acceptable. Subprocess rules B404, B603 and
-  B607 are skipped in Bandit's configuration: every call site was reviewed, none uses `shell=True`,
-  and the reviewed exceptions are enumerated by the `create_subprocess_shell` allowlist check in CI.
+- Every third-party GitHub Action is pinned to a full commit SHA (with the tag in
+  a comment). Dependabot proposes updates after a seven-day cooldown.
+  `GITHUB_TOKEN` is read-only by default in both workflows. `release.yml` grants
+  `contents: write` only to the job that creates the GitHub Release and
+  `id-token: write` only to the publish job. Checkouts do not persist
+  credentials, and no workflow uses `pull_request_target`, so code from a fork
+  does not run with secrets. The release workflow does not use a pip cache, has a
+  per-tag concurrency group that never cancels a publish, and passes tag-derived
+  values to scripts through `env:` rather than expanding them into script text.
+- The `gitleaks` binary used in CI is verified against a pinned SHA-256 before it
+  is run.
+- Release artifacts are built with Hatchling in reproducible mode
+  (`SOURCE_DATE_EPOCH`), checked with `twine check --strict`, and verified by
+  `scripts/release_artifacts.py` before publication.
 
 ### Static analysis (Bandit)
 
-Every PR is gated on `bandit -c pyproject.toml -r velune/ --severity-level
-medium --confidence-level medium` — any medium+ severity/confidence finding
-fails the build. A full low-severity report also runs (for visibility) but
-does not gate the build directly; instead, a separate regression-baseline
-step fails the build if the low-severity count *grows* past a checked-in
-baseline (184 as of writing).
-
-This is a deliberate choice, not an oversight: the existing low-severity
-findings are overwhelmingly broad `try/except: pass` patterns used
-throughout the codebase as an intentional resilience strategy (a failed
-best-effort background probe, cache write, or telemetry span must never
-crash the interactive session) — triaging and rewriting all ~184 in one pass
-isn't a security fix, it's a mass refactor with its own regression risk, and
-blocking every unrelated PR on it would just train reviewers to bypass the
-gate. The baseline instead makes sure the count only ever goes down or stays
-flat, never grows unnoticed; raising it is only valid in the same PR that
-introduces and justifies the new finding.
-
-See `.github/workflows/ci.yml` (`security` job) for the exact commands.
+Every pull request is gated on
+`bandit -c pyproject.toml -r velune/ --severity-level medium --confidence-level medium`;
+any finding of medium severity and confidence or higher fails the build. A full
+report that includes low-severity findings also runs, and a separate regression
+check fails the build if the low-severity count grows past a checked-in baseline
+(184 at the time of writing). The existing low-severity findings are mostly broad
+`try`/`except`/`pass` blocks used deliberately so that best-effort background
+work (a probe, a cache write, a telemetry span) cannot crash an interactive
+session. They were left in place rather than rewritten in one change, and the
+baseline ensures the count does not grow unnoticed. Raising it is valid only in
+the pull request that introduces and justifies the new finding. See the
+`security` job in `.github/workflows/ci.yml` for the exact commands.
 
 ---
 
-## Credits
+## Known limitations and accepted risks
 
-The project acknowledges security reporters in release notes and the advisory.
-Monetary bounties are not currently offered; any bounty program will be announced
-separately if introduced.
+These are documented deliberately. Reports that restate them are welcome but are
+not treated as new vulnerabilities.
+
+**Execution**
+
+- The managed runner is not an OS-level sandbox. Allowlisted interpreters and
+  build tools can run any file in the workspace with your privileges. Use the
+  optional Docker sandbox for isolation.
+- Hooks and TOML custom slash commands run through a shell by design, as
+  described in [Filesystem and execution protections](#filesystem-and-execution-protections).
+- In Auto mode, changes and commands inside the project run without a per-change
+  prompt.
+
+**Same-user attackers and filesystem races.** Nothing in this document protects
+against an attacker running as you. Someone who can already modify Velune's data
+directories, the directories on your `PATH`, or the `uv` executable can create
+races:
+
+- `velune purge-data` re-validates the whole path immediately before each
+  deletion, which narrows the check-then-delete window but is not guaranteed to
+  be free of races.
+- The `uv` executable is resolved first and run afterwards; replacing it between
+  the two steps is not detected.
+- `velune purge-data --execute --confirm-phrase "delete my velune data"` and
+  `velune uninstall --yes` run without a person at a prompt. The phrase is
+  public, so this is not equivalent to interactive confirmation: any script or AI
+  agent that can run shell commands can use it to delete data (credentials and
+  memory included) or the program. Do not use these flags in unattended
+  automation or let an agent run them unreviewed.
+- Two lifecycle commands started at the same time are refused by an exclusive
+  journal (exit code 8) rather than serialised. This guards against accidents,
+  not against a same-user attacker.
+
+**Credentials**
+
+- The machine-derived fallback key comes from the network adapter's MAC address
+  and a constant. It is obfuscation against casual reading, not a secret, and
+  anyone who can read the file can derive it. On Windows the persisted passphrase
+  is protected by DPAPI instead; elsewhere, without an OS keyring, the file mode
+  is the only real protection. Prefer a keyring or `VELUNE_MASTER_PASSPHRASE`.
+- The passphrase-derived key uses PBKDF2-HMAC-SHA256 at 390,000 iterations with a
+  fixed, versioned salt, so two users who choose the same passphrase derive the
+  same key. Raising the iteration count or randomising the salt would make every
+  existing store undecryptable and needs a versioned migration, which has not
+  been done. Use a long random passphrase.
+- Log redaction matches known key formats only.
+
+**Data sent to providers.** Prompts and the repository or memory context included
+with them are sent to the provider you select. Velune does not control what the
+provider retains or trains on.
+
+**Backups.** Backup archives are not size-limited on extraction, and restoring an
+untrusted archive can add trusted directories.
+
+**Supply chain**
+
+- The PyPI upload authenticates with the `PYPI_TOKEN` secret. Switching to
+  Trusted Publishing (OpenID Connect, no stored token) needs a PyPI-side setting
+  and is recommended.
+- Release tooling (`build`, `twine`) is pinned by version, not by hash.
+- The one-line installers are fetched from the mutable `main` branch, and they
+  pipe uv's own installer from `astral.sh` into the shell, as uv documents.
+  Inspect the script first if that trust is not acceptable.
+- Bandit rules B404, B603 and B607 (subprocess usage) are skipped in the
+  configuration. Every call site was reviewed, none uses `shell=True`, and the
+  reviewed `create_subprocess_shell` call sites are enumerated by a CI check.
 
 ---
 
-Apache License 2.0 — Copyright 2026 Surya HA
+## Security acknowledgements
+
+Security reporters are acknowledged in release notes and in the published
+advisory, unless they ask not to be. No security researchers are listed yet.
+Monetary bounties are not offered; if a bounty program is introduced it will be
+announced separately.
+
+---
+
+Apache License 2.0. Copyright 2026 Surya HA.
