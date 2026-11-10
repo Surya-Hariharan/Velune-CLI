@@ -25,6 +25,10 @@ class ToolPermission(StrEnum):
     GIT_WRITE = "git.write"
     TERMINAL_EXECUTE = "terminal.execute"
     NETWORK_ACCESS = "network.access"
+    # Application integrations (see velune.resources). Coarse scopes only: the
+    # precise decision is made by the permission gate on the described actions.
+    INTEGRATION_READ = "integration.read"
+    INTEGRATION_WRITE = "integration.write"
 
 
 @dataclass(slots=True)

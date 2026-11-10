@@ -43,6 +43,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Resource results are structured: normalized error codes (`connection_failed`,
   `authorization_denied`, `timeout`, …), the integration, resource ids, duration and warnings.
 - `/resource info <id>` shows each action's permission scope.
+- **The agent can discover and use integrations.** It starts with two discovery tools
+  (`integrations_list`, `integrations_enable`) instead of every operation, enables what a task needs, and
+  gets those tools on its next turn (`<integration>__<operation>`, e.g. `docker__stop`). Enabling grants no
+  permission: every call is validated and authorized by the same gate as a direct call. Integrations report
+  whether they are usable (`connected`, `available`, `unavailable`, `needs_configuration`); the Docker
+  integration needs a running daemon, not just the CLI. At most `resources.max_exposed_tools` (default 24)
+  operation tools are shown at once; the rest stay reachable through an `integration_call` dispatcher that is
+  authorized as the operation it stands for. `resources.expose_to_model = false` turns it all off. See the
+  [development guide](docs/development.md#capability-discovery-and-dynamic-tool-exposure).
+- **A `process` integration** lets the agent read the status and logs of, wait for readiness of, and stop the
+  background commands it started, by job id only (never a process id).
+- The tool loop can rebuild the tools it offers between model turns (a `DynamicToolSource`); native and MCP tools
+  are unchanged.
 
 ### Changed
 
@@ -55,6 +68,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **A call retried after its tool appeared is no longer refused as "already failed".** When the set of tools
+  offered to the model changes, the loop forgets which calls failed because their tool did not exist yet.
+- **Gemini: a function with no parameters is declared without a `parameters` schema** instead of an empty
+  OBJECT schema, which Gemini is known to reject (one rejected tool fails the whole request). Functions that take
+  parameters are unchanged.
 - **Line endings are no longer rewritten on Windows.** Writes used `Path.write_text`, which turned
   every LF line ending into CRLF, so changing one line of an LF file rewrote every line. Existing files now
   keep their encoding, byte-order mark and line-ending style (LF, CRLF or mixed); new files are
@@ -96,6 +114,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   [SECURITY.md](SECURITY.md#supply-chain-ci-and-releases) for the remaining accepted risks.
 
 ---
+- **Integration tool arguments are validated strictly** (unknown names, wrong types, enum and range
+  violations) before anything runs, and a connector redefined after its tools were offered is refused.
 - **Docker names are never parsed as options.** A container, image, path or tag starting with `-`
   (`--help`, `-a`) is rejected before `docker` runs; read actions run without asking, so this was
   reachable without a prompt.

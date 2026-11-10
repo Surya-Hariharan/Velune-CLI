@@ -298,7 +298,11 @@ for where each configuration file lives.
   shows or sends. Connector actions follow your execution mode like any other change: reads
   always run, Manual asks, Plan refuses, and Auto still asks for destructive operations and for
   anything this task did not create, such as a container that was already running. That friction
-  is intentional for actions against real infrastructure.
+  is intentional for actions against real infrastructure. The agent does not see these tools up
+  front: it asks which integrations exist, enables the ones the task needs (their tools appear on
+  its next turn) and can also start, read the output of, wait for and stop its own background
+  commands. Enabling a tool never approves it; every call is still checked as above. Set
+  `resources.expose_to_model = false` in `velune.toml` to keep integrations away from the model.
 - **GitHub and GitLab.** `/push`, `/pr` and `/issue` use the same git and REST integrations
   as the git tools. They need no separate setup beyond a configured `git` and, for pull
   request and issue commands, a token available to the underlying REST client.

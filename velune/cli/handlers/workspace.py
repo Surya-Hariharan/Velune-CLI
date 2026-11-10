@@ -389,6 +389,9 @@ async def switch_workspace(repl: VeluneREPL, new_path: Path) -> None:
     repl._conversation = []
     repl.session_tokens = 0
     repl.session_cost = 0.0
+    from velune.cli.handlers.tool_chat import reset_integration_tools
+
+    reset_integration_tools(repl)
     repl._project_profile = repl._load_project_profile()
     repl._workspace_registry.touch(new_path)
     await repl._start_episodic_session()

@@ -106,6 +106,13 @@ class ResourceCapability:
                      confirmation.
         scope:       Integration permission scope (``docker.container.start``).
                      Empty means ``<resource_id>.<action>``.
+        category:    Capability group used by discovery (``inspect``,
+                     ``containers``, ``compose`` …). Empty derives ``inspect`` for
+                     READ actions and ``change`` for the rest.
+        params:      The action's input schema as a flat JSON-schema fragment
+                     (``{"properties": {...}, "required": [...]}``). Empty means
+                     the action takes no parameters. Model-visible: it is
+                     validated and whitelisted before it is ever shown.
     """
 
     action: str
@@ -113,6 +120,8 @@ class ResourceCapability:
     description: str = ""
     destructive: bool = False
     scope: str = ""
+    category: str = ""
+    params: dict[str, Any] | None = field(default=None, compare=False, hash=False)
 
 
 @dataclass(slots=True, frozen=True)
@@ -266,6 +275,12 @@ class ResourceConnector(ABC):
     display_name: str = ""
     #: How the manager manages this connector's session.
     lifecycle: Lifecycle = Lifecycle.STATELESS
+    #: One sentence for discovery ("what can I do with this?"). Never put
+    #: credentials, hosts or paths in it: it is shown to the model.
+    description: str = ""
+    #: Lowercase words that suggest this integration for a task (matching is a
+    #: deterministic whole-word test; it only *suggests*, it never exposes).
+    keywords: tuple[str, ...] = ()
 
     def __init__(self, name: str | None = None) -> None:
         # ``name`` distinguishes multiple instances of the same connector type
@@ -423,6 +438,31 @@ class ResourceConnector(ABC):
     async def health(self) -> bool:
         """Cheap liveness check of the current session. Default: status only."""
         return self.status().connected
+
+    # ── Discovery support ────────────────────────────────────────────────────
+
+    def configuration_problem(self) -> str | None:
+        """Why this connector cannot be used until the user configures it, or None.
+
+        Must not perform I/O beyond reading stored configuration, and the text
+        must never contain a credential, host or path (it is shown to the model).
+        """
+        return None
+
+    async def probe_availability(self) -> tuple[bool, str]:
+        """Is the backing application present right now? ``(available, reason)``.
+
+        Default: the application is present when :meth:`discover` finds it.
+        Connectors that can tell "installed but stopped" from "absent" override
+        this. Bounded by the caller; must never raise.
+        """
+        try:
+            hints = await self.discover()
+        except Exception:
+            return False, "could not be probed"
+        if hints:
+            return True, ""
+        return False, "not detected"
 
 
 def resolve_effective(

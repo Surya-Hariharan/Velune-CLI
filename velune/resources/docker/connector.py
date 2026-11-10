@@ -42,6 +42,18 @@ class DockerConnector(ResourceConnector):
 
     resource_id = "docker"
     display_name = "Docker"
+    description = "Local Docker Engine: containers, images, logs, networks, volumes and Compose."
+    keywords = (
+        "docker",
+        "container",
+        "containers",
+        "image",
+        "images",
+        "compose",
+        "dockerfile",
+        "volume",
+        "volumes",
+    )
     # The CLI is invoked per call; there is no session to keep open. A4 moves
     # this connector to the Docker SDK with a persistent client.
     lifecycle = Lifecycle.STATELESS
@@ -193,37 +205,130 @@ class DockerConnector(ResourceConnector):
         read = ResourcePermission.READ
         write = ResourcePermission.WRITE
         execute = ResourcePermission.EXECUTE
+        name = {"type": "string", "description": "Container name or id."}
         return [
             ResourceCapability(
-                "ps", read, "List containers (running and stopped)", scope="docker.container.list"
-            ),
-            ResourceCapability("images", read, "List local images", scope="docker.image.list"),
-            ResourceCapability(
-                "inspect", read, "Inspect a container or image (JSON)", scope="docker.inspect"
-            ),
-            ResourceCapability(
-                "logs", read, "Show a container's logs", scope="docker.container.logs"
-            ),
-            ResourceCapability(
-                "network_ls", read, "List Docker networks", scope="docker.network.list"
-            ),
-            ResourceCapability(
-                "volume_ls", read, "List Docker volumes", scope="docker.volume.list"
+                "ps",
+                read,
+                "List containers (running and stopped)",
+                scope="docker.container.list",
+                category="inspect",
+                params={
+                    "properties": {
+                        "all": {"type": "boolean", "description": "Include stopped containers."}
+                    }
+                },
             ),
             ResourceCapability(
-                "start", write, "Start an existing container", scope="docker.container.start"
+                "images",
+                read,
+                "List local images",
+                scope="docker.image.list",
+                category="inspect",
             ),
             ResourceCapability(
-                "stop", write, "Stop a running container", scope="docker.container.stop"
+                "inspect",
+                read,
+                "Inspect a container or image (JSON)",
+                scope="docker.inspect",
+                category="inspect",
+                params={
+                    "properties": {
+                        "target": {
+                            "type": "string",
+                            "description": "Container or image name or id.",
+                        }
+                    },
+                    "required": ["target"],
+                },
             ),
             ResourceCapability(
-                "restart", write, "Restart a container", scope="docker.container.restart"
+                "logs",
+                read,
+                "Show a container's recent logs",
+                scope="docker.container.logs",
+                category="inspect",
+                params={
+                    "properties": {
+                        "container": name,
+                        "tail": {
+                            "type": "integer",
+                            "description": "Number of lines from the end (default 100).",
+                            "minimum": 1,
+                            "maximum": 5000,
+                        },
+                    },
+                    "required": ["container"],
+                },
             ),
             ResourceCapability(
-                "build", execute, "Build an image from a Dockerfile", scope="docker.image.build"
+                "network_ls",
+                read,
+                "List Docker networks",
+                scope="docker.network.list",
+                category="inspect",
             ),
             ResourceCapability(
-                "compose_up", execute, "docker compose up (detached)", scope="docker.compose.up"
+                "volume_ls",
+                read,
+                "List Docker volumes",
+                scope="docker.volume.list",
+                category="inspect",
+            ),
+            ResourceCapability(
+                "start",
+                write,
+                "Start an existing container",
+                scope="docker.container.start",
+                category="containers",
+                params={"properties": {"container": name}, "required": ["container"]},
+            ),
+            ResourceCapability(
+                "stop",
+                write,
+                "Stop a running container",
+                scope="docker.container.stop",
+                category="containers",
+                params={"properties": {"container": name}, "required": ["container"]},
+            ),
+            ResourceCapability(
+                "restart",
+                write,
+                "Restart a container",
+                scope="docker.container.restart",
+                category="containers",
+                params={"properties": {"container": name}, "required": ["container"]},
+            ),
+            ResourceCapability(
+                "build",
+                execute,
+                "Build an image from a Dockerfile in the workspace",
+                scope="docker.image.build",
+                category="images",
+                params={
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Build context directory inside the workspace (default '.').",
+                        },
+                        "tag": {"type": "string", "description": "Name:tag for the new image."},
+                    }
+                },
+            ),
+            ResourceCapability(
+                "compose_up",
+                execute,
+                "docker compose up (detached) for a compose file in the workspace",
+                scope="docker.compose.up",
+                category="compose",
+                params={
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "Compose file inside the workspace (default: the standard names).",
+                        }
+                    }
+                },
             ),
             ResourceCapability(
                 "compose_down",
@@ -231,8 +336,30 @@ class DockerConnector(ResourceConnector):
                 "docker compose down",
                 destructive=True,
                 scope="docker.compose.down",
+                category="compose",
+                params={
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "Compose file inside the workspace.",
+                        },
+                        "volumes": {
+                            "type": "boolean",
+                            "description": "Also delete the project's volumes (data loss).",
+                        },
+                    }
+                },
             ),
         ]
+
+    async def probe_availability(self) -> tuple[bool, str]:
+        """The daemon must be reachable — the CLI being installed is not enough."""
+        hints = await self.discover()
+        if not hints:
+            return False, "Docker is not installed."
+        if any(h.source == "daemon" for h in hints):
+            return True, ""
+        return False, "Docker is installed but its daemon is not running — start Docker Desktop."
 
     def authorization_preview(self, action: str, params: dict[str, Any] | None) -> str:
         params = params or {}

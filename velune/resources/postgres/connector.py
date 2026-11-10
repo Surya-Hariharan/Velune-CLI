@@ -28,6 +28,18 @@ class PostgresConnector(SQLConnector):
 
     resource_id = "postgres"
     display_name = "PostgreSQL"
+    description = "A local PostgreSQL server: inspect schemas and run SQL (read-only by default)."
+    keywords = (
+        "postgres",
+        "postgresql",
+        "psql",
+        "database",
+        "sql",
+        "query",
+        "table",
+        "tables",
+        "schema",
+    )
     default_port = 5432
     driver_name = "psycopg (or psycopg2)"
 
@@ -84,10 +96,35 @@ class PostgresConnector(SQLConnector):
     def _engine_capabilities(self) -> list[ResourceCapability]:
         read = ResourcePermission.READ
         return [
-            ResourceCapability("list_databases", read, "List databases"),
-            ResourceCapability("list_schemas", read, "List schemas in the current database"),
-            ResourceCapability("list_tables", read, "List tables"),
-            ResourceCapability("describe_table", read, "Describe a table's columns"),
+            ResourceCapability("list_databases", read, "List databases", category="schema"),
+            ResourceCapability(
+                "list_schemas", read, "List schemas in the current database", category="schema"
+            ),
+            ResourceCapability(
+                "list_tables",
+                read,
+                "List tables",
+                category="schema",
+                params={
+                    "properties": {"schema": {"type": "string", "description": "Schema name."}}
+                },
+            ),
+            ResourceCapability(
+                "describe_table",
+                read,
+                "Describe a table's columns",
+                category="schema",
+                params={
+                    "properties": {
+                        "table": {"type": "string", "description": "Table name."},
+                        "schema": {
+                            "type": "string",
+                            "description": "Schema name (default public).",
+                        },
+                    },
+                    "required": ["table"],
+                },
+            ),
         ]
 
     async def _do_list_databases(self, params: dict[str, Any]) -> ResourceResult:

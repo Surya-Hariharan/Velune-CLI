@@ -43,6 +43,8 @@ class SupabaseConnector(ResourceConnector):
 
     resource_id = "supabase"
     display_name = "Supabase"
+    description = "A Supabase project over its REST API: tables, schema, storage and functions."
+    keywords = ("supabase", "postgrest", "storage", "bucket", "buckets", "edge", "rls")
     #: One httpx client per session, reused across calls.
     lifecycle = Lifecycle.PERSISTENT
 
@@ -63,6 +65,11 @@ class SupabaseConnector(ResourceConnector):
             register_config_secrets(self._explicit_config)
             return self._explicit_config
         return load_resource_secret(self.resource_id, self.name)
+
+    def configuration_problem(self) -> str | None:
+        if self._explicit_config or load_resource_secret(self.resource_id, self.name):
+            return None
+        return "Not configured — the user must run /resource configure supabase."
 
     @staticmethod
     def _validate_url(url: str) -> str | None:
@@ -176,15 +183,59 @@ class SupabaseConnector(ResourceConnector):
         read = ResourcePermission.READ
         write = ResourcePermission.WRITE
         return [
-            ResourceCapability("verify", read, "Verify the project is reachable"),
-            ResourceCapability("list_tables", read, "List tables exposed via PostgREST"),
-            ResourceCapability("inspect_schema", read, "Inspect a table's columns"),
-            ResourceCapability("storage_buckets", read, "List Storage buckets"),
-            ResourceCapability("query", read, "Read rows from a table (read-only)"),
-            ResourceCapability("edge_functions", read, "List Edge Function metadata"),
+            ResourceCapability(
+                "verify", read, "Verify the project is reachable", category="status"
+            ),
+            ResourceCapability(
+                "list_tables", read, "List tables exposed via PostgREST", category="schema"
+            ),
+            ResourceCapability(
+                "inspect_schema",
+                read,
+                "Inspect a table's columns",
+                category="schema",
+                params={
+                    "properties": {"table": {"type": "string", "description": "Table name."}},
+                    "required": ["table"],
+                },
+            ),
+            ResourceCapability("storage_buckets", read, "List Storage buckets", category="storage"),
+            ResourceCapability(
+                "query",
+                read,
+                "Read rows from a table (read-only)",
+                category="query",
+                params={
+                    "properties": {
+                        "table": {"type": "string", "description": "Table name."},
+                        "select": {
+                            "type": "string",
+                            "description": "Columns to select (default *).",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum rows (default 100).",
+                            "minimum": 1,
+                            "maximum": 1000,
+                        },
+                        "service_role": {
+                            "type": "boolean",
+                            "description": "Use the privileged service-role key (always needs approval).",
+                        },
+                    },
+                    "required": ["table"],
+                },
+            ),
+            ResourceCapability(
+                "edge_functions", read, "List Edge Function metadata", category="functions"
+            ),
             # Uses the service-role key → privileged; must be confirmed.
             ResourceCapability(
-                "rls_policies", write, "Inspect RLS policies (requires service role)"
+                "rls_policies",
+                write,
+                "Inspect RLS policies (requires service role)",
+                category="schema",
+                params={"properties": {"table": {"type": "string", "description": "Table name."}}},
             ),
         ]
 
