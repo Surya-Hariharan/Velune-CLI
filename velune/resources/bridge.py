@@ -77,6 +77,24 @@ def _mark_outside_paths(actions: list[Any], params: dict[str, Any], boundary: An
     return [replace(a, outside_workspace=True) for a in actions]
 
 
+def _all_gated(actions: list[Any]) -> bool:
+    """Every action is scoped, and at least one is an integration action.
+
+    A network action (no scope) may accompany an integration action — the HTTP
+    integration reports "this talks to a destination nobody vouched for" that way —
+    and is decided by the ordinary network rules. Anything else unscoped, or a
+    list with no integration action at all, is refused.
+    """
+    from velune.permissions.actions import ActionType
+
+    def gated(a: Any) -> bool:
+        return bool(getattr(a, "integration", False)) or (
+            getattr(a, "action_type", None) is ActionType.NETWORK and not getattr(a, "scope", "")
+        )
+
+    return any(getattr(a, "integration", False) for a in actions) and all(gated(a) for a in actions)
+
+
 def operation_tool_name(resource_id: str, action: str) -> str:
     return _NAME_SAFE.sub("_", f"{resource_id}__{action}")[:64]
 
@@ -134,7 +152,7 @@ class ResourceOperationTool(BaseTool):
             actions += [b for b in baseline if not any(_covers(a, b) for a in actions)]
         except Exception:
             actions = []
-        if not actions or not all(getattr(a, "integration", False) for a in actions):
+        if not actions or not _all_gated(actions):
             # Nothing trustworthy to authorize: present an unscoped integration
             # action, which the policy refuses in every mode.
             actions = [

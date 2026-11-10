@@ -91,6 +91,15 @@ class ErrorCode(StrEnum):
     UNAVAILABLE = "application_unavailable"
     ADAPTER_FAILURE = "adapter_failure"
     VALIDATION_FAILED = "validation_failed"
+    # Network-facing failures (the HTTP integration). Each names where a request
+    # stopped, so the model can tell a firewall problem from a bad URL.
+    INVALID_URL = "invalid_url"
+    NETWORK_POLICY = "network_policy_blocked"
+    DNS_FAILED = "dns_resolution_failed"
+    TLS_FAILED = "tls_validation_failed"
+    RESPONSE_TOO_LARGE = "response_too_large"
+    REDIRECT_REJECTED = "redirect_rejected"
+    INVALID_RESPONSE = "invalid_response"
 
 
 @dataclass(slots=True, frozen=True)

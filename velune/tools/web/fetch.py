@@ -1,7 +1,33 @@
 """Web fetch tools."""
 
+import os
+from typing import Any
+
 from velune.tools.base.tool import BaseTool, ToolPermission
 from velune.tools.web.validator import validate_url
+
+_PROXY_VARIABLES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+
+
+def _pinned_client_options() -> dict[str, Any]:
+    """Make the connection use the addresses that were validated (DNS-rebinding guard).
+
+    ``validate_url`` resolves the host to check it, and httpx would then resolve it
+    *again* to connect — a window in which a hostile DNS server can answer with a
+    public address first and an internal one second. The pinned transport resolves
+    once, validates that answer and connects to exactly those addresses (TLS still
+    verifies the real host name). Loopback and private ranges stay refused, as
+    before.
+
+    When a proxy is configured the proxy performs the lookup itself, which cannot
+    be pinned; the existing URL validation is then all that applies.
+    """
+    if any(os.environ.get(v) or os.environ.get(v.lower()) for v in _PROXY_VARIABLES):
+        return {}
+    from velune.resources.http.netpolicy import NetworkPolicy
+    from velune.resources.http.transport import PinnedTransport
+
+    return {"transport": PinnedTransport(NetworkPolicy(allow_loopback=False))}
 
 
 class WebFetch(BaseTool):
@@ -40,7 +66,9 @@ class WebFetch(BaseTool):
         max_redirects = 3
         current = url
 
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=False, **_pinned_client_options()
+        ) as client:
             for _ in range(max_redirects + 1):
                 is_valid, error = validate_url(current)
                 if not is_valid:

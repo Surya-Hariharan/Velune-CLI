@@ -10,6 +10,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **HTTP and API integration.** The agent can send HTTP requests (GET, POST, PUT, PATCH, DELETE, HEAD,
+  OPTIONS), inspect structured, redacted responses, check them with deterministic local assertions,
+  diagnose a failing API, run API collections and explore OpenAPI 3.x specifications — through the same
+  integration runtime as Docker and the databases (`http__request`, `http__collection_run`,
+  `http__openapi_call`, … discovered with `integrations_list` / `integrations_enable`). No Postman
+  application or cloud service is involved. See [docs/http.md](docs/http.md).
+  - **Environments and variables.** `[resources.http.environments.<name>]` with a base URL, `{{variables}}`
+    and secret variables that hold credential *references*; unknown variables are errors, and a secret may
+    only be sent to its own environment's origin.
+  - **Credentials** (bearer, basic, API key in a header or query, OAuth2 client credentials) live in the
+    existing encrypted keystore (`/resource configure http <reference>`) and are **bound to one origin**:
+    never sent to another host, port or scheme, nor after a redirect.
+  - **Collections** (`.velune/api/collections/*.json`, format `velune-api-collection/1`) with ordered
+    requests, assertions and value extraction between requests; import/export of a *subset* of Postman
+    Collection v2.1 (no scripts, tests, auth or environments). A collection run is authorized against every
+    request in it at once and cannot be a way around approval.
+  - **OpenAPI** 3.0/3.1 specs from a workspace file or URL (YAML with the new `velune-cli[api]` extra) are
+    searched rather than turned into tools; calls are checked against the spec before they are sent.
+  - **Network policy.** Cloud-metadata and link-local addresses are never reachable; private ranges need a
+    trusted origin; `localhost` works for development; unusual IP notations and URL tricks are rejected;
+    redirects are re-validated hop by hop and drop credentials when the origin changes; connect/read/write
+    timeouts, an overall deadline, request and streamed response size caps, bounded decompression and a
+    redirect cap apply to every request.
+  - **Permissions.** Reads run; Manual asks for a change; Plan refuses one; Auto still asks for a DELETE,
+    for production environments, for changes to an untrusted remote origin and for sensitive local service
+    ports. A `GET` whose path looks state-changing is treated as a write.
 - **`edit_file` tool: targeted edits instead of whole-file rewrites.** The agent replaces an exact
   string that must match one place (or every place, with `replace_all`). Ambiguous or missing
   matches are refused with line numbers or the closest line, so the model can correct the call.
@@ -68,6 +94,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **DNS rebinding in `web_fetch`.** The URL was validated against one DNS answer and then fetched with a second,
+  independent lookup, so a hostile DNS server could answer with a public address first and an internal one
+  second. The name is now resolved once, the answer validated, and the connection made to exactly those
+  addresses (TLS still verifies the real host name). Behind an `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`
+  the proxy resolves names itself, so only the existing URL validation applies there.
 - **A call retried after its tool appeared is no longer refused as "already failed".** When the set of tools
   offered to the model changes, the loop forgets which calls failed because their tool did not exist yet.
 - **Gemini: a function with no parameters is declared without a `parameters` schema** instead of an empty
@@ -91,6 +122,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Security
 
+- **HTTP requests cannot reach cloud-metadata or link-local addresses, and a public hostname cannot be used
+  to reach loopback or a private network** (resolved addresses are validated and connected to as IP
+  literals). Project configuration cannot add trusted origins unless the workspace is trusted, and an
+  `httpx` log line can no longer carry an API key from a URL.
 - **Changing `.git/`, `.velune/hooks.json` or `velune.toml` always asks first**, in Auto mode too,
   and is never covered by "always allow": these files can make git or Velune run commands.
 - The workspace boundary is re-checked right before a file is replaced, and the Council's edit

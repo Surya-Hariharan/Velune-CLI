@@ -322,6 +322,57 @@ class OrchestrationConfig(BaseModel):
         return "off"
 
 
+class HttpEnvironmentConfig(BaseModel):
+    """One API environment (``[resources.http.environments.<name>]``).
+
+    Holds no secrets: ``secret_variables`` and ``auth`` are *reference names* of
+    credentials stored in the encrypted keystore.
+    """
+
+    base_url: str
+    variables: dict[str, str] = Field(default_factory=dict)
+    #: variable name -> credential reference (the value lives in the keystore)
+    secret_variables: dict[str, str] = Field(default_factory=dict)
+    #: credential reference sent to this environment's origin by default
+    auth: str | None = None
+    #: A production deployment: every state-changing request needs a confirmation
+    #: that is never covered by a session grant.
+    production: bool = False
+    #: Further origins this environment's secrets may be sent to.
+    extra_origins: list[str] = Field(default_factory=list)
+    verify_tls: bool = True
+    #: Non-secret headers sent with every request to this environment.
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class HttpConfig(ResourceEntry):
+    """Settings for the HTTP/API integration (``[resources.http]``)."""
+
+    #: Origins (``http://localhost:5000``) the user vouches for. Requests to them
+    #: skip the extra network confirmation, and they may resolve to loopback or
+    #: private addresses. Honoured only for a trusted workspace; link-local and
+    #: cloud-metadata addresses stay blocked whatever is listed here.
+    trusted_origins: list[str] = Field(default_factory=list)
+    allow_private_network: bool = False
+    allow_loopback: bool = True
+    environments: dict[str, HttpEnvironmentConfig] = Field(default_factory=dict)
+    default_environment: str | None = None
+    #: Extra JSON field names whose values are masked in responses (case-insensitive).
+    redact_response_fields: list[str] = Field(default_factory=list)
+    connect_timeout: float = Field(default=5.0, gt=0, le=60)
+    read_timeout: float = Field(default=30.0, gt=0, le=300)
+    write_timeout: float = Field(default=30.0, gt=0, le=300)
+    #: Overall limit for one request including redirects.
+    timeout: float = Field(default=30.0, gt=0, le=300)
+    max_response_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=50 * 1024 * 1024)
+    max_request_bytes: int = Field(default=1024 * 1024, ge=1024, le=50 * 1024 * 1024)
+    max_redirects: int = Field(default=5, ge=0, le=10)
+    max_connections: int = Field(default=10, ge=1, le=50)
+    #: Where API collections are kept, relative to the workspace.
+    collections_dir: str = ".velune/api/collections"
+    max_collection_requests: int = Field(default=100, ge=1, le=500)
+
+
 class ResourcesConfig(BaseModel):
     """Configuration for external resource connectors (Docker, DBs, Supabase).
 
@@ -334,6 +385,7 @@ class ResourcesConfig(BaseModel):
     postgres: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
     mysql: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
     supabase: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
+    http: HttpConfig = Field(default_factory=HttpConfig)
     #: When False the model is never offered integration tools (the discovery tools
     #: and every integration operation are withheld). ``/resource`` is unaffected.
     expose_to_model: bool = True

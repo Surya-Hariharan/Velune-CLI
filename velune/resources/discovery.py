@@ -25,6 +25,14 @@ from velune.resources.base import DiscoveryHint
 logger = logging.getLogger("velune.resources.discovery")
 
 _COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml")
+_OPENAPI_FILES = (
+    "openapi.json",
+    "openapi.yaml",
+    "openapi.yml",
+    "swagger.json",
+    "swagger.yaml",
+    "swagger.yml",
+)
 
 # .env keys → the connector that consumes them.
 _ENV_DB_KEYS = {
@@ -110,6 +118,28 @@ def scan_workspace(workspace: Path | None) -> list[DiscoveryHint]:
                 )
             )
             break  # one compose hint is enough
+
+    # ── OpenAPI / API collections ─────────────────────────────────────────
+    for fname in _OPENAPI_FILES:
+        if (root / fname).is_file():
+            hints.append(
+                DiscoveryHint(
+                    resource_id="http",
+                    display_name="OpenAPI specification",
+                    detail=fname,
+                    source=fname,
+                )
+            )
+            break
+    if (root / ".velune" / "api" / "collections").is_dir():
+        hints.append(
+            DiscoveryHint(
+                resource_id="http",
+                display_name="API collections",
+                detail=".velune/api/collections",
+                source=".velune/api/collections",
+            )
+        )
 
     # ── Supabase project directory ────────────────────────────────────────
     supabase_dir = root / "supabase"
