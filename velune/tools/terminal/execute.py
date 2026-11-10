@@ -83,10 +83,16 @@ class ExecuteCommand(BaseTool):
         self,
         command: str,
         directory: str | None = None,
-        timeout: int = 30,
+        timeout: int | None = None,
         background: bool = False,
     ) -> dict:
-        """Execute a command after applying the hard ApprovalMode refusals."""
+        """Execute a command after applying the hard ApprovalMode refusals.
+
+        *timeout* defaults to 30 s in the foreground. A background job runs
+        until it is stopped, the session ends, or *timeout* (default
+        :data:`~velune.execution.processes.BACKGROUND_TIMEOUT_S`) — a dev
+        server must not be killed after 30 seconds.
+        """
         import asyncio
         from pathlib import Path
 
@@ -114,6 +120,10 @@ class ExecuteCommand(BaseTool):
         workspace = resolve_tool_path(directory, base, label="directory") if directory else base
         sandbox = self._sandbox or SubprocessSandbox(workspace)
 
+        if timeout is None:
+            from velune.execution.processes import BACKGROUND_TIMEOUT_S
+
+            timeout = BACKGROUND_TIMEOUT_S if background else 30
         try:
             spec = CommandSpec.from_string(command, cwd=workspace, timeout=float(timeout))
         except SandboxError as e:
@@ -153,8 +163,8 @@ class ExecuteCommand(BaseTool):
         import time
 
         from velune.core.errors.execution import SandboxError
-        from velune.core.task_registry import JobRecord, JobStatus, track
-        from velune.execution import cancellation
+        from velune.core.task_registry import JobRecord, JobStatus, ProcessLog, track
+        from velune.execution.processes import JobProcessObserver
 
         if self._job_registry is None:
             raise RuntimeError(
@@ -166,20 +176,33 @@ class ExecuteCommand(BaseTool):
         cancel_event = threading.Event()
         self._job_registry.register(
             JobRecord(
-                job_id=job_id, name=f"shell:{command[:40]}", kind="shell", cancel_event=cancel_event
+                job_id=job_id,
+                name=f"shell:{command[:40]}",
+                kind="shell",
+                cancel_event=cancel_event,
+                command=command,
+                log=ProcessLog(),
+                owner="agent",
             )
         )
+        observer = JobProcessObserver(self._job_registry, job_id)
 
         async def _run() -> None:
-            cancellation.register(cancel_event)
+            # Deliberately NOT registered with velune.execution.cancellation:
+            # that registry is the foreground Ctrl+C path, and pressing Ctrl+C
+            # on an unrelated command must not kill a background server. A
+            # background job is stopped via JobRegistry.cancel / terminate_job
+            # (and at session exit by cleanup_background_jobs).
             self._job_registry.update(job_id, status=JobStatus.RUNNING)
+            job = self._job_registry.get(job_id)
             try:
-                result = await asyncio.to_thread(sandbox.execute, spec, cancel_event)
+                result = await asyncio.to_thread(sandbox.execute, spec, cancel_event, observer)
                 preview = (result.stdout or result.stderr or "").strip()[:200]
                 self._job_registry.update(
                     job_id,
                     status=JobStatus.COMPLETED,
                     result_preview=preview or f"exit code {result.exit_code}",
+                    exit_code=result.exit_code,
                     completed_at=time.monotonic(),
                 )
             except asyncio.CancelledError:
@@ -188,14 +211,17 @@ class ExecuteCommand(BaseTool):
                 )
                 raise
             except SandboxError as exc:
+                # A job stopped on request stays CANCELLED; the sandbox reports
+                # the kill as an error, which must not relabel it FAILED.
                 self._job_registry.update(
                     job_id,
-                    status=JobStatus.FAILED,
-                    error=str(exc)[:200],
+                    status=JobStatus.CANCELLED if cancel_event.is_set() else JobStatus.FAILED,
+                    error=None if cancel_event.is_set() else str(exc)[:200],
                     completed_at=time.monotonic(),
                 )
             finally:
-                cancellation.unregister(cancel_event)
+                if job is not None and job.log is not None:
+                    job.log.flush()
 
         task_obj = asyncio.create_task(_run(), name=f"execute-bg-{job_id}")
         self._job_registry.update(job_id, task=task_obj)
@@ -221,7 +247,10 @@ class ExecuteCommand(BaseTool):
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Command timeout in seconds",
+                    "description": (
+                        "Timeout in seconds (default 30; a background job runs until "
+                        "stopped or the session ends)"
+                    ),
                 },
                 "background": {
                     "type": "boolean",

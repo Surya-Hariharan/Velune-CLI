@@ -986,6 +986,18 @@ class VeluneREPL:
 
         self.console.print("[dim]Stopping background tasks...[/dim]")
 
+        # Background processes (dev servers, watchers) the agent started must
+        # not outlive the session: kill their process trees before cancelling
+        # the tasks that supervise them.
+        try:
+            from velune.execution.processes import cleanup_background_jobs
+
+            stopped = cleanup_background_jobs(self._job_registry)
+            if stopped:
+                _log.info("Stopped %d background process(es) at exit.", stopped)
+        except Exception as exc:
+            _log.warning("Background process cleanup failed: %s", exc)
+
         # Two independent task universes exist: BackgroundTaskRegistry.submit()
         # and the module-level track(). Only the former was being cancelled here,
         # so tracked tasks — record_turn writes, the Ollama probe loop, turn event
@@ -2056,7 +2068,7 @@ class VeluneREPL:
         await cmd_plugin(self, args)
 
     def _build_resource_manager(self, workspace_path):
-        """Construct the ResourceManager with config, workspace, and approver.
+        """Construct the ResourceManager with config, workspace, and the session gate.
 
         Isolated in a try/except so a resources-config problem can never block
         the REPL from starting — a bare manager (all connectors, fail-closed
@@ -2077,11 +2089,15 @@ class VeluneREPL:
             workspace=Path(workspace_path) if workspace_path else None,
         )
         try:
-            from velune.cli.handlers.resources import make_resource_approver
+            from velune.cli.handlers.resources import make_resource_context_factory
 
-            manager.set_approver(make_resource_approver(self))
+            # Resource actions are authorized by the session's PermissionGate
+            # (execution mode, grants, audit) — not by a separate approver.
+            manager.set_context_factory(make_resource_context_factory(self))
         except Exception as exc:
-            _log.debug("Could not install interactive resource approver: %s", exc)
+            # Without the factory the manager falls back to its fail-closed
+            # read-only approver: nothing that changes state can run.
+            _log.debug("Could not install the resource permission context: %s", exc)
         return manager
 
     async def _cmd_resource(self, args: str) -> None:

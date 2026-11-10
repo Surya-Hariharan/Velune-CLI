@@ -35,6 +35,7 @@ from velune.mcp.transports.base import (
     ResourceInfo,
     ServerConfig,
     ToolInfo,
+    tool_annotations,
 )
 
 logger = logging.getLogger("velune.mcp.transports.websocket")
@@ -229,6 +230,7 @@ class WebSocketConnection(MCPConnection):
                 description=t.get("description", ""),
                 input_schema=t.get("inputSchema", {}),
                 server_name=self.config.name,
+                annotations=tool_annotations(t),
             )
             for t in result.get("tools", [])
         ]

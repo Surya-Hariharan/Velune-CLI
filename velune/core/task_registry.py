@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
@@ -201,6 +202,70 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ProcessLog:
+    """Thread-safe, bounded ring buffer of a background process's output lines.
+
+    Fed live from the sandbox's pipe readers. Bounded by both line count and
+    total characters so a chatty server can never exhaust memory; the oldest
+    lines are dropped first and counted in :attr:`dropped`.
+    """
+
+    def __init__(self, max_lines: int = 2000, max_chars: int = 512 * 1024) -> None:
+        self._lines: deque[tuple[str, str]] = deque()
+        self._chars = 0
+        self._partial: dict[str, str] = {}
+        self._max_lines = max_lines
+        self._max_chars = max_chars
+        self._lock = threading.Lock()
+        self.dropped = 0
+        self.total_lines = 0
+
+    def append(self, stream: str, text: str) -> None:
+        if not text:
+            return
+        with self._lock:
+            buffered = self._partial.pop(stream, "") + text
+            parts = buffered.split("\n")
+            tail = parts.pop()  # incomplete last line (or "" after a newline)
+            if tail:
+                if len(tail) > 8192:  # a line with no newline: flush it anyway
+                    parts.append(tail)
+                else:
+                    self._partial[stream] = tail
+            for line in parts:
+                self._push(stream, line.rstrip("\r"))
+
+    def _push(self, stream: str, line: str) -> None:
+        self._lines.append((stream, line))
+        self._chars += len(line)
+        self.total_lines += 1
+        while self._lines and (len(self._lines) > self._max_lines or self._chars > self._max_chars):
+            _, old = self._lines.popleft()
+            self._chars -= len(old)
+            self.dropped += 1
+
+    def flush(self) -> None:
+        """Commit any partial (newline-less) trailing output."""
+        with self._lock:
+            for stream, tail in list(self._partial.items()):
+                self._push(stream, tail.rstrip("\r"))
+            self._partial.clear()
+
+    def tail(self, n: int = 200, stream: str | None = None) -> list[str]:
+        n = max(0, min(int(n), self._max_lines))
+        with self._lock:
+            lines = [
+                (f"[{s}] {line}" if stream is None and s != "stdout" else line)
+                for s, line in self._lines
+                if stream is None or s == stream
+            ]
+        return lines[-n:] if n else []
+
+    def text(self) -> str:
+        with self._lock:
+            return "\n".join(line for _, line in self._lines)
+
+
 @dataclass
 class JobRecord:
     """Tracks the lifecycle of a single user-submitted background job."""
@@ -227,6 +292,21 @@ class JobRecord:
     #: process instead of leaving it running past the job's "cancelled"
     #: status.
     cancel_event: threading.Event | None = field(default=None, repr=False)
+    # ── Supervised processes (background shell jobs) ─────────────────────────
+    #: OS process id of the job's root process, once spawned.
+    pid: int | None = None
+    #: The process's creation time, recorded at spawn. Operating systems reuse
+    #: process ids, so a pid alone cannot prove a process is still *ours*.
+    pid_started: float | None = None
+    #: The command line, for identification in /jobs and job tools.
+    command: str | None = None
+    #: Live, bounded output buffer.
+    log: ProcessLog | None = field(default=None, repr=False)
+    exit_code: int | None = None
+    #: Set by a readiness check: True once the process was seen ready.
+    ready: bool | None = None
+    #: Who started it ("agent", "user"); background jobs are owned by the session.
+    owner: str = ""
 
 
 class JobRegistry:
@@ -267,6 +347,23 @@ class JobRegistry:
             return sum(
                 1 for j in self._jobs.values() if j.status in (JobStatus.PENDING, JobStatus.RUNNING)
             )
+
+    def logs(self, job_id: str, tail: int = 200, stream: str | None = None) -> list[str] | None:
+        """Last *tail* output lines of a job, or None when the job has no log."""
+        job = self.get(job_id)
+        if job is None or job.log is None:
+            return None
+        return job.log.tail(tail, stream)
+
+    def running(self, kind: str | None = None) -> list[JobRecord]:
+        with self._lock:
+            jobs = list(self._jobs.values())
+        return [
+            j
+            for j in jobs
+            if j.status in (JobStatus.PENDING, JobStatus.RUNNING)
+            and (kind is None or j.kind == kind)
+        ]
 
     def cancel(self, job_id: str) -> bool:
         """Cancel the asyncio task for *job_id*; return True if cancelled."""

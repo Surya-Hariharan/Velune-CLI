@@ -19,6 +19,8 @@ from typing import Any
 
 from velune.resources.base import (
     DiscoveryHint,
+    ErrorCode,
+    Lifecycle,
     ResourceCapability,
     ResourceConnector,
     ResourcePermission,
@@ -31,12 +33,18 @@ logger = logging.getLogger("velune.resources.docker")
 
 _DEFAULT_TIMEOUT = 20.0
 
+#: Parameters that become positional docker arguments (see ``execute``).
+_ARGV_PARAMS = ("container", "image", "target", "path", "file", "tag", "tail")
+
 
 class DockerConnector(ResourceConnector):
     """Connector for a local Docker daemon."""
 
     resource_id = "docker"
     display_name = "Docker"
+    # The CLI is invoked per call; there is no session to keep open. A4 moves
+    # this connector to the Docker SDK with a persistent client.
+    lifecycle = Lifecycle.STATELESS
 
     def __init__(self, name: str | None = None) -> None:
         super().__init__(name)
@@ -56,7 +64,10 @@ class DockerConnector(ResourceConnector):
         docker = self._docker_path()
         if docker is None:
             return ResourceResult.failure(
-                "Docker CLI not found on PATH.", action=args[0] if args else ""
+                "Docker CLI not found on PATH.",
+                action=args[0] if args else "",
+                code=ErrorCode.UNAVAILABLE,
+                hint="Install Docker Desktop or Docker Engine.",
             )
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -69,9 +80,13 @@ class DockerConnector(ResourceConnector):
                 out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except asyncio.TimeoutError:
                 proc.kill()
-                return ResourceResult.failure(f"docker {args[0]} timed out after {timeout:.0f}s")
+                return ResourceResult.failure(
+                    f"docker {args[0]} timed out after {timeout:.0f}s", code=ErrorCode.TIMEOUT
+                )
         except (OSError, ValueError) as exc:
-            return ResourceResult.failure(f"Could not run docker: {exc}")
+            return ResourceResult.failure(
+                f"Could not run docker: {exc}", code=ErrorCode.UNAVAILABLE
+            )
 
         stdout = out.decode("utf-8", "replace")
         stderr = err.decode("utf-8", "replace").strip()
@@ -179,18 +194,44 @@ class DockerConnector(ResourceConnector):
         write = ResourcePermission.WRITE
         execute = ResourcePermission.EXECUTE
         return [
-            ResourceCapability("ps", read, "List containers (running and stopped)"),
-            ResourceCapability("images", read, "List local images"),
-            ResourceCapability("inspect", read, "Inspect a container or image (JSON)"),
-            ResourceCapability("logs", read, "Show a container's logs"),
-            ResourceCapability("network_ls", read, "List Docker networks"),
-            ResourceCapability("volume_ls", read, "List Docker volumes"),
-            ResourceCapability("start", write, "Start an existing container"),
-            ResourceCapability("stop", write, "Stop a running container"),
-            ResourceCapability("restart", write, "Restart a container"),
-            ResourceCapability("build", execute, "Build an image from a Dockerfile"),
-            ResourceCapability("compose_up", execute, "docker compose up (detached)"),
-            ResourceCapability("compose_down", execute, "docker compose down", destructive=True),
+            ResourceCapability(
+                "ps", read, "List containers (running and stopped)", scope="docker.container.list"
+            ),
+            ResourceCapability("images", read, "List local images", scope="docker.image.list"),
+            ResourceCapability(
+                "inspect", read, "Inspect a container or image (JSON)", scope="docker.inspect"
+            ),
+            ResourceCapability(
+                "logs", read, "Show a container's logs", scope="docker.container.logs"
+            ),
+            ResourceCapability(
+                "network_ls", read, "List Docker networks", scope="docker.network.list"
+            ),
+            ResourceCapability(
+                "volume_ls", read, "List Docker volumes", scope="docker.volume.list"
+            ),
+            ResourceCapability(
+                "start", write, "Start an existing container", scope="docker.container.start"
+            ),
+            ResourceCapability(
+                "stop", write, "Stop a running container", scope="docker.container.stop"
+            ),
+            ResourceCapability(
+                "restart", write, "Restart a container", scope="docker.container.restart"
+            ),
+            ResourceCapability(
+                "build", execute, "Build an image from a Dockerfile", scope="docker.image.build"
+            ),
+            ResourceCapability(
+                "compose_up", execute, "docker compose up (detached)", scope="docker.compose.up"
+            ),
+            ResourceCapability(
+                "compose_down",
+                execute,
+                "docker compose down",
+                destructive=True,
+                scope="docker.compose.down",
+            ),
         ]
 
     def authorization_preview(self, action: str, params: dict[str, Any] | None) -> str:
@@ -198,10 +239,107 @@ class DockerConnector(ResourceConnector):
         target = params.get("container") or params.get("image") or params.get("path") or ""
         return f"docker {action} {target}".strip()
 
+    # ── Ownership-aware authorization (Decision E) ───────────────────────────
+
+    _LIFECYCLE_ACTIONS = frozenset({"start", "stop", "restart"})
+
+    def describe_actions(self, action, params, *, ledger=None):
+        """Raise risk for anything this task does not own.
+
+        Starting, stopping or restarting a container is an ordinary (MEDIUM)
+        change only for a container this session created. For every other
+        container — the user's, another process's, or one whose origin is
+        unknown — it becomes HIGH, so the gate asks a human in every mode,
+        AUTO included. ``compose down -v`` additionally names the volume
+        deletion it performs.
+
+        ``compose up`` creates whatever the compose file describes, so the file
+        is inspected (:mod:`~velune.resources.docker.compose_scan`): privileged
+        containers, host namespaces, host bind mounts, the Docker socket,
+        devices, and anything it cannot verify each add a HIGH-risk action with
+        its own scope, so unattended AUTO mode never starts them.
+        """
+        from dataclasses import replace
+
+        from velune.permissions.actions import Action, ActionType, Risk
+        from velune.resources.ownership import Ownership, ResourceRef
+
+        actions = super().describe_actions(action, params, ledger=ledger)
+        params = params or {}
+        if action in self._LIFECYCLE_ACTIONS and actions:
+            container = str(params.get("container") or "")
+            owned = (
+                ledger is not None
+                and bool(container)
+                and ledger.ownership(ResourceRef("docker", "container", container))
+                is Ownership.OWNED
+            )
+            if not owned:
+                actions = [
+                    replace(
+                        a,
+                        risk=Risk.HIGH,
+                        reason=(
+                            f"container '{container or '?'}' was not created by this task — "
+                            "an existing resource is never assumed to be the task's own"
+                        ),
+                    )
+                    for a in actions
+                ]
+        if action == "compose_up":
+            from velune.resources.docker.compose_scan import compose_risks
+
+            for risk in compose_risks(str(params["file"]) if params.get("file") else None):
+                actions.append(
+                    Action(
+                        ActionType.INTEGRATION_EXECUTE,
+                        f"{self.name}:compose_up",
+                        f"the compose file {risk.reason}",
+                        Risk.HIGH,
+                        scope=risk.scope,
+                    )
+                )
+        if action == "compose_down" and params.get("volumes"):
+            actions.append(
+                Action(
+                    ActionType.INTEGRATION_DELETE,
+                    f"{self.name}:compose_down",
+                    "deletes the project's named volumes (data loss)",
+                    Risk.HIGH,
+                    scope="docker.volume.delete",
+                )
+            )
+        return actions
+
+    def ownership_effects(self, action, params, result):
+        from velune.resources.ownership import ResourceRef
+
+        params = params or {}
+        if action == "build" and params.get("tag"):
+            return [(ResourceRef("docker", "image", str(params["tag"])), True)]
+        if action == "compose_up":
+            project = str(params.get("file") or "compose")
+            return [(ResourceRef("docker", "compose_project", project), True)]
+        if action == "compose_down":
+            project = str(params.get("file") or "compose")
+            return [(ResourceRef("docker", "compose_project", project), False)]
+        return []
+
     # ── Execution ────────────────────────────────────────────────────────────
 
     async def execute(self, action: str, params: dict[str, Any] | None = None) -> ResourceResult:
         params = params or {}
+        # Names and paths go straight into the docker argv; one that starts with
+        # "-" would be parsed by Docker as an option (``--help``, ``-a``), even
+        # for read actions that run without asking.
+        for key in _ARGV_PARAMS:
+            value = params.get(key)
+            if value is not None and str(value).lstrip().startswith("-"):
+                return ResourceResult.failure(
+                    f"'{key}' must not start with '-' (it would be read as a docker option).",
+                    action=action,
+                    code=ErrorCode.VALIDATION_FAILED,
+                )
         if self._state is not ResourceState.CONNECTED and action not in {"ps", "images"}:
             # Allow a lazy connect for read actions so `/resource info docker`
             # style calls work, but surface a clear state otherwise.

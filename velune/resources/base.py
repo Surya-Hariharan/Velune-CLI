@@ -26,9 +26,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from velune._compat import StrEnum
+
+if TYPE_CHECKING:
+    from velune.permissions.actions import Action as PermAction
+    from velune.resources.ownership import OwnershipLedger, ResourceRef
 
 
 class ResourcePermission(StrEnum):
@@ -55,6 +59,40 @@ class ResourceState(StrEnum):
     ERROR = "error"
 
 
+class Lifecycle(StrEnum):
+    """How a connector's session is managed by the :class:`ResourceManager`.
+
+    The manager owns connect / reuse / health / disconnect for every strategy;
+    connectors only implement the application-specific open and close. Pooling
+    belongs to strategies that need it — never forced on a stateless client.
+    """
+
+    STATELESS = "stateless"  # no session (a CLI wrapper, a one-shot HTTP client)
+    PERSISTENT = "persistent"  # one long-lived client or connection, reused
+    POOL = "pool"  # a driver-managed connection pool
+    SESSION = "session"  # a protocol session owned elsewhere (MCP)
+    SUPERVISED_PROCESS = "process"  # child processes Velune started and must clean up
+
+
+class ErrorCode(StrEnum):
+    """Normalized failure categories, stable across every connector.
+
+    Both the model and the user see these; the message alongside explains the
+    specifics without ever including credentials.
+    """
+
+    CONNECTION_FAILED = "connection_failed"
+    AUTHENTICATION_FAILED = "authentication_failed"
+    AUTHORIZATION_DENIED = "authorization_denied"
+    UNSUPPORTED_OPERATION = "unsupported_operation"
+    TIMEOUT = "timeout"
+    NOT_FOUND = "not_found"
+    CONFLICT = "conflict"
+    UNAVAILABLE = "application_unavailable"
+    ADAPTER_FAILURE = "adapter_failure"
+    VALIDATION_FAILED = "validation_failed"
+
+
 @dataclass(slots=True, frozen=True)
 class ResourceCapability:
     """One action a connector can perform.
@@ -66,12 +104,15 @@ class ResourceCapability:
         destructive: True for irreversible operations (DROP TABLE, ``compose
                      down -v``). The approver is told so it can demand a stronger
                      confirmation.
+        scope:       Integration permission scope (``docker.container.start``).
+                     Empty means ``<resource_id>.<action>``.
     """
 
     action: str
     permission: ResourcePermission
     description: str = ""
     destructive: bool = False
+    scope: str = ""
 
 
 @dataclass(slots=True, frozen=True)
@@ -123,18 +164,67 @@ class ResourceResult:
     #: Set when the action was rejected by the approval framework rather than by
     #: an operational failure, so callers can message it differently.
     denied: bool = False
+    #: Normalized failure category (None on success). The manager fills in
+    #: ADAPTER_FAILURE for a connector failure that did not set one.
+    code: ErrorCode | None = None
+    #: Which integration produced the result (set by the manager).
+    integration: str = ""
+    #: Identifiers of the application resources the call touched or created.
+    resource_ids: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    duration_ms: float = 0.0
+    #: Short remediation advice for the user and the model ("start Docker").
+    hint: str = ""
 
     @classmethod
     def success(cls, action: str = "", data: Any = None) -> ResourceResult:
         return cls(ok=True, action=action, data=data)
 
     @classmethod
-    def failure(cls, error: str, *, action: str = "") -> ResourceResult:
-        return cls(ok=False, action=action, error=error)
+    def failure(
+        cls,
+        error: str,
+        *,
+        action: str = "",
+        code: ErrorCode | None = None,
+        hint: str = "",
+    ) -> ResourceResult:
+        return cls(ok=False, action=action, error=error, code=code, hint=hint)
 
     @classmethod
     def denied_result(cls, action: str, reason: str) -> ResourceResult:
-        return cls(ok=False, action=action, error=reason, denied=True)
+        return cls(
+            ok=False,
+            action=action,
+            error=reason,
+            denied=True,
+            code=ErrorCode.AUTHORIZATION_DENIED,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-serializable form (what the model and the audit trail see)."""
+        out: dict[str, Any] = {
+            "ok": self.ok,
+            "integration": self.integration,
+            "action": self.action,
+        }
+        if self.ok:
+            out["data"] = self.data
+        else:
+            out["error"] = {
+                "code": (self.code or ErrorCode.ADAPTER_FAILURE).value,
+                "message": self.error or "",
+            }
+            if self.hint:
+                out["error"]["hint"] = self.hint
+            if self.denied:
+                out["error"]["denied"] = True
+        if self.resource_ids:
+            out["resource_ids"] = list(self.resource_ids)
+        if self.warnings:
+            out["warnings"] = list(self.warnings)
+        out["duration_ms"] = round(self.duration_ms, 1)
+        return out
 
 
 @dataclass(slots=True, frozen=True)
@@ -174,6 +264,8 @@ class ResourceConnector(ABC):
     resource_id: str = ""
     #: Human-readable label for tables and prompts.
     display_name: str = ""
+    #: How the manager manages this connector's session.
+    lifecycle: Lifecycle = Lifecycle.STATELESS
 
     def __init__(self, name: str | None = None) -> None:
         # ``name`` distinguishes multiple instances of the same connector type
@@ -246,3 +338,124 @@ class ResourceConnector(ABC):
         manager never trusts it to weaken a WRITE action down to READ.
         """
         return None
+
+    # ── Authorization description ────────────────────────────────────────────
+
+    def scope_for(
+        self, action: str, params: dict[str, Any] | None, permission: ResourcePermission
+    ) -> str:
+        """The permission scope for this specific call.
+
+        Defaults to the capability's declared scope, else ``<resource_id>.<action>``.
+        Connectors whose single action spans several scopes (SQL ``query`` can
+        read or write) override this to name the concrete one.
+        """
+        cap = self.capability_for(action)
+        if cap is not None and cap.scope:
+            return cap.scope
+        return f"{self.resource_id}.{action}"
+
+    def describe_actions(
+        self,
+        action: str,
+        params: dict[str, Any] | None,
+        *,
+        ledger: OwnershipLedger | None = None,
+    ) -> list[PermAction]:
+        """Describe *action* as permission-gate actions, before it runs.
+
+        The default maps the effective permission tier (declared capability,
+        escalated by :meth:`effective_permission`) to an ``INTEGRATION_*``
+        action type and risk:
+
+        ==========  =====================  ======
+        tier        action type            risk
+        ==========  =====================  ======
+        READ        INTEGRATION_READ       low
+        WRITE       INTEGRATION_WRITE      medium
+        EXECUTE     INTEGRATION_EXECUTE    medium
+        ADMIN       INTEGRATION_WRITE      high
+        destructive INTEGRATION_DELETE     high
+        ==========  =====================  ======
+
+        Overrides may add context (ownership, targets) and may only *raise* the
+        risk — :meth:`ResourceManager.execute` enforces that.
+        """
+        from velune.permissions.actions import Action as GateAction
+        from velune.permissions.actions import ActionType, Risk
+
+        cap = self.capability_for(action)
+        if cap is None:
+            return []
+        permission, destructive = resolve_effective(self, cap, action, params)
+        scope = self.scope_for(action, params, permission)
+        if destructive:
+            action_type, risk = ActionType.INTEGRATION_DELETE, Risk.HIGH
+        elif permission is ResourcePermission.READ:
+            action_type, risk = ActionType.INTEGRATION_READ, Risk.LOW
+        elif permission is ResourcePermission.EXECUTE:
+            action_type, risk = ActionType.INTEGRATION_EXECUTE, Risk.MEDIUM
+        elif permission is ResourcePermission.ADMIN:
+            action_type, risk = ActionType.INTEGRATION_WRITE, Risk.HIGH
+        else:
+            action_type, risk = ActionType.INTEGRATION_WRITE, Risk.MEDIUM
+        return [
+            GateAction(
+                action_type,
+                f"{self.name}:{action}",
+                cap.description or action,
+                risk,
+                detail=_safe_preview(self, action, params),
+                scope=scope,
+            )
+        ]
+
+    def ownership_effects(
+        self, action: str, params: dict[str, Any] | None, result: ResourceResult
+    ) -> list[tuple[ResourceRef, bool]]:
+        """Resources a *successful* call created (True) or removed (False).
+
+        The manager records these in the session's ownership ledger. Default:
+        none — connectors that create resources override this.
+        """
+        return []
+
+    async def health(self) -> bool:
+        """Cheap liveness check of the current session. Default: status only."""
+        return self.status().connected
+
+
+def resolve_effective(
+    connector: ResourceConnector,
+    cap: ResourceCapability,
+    action: str,
+    params: dict[str, Any] | None,
+) -> tuple[ResourcePermission, bool]:
+    """Declared tier, raised (never lowered) by the connector's per-call override."""
+    permission, destructive = cap.permission, cap.destructive
+    override = connector.effective_permission(action, params)
+    if override is not None:
+        ov_perm, ov_destructive = override
+        if PERMISSION_RANK[ov_perm] >= PERMISSION_RANK[permission]:
+            permission = ov_perm
+        destructive = destructive or ov_destructive
+    return permission, destructive
+
+
+def _safe_preview(connector: ResourceConnector, action: str, params: dict[str, Any] | None) -> str:
+    try:
+        preview = connector.authorization_preview(action, params) or ""
+    except Exception:
+        return ""
+    from velune.core.redaction import redact_secrets
+
+    return redact_secrets(preview)[:300]
+
+
+#: Tier ordering for "stronger wins" when resolving an escalated permission.
+PERMISSION_RANK: dict[ResourcePermission, int] = {
+    ResourcePermission.READ: 0,
+    ResourcePermission.WRITE: 1,
+    ResourcePermission.EXECUTE: 1,
+    ResourcePermission.ADMIN: 2,
+}

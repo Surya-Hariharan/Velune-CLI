@@ -55,6 +55,18 @@ class _MCPToolWrapperBase:
     def get_schema(self) -> dict[str, Any]:
         return self._input_schema
 
+    def get_required_permissions(self) -> set[Any]:
+        from velune.tools.base.tool import ToolPermission
+
+        return {ToolPermission.NETWORK_ACCESS}
+
+    def describe_actions(self, args: dict[str, Any], boundary: Any) -> list[Any]:
+        # Without this override BaseTool's default classified an external MCP
+        # tool as a local READ. It is an untrusted integration call.
+        from velune.mcp.authorization import describe_mcp_call
+
+        return describe_mcp_call(self._client.server_name, self._name)
+
     async def execute(self, **kwargs: Any) -> Any:
         if self._client._connection is None:
             raise RuntimeError(f"MCP client '{self._client.server_name}' is not connected.")

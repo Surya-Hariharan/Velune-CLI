@@ -252,9 +252,13 @@ resources.
 | `resource` | `resources`, `res` | `/resource [list\|discover\|configure <id>\|connect <id>\|disconnect <id>\|status\|info <id>]` | Connect and inspect local resources — Docker, PostgreSQL, MySQL, Supabase |
 
 > `/resource configure <id>` interactively collects and encrypts
-> credentials for a database connector (aliases: `set`, `config`). Every
-> action beyond read access — write, execute, admin — goes through an
-> approval prompt.
+> credentials for a database connector (aliases: `set`, `config`). Resource
+> actions are decided by the same permission gate as the agent's own tools, so
+> they follow your execution mode: reads always run, Manual asks before any
+> change, Plan refuses changes, and Auto runs ordinary changes but still asks
+> for destructive ones and for anything this task did not create (for example a
+> container that was already running). `/resource info <id>` lists each action
+> with its permission scope, such as `docker.container.stop`.
 
 ---
 

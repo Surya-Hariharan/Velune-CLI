@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 from velune.resources.base import (
     DiscoveryHint,
+    Lifecycle,
     ResourceCapability,
     ResourceConnector,
     ResourcePermission,
@@ -29,7 +30,7 @@ from velune.resources.base import (
     ResourceState,
     ResourceStatus,
 )
-from velune.resources.secrets import load_resource_secret
+from velune.resources.secrets import load_resource_secret, register_config_secrets
 
 logger = logging.getLogger("velune.resources.supabase")
 
@@ -42,6 +43,8 @@ class SupabaseConnector(ResourceConnector):
 
     resource_id = "supabase"
     display_name = "Supabase"
+    #: One httpx client per session, reused across calls.
+    lifecycle = Lifecycle.PERSISTENT
 
     def __init__(self, name: str | None = None, config: dict[str, Any] | None = None) -> None:
         super().__init__(name)
@@ -55,6 +58,9 @@ class SupabaseConnector(ResourceConnector):
 
     def _resolve_config(self) -> dict[str, Any] | None:
         if self._explicit_config:
+            # Secrets passed in directly are masked everywhere from now on,
+            # exactly like ones loaded from the keystore.
+            register_config_secrets(self._explicit_config)
             return self._explicit_config
         return load_resource_secret(self.resource_id, self.name)
 

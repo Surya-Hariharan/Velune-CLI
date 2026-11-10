@@ -23,6 +23,12 @@ location there.
 
 Secret files (``.env``, keys, ``~/.ssh``) are high-risk even to *read*.
 Blocked commands (``sudo``, disk formatting…) are denied in every mode.
+
+Integration actions (``INTEGRATION_*``, see :mod:`velune.permissions.actions`)
+follow the same table with three additions: an integration action without a
+valid ``scope`` is denied (fail closed); an ``INTEGRATION_DELETE`` is treated as
+high-risk in every mode; and while an approved plan executes, an integration
+change asks — a plan's scope names files, never integration operations.
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from velune._compat import StrEnum
-from velune.permissions.actions import Action, ActionType, Risk
+from velune.permissions.actions import Action, ActionType, Risk, valid_scope
 
 
 class ExecutionMode(StrEnum):
@@ -76,7 +82,7 @@ class Decision:
 
     @property
     def high_risk(self) -> bool:
-        return any(a.risk is Risk.HIGH for a in self.actions)
+        return any(a.high_risk for a in self.actions)
 
     @property
     def outside_workspace(self) -> bool:
@@ -96,9 +102,57 @@ def _in_plan_scope(action: Action, state: PolicyState) -> bool:
     return any(target == p or p in target.parents for p in state.plan_scope)
 
 
+def _decide_integration(action: Action, state: PolicyState) -> tuple[Verdict, str]:
+    """Decide on one INTEGRATION_* action. Called only for those types."""
+    if not valid_scope(action.scope):
+        return (
+            Verdict.DENY,
+            "integration operation has no valid permission scope (refused: fail closed)",
+        )
+    scope = action.scope
+    if action.action_type is ActionType.INTEGRATION_READ:
+        if action.secret:
+            return Verdict.ASK, f"{scope}: reads credentials or secrets"
+        if action.outside_workspace:
+            return Verdict.ASK, f"{scope}: reads outside the workspace"
+        return Verdict.ALLOW, f"{scope}: read-only"
+
+    # WRITE / EXECUTE / DELETE change application state.
+    if state.mode is ExecutionMode.PLAN and not state.plan_executing:
+        return (
+            Verdict.DENY,
+            f"plan mode: {scope} changes application state — record this step in the plan "
+            "with write_plan; it runs after the user approves the plan",
+        )
+    if state.mode is ExecutionMode.AUTO and action.outside_workspace:
+        return (
+            Verdict.DENY,
+            f"auto mode never changes anything outside the workspace ({scope}) — switch to "
+            "MANUAL (Shift+Tab) to approve it yourself",
+        )
+    if action.secret:
+        return Verdict.ASK, f"{scope}: touches credentials or secrets"
+    if action.outside_workspace:
+        return Verdict.ASK, f"{scope}: outside the workspace"
+    if action.high_risk:
+        return Verdict.ASK, f"high-risk: {scope}: {action.reason or action.describe()}"
+    if state.mode is ExecutionMode.AUTO:
+        return Verdict.ALLOW, f"{scope} (auto)"
+    if state.mode is ExecutionMode.PLAN:  # executing an approved plan
+        return Verdict.ASK, f"{scope} is not covered by the approved plan"
+    return Verdict.ASK, f"manual mode: {scope} needs approval"
+
+
 def _decide_one(action: Action, state: PolicyState) -> tuple[Verdict, str]:
     if action.blocked:
         return Verdict.DENY, f"blocked in every mode: {action.reason or action.target}"
+
+    if action.integration:
+        return _decide_integration(action, state)
+    if action.scope:
+        # A scope on a non-integration action means a caller built the action
+        # wrongly; refuse rather than guess which rules it meant.
+        return Verdict.DENY, "scope set on a non-integration action (refused: fail closed)"
 
     if action.action_type is ActionType.WRITE_PLAN:
         if not _in_plans_dir(action, state):

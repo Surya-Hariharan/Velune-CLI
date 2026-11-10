@@ -7,8 +7,9 @@ import os
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import psutil
 
@@ -24,6 +25,14 @@ logger = logging.getLogger("velune.execution.sandbox")
 DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 
+class ProcessObserver(Protocol):
+    """Live view of a sandboxed process, for supervised (background) jobs."""
+
+    def on_spawn(self, pid: int) -> None: ...
+
+    def on_output(self, stream: str, text: str) -> None: ...
+
+
 class _BoundedStreamReader(threading.Thread):
     """Drain a subprocess text pipe into a memory-bounded buffer on its own thread.
 
@@ -35,10 +44,14 @@ class _BoundedStreamReader(threading.Thread):
     keeps a runaway producer from exhausting memory.
     """
 
-    def __init__(self, stream: Any, limit: int) -> None:
+    def __init__(self, stream: Any, limit: int, sink: Callable[[str], None] | None = None) -> None:
         super().__init__(daemon=True)
         self._stream = stream
         self._limit = limit
+        # Live consumer (a background job's log). Sees every chunk, including
+        # output past the capture cap — the sink is responsible for bounding
+        # its own memory (ProcessLog keeps a ring buffer).
+        self._sink = sink
         self._chunks: list[str] = []
         self._size = 0
         self.truncated = False
@@ -46,9 +59,14 @@ class _BoundedStreamReader(threading.Thread):
     def run(self) -> None:
         try:
             while True:
-                chunk = self._stream.read(8192)
+                chunk = self._stream.readline(8192) if self._sink else self._stream.read(8192)
                 if not chunk:
                     break
+                if self._sink is not None:
+                    try:
+                        self._sink(chunk)
+                    except Exception:  # a broken log consumer must not stall the pipe
+                        self._sink = None
                 if self._size >= self._limit:
                     # Keep draining to EOF so the writer never blocks, but
                     # discard the overflow.
@@ -271,6 +289,7 @@ class SubprocessSandbox:
         self,
         spec: CommandSpec,
         cancel_event: threading.Event | None = None,
+        observer: ProcessObserver | None = None,
     ) -> SandboxResult:
         """Synchronously execute command in process-isolated sandbox.
 
@@ -334,8 +353,21 @@ class SubprocessSandbox:
         # Drain both pipes concurrently while the process runs. Reading only
         # after exit (the old ``communicate()`` placement) deadlocks once the
         # child fills the OS pipe buffer — see _BoundedStreamReader.
-        stdout_reader = _BoundedStreamReader(process.stdout, self.max_output_bytes)
-        stderr_reader = _BoundedStreamReader(process.stderr, self.max_output_bytes)
+        out_sink = err_sink = None
+        if observer is not None:
+            try:
+                observer.on_spawn(process.pid)
+            except Exception as exc:  # observing must never break execution
+                logger.debug("process observer on_spawn failed: %s", exc)
+
+            def out_sink(text: str) -> None:
+                observer.on_output("stdout", text)
+
+            def err_sink(text: str) -> None:
+                observer.on_output("stderr", text)
+
+        stdout_reader = _BoundedStreamReader(process.stdout, self.max_output_bytes, out_sink)
+        stderr_reader = _BoundedStreamReader(process.stderr, self.max_output_bytes, err_sink)
         stdout_reader.start()
         stderr_reader.start()
 

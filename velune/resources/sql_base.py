@@ -27,6 +27,7 @@ from abc import abstractmethod
 from typing import Any
 
 from velune.resources.base import (
+    Lifecycle,
     ResourceCapability,
     ResourceConnector,
     ResourcePermission,
@@ -34,7 +35,11 @@ from velune.resources.base import (
     ResourceState,
     ResourceStatus,
 )
-from velune.resources.secrets import load_resource_secret, redact_config
+from velune.resources.secrets import (
+    load_resource_secret,
+    redact_config,
+    register_config_secrets,
+)
 from velune.resources.sql_safety import classify_sql
 
 logger = logging.getLogger("velune.resources.sql")
@@ -46,6 +51,8 @@ _PASSWORD_IN_TEXT = re.compile(r"(password|pwd)\s*=\s*\S+", re.IGNORECASE)
 class SQLConnector(ResourceConnector):
     """Common lifecycle + gated SQL execution for local relational databases."""
 
+    #: One live driver connection per connector instance, reused across calls.
+    lifecycle = Lifecycle.PERSISTENT
     #: Default TCP port, overridden per engine.
     default_port: int = 5432
     #: Human name of the required driver, used in the "not installed" message.
@@ -82,6 +89,9 @@ class SQLConnector(ResourceConnector):
 
     def _resolve_config(self) -> dict[str, Any] | None:
         if self._explicit_config:
+            # Secrets passed in directly are masked everywhere from now on,
+            # exactly like ones loaded from the keystore.
+            register_config_secrets(self._explicit_config)
             return self._explicit_config
         return load_resource_secret(self.resource_id, self.name)
 
@@ -195,9 +205,28 @@ class SQLConnector(ResourceConnector):
             ResourceCapability(
                 "query", read, "Run SQL. SELECT auto-approves; writes/DDL need confirmation"
             ),
-            ResourceCapability("explain", read, "EXPLAIN a query plan (read-only)"),
-            ResourceCapability("health", read, "Check connection health"),
+            ResourceCapability(
+                "explain", read, "EXPLAIN a query plan (read-only)", scope="database.query.read"
+            ),
+            ResourceCapability("health", read, "Check connection health", scope="database.health"),
         ]
+
+    #: ``query`` spans several scopes; the concrete one follows the SQL itself.
+    _QUERY_SCOPES = {
+        ResourcePermission.READ: "database.query.read",
+        ResourcePermission.WRITE: "database.query.write",
+        ResourcePermission.EXECUTE: "database.query.write",
+        ResourcePermission.ADMIN: "database.query.destructive",
+    }
+
+    def scope_for(self, action, params, permission):
+        if action == "query":
+            return self._QUERY_SCOPES[permission]
+        cap = self.capability_for(action)
+        if cap is not None and cap.scope:
+            return cap.scope
+        # Engine introspection (list_tables, describe_table, …) reads schema.
+        return "database.schema.read"
 
     def effective_permission(
         self, action: str, params: dict[str, Any] | None

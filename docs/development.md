@@ -124,6 +124,10 @@ Conventions worth knowing before adding tests:
   [Filesystem tools](filesystem-tools.md#adding-a-filesystem-tool).
 - **Doc tests:** `tests/test_slash_commands_doc.py` fails when `docs/slash-commands.md` drifts from the
   registered commands, and `tests/test_docs_links.py` fails on a broken relative link in the Markdown docs.
+- **Integration tests go through the gate.** Test resource and MCP behaviour with the production
+  `ResourceManager`, a real `PermissionGate` and, for the loop, `ToolLoopRunner` with a scripted provider;
+  assert on what ran, on the audit record and on the redacted result. Tests that start real processes
+  (`tests/test_process_supervision.py`) must not leave any behind.
 
 Run the same checks CI does:
 
@@ -223,6 +227,75 @@ Where each one lives:
 | Resource connectors | `velune.toml [resources.*]` | `resources/` |
 
 Prefer extending one of these registries over inventing a new loading mechanism.
+
+### Resource connectors and the authorization pipeline
+
+`velune/resources/` connects Velune to applications on the developer's machine (Docker, local PostgreSQL
+and MySQL, Supabase). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
+`ResourceManager.register`; nothing else needs to change.
+
+**What a connector declares.** `capabilities()` lists each action with a permission tier
+(`READ`/`WRITE`/`EXECUTE`/`ADMIN`), a `destructive` flag and a dotted `scope` (`docker.container.start`; empty
+means `<resource_id>.<action>`). `lifecycle` says how the manager treats the session (`STATELESS`,
+`PERSISTENT`, `POOL`, `SESSION`, `SUPERVISED_PROCESS`); the manager owns connect, reuse, health and
+disconnect, serialised per resource. Operational failures are returned as a `ResourceResult` with a normalized
+`ErrorCode`, never raised, and never contain credentials.
+
+**How a call is authorized.** There is one decision point, the same one every native tool uses:
+
+```
+ResourceManager.execute ─▶ ResourceOperationTool ─▶ authorize_and_execute ─▶ PermissionGate ─▶ connector.execute
+   (resources/manager.py)    (resources/bridge.py)     (tools/base/tool.py)     (permissions/)
+```
+
+The connector only *describes* the call. `describe_actions()` returns `Action`s of type `INTEGRATION_READ`,
+`_WRITE`, `_EXECUTE` or `_DELETE` (`permissions/actions.py`), each with its scope and a risk. An override may
+add context or raise the risk, never lower it: the bridge always includes the framework's own classification
+too. The policy (`permissions/policy.py`) then decides by execution mode:
+
+| Action | Manual | Plan | Plan, executing an approved plan | Auto |
+| --- | --- | --- | --- | --- |
+| `INTEGRATION_READ` | allow | allow | allow | allow |
+| `_WRITE` / `_EXECUTE`, medium risk | ask | refuse | ask | allow |
+| High risk, or `INTEGRATION_DELETE` | ask | refuse | ask | ask |
+| A change outside the workspace (a read there asks in every mode) | ask | refuse | ask | refuse |
+| No valid scope, or `blocked` | refuse | refuse | refuse | refuse |
+
+High-risk actions are never covered by an "always allow" grant. Scopes are matched exactly; there are no
+wildcards. The REPL supplies the session gate through `make_resource_context_factory`
+(`cli/handlers/resources.py`), so `/resource`, the agent and MCP share one mode, one set of grants and one audit
+trail. A legacy `ResourceManager(approver=...)` callback still works: it becomes the *ask* callback of a
+Manual-mode gate and is consulted only when the policy says a person must decide.
+
+**External MCP tools** take the same path. `ToolLoopRunner` wraps each one in `MCPRegistryTool`
+(`mcp/authorization.py`), described as `INTEGRATION_EXECUTE` in the scope `mcp.<server>.<tool>`. A server's
+annotations only raise risk (`destructiveHint` makes it `INTEGRATION_DELETE`); `readOnlyHint` is ignored.
+
+**Ownership.** `OwnershipLedger` (`resources/ownership.py`) records what *this session* created. A connector
+consults it in `describe_actions` and raises the risk of acting on anything else; a resource that existed
+before, or whose origin is unknown, is never assumed to be the task's own. `ownership_effects()` reports what a
+successful call created or removed. The CLI-based Docker connector has no action that creates a container, so
+starting, stopping or restarting an existing container always needs confirmation today. `compose_up` inspects
+the compose file (`resources/docker/compose_scan.py`) and treats a privileged container, host network or
+namespaces, a host bind mount, the Docker socket, a device, or anything it cannot inspect as high-risk.
+
+**Secrets.** Store connector credentials with `resources/secrets.py` (the existing encrypted store). Loading a
+config registers its secret values with `core/redaction.py`, and `_finish` in the manager passes every result
+through `redact_structure`. Never put a credential in an error message, a preview or a log line, and never ask
+the model for one.
+
+**Background processes.** `ExecuteCommand(background=True)` registers a `JobRecord` that carries the process
+id (with its creation time), the command, a bounded live `ProcessLog` and the exit code. A background job runs
+until it is stopped, not for the foreground 30 seconds, under the same sandbox limits as any command.
+`execution/processes.py` provides `wait_until_ready` (a log pattern and/or a *loopback-only* port),
+`terminate_job` (kills the whole tree; leaves a finished job untouched, because process ids are reused) and
+`cleanup_background_jobs`, which the REPL runs on exit. These are library functions; they are not yet exposed
+to the model as tools.
+
+To add a connector: subclass `ResourceConnector`, give every capability a scope, override `describe_actions`
+only to add risk, return `ResourceResult` with an `ErrorCode`, load secrets through `resources/secrets.py`,
+and test it through the manager with a real `PermissionGate` as in `tests/test_resource_authorization.py` and
+`tests/test_docker_compose_authorization.py`.
 
 **Trust matters for extensions.** Project-level hooks (`.velune/hooks.json` and `velune.toml [hooks]`) and
 project `.mcp.json` servers load only for directories the user has trusted (`velune/core/trust.py`).

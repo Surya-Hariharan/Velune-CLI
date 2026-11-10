@@ -24,6 +24,7 @@ from velune.mcp.transports.base import (
     ResourceInfo,
     ServerConfig,
     ToolInfo,
+    tool_annotations,
 )
 
 logger = logging.getLogger("velune.mcp.transports.sse")
@@ -108,6 +109,7 @@ class SSEConnection(MCPConnection):
                 description=t.description or "",
                 input_schema=t.inputSchema or {},
                 server_name=self.config.name,
+                annotations=tool_annotations(t),
             )
             for t in result.tools
         ]
