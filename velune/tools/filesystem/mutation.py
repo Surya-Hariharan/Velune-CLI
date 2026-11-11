@@ -38,6 +38,7 @@ import difflib
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -428,6 +429,34 @@ class RewindReport:
     skipped: list[str] = field(default_factory=list)
 
 
+def is_link(path: Path) -> bool:
+    """True for a symbolic link **or a Windows junction / other reparse point**.
+
+    ``Path.is_symlink()`` is False for a directory junction before Python 3.12, so
+    code that relied on it would walk *through* a junction into whatever it points at,
+    which may lie outside the workspace.
+    """
+    if path.is_symlink():
+        return True
+    if os.name == "nt":
+        try:
+            attributes = os.lstat(path).st_file_attributes  # type: ignore[attr-defined]
+        except (OSError, AttributeError):
+            return False
+        return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)  # type: ignore[attr-defined]
+    return False
+
+
+def count_entries(root: Path) -> int:
+    """Number of files and folders under *root*, counting a link but never walking into one."""
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        base = Path(dirpath)
+        total += len(filenames) + len(dirnames)
+        dirnames[:] = [name for name in dirnames if not is_link(base / name)]
+    return total
+
+
 def snapshot_tree(
     root: Path, limit: int = JOURNAL_MAX_BYTES
 ) -> list[tuple[str, bytes | None]] | None:
@@ -438,12 +467,12 @@ def snapshot_tree(
         base = Path(dirpath)
         for name in dirnames:
             child = base / name
-            if child.is_symlink():
+            if is_link(child):
                 return None
             entries.append((child.relative_to(root).as_posix(), None))
         for name in filenames:
             child = base / name
-            if child.is_symlink():
+            if is_link(child):
                 return None
             total += child.stat().st_size
             if total > limit:

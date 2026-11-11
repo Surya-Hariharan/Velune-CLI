@@ -257,6 +257,51 @@ async def test_recursive_delete_stays_high_risk_in_auto(ws):
     assert (ws / "pkg" / "m.py").exists()
 
 
+async def test_a_link_inside_a_deleted_folder_is_never_followed_or_copied_into_the_journal(
+    ws, tmp_path
+):
+    """Regression: on Windows before Python 3.12 a directory junction is not reported by
+    ``is_symlink()``, so the undo snapshot walked through it and copied files from
+    *outside* the workspace into the journal (and ``/rewind`` then recreated them inside
+    the workspace). Links must be treated as opaque on every platform."""
+    from velune.tools.filesystem import mutation as mut
+
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "precious.txt").write_bytes(b"DO NOT COPY OR DELETE\n")
+    (ws / "proj" / "inner").mkdir(parents=True)
+    (ws / "proj" / "keep.txt").write_bytes(b"x")
+    _symlink_or_skip(ws / "proj" / "inner" / "link", victim, is_dir=True)
+
+    assert mut.is_link(ws / "proj" / "inner" / "link")
+    assert not mut.is_link(ws / "proj" / "inner")
+    assert mut.snapshot_tree(ws / "proj") is None  # refuses rather than reading through the link
+    assert mut.count_entries(ws / "proj") == 3  # inner, keep.txt, link: nothing beyond the link
+
+    async def allow(tool_name, decision):
+        return Approval.ALLOW_ONCE
+
+    journal = mut.TurnJournal()
+    token = mut.set_active_journal(journal)
+    try:
+        await _run(
+            production_registry(ws),
+            "delete_directory",
+            gated_ctx(ws, ask=allow),
+            path="proj",
+            recursive=True,
+        )
+    finally:
+        mut.reset_active_journal(token)
+
+    assert not (ws / "proj").exists()
+    assert (victim / "precious.txt").read_bytes() == b"DO NOT COPY OR DELETE\n"
+    report = journal.rewind()
+    assert any("cannot be restored" in line or "too large" in line for line in report.skipped)
+    # Nothing from outside the workspace was recreated inside it.
+    assert not list(ws.rglob("precious.txt"))
+
+
 def test_atomic_write_rechecks_the_boundary_right_before_the_swap(ws, tmp_path):
     from velune.execution.path_guard import PathTraversalError
     from velune.permissions.gate import reset_active_boundary, set_active_boundary
