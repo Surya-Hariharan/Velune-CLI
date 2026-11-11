@@ -217,6 +217,49 @@ def _check_boundary(path: Path) -> None:
         raise PathTraversalError(f"'{path}' now resolves outside the workspace ('{resolved}').")
 
 
+#: Names Windows reserves for devices. A file called ``CON`` or ``nul.txt`` can be created
+#: through some APIs but then cannot be opened, renamed or deleted by ordinary tools.
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{n}" for n in range(1, 10)}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
+
+
+def _refuse_unsafe_target(path: Path) -> None:
+    """Refuse a target that cannot be written safely, before anything is created."""
+    if os.name == "nt" and path.name.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES:
+        raise ValueError(
+            f"'{path.name}' is a reserved Windows device name; a file with that name cannot "
+            "be managed afterwards. Choose another file name."
+        )
+    # A file the user marked read-only stays as it is. Without this, Windows refuses the
+    # swap after a delay and POSIX would silently replace it (rename ignores the file's
+    # own mode), which defeats the protection.
+    if path.is_file() and not os.access(path, os.W_OK):
+        raise PermissionError(
+            f"{path.name} is read-only, so it was not modified. Make it writable first if "
+            "the change is intended."
+        )
+
+
+def _discard(tmp: str) -> None:
+    """Remove a temporary file, even one that inherited a read-only attribute."""
+    for _ in range(2):
+        try:
+            os.unlink(tmp)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            try:
+                os.chmod(tmp, stat.S_IWRITE | stat.S_IREAD)
+            except OSError:
+                return
+        except OSError:
+            return
+
+
 def _replace(source: str, target: Path) -> None:
     # On Windows a file held open by another program (an editor, an indexer, an
     # antivirus scan) refuses replacement for a moment; retry briefly.
@@ -240,6 +283,7 @@ def atomic_write(path: Path, data: bytes, *, expected_sha256: str | None = None)
     bits are kept. The temporary file is removed if anything fails.
     """
     _check_boundary(path)
+    _refuse_unsafe_target(path)
     ensure_parent(path)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=_TMP_PREFIX, suffix=".part")
     try:
@@ -259,10 +303,7 @@ def atomic_write(path: Path, data: bytes, *, expected_sha256: str | None = None)
         _check_boundary(path)
         _replace(tmp, path)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
+        _discard(tmp)
         raise
     return sha256_bytes(data)
 
