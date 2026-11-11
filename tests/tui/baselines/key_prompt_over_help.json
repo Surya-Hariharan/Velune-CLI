@@ -1,10 +1,10 @@
 {
   "meta": {"schema": 1, "size": [40, 120], "cursor": {"row": 36, "col": 54, "hidden": false}},
   "rows": [
-    "/hunk       /hunks                  Toggle hunk-by-hunk review mode — approve each change before it's applied",
-    "/i┌────────────────────────────────────────────────|  OPENAI KEY  |─────────────────────────────────────────────────┐",
+    "/issue      /gh-issue, /gl-issue    Fetch a GitHub/GitLab issue and inject it as conversation context",
+    "/p┌────────────────────────────────────────────────|  OPENAI KEY  |─────────────────────────────────────────────────┐",
     "/p│  STEP                               |   OpenAI API key                                                          │",
-    "/p│  OpenAI API key                     |                                                                           │",
+    "/r│  OpenAI API key                     |                                                                           │",
     "/s│                                     |   DETAILS                                                                 │",
     "/u│  Type below and press Enter.        |   Get one at https://platform.openai.com/api-keys  ·  input is hidden     │)",
     "  │  Input is hidden as you type.       |                                                                           │",
@@ -43,7 +43,7 @@
     "╰─ Enter confirm  ·  Esc cancel ──────────────────────────────────────────────────────────────────────────────────────╯"
   ],
   "styles": [
-    "0-4:cyan/0a0a0a;5-11:7a7a78/0a0a0a;12-17:white/0a0a0a;18-117:7a7a78/0a0a0a;118-118:e8e8e6/0a0a0a;119-119:default/default",
+    "0-5:cyan/0a0a0a;6-11:7a7a78/0a0a0a;12-31:white/0a0a0a;32-117:7a7a78/0a0a0a;118-118:e8e8e6/0a0a0a;119-119:default/default",
     "0-1:cyan/0a0a0a;2-52:4a4a48/131311;53-64:818cf8/131311+b;65-116:4a4a48/131311;117-117:7a7a78/0a0a0a;118-118:e8e8e6/0a0a0a",
     "0-1:cyan/0a0a0a;2-2:4a4a48/131311;3-8:7a7a78/131311+b;9-41:4a4a48/131311;42-57:e8e8e6/131311+b;58-116:4a4a48/131311;117-117:7a7a78/0a0a0a;118-118:e8e8e6/0a0a0a;119-119:default/default",
     "0-1:cyan/0a0a0a;2-2:4a4a48/131311;3-18:e8e8e6/131311;19-116:4a4a48/131311;117-117:7a7a78/0a0a0a;118-118:e8e8e6/0a0a0a",

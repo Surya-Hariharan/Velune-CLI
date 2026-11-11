@@ -123,14 +123,14 @@ class DeleteDirectory(_FsTool):
         target = resolve_tool_path(path, self.workspace, label="delete_directory")
         if not target.exists():
             raise FileNotFoundError(f"Folder not found: {target}")
-        if not target.is_dir() or target.is_symlink():
+        if not target.is_dir() or mut.is_link(target):
             raise NotADirectoryError(f"Not a folder: {target} (use delete_file)")
         if any(target.iterdir()):
             if not recursive:
                 raise OSError(
                     f"Folder is not empty: {target}. Pass recursive=true to delete its contents."
                 )
-            count = sum(1 for _ in target.rglob("*"))
+            count = mut.count_entries(target)
             snapshot = mut.snapshot_tree(target)
             shutil.rmtree(target)
             message = f"Deleted folder {target} and {count} item(s) inside it"
