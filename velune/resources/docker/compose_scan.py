@@ -39,6 +39,7 @@ SCOPE_HOST_NETWORK = "docker.network.host"
 SCOPE_HOST_MOUNT = "docker.mount.host"
 SCOPE_DEVICE = "docker.device.access"
 SCOPE_UNVERIFIED = "docker.compose.unverified"
+SCOPE_EXTERNAL = "docker.compose.external"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +121,8 @@ def scan_compose_text(text: str) -> list[ComposeRisk]:
 
         if key == "privileged" and plain not in _FALSY:
             add(SCOPE_PRIVILEGED, "runs a privileged container")
+        elif key == "network_mode" and re.match(r"^container:", plain):
+            add(SCOPE_PRIVILEGED, "joins an existing container's network namespace")
         elif key in _NAMESPACE_KEYS:
             scope, reason = _NAMESPACE_KEYS[key]
             if re.search(r"\bhost\b", plain) or "${" in plain:
@@ -129,6 +132,13 @@ def scan_compose_text(text: str) -> list[ComposeRisk]:
             add(scope, reason)
         elif key in ("source", "device") and value and _is_host_path(value):
             add(SCOPE_HOST_MOUNT, "mounts a host path outside the project")
+        elif key == "external" and plain not in {"false", "no", "off", "0"}:
+            add(
+                SCOPE_EXTERNAL,
+                "uses an external volume or network that already exists (the project does not own it)",
+            )
+        elif key == "volumes_from":
+            add(SCOPE_EXTERNAL, "mounts the volumes of another container")
         elif key in ("include", "extends"):
             add(SCOPE_UNVERIFIED, f"uses '{key}', which pulls in files that were not inspected")
 

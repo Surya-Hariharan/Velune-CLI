@@ -128,7 +128,7 @@ when the extra is missing (semantic search is disabled while keyword search keep
 | `rag` | Semantic memory and vector retrieval (`lancedb`, `pyarrow`, `qdrant-client`) |
 | `parsing` | Tree-sitter parsing for repository cognition; lighter heuristics are used without it |
 | `telemetry` | Export spans and metrics to an OTLP collector |
-| `gguf`, `docker` | GGUF metadata reading; the Docker sandbox |
+| `gguf`, `docker`, `api` | GGUF metadata reading; the Docker sandbox and the native Docker Engine integration (see [docs/docker.md](docs/docker.md)); YAML OpenAPI specs for the HTTP integration |
 | `all` | Every optional feature |
 
 ```bash

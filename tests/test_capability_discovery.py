@@ -67,8 +67,15 @@ def test_docker_categories_group_its_operations():
     m = build_manifest(manager.get("docker"))
     by = {c: {o.action for o in m.operations if o.category == c} for c in m.categories}
     assert by["inspect"] >= {"ps", "logs", "inspect"}
-    assert by["containers"] == {"start", "stop", "restart"}
-    assert by["compose"] == {"compose_up", "compose_down"}
+    assert by["containers"] == {
+        "container_create", "start", "stop", "restart", "pause", "unpause", "container_remove", "wait_ready"
+    }
+    assert by["images"] == {"image_pull", "image_tag", "image_remove", "build"}
+    assert by["volumes"] == {"volume_create", "volume_remove"}
+    assert by["networks"] == {"network_create", "network_connect", "network_disconnect", "network_remove"}
+    assert by["compose"] == {
+        "compose_config", "compose_ps", "compose_logs", "compose_up", "compose_stop", "compose_down"
+    }
 
 
 # ── Invalid manifests are rejected, never exposed ───────────────────────────
@@ -457,19 +464,16 @@ async def test_a_crashing_configuration_check_is_reported_safely(tmp_path):
 
 
 async def test_docker_probe_needs_a_running_daemon_not_just_the_cli():
+    from tests.docker_fakes import FakeDaemon, make_engine
     from velune.resources.docker.connector import DockerConnector
 
-    async def run(hints):
-        class D(DockerConnector):
-            async def discover(self):
-                return hints
-
-        return await D().probe_availability()
-
-    assert (await run([]))[0] is False
-    ok, reason = await run([DiscoveryHint("docker", "Docker", source="cli")])
-    assert not ok and "daemon is not running" in reason
-    assert (await run([DiscoveryHint("docker", "Docker", source="daemon")])) == (True, "")
+    daemon = FakeDaemon()
+    connector = DockerConnector(engine=make_engine(daemon), workspace_trusted=True)
+    assert await connector.probe_availability() == (True, "")
+    daemon.down = True
+    connector = DockerConnector(engine=make_engine(daemon), workspace_trusted=True)
+    ok, reason = await connector.probe_availability()
+    assert not ok and "not running or not reachable" in reason
 
 
 async def test_sql_connectors_need_stored_configuration(monkeypatch):

@@ -320,17 +320,6 @@ async def test_per_call_approver_override():
 # ── Docker connector ─────────────────────────────────────────────────────────
 
 
-async def test_docker_not_installed_graceful(monkeypatch):
-    from velune.resources.docker.connector import DockerConnector
-
-    monkeypatch.setattr(DockerConnector, "_docker_path", staticmethod(lambda: None))
-    c = DockerConnector()
-    result = await c.connect()
-    assert not result.ok
-    assert c.status().state is ResourceState.UNAVAILABLE
-    assert await c.discover() == []  # no crash, no hint
-
-
 def test_docker_capabilities_tiers():
     from velune.resources.docker.connector import DockerConnector
 
@@ -339,32 +328,6 @@ def test_docker_capabilities_tiers():
     assert caps["stop"].permission is ResourcePermission.WRITE
     assert caps["compose_up"].permission is ResourcePermission.EXECUTE
     assert caps["compose_down"].destructive is True
-
-
-async def test_docker_ps_parses_json(monkeypatch):
-    from velune.resources.docker.connector import DockerConnector
-
-    c = DockerConnector()
-    c._state = ResourceState.CONNECTED
-
-    async def fake_run(args, timeout=20.0):
-        return ResourceResult.success(
-            data='{"ID":"abc","Names":"web"}\n{"ID":"def","Names":"db"}\n'
-        )
-
-    monkeypatch.setattr(c, "_run", fake_run)
-    result = await c.execute("ps", {})
-    assert result.ok
-    assert [row["Names"] for row in result.data] == ["web", "db"]
-
-
-async def test_docker_inspect_requires_target():
-    from velune.resources.docker.connector import DockerConnector
-
-    c = DockerConnector()
-    c._state = ResourceState.CONNECTED
-    result = await c.execute("inspect", {})
-    assert not result.ok and "requires" in result.error
 
 
 # ── PostgreSQL connector ─────────────────────────────────────────────────────
@@ -647,111 +610,6 @@ def _docker_runner(script):
         return script.get(args[0], ResourceResult.success(data=""))
 
     return fake_run
-
-
-async def test_docker_connect_success(monkeypatch):
-    from velune.resources.docker.connector import DockerConnector
-
-    c = DockerConnector()
-    monkeypatch.setattr(DockerConnector, "_docker_path", staticmethod(lambda: "docker"))
-
-    async def fake_run(args, timeout=20.0):
-        if args[0] == "version":
-            return ResourceResult.success(data='{"Server":{"Version":"25.0.1"}}')
-        return ResourceResult.success(data="ok")
-
-    monkeypatch.setattr(c, "_run", fake_run)
-    result = await c.connect()
-    assert result.ok
-    st = c.status()
-    assert st.state is ResourceState.CONNECTED
-    assert "25.0.1" in st.detail
-    assert st.info["compose"] is True
-    assert (await c.disconnect()).ok
-    assert c.status().state is ResourceState.DISCONNECTED
-
-
-async def test_docker_connect_daemon_down(monkeypatch):
-    from velune.resources.docker.connector import DockerConnector
-
-    c = DockerConnector()
-    monkeypatch.setattr(DockerConnector, "_docker_path", staticmethod(lambda: "docker"))
-
-    async def fake_run(args, timeout=20.0):
-        return ResourceResult.failure("cannot connect")
-
-    monkeypatch.setattr(c, "_run", fake_run)
-    result = await c.connect()
-    assert not result.ok
-    assert c.status().state is ResourceState.ERROR
-
-
-async def test_docker_discover_running_and_stopped(monkeypatch):
-    from velune.resources.docker.connector import DockerConnector
-
-    c = DockerConnector()
-    monkeypatch.setattr(DockerConnector, "_docker_path", staticmethod(lambda: "docker"))
-
-    async def running(args, timeout=20.0):
-        return ResourceResult.success(data="25.0.1\n")
-
-    monkeypatch.setattr(c, "_run", running)
-    hints = await c.discover()
-    assert hints and hints[0].source == "daemon"
-
-    async def stopped(args, timeout=20.0):
-        return ResourceResult.failure("daemon down")
-
-    monkeypatch.setattr(c, "_run", stopped)
-    hints = await c.discover()
-    assert hints and "stopped" in hints[0].display_name.lower()
-
-
-async def test_docker_all_read_and_write_actions(monkeypatch):
-    from velune.resources.docker.connector import DockerConnector
-
-    c = DockerConnector()
-    c._state = ResourceState.CONNECTED
-    c._has_compose = True
-    calls: list[list[str]] = []
-
-    async def fake_run(args, timeout=20.0):
-        calls.append(args)
-        if "json" in " ".join(args):
-            return ResourceResult.success(data='{"k":"v"}\n')
-        return ResourceResult.success(data="done")
-
-    monkeypatch.setattr(c, "_run", fake_run)
-
-    assert (await c.execute("images", {})).ok
-    assert (await c.execute("network_ls", {})).ok
-    assert (await c.execute("volume_ls", {})).ok
-    assert (await c.execute("logs", {"container": "web", "tail": 5})).ok
-    inspect = await c.execute("inspect", {"container": "web"})
-    assert inspect.ok
-    assert (await c.execute("start", {"container": "web"})).ok
-    assert (await c.execute("stop", {"container": "web"})).ok
-    assert (await c.execute("restart", {"container": "web"})).ok
-    assert (await c.execute("build", {"path": ".", "tag": "img:1"})).ok
-    assert (await c.execute("compose_up", {"file": "compose.yaml"})).ok
-    assert (await c.execute("compose_down", {"volumes": True})).ok
-    # Missing-target validations.
-    assert not (await c.execute("logs", {})).ok
-    assert not (await c.execute("start", {})).ok
-    assert not (await c.execute("stop", {})).ok
-    assert not (await c.execute("restart", {})).ok
-    # Unknown action.
-    assert not (await c.execute("bogus", {})).ok
-
-
-async def test_docker_compose_unavailable(monkeypatch):
-    from velune.resources.docker.connector import DockerConnector
-
-    c = DockerConnector()
-    c._state = ResourceState.CONNECTED
-    c._has_compose = False
-    result = await c.execute("compose_up", {})
-    assert not result.ok and "compose" in result.error.lower()
 
 
 def test_docker_authorization_preview():

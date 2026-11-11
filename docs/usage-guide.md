@@ -303,6 +303,12 @@ for where each configuration file lives.
   its next turn) and can also start, read the output of, wait for and stop its own background
   commands. Enabling a tool never approves it; every call is still checked as above. Set
   `resources.expose_to_model = false` in `velune.toml` to keep integrations away from the model.
+- **Docker.** With `pip install "velune-cli[docker]"` the agent manages containers, images, volumes,
+  networks and Compose projects through the Docker SDK (see [docker.md](docker.md)). It tracks what it
+  created: in Auto mode it can start, stop, restart and remove its own containers and create ordinary
+  ones, but anything that already existed — your containers, images, volumes, networks in use — and anything
+  privileged (host network, devices, the Docker socket, host mounts) needs your approval. Plan mode
+  changes nothing.
 - **HTTP and API testing.** The agent can send requests to a local dev server or a remote API,
   check responses with assertions, run saved API collections and explore an OpenAPI spec, with
   no Postman installation. Describe your API once in `velune.toml` (`[resources.http]` with

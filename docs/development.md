@@ -230,8 +230,8 @@ Prefer extending one of these registries over inventing a new loading mechanism.
 
 ### Resource connectors and the authorization pipeline
 
-`velune/resources/` connects Velune to applications on the developer's machine (Docker, local PostgreSQL
-and MySQL, Supabase, background processes, and HTTP APIs — see [http.md](http.md)). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
+`velune/resources/` connects Velune to applications on the developer's machine (Docker through the Docker SDK — see [docker.md](docker.md) —
+local PostgreSQL and MySQL, Supabase, background processes, and HTTP APIs — see [http.md](http.md)). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
 `ResourceManager.register`; nothing else needs to change.
 
 **What a connector declares.** `capabilities()` lists each action with a permission tier

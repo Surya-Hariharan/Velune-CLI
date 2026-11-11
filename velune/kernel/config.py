@@ -322,6 +322,34 @@ class OrchestrationConfig(BaseModel):
         return "off"
 
 
+class DockerConfig(ResourceEntry):
+    """Settings for the Docker Engine integration (``[resources.docker]``).
+
+    Certificate *paths* only: private keys stay on disk where you put them and
+    their contents are never read into configuration, logs or model context.
+    """
+
+    enabled: bool = True
+    #: Explicit daemon endpoint. ``unix://``, ``npipe://``, ``ssh://`` or ``tcp://``
+    #: (the last only with the three ``tls_*`` paths). Empty means auto-detect
+    #: (``DOCKER_HOST``, the active docker context, then the platform default).
+    #: Honoured only for a trusted workspace.
+    host: str = ""
+    tls_ca: str = ""
+    tls_cert: str = ""
+    tls_key: str = ""
+    #: Per-request timeout in seconds.
+    timeout: float = Field(default=20.0, gt=0, le=300)
+    #: Most log lines one call may return.
+    max_log_lines: int = Field(default=500, ge=1, le=5000)
+    #: Most characters of container output returned to the model.
+    max_output_chars: int = Field(default=16000, ge=1000, le=200000)
+    #: Where project bind mounts are allowed without a prompt: inside the workspace.
+    #: False makes every bind mount need approval.
+    workspace_mounts: bool = True
+    compose_timeout: float = Field(default=600.0, gt=0, le=3600)
+
+
 class HttpEnvironmentConfig(BaseModel):
     """One API environment (``[resources.http.environments.<name>]``).
 
@@ -381,7 +409,7 @@ class ResourcesConfig(BaseModel):
     encrypted keystore. This section only carries non-sensitive toggles.
     """
 
-    docker: ResourceEntry = Field(default_factory=lambda: ResourceEntry(enabled=True))
+    docker: DockerConfig = Field(default_factory=DockerConfig)
     postgres: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
     mysql: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
     supabase: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))

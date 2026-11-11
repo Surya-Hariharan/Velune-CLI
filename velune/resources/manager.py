@@ -146,18 +146,27 @@ class ResourceManager:
 
         Imports are deferred to call time so an unused DB driver is never loaded.
         """
-        from velune.resources.docker.connector import DockerConnector
         from velune.resources.mysql.connector import MySQLConnector
         from velune.resources.postgres.connector import PostgresConnector
         from velune.resources.supabase.connector import SupabaseConnector
 
-        self.register("docker", DockerConnector)
+        self.register("docker", self._docker_connector)
         self.register("postgres", PostgresConnector)
         self.register("mysql", MySQLConnector)
         self.register("supabase", SupabaseConnector)
         self.register("http", self._http_connector)
         if self._job_registry is not None:
             self.attach_job_registry(self._job_registry)
+
+    def _docker_connector(self) -> ResourceConnector:
+        """The Docker Engine integration, built from the ``resources.docker`` settings."""
+        from velune.resources.docker.connector import DockerConnector
+
+        return DockerConnector(
+            config=self._config.get("docker"),
+            workspace=self._workspace,
+            session_id=self.ledger.session_id,
+        )
 
     def _http_connector(self) -> ResourceConnector:
         """The HTTP integration, built from the ``resources.http`` settings."""

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.docker_fakes import FakeDaemon, make_engine
 from velune.permissions.boundary import Boundary
 from velune.permissions.gate import Approval, PermissionGate
 from velune.permissions.policy import ExecutionMode, PolicyState
@@ -41,9 +42,15 @@ def _manager(workspace, mode, *, ask=None):
             ran.append(args)
             return ResourceResult.success(action=args[0], data="")
 
+    daemon = FakeDaemon()
+    daemon.add_container("web-1", logs=b"hello")
     manager = ResourceManager(workspace=workspace, context_factory=factory)
-    manager.register("docker", FakeDocker)
+    manager.register(
+        "docker",
+        lambda: FakeDocker(engine=make_engine(daemon), workspace=workspace, workspace_trusted=True),
+    )
     manager.get("docker")._has_compose = True
+    manager.daemon = daemon
     return manager, records, ran
 
 
@@ -67,7 +74,7 @@ services:
 async def test_auto_runs_compose_up_for_an_ordinary_project(tmp_path, monkeypatch):
     m, _, ran = _with_compose(tmp_path, monkeypatch, ExecutionMode.AUTO, ORDINARY)
     assert (await m.execute("docker", "compose_up")).ok
-    assert ran[-1][:2] == ["compose", "up"]
+    assert "up" in ran[-1] and ran[-1][0] == "compose" and "-p" in ran[-1]
 
 
 @pytest.mark.parametrize(
@@ -185,5 +192,6 @@ async def test_read_actions_with_option_like_names_fail_validation(tmp_path):
 async def test_ordinary_names_still_work(tmp_path):
     m, _, ran = _manager(tmp_path, ExecutionMode.PLAN)
     assert (await m.execute("docker", "inspect", {"container": "web-1"})).ok
-    assert (await m.execute("docker", "logs", {"container": "web-1", "tail": 50})).ok
-    assert [a[0] for a in ran] == ["inspect", "logs"]
+    logs = await m.execute("docker", "logs", {"container": "web-1", "tail": 50})
+    assert logs.ok and "hello" in logs.data["text"]
+    assert [a for a in ran if a[0] != "compose"] == []  # native SDK reads never shell out

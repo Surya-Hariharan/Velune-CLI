@@ -10,6 +10,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **Native Docker Engine integration** (Docker SDK for Python, `pip install "velune-cli[docker]"`). The `docker`
+  integration now covers containers (create, start, stop, restart, pause, unpause, remove, logs, health, stats,
+  readiness), images (list, inspect, pull, tag, remove), volumes, networks and Compose (inspect, up, stop, down,
+  ps, logs) in 36 operations, with bounded, redacted output and environment variables shown by name only. See
+  [docs/docker.md](docs/docker.md).
+  - **Proven ownership.** Objects Velune creates are recorded by their stable id and a creation fingerprint in
+    Velune's data directory (surviving restarts, reconciled against the daemon); labels are only claims, a
+    pre-existing image tag or a reused name is never adopted, and Compose adopts only the resources it newly
+    created. In Auto mode the agent manages only what it created; existing containers, images, volumes and
+    networks in use need approval.
+  - **Connection.** Windows named pipe, Linux/macOS sockets, `DOCKER_HOST`, docker contexts, `ssh://`, and `tcp://`
+    only with TLS and a client certificate; unauthenticated network sockets are refused. Availability means the
+    daemon answered, not that the CLI exists. Reads reconnect after a daemon restart; changes are never retried.
+  - **Escalation.** Privileged mode, capabilities, host networking, devices, non-loopback ports, Docker-socket and
+    secret bind mounts, external Compose volumes/networks and remote daemons each need a person; a bind mount
+    outside the workspace is refused in Auto mode.
 - **HTTP and API integration.** The agent can send HTTP requests (GET, POST, PUT, PATCH, DELETE, HEAD,
   OPTIONS), inspect structured, redacted responses, check them with deterministic local assertions,
   diagnose a failing API, run API collections and explore OpenAPI 3.x specifications — through the same
@@ -85,6 +101,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- **The Docker integration moved from a CLI wrapper to the Docker SDK.** `ps`, `inspect`, `logs`, `start`, `stop`
+  and `restart` keep their names; container ownership is now by id rather than name; Compose commands carry a
+  forced project name. Docker now has 36 operations, so enable them by category rather than all at once.
 - **Resource actions and external MCP tool calls are authorized by the same permission gate as every
   other tool.** They follow your execution mode, "always allow" grants and the audit trail
   (`velune trace --type permission`) instead of a separate approver. In Plan mode they are refused

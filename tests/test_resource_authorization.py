@@ -332,10 +332,14 @@ def test_ledger_round_trip_does_not_widen_ownership_across_sessions():
 
 
 def _docker_manager(tmp_path, mode, records=None):
+    from tests.docker_fakes import FakeDaemon, make_engine
     from velune.resources.docker.connector import DockerConnector
 
     m, records = _manager(tmp_path, mode=mode, records=records)
     ran: list[list[str]] = []
+    daemon = FakeDaemon()
+    daemon.add_image("nginx:1.27")
+    daemon.add_container("users-db")  # a container the user already had
 
     class FakeDocker(DockerConnector):
         @staticmethod
@@ -344,33 +348,41 @@ def _docker_manager(tmp_path, mode, records=None):
 
         async def _run(self, args, *, timeout=20.0):
             ran.append(args)
+            if args[0] == "build":
+                daemon.add_image(args[2])  # the build produces a new image
             return ResourceResult.success(action=args[0], data="")
 
-    m.register("docker", FakeDocker)
+    m.register(
+        "docker",
+        lambda: FakeDocker(
+            engine=make_engine(daemon), workspace=tmp_path, workspace_trusted=True, session_id="s1"
+        ),
+    )
+    m.daemon = daemon
     return m, records, ran
 
 
 async def test_auto_cannot_stop_a_container_it_did_not_create(tmp_path):
     m, records, ran = _docker_manager(tmp_path, ExecutionMode.AUTO)
     result = await m.execute("docker", "stop", {"container": "users-db"})
-    assert result.denied and ran == []
+    assert result.denied and m.daemon.calls == []
     assert records[-1]["actions"][0]["risk"] == "high"
     assert records[-1]["actions"][0]["scope"] == "docker.container.stop"
 
 
 async def test_auto_may_manage_a_container_the_task_owns(tmp_path):
-    m, _, ran = _docker_manager(tmp_path, ExecutionMode.AUTO)
-    m.ledger.record_created(ResourceRef("docker", "container", "velune-api"))
+    m, _, _ = _docker_manager(tmp_path, ExecutionMode.AUTO)
+    made = await m.execute("docker", "container_create", {"image": "nginx:1.27", "name": "velune-api"})
+    assert made.ok
     for action in ("start", "stop", "restart"):
         assert (await m.execute("docker", action, {"container": "velune-api"})).ok
-    assert [a[0] for a in ran] == ["start", "stop", "restart"]
+    assert [c[0] for c in m.daemon.calls] == ["running", "exited", "running"]
 
 
 async def test_preexisting_container_is_never_assumed_owned(tmp_path):
-    m, _, ran = _docker_manager(tmp_path, ExecutionMode.AUTO)
-    m.ledger.record_preexisting([ResourceRef("docker", "container", "users-db")])
+    m, _, _ = _docker_manager(tmp_path, ExecutionMode.AUTO)
     assert (await m.execute("docker", "restart", {"container": "users-db"})).denied
-    assert ran == []
+    assert m.daemon.calls == []
 
 
 @pytest.mark.parametrize("mode", [ExecutionMode.AUTO, ExecutionMode.MANUAL])
@@ -384,17 +396,18 @@ async def test_destructive_compose_and_volume_deletion_need_a_human(tmp_path, mo
 
 
 async def test_docker_reads_run_in_plan_mode(tmp_path):
-    m, _, ran = _docker_manager(tmp_path, ExecutionMode.PLAN)
+    m, _, _ = _docker_manager(tmp_path, ExecutionMode.PLAN)
     assert (await m.execute("docker", "ps")).ok
-    assert (await m.execute("docker", "logs", {"container": "db"})).ok
+    assert (await m.execute("docker", "logs", {"container": "users-db"})).ok
     assert (await m.execute("docker", "build", {"path": "."})).denied
 
 
 async def test_build_records_the_image_as_owned(tmp_path):
     m, _, _ = _docker_manager(tmp_path, ExecutionMode.AUTO)
     result = await m.execute("docker", "build", {"path": ".", "tag": "velune/app:dev"})
-    assert result.ok and "velune/app:dev" in result.resource_ids
-    assert m.ledger.is_owned(ResourceRef("docker", "image", "velune/app:dev"))
+    assert result.ok and result.resource_ids
+    image_id = next(a["Id"] for a in m.daemon._images.values() if "velune/app:dev" in a["RepoTags"])
+    assert m.ledger.is_owned(ResourceRef("docker", "image", image_id))  # by id, not by tag
 
 
 async def test_build_context_outside_the_workspace_is_refused_in_auto(tmp_path):
