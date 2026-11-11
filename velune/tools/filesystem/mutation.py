@@ -38,6 +38,7 @@ import difflib
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -216,6 +217,49 @@ def _check_boundary(path: Path) -> None:
         raise PathTraversalError(f"'{path}' now resolves outside the workspace ('{resolved}').")
 
 
+#: Names Windows reserves for devices. A file called ``CON`` or ``nul.txt`` can be created
+#: through some APIs but then cannot be opened, renamed or deleted by ordinary tools.
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{n}" for n in range(1, 10)}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
+
+
+def _refuse_unsafe_target(path: Path) -> None:
+    """Refuse a target that cannot be written safely, before anything is created."""
+    if os.name == "nt" and path.name.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES:
+        raise ValueError(
+            f"'{path.name}' is a reserved Windows device name; a file with that name cannot "
+            "be managed afterwards. Choose another file name."
+        )
+    # A file the user marked read-only stays as it is. Without this, Windows refuses the
+    # swap after a delay and POSIX would silently replace it (rename ignores the file's
+    # own mode), which defeats the protection.
+    if path.is_file() and not os.access(path, os.W_OK):
+        raise PermissionError(
+            f"{path.name} is read-only, so it was not modified. Make it writable first if "
+            "the change is intended."
+        )
+
+
+def _discard(tmp: str) -> None:
+    """Remove a temporary file, even one that inherited a read-only attribute."""
+    for _ in range(2):
+        try:
+            os.unlink(tmp)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            try:
+                os.chmod(tmp, stat.S_IWRITE | stat.S_IREAD)
+            except OSError:
+                return
+        except OSError:
+            return
+
+
 def _replace(source: str, target: Path) -> None:
     # On Windows a file held open by another program (an editor, an indexer, an
     # antivirus scan) refuses replacement for a moment; retry briefly.
@@ -239,6 +283,7 @@ def atomic_write(path: Path, data: bytes, *, expected_sha256: str | None = None)
     bits are kept. The temporary file is removed if anything fails.
     """
     _check_boundary(path)
+    _refuse_unsafe_target(path)
     ensure_parent(path)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=_TMP_PREFIX, suffix=".part")
     try:
@@ -258,10 +303,7 @@ def atomic_write(path: Path, data: bytes, *, expected_sha256: str | None = None)
         _check_boundary(path)
         _replace(tmp, path)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
+        _discard(tmp)
         raise
     return sha256_bytes(data)
 
@@ -428,6 +470,34 @@ class RewindReport:
     skipped: list[str] = field(default_factory=list)
 
 
+def is_link(path: Path) -> bool:
+    """True for a symbolic link **or a Windows junction / other reparse point**.
+
+    ``Path.is_symlink()`` is False for a directory junction before Python 3.12, so
+    code that relied on it would walk *through* a junction into whatever it points at,
+    which may lie outside the workspace.
+    """
+    if path.is_symlink():
+        return True
+    if os.name == "nt":
+        try:
+            attributes = os.lstat(path).st_file_attributes  # type: ignore[attr-defined]
+        except (OSError, AttributeError):
+            return False
+        return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)  # type: ignore[attr-defined]
+    return False
+
+
+def count_entries(root: Path) -> int:
+    """Number of files and folders under *root*, counting a link but never walking into one."""
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        base = Path(dirpath)
+        total += len(filenames) + len(dirnames)
+        dirnames[:] = [name for name in dirnames if not is_link(base / name)]
+    return total
+
+
 def snapshot_tree(
     root: Path, limit: int = JOURNAL_MAX_BYTES
 ) -> list[tuple[str, bytes | None]] | None:
@@ -438,12 +508,12 @@ def snapshot_tree(
         base = Path(dirpath)
         for name in dirnames:
             child = base / name
-            if child.is_symlink():
+            if is_link(child):
                 return None
             entries.append((child.relative_to(root).as_posix(), None))
         for name in filenames:
             child = base / name
-            if child.is_symlink():
+            if is_link(child):
                 return None
             total += child.stat().st_size
             if total > limit:

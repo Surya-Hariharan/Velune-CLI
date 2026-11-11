@@ -72,6 +72,75 @@ def test_permission_bits_are_preserved(tmp_path):
     assert target.stat().st_mode & 0o777 == 0o755
 
 
+def _make_readonly(path: Path) -> None:
+    import stat
+
+    path.chmod(stat.S_IREAD)
+
+
+def _can_write_readonly(tmp_path: Path) -> bool:
+    """Root (and some CI containers) ignore the read-only bit, so there is nothing to test."""
+    probe = tmp_path / "_probe"
+    probe.write_bytes(b"x")
+    _make_readonly(probe)
+    writable = os.access(probe, os.W_OK)
+    probe.chmod(0o644)
+    return writable
+
+
+def test_a_read_only_file_is_refused_with_a_clear_message_and_leaves_no_litter(tmp_path):
+    """Regression: on Windows the read-only attribute was copied onto the temp file, the
+    swap was refused after a delay, and the temp file could not be deleted — the caller saw
+    an error naming the temp file and a `.velune-tmp-*.part` was left in the workspace."""
+    if _can_write_readonly(tmp_path):
+        pytest.skip("this account ignores the read-only attribute")
+    target = tmp_path / "ro.txt"
+    target.write_bytes(b"protected\n")
+    _make_readonly(target)
+    try:
+        with pytest.raises(PermissionError, match="read-only") as err:
+            mut.atomic_write(target, b"overwritten\n")
+        assert ".velune-tmp" not in str(err.value)
+        assert target.read_bytes() == b"protected\n"
+        assert _leftover_temps(tmp_path) == []
+    finally:
+        target.chmod(0o644)
+
+
+def test_a_temp_file_that_inherited_the_read_only_bit_is_still_removed(tmp_path, monkeypatch):
+    """The cleanup path itself: a failure after the temp file became read-only."""
+    target = tmp_path / "keep.txt"
+    target.write_bytes(b"original\n")
+
+    def fail_after_locking_the_temp_file(source, destination):
+        _make_readonly(Path(source))
+        raise PermissionError("swap refused")
+
+    monkeypatch.setattr(mut, "_replace", fail_after_locking_the_temp_file)
+    with pytest.raises(PermissionError, match="swap refused"):
+        mut.atomic_write(target, b"new\n")
+    assert target.read_bytes() == b"original\n"
+    assert _leftover_temps(tmp_path) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="reserved device names exist only on Windows")
+@pytest.mark.parametrize("name", ["CON", "nul.txt", "Com1.log", "LPT9", "aux.", "PRN .md"])
+def test_windows_device_names_are_refused_and_nothing_is_created(tmp_path, name):
+    """Regression: `write_file CON` really created a file Windows tools cannot delete."""
+    before = {p.name for p in tmp_path.iterdir()}
+    with pytest.raises(ValueError, match="reserved Windows device name"):
+        mut.atomic_write(tmp_path / name, b"x")
+    assert {p.name for p in tmp_path.iterdir()} == before
+
+
+@pytest.mark.parametrize(
+    "name", ["console.txt", "nullable.py", "com10.txt", "lpt.txt", "auxiliary"]
+)
+def test_names_that_merely_resemble_device_names_are_fine(tmp_path, name):
+    mut.atomic_write(tmp_path / name, b"ok")
+    assert (tmp_path / name).read_bytes() == b"ok"
+
+
 def test_expected_absent_refuses_to_clobber_an_existing_file(tmp_path):
     target = tmp_path / "a.txt"
     target.write_bytes(b"someone else's")
