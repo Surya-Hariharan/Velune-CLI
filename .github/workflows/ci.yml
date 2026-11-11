@@ -4,7 +4,9 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
+    # `feat/**` so a pull request stacked on another feature branch (base = that branch,
+    # not main) is validated too; otherwise it would receive no CI at all.
+    branches: [main, develop, 'feat/**']
   # Lets release.yml run this same pipeline (full OS x Python matrix and the
   # install jobs) as a gate before anything is published.
   workflow_call:
