@@ -483,6 +483,9 @@ Docker daemon access is effectively host-level privilege, so the `docker` integr
   are only claims — an image can ship `dev.velune.managed=true` — so a label without a record is `external`, and
   an inconsistent record is not trusted. A name is resolved to an id and the action runs on that id; a name
   re-pointed after approval is refused. A pre-existing image tag is never owned, and name collisions never adopt.
+  The record file is authenticated with an HMAC-SHA256 whose key lives in the encrypted keystore (bound to the daemon
+  and workspace), written atomically under a cross-process lock and merged across processes; a file that is
+  corrupt, forged, copied from elsewhere or in an old format is set aside and **nothing in it is trusted**.
 - **Authorization.** AUTO may create ordinary non-privileged containers and start/stop/restart/remove the
   ones Velune created; everything else — other containers, images, volumes, networks in use, privileged mode,
   capabilities, host networking, devices, non-loopback ports, Docker-socket or secret bind mounts, `compose
@@ -492,7 +495,40 @@ Docker daemon access is effectively host-level privilege, so the `docker` integr
   that cannot be read as CLI options; commands are never run through a shell; ports bind to loopback by
   default; reserved labels cannot be forged; environment variables are shown by name only; logs and output are
   bounded and redacted; Compose files are scanned for privileged settings, host mounts, the Docker socket,
-  devices and external resources before `compose up`.
+  devices and external resources before `compose up`. The scan parses the file structurally (PyYAML `safe_load`, with
+  size, depth and document limits) in addition to a line scan, so flow-style YAML, quoted keys, anchors, JSON files and
+  variable bind sources are seen; what cannot be parsed or inspected is reported as unverified and asks.
+
+### Database integration
+
+The `postgres`, `mysql` and `supabase` integrations (`velune/resources/sql_base.py` and friends, see
+[docs/database.md](docs/database.md)) treat model-written SQL as untrusted input:
+
+- **Credentials.** A connection's host, port, user, database and password are stored together in the encrypted
+  keystore and referred to by name; configuration only names a credential and sets policy, so a repository's
+  `velune.toml` cannot redirect a stored password. A non-local host is refused unless the *stored* connection allows
+  it and requires TLS. Passwords are registered for redaction and never appear in results, errors, previews or logs;
+  only the driver's primary error message is kept (detail lines can echo row values).
+- **One parameterized statement.** Values travel as bound driver parameters, never spliced into text. The SQL is
+  tokenized (strings, comments, `$$` quoting, quoted identifiers) and counted; several statements, none, or text
+  that cannot be parsed are refused before reaching the server. Where a dialect's quoting is ambiguous every reading
+  is analysed and the strongest wins, so text one engine treats as a comment cannot hide a statement.
+- **Structural classification, engine-enforced read-only.** Data-modifying CTEs, `EXPLAIN ANALYZE` of a write,
+  `SELECT … INTO`, row locks, and functions with side effects are not reads. Reads run in a `READ ONLY` transaction that
+  is always rolled back, so a mis-classified write is still stopped by the server. Administrative statements
+  (privileges, roles, session state, `COPY`, `DO`, dynamic SQL, transaction control, `KILL`, `USE`) are blocked in every
+  mode and never offered.
+- **Authorization.** Reads need no confirmation. Every change (data, schema, destructive, transaction commit) is
+  high-risk: MANUAL and AUTO ask (an "always allow" answer is not honoured), PLAN denies it, and no database is
+  assumed disposable because of its name. A read-only connection blocks every change in every mode. Discovery grants
+  nothing, and connections run as the role you stored: Velune never changes role or privileges.
+- **Bounds.** Row, cell and total output caps with truncation reported; client- and server-side statement timeouts with
+  query cancellation and a dropped connection on timeout; idle transactions are rolled back; a failed statement can
+  never be committed; sensitive column names are masked.
+- **Discovery respects database privileges.** Catalog queries filter by the connected role's own privileges, so an
+  object the role cannot use is not listed, and a foreign key does not reveal a table the role cannot see.
+- **Supabase.** Reads use the anon key so Row Level Security applies; the service-role key is never shown to the model
+  and *using* it asks in every mode, is denied in PLAN and is never covered by a session grant.
 
 ### HTTP and API integration
 
@@ -635,6 +671,9 @@ not treated as new vulnerabilities.
 
 **Execution**
 
+- The SQL classifier is structural but not a full parser of either dialect; anything it cannot confirm is not a read
+  and the engine's read-only transaction is the backstop. A database role with broad privileges can still be misused
+  by an approved statement: approvals show the statement, and database-native permissions are the real boundary.
 - The managed runner is not an OS-level sandbox. Allowlisted interpreters and
   build tools can run any file in the workspace with your privileges. Use the
   optional Docker sandbox for isolation.

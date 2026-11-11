@@ -371,7 +371,7 @@ def test_release_forgets_an_object(tmp_path):
     s.record_created(labelled(s))
     s.release("container", "c1")
     assert s.classify(labelled(s)) is DockerOwnership.EXTERNAL
-    assert json.loads((tmp_path / "state" / "own.json").read_text())["daemons"]["D1"] == []
+    assert json.loads((tmp_path / "state" / "own.json").read_text())["daemons"]["D1"]["records"] == []
 
 
 def test_reconcile_drops_missing_changed_and_relabelled_records(tmp_path):

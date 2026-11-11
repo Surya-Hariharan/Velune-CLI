@@ -10,6 +10,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **Database integrations on the integration runtime** (PostgreSQL, MySQL / MariaDB, Supabase;
+  `pip install "velune-cli[postgres]"` / `"velune-cli[mysql]"`). The agent can list connections, inspect
+  databases, schemas, tables, views, columns, primary and foreign keys, indexes, constraints and table
+  relationships (bounded, paged, filtered by the connected role's own privileges), run read-only queries, make
+  approved changes, and group statements in explicit transactions, discovered with `integrations_list` /
+  `integrations_enable` in the categories `connections`, `schema`, `query_read`, `query_write` and
+  `transactions`. See [docs/database.md](docs/database.md) and [docs/integrations.md](docs/integrations.md).
+  - **Named connections.** One integration serves any number of connections (`connection="staging"`);
+    `/resource configure postgres staging --env staging --read-only` stores the endpoint and password together in the encrypted keystore, and
+    `[resources.postgres.connections.<name>]` only names a credential and sets policy (`read_only`, `environment`,
+    limits, column redaction), so a repository cannot redirect a stored password. A non-local host needs a stored
+    opt-in and TLS.
+  - **Safe SQL.** Values are bound parameters, never spliced in; exactly one statement per call; the text is
+    tokenized and classified structurally (data-modifying CTEs, `EXPLAIN ANALYZE`, `SELECT ... INTO`, row locks and
+    side-effect functions are not reads); reads run in an engine-enforced `READ ONLY` transaction; administrative
+    statements are blocked in every mode; results are bounded, JSON-safe and column-redacted; statements time out
+    and are cancelled.
+  - **Transactions.** `transaction_begin` / `_execute` / `_commit` / `_rollback`, each statement authorized on its
+    own; a failed statement can never be committed; idle or lost transactions roll back; disconnect never leaves one
+    open.
+  - **Diagnosis.** `health` and `diagnose` walk driver, configuration, TLS policy, reachability, login and a test
+    query and report where a connection stops; driver errors are normalized with hints and never echo credentials or
+    row values.
+  - **Supabase.** Reads use the anon key so Row Level Security applies; bounded, redacted rows with filters, order
+    and paging; several named projects. The service-role key is never shown to the model and using it asks in every
+    mode.
+- **Authenticated Docker ownership ledger** and **structural Compose scan** (security follow-up to the Docker
+  integration). Ownership records carry an HMAC-SHA256 whose key lives in the encrypted keystore; a forged, edited,
+  copied, old-format or corrupt record file is set aside and nothing in it is trusted. Writes are atomic, fsynced,
+  locked across processes and merged. The Compose scan now parses the file (PyYAML `safe_load`, with limits) in
+  addition to the line scan, so flow-style YAML, quoted keys, anchors, JSON files and variable bind sources are
+  seen; what cannot be inspected is reported as unverified. `pyyaml` joins the `docker` extra.
+- `postgres` and `mysql` extras for the database drivers.
 - **Native Docker Engine integration** (Docker SDK for Python, `pip install "velune-cli[docker]"`). The `docker`
   integration now covers containers (create, start, stop, restart, pause, unpause, remove, logs, health, stats,
   readiness), images (list, inspect, pull, tag, remove), volumes, networks and Compose (inspect, up, stop, down,
@@ -101,6 +134,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- **Database integrations.** `query` is now read-only: a statement that changes data is refused with a pointer to the
+  new `execute` operation (which asks); previously `query` ran writes after approval. Every database change
+  (`INSERT`/`UPDATE`/`DELETE`, DDL, transaction commit) is high-risk, so Auto mode asks for it (it previously ran
+  ordinary writes unattended), and `explain` can no longer be used to run a write (`EXPLAIN ANALYZE`).
+  `describe_table`, `list_tables` and `list_databases` return structured, paged results that respect the role's
+  privileges. Supabase `query` returns `{rows, rowcount, truncated, role}` instead of a bare list, and service-role
+  use is high-risk and always asks.
+- The Docker ownership record file format changed (authenticated). An existing unauthenticated file is set aside and
+  its records are not trusted, so objects Velune created before the upgrade are treated as pre-existing.
 - **The Docker integration moved from a CLI wrapper to the Docker SDK.** `ps`, `inspect`, `logs`, `start`, `stop`
   and `restart` keep their names; container ownership is now by id rather than name; Compose commands carry a
   forced project name. Docker now has 36 operations, so enable them by category rather than all at once.

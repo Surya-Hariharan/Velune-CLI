@@ -151,12 +151,16 @@ class ResourceManager:
         from velune.resources.supabase.connector import SupabaseConnector
 
         self.register("docker", self._docker_connector)
-        self.register("postgres", PostgresConnector)
-        self.register("mysql", MySQLConnector)
-        self.register("supabase", SupabaseConnector)
+        self.register("postgres", lambda: self._sql_connector(PostgresConnector, "postgres"))
+        self.register("mysql", lambda: self._sql_connector(MySQLConnector, "mysql"))
+        self.register("supabase", lambda: self._sql_connector(SupabaseConnector, "supabase"))
         self.register("http", self._http_connector)
         if self._job_registry is not None:
             self.attach_job_registry(self._job_registry)
+
+    def _sql_connector(self, cls: Any, resource_id: str) -> ResourceConnector:
+        """A database integration built from its ``resources.<id>`` settings."""
+        return cls(settings=self._config.get(resource_id), workspace=self._workspace)
 
     def _docker_connector(self) -> ResourceConnector:
         """The Docker Engine integration, built from the ``resources.docker`` settings."""

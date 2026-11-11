@@ -162,6 +162,24 @@ async def _configure(repl: VeluneREPL, resource_id: str) -> None:
         )
         return
 
+    from velune.resources.connections import CONNECTION_NAME
+
+    # An optional word names the connection: /resource configure postgres staging
+    # Options (never prompts, so the interactive questions stay exactly the same):
+    #   --env <label>   --read-only   --allow-remote [--tls require|verify-ca|verify-full]
+    parsed = _parse_configure_options(argument)
+    if isinstance(parsed, str):
+        repl.console.print(f"[yellow]{parsed}[/yellow]")
+        return
+    name, options = parsed
+    connection = name or resource_id
+    if not CONNECTION_NAME.match(connection):
+        repl.console.print(
+            "[yellow]A connection name is lowercase letters, digits, '.', '_' or '-' "
+            "(for example: staging).[/yellow]"
+        )
+        return
+
     suggested: dict[str, object] = {}
     try:
         for hint in await repl._resource_manager.discover():
@@ -236,13 +254,83 @@ async def _configure(repl: VeluneREPL, resource_id: str) -> None:
         repl.console.print("\n[yellow]Cancelled.[/yellow]")
         return
 
+    _apply_connection_options(repl, resource_id, config, options)
+
     from velune.resources.secrets import save_resource_secret
 
-    save_resource_secret(resource_id, resource_id, config)
+    save_resource_secret(resource_id, connection, config)
+    named = "" if connection == resource_id else f" {connection}"
     repl.console.print(
-        f"[green]Saved {resource_id} configuration.[/green] "
-        f"[dim]Connect with /resource connect {resource_id}[/dim]"
+        f"[green]Saved {resource_id}{named} configuration.[/green] "
+        f"[dim]Connect with /resource connect {resource_id}; operations name it with "
+        f"connection={connection}[/dim]"
     )
+
+
+_TLS_MODES = ("require", "verify-ca", "verify-full")
+
+
+def _parse_configure_options(argument: str) -> tuple[str, dict[str, object]] | str:
+    """Split ``[name] [--env x] [--read-only] [--allow-remote] [--tls mode]``.
+
+    Returns ``(connection_name_or_empty, options)`` or an error message.
+    """
+    words = argument.split()
+    name = ""
+    options: dict[str, object] = {}
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word == "--read-only":
+            options["read_only"] = True
+        elif word == "--allow-remote":
+            options["allow_remote"] = True
+        elif word in ("--env", "--tls"):
+            if i + 1 >= len(words) or words[i + 1].startswith("--"):
+                return f"{word} needs a value."
+            options[word[2:]] = words[i + 1]
+            i += 1
+        elif word.startswith("--"):
+            return (
+                f"Unknown option {word}. Options: --env <label>, --read-only, "
+                "--allow-remote [--tls require|verify-ca|verify-full]."
+            )
+        elif not name:
+            name = word
+        else:
+            return "Only one connection name is allowed."
+        i += 1
+    if "tls" in options and options["tls"] not in _TLS_MODES:
+        return "--tls must be one of: " + ", ".join(_TLS_MODES) + "."
+    return name, options
+
+
+def _apply_connection_options(
+    repl: VeluneREPL, resource_id: str, config: dict, options: dict[str, object]
+) -> None:
+    """Record the environment label, read-only flag and remote opt-in in the *encrypted*
+    record, next to the endpoint they govern, so a repository can never loosen them."""
+    if options.get("env"):
+        config["environment"] = str(options["env"]).strip().lower()[:30]
+    if resource_id == "supabase":
+        return
+    if options.get("read_only"):
+        config["read_only"] = True
+    from velune.resources.sql_base import SQLConnector
+
+    host = str(config.get("host") or "localhost")
+    if SQLConnector.is_local_host(host):
+        return
+    if options.get("allow_remote"):
+        config["allow_remote"] = True
+        config["sslmode"] = str(options.get("tls") or "verify-full")
+    else:
+        repl.console.print(
+            f"[yellow]'{host}' is not a local host, so connecting to it will be refused. Velune "
+            "sends a stored password to a remote server only when you allow it and require TLS: "
+            f"re-run with [bold]/resource configure {resource_id} <name> --allow-remote "
+            "--tls verify-full[/bold].[/yellow]"
+        )
 
 
 _HTTP_FIELDS: dict[str, tuple[tuple[str, str, bool], ...]] = {

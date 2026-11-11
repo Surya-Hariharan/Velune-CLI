@@ -477,10 +477,11 @@ async def test_docker_probe_needs_a_running_daemon_not_just_the_cli():
 
 
 async def test_sql_connectors_need_stored_configuration(monkeypatch):
-    from velune.resources import sql_base
+    from velune.resources import connections
     from velune.resources.postgres.connector import PostgresConnector
 
-    monkeypatch.setattr(sql_base, "load_resource_secret", lambda *a: None)
+    monkeypatch.setattr(connections, "load_resource_secret", lambda *a: None)
+    monkeypatch.setattr(PostgresConnector, "_stored_names", lambda self: [])
     problem = PostgresConnector().configuration_problem()
     assert "/resource configure postgres" in problem
     assert PostgresConnector(config={"host": "localhost"}).configuration_problem() is None

@@ -319,6 +319,15 @@ for where each configuration file lives.
   DELETE, for changes to a production environment and for changes to a remote service you have not
   trusted. Running a collection is approved for all of its requests at once. Cloud-metadata and
   private-network addresses are never reachable. See [http.md](http.md).
+- **Databases.** With `pip install "velune-cli[postgres]"` (or `[mysql]`) the agent can list your
+  databases, tables, columns, keys and indexes, run read-only queries and, with your approval, change
+  data. Store each connection with `/resource configure postgres [name]` (encrypted; the agent sees only
+  its name), then ask, for example, "which tables reference `orders`?" or "how many users signed up
+  this week?". Reads always run and are bounded and redacted; every change asks you (Auto included, since
+  no database is assumed disposable) and Plan refuses it; transactions group several statements so they
+  commit or roll back together. Supabase projects are read through their REST API with Row Level Security
+  applied; using the service-role key always asks. See [database.md](database.md) and the overview in
+  [integrations.md](integrations.md).
 - **GitHub and GitLab.** `/push`, `/pr` and `/issue` use the same git and REST integrations
   as the git tools. They need no separate setup beyond a configured `git` and, for pull
   request and issue commands, a token available to the underlying REST client.

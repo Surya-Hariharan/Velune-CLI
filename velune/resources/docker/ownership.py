@@ -27,15 +27,33 @@ Classes, from most to least trusted:
 Only ``VELUNE`` lets AUTO mode act unattended. :meth:`DockerOwnershipStore.reconcile`
 drops records whose object has vanished or no longer matches, so stale ownership
 cannot linger.
+
+Integrity (VAIR A5). The record file is *authenticated*, not merely stored: each
+daemon's records carry an HMAC-SHA256 computed with a random key kept in the encrypted
+keystore (outside the workspace and outside the record directory), so a file edited or
+forged by anything that lacks the key (a repository script, another local program, a
+hand edit) fails verification and **nothing in it is trusted**. Encryption would not
+help here: ownership is a claim to be *proven*, and a MAC proves "Velune wrote this".
+A replayed older file can only restore records Velune genuinely wrote, and each is
+still checked against the live daemon (id, fingerprint, labels) before it counts.
+Writes are atomic (unique temp file, flush, fsync, replace), serialized across
+processes by a lock, and merged with what other Velune processes recorded; a file
+that is corrupt, unauthenticated or from an older format is set aside, never read.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import hmac
 import json
 import logging
+import os
+import secrets
+import tempfile
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -49,6 +67,28 @@ LABEL_SESSION = "dev.velune.session"
 LABEL_WORKSPACE = "dev.velune.workspace"
 KINDS = ("container", "image", "volume", "network")
 MAX_RECORDS = 5000
+FORMAT_VERSION = 2
+#: Keystore id of the HMAC key. The ``resource:`` namespace keeps it out of provider ids.
+LEDGER_KEY_ID = "resource:docker:ledger-key"
+
+
+def default_ledger_key() -> bytes | None:
+    """The ledger's HMAC key from the encrypted keystore (created on first use).
+
+    ``None`` when the keystore cannot be used: the ledger then keeps records in memory
+    only and trusts nothing from disk. It fails safe rather than falling back to an
+    unauthenticated file.
+    """
+    try:
+        from velune.providers.keystore import get_key, save_key
+
+        raw = get_key(LEDGER_KEY_ID)
+        if not raw:
+            save_key(LEDGER_KEY_ID, secrets.token_hex(32))
+            raw = get_key(LEDGER_KEY_ID)  # whichever process won a creation race
+        return bytes.fromhex(raw) if raw else None
+    except Exception:
+        return None
 
 
 class DockerOwnership(StrEnum):
@@ -102,6 +142,7 @@ class DockerOwnershipStore:
         *,
         path: Path | None = None,
         daemon_id: str = "",
+        key_provider: Callable[[], bytes | None] | None = None,
     ) -> None:
         self.session_id = session_id or "session"
         self.workspace_hash = workspace_hash(workspace)
@@ -111,6 +152,11 @@ class DockerOwnershipStore:
         self._records: dict[str, Record] = {}
         self._snapshot: set[str] = set()
         self._loaded = False
+        self._key_provider = key_provider or default_ledger_key
+        self._key: bytes | None = None
+        self._key_checked = False
+        #: Records removed in this process: a merge with disk must not resurrect them.
+        self._removed: set[str] = set()
 
     # ── identity of the daemon the records belong to ────────────────────────
 
@@ -125,63 +171,178 @@ class DockerOwnershipStore:
 
     # ── persistence ──────────────────────────────────────────────────────────
 
+    def _hmac_key(self) -> bytes | None:
+        if not self._key_checked:
+            self._key_checked = True
+            try:
+                self._key = self._key_provider()
+            except Exception:
+                self._key = None
+            if self._key is None:
+                logger.warning("Docker ownership records cannot be authenticated; not persisted")
+        return self._key
+
+    @staticmethod
+    def _row(r: Record) -> dict[str, Any]:
+        return {
+            "kind": r.kind,
+            "id": r.id,
+            "name": r.name,
+            "fingerprint": r.fingerprint,
+            "session": r.session,
+            "recorded_at": r.recorded_at,
+            "project": r.project,
+        }
+
+    def _mac(self, key: bytes, daemon: str, rows: list[dict[str, Any]]) -> str:
+        """HMAC over the daemon, this workspace and the records in a canonical order."""
+        body = json.dumps(
+            {
+                "v": FORMAT_VERSION,
+                "daemon": daemon,
+                "workspace": self.workspace_hash,
+                "records": sorted(rows, key=lambda r: (str(r.get("kind")), str(r.get("id")))),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hmac.new(key, body.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    @staticmethod
+    def _record_from(raw: dict[str, Any]) -> Record | None:
+        try:
+            rec = Record(
+                str(raw["kind"]),
+                str(raw["id"]),
+                str(raw.get("name", "")),
+                str(raw["fingerprint"]),
+                str(raw.get("session", "")),
+                float(raw.get("recorded_at", 0)),
+                str(raw.get("project", "")),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        return rec if rec.kind in KINDS else None
+
+    def _quarantine(self, reason: str) -> None:
+        """Set a file we must not trust aside, so it can be inspected but never read."""
+        if self._path is None:
+            return
+        target = self._path.with_name(f"{self._path.name}.{reason}-{int(time.time())}")
+        with contextlib.suppress(OSError):
+            self._path.replace(target)
+        logger.warning(
+            "Docker ownership records set aside (%s); none from that file are trusted", reason
+        )
+
+    def _read_daemon(self) -> dict[str, Record] | None:
+        """Verified records for this daemon, ``{}`` when none, ``None`` when untrusted."""
+        if self._path is None:
+            return {}
+        try:
+            text = self._path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except OSError:
+            return None
+        try:
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                raise ValueError("not an object")
+        except ValueError:
+            self._quarantine("corrupt")
+            return None
+        if data.get("version") != FORMAT_VERSION:
+            # An older, unauthenticated format cannot be trusted: set it aside.
+            self._quarantine("unauthenticated")
+            return None
+        daemons = data.get("daemons")
+        section = daemons.get(self._daemon) if isinstance(daemons, dict) else None
+        if section is None:
+            return {}
+        key = self._hmac_key()
+        rows = section.get("records") if isinstance(section, dict) else None
+        mac = section.get("mac") if isinstance(section, dict) else None
+        if key is None or not isinstance(rows, list) or not isinstance(mac, str):
+            return None
+        rows = [r for r in rows[:MAX_RECORDS] if isinstance(r, dict)]
+        if not hmac.compare_digest(mac, self._mac(key, self._daemon, rows)):
+            self._quarantine("tampered")
+            return None
+        out: dict[str, Record] = {}
+        for raw in rows:
+            rec = self._record_from(raw)
+            if rec is not None:
+                out[self._key_of(rec.kind, rec.id)] = rec
+        return out
+
     def _load(self) -> None:
         self._loaded = True
         if self._path is None:
             return
-        try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            rows = (data.get("daemons") or {}).get(self._daemon) or []
-            for raw in rows[:MAX_RECORDS]:
-                rec = Record(
-                    str(raw["kind"]),
-                    str(raw["id"]),
-                    str(raw.get("name", "")),
-                    str(raw["fingerprint"]),
-                    str(raw.get("session", "")),
-                    float(raw.get("recorded_at", 0)),
-                    str(raw.get("project", "")),
-                )
-                if rec.kind in KINDS:
-                    self._records[self._key(rec.kind, rec.id)] = rec
-        except FileNotFoundError:
-            return
-        except (OSError, ValueError, KeyError, TypeError, AttributeError):
-            # A corrupt file means nothing is proven: start empty (fail safe) and
-            # keep the bad file aside so it can be inspected.
-            logger.warning("Docker ownership records could not be read; none are trusted")
-            self._records = {}
+        verified = self._read_daemon()
+        # Unverifiable means nothing is proven: start empty (fail safe).
+        self._records = dict(verified) if verified else {}
 
     def _save(self) -> None:
         if self._path is None:
             return
+        key = self._hmac_key()
+        if key is None:
+            return  # cannot authenticate: keep records in memory only
+        from velune.core.filelock import FileLock, FileLockTimeout
+
+        lock = FileLock(self._path)
         try:
-            existing: dict[str, Any] = {}
+            lock.acquire(timeout=5.0)
+        except (FileLockTimeout, OSError):
+            logger.warning("Docker ownership records could not be saved (locked)")
+            return
+        try:
+            # Merge with what other Velune processes recorded since we loaded.
+            on_disk = self._read_daemon() or {}
+            merged = {k: v for k, v in on_disk.items() if k not in self._removed}
+            merged.update(self._records)
+            self._records = merged
+            rows = [self._row(r) for r in merged.values()]
+            sections: dict[str, Any] = {}
             try:
-                existing = json.loads(self._path.read_text(encoding="utf-8")).get("daemons", {})
+                existing = json.loads(self._path.read_text(encoding="utf-8"))
+                if existing.get("version") == FORMAT_VERSION:
+                    sections = dict(existing.get("daemons") or {})
             except (OSError, ValueError, AttributeError):
-                existing = {}
-            existing[self._daemon] = [
-                {
-                    "kind": r.kind,
-                    "id": r.id,
-                    "name": r.name,
-                    "fingerprint": r.fingerprint,
-                    "session": r.session,
-                    "recorded_at": r.recorded_at,
-                    "project": r.project,
-                }
-                for r in self._records.values()
-            ]
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"version": 1, "daemons": existing}), encoding="utf-8")
-            tmp.replace(self._path)
+                sections = {}
+            sections[self._daemon] = {"records": rows, "mac": self._mac(key, self._daemon, rows)}
+            self._write_atomic({"version": FORMAT_VERSION, "daemons": sections})
         except OSError:
             logger.warning("Docker ownership records could not be saved")
+        finally:
+            lock.release()
+
+    def _write_atomic(self, document: dict[str, Any]) -> None:
+        """Unique temp file in the same directory, flushed and fsynced, then replaced."""
+        assert self._path is not None
+        directory = self._path.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            with contextlib.suppress(OSError):
+                os.chmod(directory, 0o700)
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=self._path.name + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(document, handle, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.name != "nt":  # owner-only; on Windows the profile ACL applies
+                os.chmod(tmp, 0o600)
+            os.replace(tmp, self._path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     @staticmethod
-    def _key(kind: str, ident: str) -> str:
+    def _key_of(kind: str, ident: str) -> str:
         return f"{kind}:{ident}"
 
     # ── labels ───────────────────────────────────────────────────────────────
@@ -199,7 +360,8 @@ class DockerOwnershipStore:
     def record_created(self, facts: Facts, project: str = "") -> None:
         """Record an object Velune just created (call only after the daemon confirmed it)."""
         with self._lock:
-            self._records[self._key(facts.kind, facts.id)] = Record(
+            self._removed.discard(self._key_of(facts.kind, facts.id))
+            self._records[self._key_of(facts.kind, facts.id)] = Record(
                 facts.kind,
                 facts.id,
                 facts.name,
@@ -217,17 +379,19 @@ class DockerOwnershipStore:
 
     def release(self, kind: str, ident: str) -> None:
         with self._lock:
-            if self._records.pop(self._key(kind, ident), None) is not None:
+            key = self._key_of(kind, ident)
+            if self._records.pop(key, None) is not None:
+                self._removed.add(key)
                 self._save()
 
     def record_for(self, kind: str, ident: str) -> Record | None:
         with self._lock:
-            return self._records.get(self._key(kind, ident))
+            return self._records.get(self._key_of(kind, ident))
 
     def remember_existing(self, kind: str, ids: list[str]) -> None:
         """The snapshot taken when the session first connected (pre-existing objects)."""
         with self._lock:
-            self._snapshot.update(self._key(kind, i) for i in ids[:MAX_RECORDS])
+            self._snapshot.update(self._key_of(kind, i) for i in ids[:MAX_RECORDS])
 
     def owned(self, kind: str | None = None) -> list[Record]:
         with self._lock:
@@ -240,8 +404,8 @@ class DockerOwnershipStore:
         if facts is None:
             return DockerOwnership.UNKNOWN
         with self._lock:
-            record = self._records.get(self._key(facts.kind, facts.id))
-            snapshotted = self._key(facts.kind, facts.id) in self._snapshot
+            record = self._records.get(self._key_of(facts.kind, facts.id))
+            snapshotted = self._key_of(facts.kind, facts.id) in self._snapshot
         claims_velune = facts.labels.get(LABEL_MANAGED) == "true"
         if record is None:
             if claims_velune:
@@ -288,12 +452,15 @@ class DockerOwnershipStore:
                 if facts is None:
                     report["missing"].append(key)
                     self._records.pop(key)
+                    self._removed.add(key)
                 elif facts.fingerprint != record.fingerprint:
                     report["changed"].append(key)
                     self._records.pop(key)
+                    self._removed.add(key)
                 elif record.kind != "image" and not self._verified(record, facts):
                     report["relabelled"].append(key)
                     self._records.pop(key)
+                    self._removed.add(key)
             if any(report.values()):
                 self._save()
         return report

@@ -157,7 +157,13 @@ git = []
 # GGUF metadata reading only — safe, no diskcache dependency.
 gguf = ["gguf>=0.6.0"]
 # Docker sandbox isolation — install to enable execution.docker_sandbox = true.
-docker = ["docker>=7.0.0"]
+# (PyYAML lets the Compose risk scan parse the file structurally; without it a file using
+# flow-style YAML, anchors or quoted keys is reported as unverified instead.)
+docker = ["docker>=7.0.0", "pyyaml>=6.0.1"]
+# Database integrations. Drivers are imported lazily; a missing one degrades to a
+# "driver not installed" result. Not part of ``all``: they ship platform wheels.
+postgres = ["psycopg[binary]>=3.1"]
+mysql = ["pymysql>=1.1"]
 # YAML OpenAPI specifications for the HTTP integration (JSON specifications and every
 # other HTTP feature work without it). Parsed with yaml.safe_load only.
 api = ["pyyaml>=6.0.1"]
