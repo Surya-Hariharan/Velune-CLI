@@ -336,6 +336,28 @@ def test_mysql_errnos_are_normalized():
         assert classify_db_error(MyError(errno, "message")).code is code
 
 
+def test_a_mysql_error_with_a_generic_sqlstate_is_still_classified_by_its_errno():
+    """Regression, found against a live MySQL 8.0.46: PyMySQL >= 1.2 also sets ``sqlstate``
+    (``HY000`` for a statement timeout). That must not shadow the integer error number, or a
+    timeout is reported as a lost connection and the model reconnects for nothing."""
+
+    class MyOperationalError(Exception):  # mirrors pymysql.err.OperationalError
+        sqlstate = "HY000"
+
+    timeout = classify_db_error(
+        MyOperationalError(3024, "Query execution was interrupted, maximum statement execution time exceeded")
+    )
+    assert timeout.code is ErrorCode.TIMEOUT and not timeout.connection_lost
+    for errno, code in [
+        (1045, ErrorCode.AUTHENTICATION_FAILED),
+        (1062, ErrorCode.CONFLICT),
+        (1205, ErrorCode.CONFLICT),
+        (1792, ErrorCode.AUTHORIZATION_DENIED),
+    ]:
+        assert classify_db_error(MyOperationalError(errno, "m")).code is code
+    assert classify_db_error(MyOperationalError(2013, "lost")).connection_lost
+
+
 def test_only_the_primary_message_is_kept_so_row_values_do_not_leak():
     err = classify_db_error(
         DriverError(

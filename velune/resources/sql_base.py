@@ -168,13 +168,16 @@ def classify_db_error(exc: BaseException) -> DbError:
         message = str(exc.args[1])
     code: ErrorCode | None = None
     hint = ""
-    if state:
+    # A MySQL driver error carries an integer error number, which is more specific than the
+    # SQLSTATE (PyMySQL >= 1.2 also sets ``sqlstate``, often the generic ``HY000``), so it
+    # is consulted first. PostgreSQL errors have no integer ``args[0]``.
+    if errno in _MYSQL_ERRNO:
+        code, hint = _MYSQL_ERRNO[errno]  # type: ignore[index]
+    elif state:
         for key in (state, state[:2]):
             if key in _PG_CLASSES:
                 code, hint = _PG_CLASSES[key]
                 break
-    elif errno in _MYSQL_ERRNO:
-        code, hint = _MYSQL_ERRNO[errno]  # type: ignore[index]
     if code is None:
         if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
             code, hint = ErrorCode.TIMEOUT, "Narrow the query or raise the statement timeout."

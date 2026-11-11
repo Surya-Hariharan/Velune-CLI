@@ -112,8 +112,15 @@ async def test_a_transaction_commits_and_rolls_back_for_real(live):
 
 
 async def test_the_server_stops_a_slow_statement(live):
-    sleep = "SELECT pg_sleep(30)" if isinstance(live, PostgresConnector) else "SELECT SLEEP(30)"
-    result = await live.execute("query", {"sql": sleep, "timeout_seconds": 1})
+    # MySQL's SLEEP() returns 1 when interrupted instead of raising, so MySQL needs a
+    # genuinely slow scan to produce the real "maximum statement execution time" error.
+    slow = (
+        "SELECT pg_sleep(30)"
+        if isinstance(live, PostgresConnector)
+        else "SELECT COUNT(*) FROM information_schema.columns a, "
+        "information_schema.columns b, information_schema.columns c"
+    )
+    result = await live.execute("query", {"sql": slow, "timeout_seconds": 1})
     assert not result.ok and result.code is ErrorCode.TIMEOUT
     assert (await live.execute("query", {"sql": "SELECT 1"})).ok  # a fresh connection works
     await live.disconnect()
@@ -292,4 +299,188 @@ async def test_a_write_through_execute_commits_for_real(pg_world):
     )
     assert out.ok and out.data["rows_affected"] == 1
     assert pg_world.admin.execute(f"SELECT name FROM {_SCHEMA}.orgs").fetchall() == [("solo",)]
+    await c.disconnect()
+
+
+# ── MySQL: a real schema, a restricted account, committed data ──────────────
+# Needs an administrator account that can create a throwaway schema and account:
+#   VELUNE_LIVE_MYSQL_ADMIN="127.0.0.1:3306:mysql:root:pw"   (host:port:database:user:password)
+# plus VELUNE_LIVE_MYSQL for the account the connector itself uses.
+
+_MY_DB = "velune_live_world"
+_MY_LIMITED = "velune_limited"
+
+
+@pytest.fixture
+def my_world():
+    admin_cfg = _config("VELUNE_LIVE_MYSQL_ADMIN", 3306)
+    cfg = _config("VELUNE_LIVE_MYSQL", 3306)
+    if admin_cfg is None or cfg is None:
+        pytest.skip("VELUNE_LIVE_MYSQL and VELUNE_LIVE_MYSQL_ADMIN are required")
+    pymysql = pytest.importorskip("pymysql")
+    admin = pymysql.connect(
+        host=admin_cfg["host"],
+        port=admin_cfg["port"],
+        user=admin_cfg["username"],
+        password=admin_cfg["password"],
+        autocommit=True,
+    )
+
+    def run(sql):
+        with admin.cursor() as cur:
+            cur.execute(sql)
+            return cur.fetchall()
+
+    host = cfg["host"]
+    run(f"DROP DATABASE IF EXISTS {_MY_DB}")
+    run(f"DROP USER IF EXISTS '{_MY_LIMITED}'@'{host}'")
+    run(f"CREATE DATABASE {_MY_DB}")
+    run(
+        f"CREATE TABLE {_MY_DB}.orgs "
+        "(id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(80) NOT NULL UNIQUE)"
+    )
+    run(
+        f"CREATE TABLE {_MY_DB}.users (id INT AUTO_INCREMENT PRIMARY KEY, org_id INT, "
+        f"email VARCHAR(80) NOT NULL, balance INT NOT NULL DEFAULT 0, CHECK (balance >= 0), "
+        f"FOREIGN KEY (org_id) REFERENCES {_MY_DB}.orgs(id))"
+    )
+    run(f"CREATE INDEX users_email_idx ON {_MY_DB}.users (email)")
+    run(f"CREATE VIEW {_MY_DB}.v_users AS SELECT id, email FROM {_MY_DB}.users")
+    run(f"CREATE USER '{_MY_LIMITED}'@'{host}' IDENTIFIED BY 'limited-pass'")
+    run(f"GRANT SELECT ON {_MY_DB}.orgs TO '{_MY_LIMITED}'@'{host}'")  # not users, not the view
+    run(f"GRANT ALL ON {_MY_DB}.* TO '{cfg['username']}'@'{host}'")
+    try:
+        yield SimpleNamespace(cfg={**cfg, "database": _MY_DB}, admin=admin, run=run, host=host)
+    finally:
+        run(f"DROP DATABASE IF EXISTS {_MY_DB}")
+        run(f"DROP USER IF EXISTS '{_MY_LIMITED}'@'{host}'")
+        admin.close()
+
+
+def _my(cfg, **overrides):
+    connector = MySQLConnector(
+        config={**cfg, **overrides}, settings={"statement_timeout": 5, "max_rows": 50}
+    )
+    if not connector.driver_available():
+        pytest.skip("pymysql is not installed")
+    return connector
+
+
+async def test_mysql_catalog_of_a_real_schema(my_world):
+    c = _my(my_world.cfg)
+    tables = await c.execute("list_tables", {})
+    assert tables.ok, tables.error
+    assert {t["name"] for t in tables.data["tables"]} == {"orgs", "users"}
+    views = await c.execute("list_views", {})
+    assert [v["name"] for v in views.data["views"]] == ["v_users"]
+    users = await c.execute("describe_table", {"table": "users"})
+    assert users.ok, users.error
+    assert [col["name"] for col in users.data["columns"]] == ["id", "org_id", "email", "balance"]
+    assert users.data["primary_key"] == ["id"]
+    (fk,) = users.data["foreign_keys"]
+    assert fk["columns"] == ["org_id"] and fk["references"]["table"] == "orgs"
+    indexes = await c.execute("list_indexes", {"table": "users"})
+    by_name = {i["name"]: i for i in indexes.data["indexes"]}
+    assert by_name["PRIMARY"]["is_primary"] and by_name["users_email_idx"]["columns"] == ["email"]
+    constraints = await c.execute("list_constraints", {"table": "users"})
+    kinds = {k["type"] for k in constraints.data["constraints"]}
+    assert {"primary_key", "foreign_key"} <= kinds
+    rel = await c.execute("table_relationships", {"table": "orgs"})
+    assert [r["from_table"] for r in rel.data["referenced_by"]] == ["users"]
+    await c.disconnect()
+
+
+async def test_mysql_discovery_shows_a_restricted_account_only_what_it_can_use(my_world):
+    c = _my(my_world.cfg, username=_MY_LIMITED, password="limited-pass")
+    tables = await c.execute("list_tables", {})
+    assert tables.ok, tables.error
+    assert [t["name"] for t in tables.data["tables"]] == ["orgs"]  # not users, not the view
+    hidden = await c.execute("describe_table", {"table": "users"})
+    assert not hidden.ok and hidden.code is ErrorCode.NOT_FOUND
+    selected = await c.execute("query", {"sql": f"SELECT * FROM {_MY_DB}.users"})
+    assert not selected.ok and selected.code is ErrorCode.AUTHORIZATION_DENIED
+    await c.disconnect()
+
+
+async def test_mysql_commit_persists_and_a_failed_transaction_cannot_commit(my_world):
+    c = _my(my_world.cfg)
+    insert = "INSERT INTO orgs (name) VALUES (%s)"
+    tid = (await c.execute("transaction_begin", {})).data["transaction_id"]
+    ins = await c.execute(
+        "transaction_execute", {"transaction_id": tid, "sql": insert, "params": ["acme"]}
+    )
+    assert ins.ok, ins.error
+    assert (await c.execute("transaction_commit", {"transaction_id": tid})).ok
+    assert my_world.run(f"SELECT COUNT(*) FROM {_MY_DB}.orgs")[0][0] == 1  # visible elsewhere
+
+    tid = (await c.execute("transaction_begin", {})).data["transaction_id"]
+    await c.execute(
+        "transaction_execute", {"transaction_id": tid, "sql": insert, "params": ["globex"]}
+    )
+    bad = await c.execute(
+        "transaction_execute", {"transaction_id": tid, "sql": insert, "params": ["acme"]}
+    )
+    assert not bad.ok and bad.code is ErrorCode.CONFLICT  # 1062 duplicate entry
+    refused = await c.execute("transaction_commit", {"transaction_id": tid})
+    assert not refused.ok and "Refusing to commit" in refused.error
+    assert my_world.run(f"SELECT COUNT(*) FROM {_MY_DB}.orgs")[0][0] == 1  # globex rolled back
+    await c.disconnect()
+
+
+async def test_mysql_rollback_discards_changes(my_world):
+    c = _my(my_world.cfg)
+    tid = (await c.execute("transaction_begin", {})).data["transaction_id"]
+    await c.execute(
+        "transaction_execute",
+        {"transaction_id": tid, "sql": "INSERT INTO orgs (name) VALUES (%s)", "params": ["gone"]},
+    )
+    assert (await c.execute("transaction_rollback", {"transaction_id": tid})).ok
+    assert my_world.run(f"SELECT COUNT(*) FROM {_MY_DB}.orgs")[0][0] == 0
+    await c.disconnect()
+
+
+async def test_mysql_server_rejects_a_write_inside_a_read_only_transaction(my_world):
+    from velune.resources.sql_base import classify_db_error
+
+    c = _my(my_world.cfg)
+    tid = (await c.execute("transaction_begin", {"read_only": True})).data["transaction_id"]
+    sess = c._sessions["mysql"]
+    try:  # bypass the connector's own refusal to prove the SERVER enforces it as well
+        await asyncio.to_thread(
+            c._in_tx,
+            sess.conn,
+            "INSERT INTO orgs (name) VALUES ('x')",
+            None,
+            limits=sess.profile.limits,
+            stream=False,
+        )
+    except Exception as exc:
+        assert classify_db_error(exc).code is ErrorCode.AUTHORIZATION_DENIED
+    else:  # pragma: no cover
+        raise AssertionError("the server accepted a write in a read-only transaction")
+    await c.execute("transaction_rollback", {"transaction_id": tid})
+    await c.disconnect()
+
+
+async def test_mysql_execute_commits_and_binds_hostile_values_safely(my_world):
+    c = _my(my_world.cfg)
+    hostile = "x'); DROP TABLE orgs; --"
+    out = await c.execute(
+        "execute", {"sql": "INSERT INTO orgs (name) VALUES (%s)", "params": [hostile]}
+    )
+    assert out.ok and out.data["rows_affected"] == 1
+    assert my_world.run(f"SELECT name FROM {_MY_DB}.orgs") == ((hostile,),)  # verbatim, table intact
+    back = await c.execute(
+        "query", {"sql": "SELECT name FROM orgs WHERE name = %s", "params": [hostile]}
+    )
+    assert back.ok and back.data["rows"] == [[hostile]]
+    await c.disconnect()
+
+
+async def test_mysql_rejects_stacked_statements_before_they_reach_the_server(my_world):
+    c = _my(my_world.cfg)
+    out = await c.execute("query", {"sql": "SELECT 1; DROP TABLE orgs"})
+    assert not out.ok
+    tables = await c.execute("list_tables", {})
+    assert "orgs" in {t["name"] for t in tables.data["tables"]}
     await c.disconnect()
