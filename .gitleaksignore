@@ -8,3 +8,5 @@
 # Entries (what each fixture is is described, never quoted):
 #   test_integration_redaction.py:59 - a sample key=value input that redact_secrets must mask
 f67d787c69d459d2d0d4e2a18a8a376b076fdf77:tests/test_integration_redaction.py:generic-api-key:59
+#   test_process_connector.py:148 - a command line carrying a sample --api_key= argument, used to test redaction of job commands
+f86f844c1ead02f7cac6e80ee33566347efbb249:tests/test_process_connector.py:generic-api-key:148
