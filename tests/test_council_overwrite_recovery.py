@@ -43,7 +43,9 @@ def _repl(ws: Path) -> SimpleNamespace:
 
 
 def _text(repl) -> str:
-    return repl.console.file.getvalue()
+    """Console output with whitespace collapsed: Rich wraps long lines (and a temp path on Linux
+    is long), which would otherwise split a phrase across two lines."""
+    return " ".join(repl.console.file.getvalue().split())
 
 
 @pytest.fixture(autouse=True)
