@@ -26,15 +26,21 @@ class EditError(ValueError):
     """The edit cannot be applied as asked; the message tells the model how to fix the call."""
 
 
-def _line_of(text: str, index: int) -> int:
-    return text.count("\n", 0, index) + 1
+def _first_match_lines(text: str, needle: str, limit: int) -> list[int]:
+    """Line numbers (1-based) of the first *limit* non-overlapping matches of *needle*.
 
-
-def _match_lines(text: str, needle: str) -> list[int]:
+    Line numbers are counted incrementally from one match to the next, so the cost is one
+    pass over the text up to the last match listed — never one pass per match — and nothing
+    is kept for matches that will not be shown.
+    """
     lines: list[int] = []
     start = 0
-    while (index := text.find(needle, start)) != -1:
-        lines.append(_line_of(text, index))
+    line = 1
+    counted_to = 0
+    while len(lines) < limit and (index := text.find(needle, start)) != -1:
+        line += text.count("\n", counted_to, index)
+        counted_to = index
+        lines.append(line)
         start = index + len(needle)
     return lines
 
@@ -86,18 +92,23 @@ def plan_edit(
         if alt not in forms:
             forms.append(alt)
     for old, new in forms:
-        matches = _match_lines(text, old)
-        if not matches:
+        # ``str.count`` and ``str.replace`` agree on what a match is (non-overlapping, left to
+        # right) and run in one linear pass in C, however many matches there are.
+        total = text.count(old)
+        if not total:
             continue
-        if len(matches) > 1 and not replace_all:
-            shown = ", ".join(str(n) for n in matches[:_MAX_LISTED_MATCHES])
-            more = "…" if len(matches) > _MAX_LISTED_MATCHES else ""
+        if total > 1 and not replace_all:
+            # Only a rejected, ambiguous edit needs line numbers, and only for the few that
+            # the message lists.
+            listed = _first_match_lines(text, old, _MAX_LISTED_MATCHES)
+            shown = ", ".join(str(n) for n in listed)
+            more = "…" if total > _MAX_LISTED_MATCHES else ""
             raise EditError(
-                f"old_string matches {len(matches)} places (lines {shown}{more}). Include more "
+                f"old_string matches {total} places (lines {shown}{more}). Include more "
                 "surrounding lines so it matches exactly one place, or set replace_all=true to "
                 "change every occurrence."
             )
-        count = len(matches) if replace_all else 1
+        count = total if replace_all else 1
         return text.replace(old, new, -1 if replace_all else 1), count
     raise EditError(f"old_string was not found in the file.{_missing_hint(text, old_string)}")
 
