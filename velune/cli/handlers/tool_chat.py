@@ -296,8 +296,12 @@ async def run_tool_chat(
             finally:
                 gate.boundary.clear_grants()
                 reset_active_journal(journal_token)
-                if journal:
-                    repl._last_turn_journal = journal
+                # Always replace the previous turn's journal, even with an empty one: /rewind
+                # means "undo the most recent turn", and a turn that changed nothing must
+                # not leave an older turn's changes behind it to be undone by mistake. This
+                # also runs when the turn failed or was cancelled, so whatever it did change
+                # before stopping stays rewindable and nothing else does.
+                repl._last_turn_journal = journal
     except asyncio.CancelledError:
         if not repl._interrupts.consume_user_cancelled():
             raise

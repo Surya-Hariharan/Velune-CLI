@@ -48,6 +48,21 @@ def is_secret_path(path: Path) -> bool:
     return any(part.lower() in _SECRET_DIR_NAMES for part in path.parts)
 
 
+_GIT_REASON = "changes git internals (.git/ — hooks and config there can run code)"
+_HOOKS_REASON = "changes Velune hook configuration (hooks run commands)"
+_VELUNE_DIR_REASON = (
+    "changes the Velune configuration folder (.velune/ — the hook configuration inside it "
+    "runs commands)"
+)
+_TOML_REASON = "changes Velune configuration (it can define hooks that run commands)"
+_LINK_NOTE = " (this path is, or links to, a protected location)"
+
+# A folder move is checked by looking at what it would install at the destination. The walk is
+# bounded; a tree too big to inspect is not assumed to be harmless.
+MAX_MOVE_SCAN_ENTRIES = 20_000
+MAX_MOVE_SCAN_DEPTH = 64
+
+
 def protected_reason(path: Path) -> str:
     """Why changing *path* is high-risk even inside the workspace ("" if it is not).
 
@@ -56,15 +71,133 @@ def protected_reason(path: Path) -> str:
     Velune runs the commands in its hook configuration. Changing them is not
     forbidden — it is confirmed by the user in every mode, and never covered by a
     session-wide "always allow". Reading them is ordinary.
+
+    This judges the *name* of the path. The ``.velune`` folder itself is protected, not
+    only ``hooks.json`` inside it: creating, moving, replacing or deleting the folder
+    changes which hook file is active. Links are handled by :func:`protected_for`.
     """
     parts = [part.lower() for part in path.parts]
     if ".git" in parts:
-        return "changes git internals (.git/ — hooks and config there can run code)"
+        return _GIT_REASON
     name = parts[-1] if parts else ""
+    if name == ".velune":
+        return _VELUNE_DIR_REASON
     if name == "hooks.json" and len(parts) > 1 and parts[-2] == ".velune":
-        return "changes Velune hook configuration (hooks run commands)"
+        return _HOOKS_REASON
     if name == "velune.toml":
-        return "changes Velune configuration (it can define hooks that run commands)"
+        return _TOML_REASON
+    return ""
+
+
+def _safe_resolve(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return path
+
+
+def _same_place(a: Path, b: Path) -> bool:
+    """True if two paths are the same filesystem object (string match or real identity)."""
+    if a == b or str(a).casefold() == str(b).casefold():
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except (OSError, ValueError):
+        return False
+
+
+def _canonical_protected(root: Path) -> list[tuple[Path, bool, str]]:
+    """The protected locations under *root*, resolved through any links they are made of.
+
+    ``(location, whole_tree, reason)``: for a whole-tree entry everything below it counts.
+    """
+    return [
+        (_safe_resolve(root / ".git"), True, _GIT_REASON),
+        (_safe_resolve(root / ".velune"), False, _VELUNE_DIR_REASON),
+        (_safe_resolve(root / ".velune" / "hooks.json"), False, _HOOKS_REASON),
+        (_safe_resolve(root / "velune.toml"), False, _TOML_REASON),
+    ]
+
+
+def _alias_reason(resolved: Path, roots: list[Path]) -> str:
+    """Is *resolved* the very place a protected location points at (whatever it is called)?
+
+    Catches a protected name that is a link to somewhere ordinary (``.velune`` -> ``cfg``
+    makes ``cfg/hooks.json`` the live hook file) and an ordinary name that links to a
+    protected target. Compares real identity, not just text.
+    """
+    for root in roots:
+        for location, whole_tree, reason in _canonical_protected(root):
+            if _same_place(resolved, location):
+                return reason + _LINK_NOTE
+            if whole_tree and any(_same_place(parent, location) for parent in resolved.parents):
+                return reason + _LINK_NOTE
+    return ""
+
+
+def protected_for(requested: Path, resolved: Path, roots: list[Path]) -> str:
+    """Protection verdict for a path argument, from every identity it has.
+
+    *requested* is the path as asked for (``..`` collapsed, links **not** followed) and
+    *resolved* is where it really leads. Either may be protected, and so may the place a
+    protected location links to; a link must not be a way around the check in either
+    direction.
+    """
+    return (
+        protected_reason(requested) or protected_reason(resolved) or _alias_reason(resolved, roots)
+    )
+
+
+_REPARSE_POINT = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: Windows junctions and symlinks
+
+
+def _is_link_entry(entry: os.DirEntry[str]) -> bool:
+    """A symbolic link **or a Windows junction** (``is_symlink`` misses junctions before 3.12)."""
+    try:
+        if entry.is_symlink():
+            return True
+        attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+    except OSError:
+        return True  # cannot tell: do not descend
+    return bool(attributes & _REPARSE_POINT)
+
+
+def protected_descendant_reason(source: Path, destination: Path) -> str:
+    """Would moving the folder *source* to *destination* install something protected there?
+
+    Walks the source tree (no link is followed, the walk is bounded) and judges each entry
+    by the path it would have under *destination*. A tree that is too big to inspect is
+    reported rather than assumed harmless.
+    """
+    if not source.is_dir():
+        return ""
+    seen = 0
+    stack: list[tuple[Path, Path, int]] = [(source, destination, 0)]
+    while stack:
+        folder, target, depth = stack.pop()
+        try:
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    seen += 1
+                    if seen > MAX_MOVE_SCAN_ENTRIES:
+                        return (
+                            "moves a folder too large to inspect for protected files "
+                            f"(more than {MAX_MOVE_SCAN_ENTRIES} entries)"
+                        )
+                    moved_to = target / entry.name
+                    reason = protected_reason(moved_to)
+                    if reason:
+                        return reason
+                    try:
+                        descend = entry.is_dir(follow_symlinks=False) and not _is_link_entry(entry)
+                    except OSError:
+                        descend = False
+                    if descend:
+                        if depth + 1 > MAX_MOVE_SCAN_DEPTH:
+                            return "moves a folder nested too deeply to inspect for protected files"
+                        stack.append((Path(entry.path), moved_to, depth + 1))
+        except OSError:
+            return "moves a folder that could not be fully inspected for protected files"
     return ""
 
 
@@ -84,6 +217,19 @@ class Boundary:
         if not candidate.is_absolute():
             candidate = self.workspace_root / candidate
         return candidate.resolve()
+
+    def lexical(self, raw: str | Path) -> Path:
+        """The path as requested: anchored to the workspace, ``..`` collapsed, links not followed."""
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.workspace_root / candidate
+        return Path(os.path.abspath(candidate))
+
+    def protected(self, raw: str | Path, resolved: Path | None = None) -> str:
+        """Why changing *raw* is high-risk (see :func:`protected_for`), or ""."""
+        resolved = resolved if resolved is not None else self.resolve(raw)
+        roots = [self.workspace_root, *sorted(self.extra_roots)]
+        return protected_for(self.lexical(raw), resolved, roots)
 
     def _within(self, path: Path, root: Path) -> bool:
         return path == root or root in path.parents
@@ -127,7 +273,7 @@ def path_action(
     outside = not boundary.inside(resolved)
     if risk is None:
         risk = Risk.HIGH if secret else Risk.LOW
-    protected = protected_reason(resolved) if action_type in MUTATING_TYPES else ""
+    protected = boundary.protected(raw, resolved) if action_type in MUTATING_TYPES else ""
     if protected:
         risk = Risk.HIGH
         reason = f"{reason}: {protected}" if reason else protected
