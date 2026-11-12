@@ -8,7 +8,11 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from velune.core.errors.provider import InferenceError, ProviderConnectionError
+from velune.core.errors.provider import (
+    InferenceError,
+    ProviderConnectionError,
+    StreamInterruptedError,
+)
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
@@ -185,7 +189,9 @@ class LMStudioProvider(ModelProvider):
                     # An error frame is a failure, not a chunk: never fall through to a
                     # "successful" finish that would publish half-built tool calls.
                     if error_event or data.get("error"):
-                        raise InferenceError(f"LM Studio stream error: {_stream_error_text(data)}")
+                        raise StreamInterruptedError(
+                            f"LM Studio stream error: {_stream_error_text(data)}"
+                        )
                     try:
                         choice = data["choices"][0]
                         delta = choice["delta"]
@@ -193,7 +199,9 @@ class LMStudioProvider(ModelProvider):
                         continue  # e.g. a usage-only frame with no choices
                     reason = choice.get("finish_reason")
                     if reason == "error":
-                        raise InferenceError("LM Studio stream error: the server ended the reply")
+                        raise StreamInterruptedError(
+                            "LM Studio stream error: the server ended the reply"
+                        )
                     if reason:
                         finish_reason = reason
                     accumulator.add(delta.get("tool_calls"))
@@ -203,19 +211,19 @@ class LMStudioProvider(ModelProvider):
             # the server said so; a connection that just stopped is a failure, and must never
             # be turned into a "finished" reply or published tool calls.
             if not (done or finish_reason):
-                raise InferenceError(
+                raise StreamInterruptedError(
                     "LM Studio stream ended before the reply was complete "
                     "(no finish_reason and no [DONE])"
                 )
             tool_calls = accumulator.finalize()
             if tool_calls:
                 if corrupt:
-                    raise InferenceError(
+                    raise StreamInterruptedError(
                         "LM Studio stream contained an unreadable frame while building tool "
                         "calls; refusing to run a possibly incomplete call"
                     )
                 if finish_reason not in (None, *_COMPLETE_FINISH_REASONS):
-                    raise InferenceError(
+                    raise StreamInterruptedError(
                         f"LM Studio stream stopped early ({finish_reason!r}) while building "
                         "tool calls; refusing to run an incomplete call"
                     )
@@ -224,6 +232,14 @@ class LMStudioProvider(ModelProvider):
                     finish_reason="tool_calls",
                     metadata={"tool_calls": tool_calls},
                 )
+        except httpx.HTTPStatusError as e:
+            # The server answered and refused: a verdict on the request (e.g. a tool payload it
+            # rejects), which callers may legitimately act on.
+            raise InferenceError(f"LM Studio stream failed: {e}")
+        except httpx.TransportError as e:
+            # The connection failed, dropped or timed out: this reply is lost, but nothing
+            # was said about the request itself.
+            raise StreamInterruptedError(f"LM Studio stream failed: {e}")
         except httpx.HTTPError as e:
             raise InferenceError(f"LM Studio stream failed: {e}")
 

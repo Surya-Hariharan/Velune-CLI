@@ -69,8 +69,11 @@ def _link_or_skip(link: Path, target: Path, is_dir: bool) -> None:
     if is_dir and os.name == "nt":
         import _winapi  # type: ignore[import-not-found]
 
-        _winapi.CreateJunction(str(target), str(link))
-        return
+        try:
+            _winapi.CreateJunction(str(target), str(link))
+            return
+        except OSError:
+            pass  # junctions can be refused too (policy, filesystem): fall through to the skip
     pytest.skip("this platform/user cannot create this kind of link")
 
 
@@ -367,3 +370,72 @@ def test_a_broken_link_does_not_crash_classification(ws):
         pytest.skip("symlinks are unavailable here")
     action = path_action(ActionType.MODIFY_FILE, "dangling", Boundary(ws), "w")
     assert action.risk in (Risk.LOW, Risk.MEDIUM, Risk.HIGH)
+
+
+# ── #5, completed: links whose target is *inside* a folder, and moves that land on that target ──
+
+
+def _dot_velune_linked_into(ws: Path) -> Path:
+    """``.velune`` is a link to ``cfg/live``, which holds the live hook file."""
+    live = ws / "cfg" / "live"
+    live.mkdir(parents=True)
+    (live / "hooks.json").write_text('{"hooks": {}}')
+    _link_or_skip(ws / ".velune", live, is_dir=True)
+    return live
+
+
+async def test_moving_a_folder_that_contains_the_live_hook_folder_asks(ws):
+    """``cfg`` is not protected by name and is not the link target, but it holds it."""
+    _dot_velune_linked_into(ws)
+    await _must_ask(ws, "move_path", source="cfg", destination="backup")
+    assert (ws / "cfg" / "live" / "hooks.json").exists()
+
+
+async def test_deleting_or_replacing_the_folder_that_contains_the_live_hook_folder_asks(ws):
+    _dot_velune_linked_into(ws)
+    await _must_ask(ws, "delete_directory", path="cfg", recursive=True)
+    await _must_ask(ws, "delete_directory", path="cfg/live", recursive=True)
+    assert (ws / "cfg" / "live" / "hooks.json").read_text() == '{"hooks": {}}'
+
+
+async def test_moving_a_prepared_folder_onto_the_place_the_hook_link_points_at_asks(ws):
+    """The two-step attack: move ``cfg`` away, then move a prepared ``payload`` into its place.
+
+    After the first step ``cfg/live`` is gone and ``.velune`` dangles; putting a folder named
+    ``live`` back under a new ``cfg`` makes the attacker's ``hooks.json`` the active one.
+    Neither destination name is protected, so the move is judged by where it would land.
+    """
+    live = _dot_velune_linked_into(ws)
+    shutil_rmtree = __import__("shutil").rmtree
+    shutil_rmtree(ws / "cfg")  # the first step's effect: the target is gone, the link dangles
+    if (ws / ".velune").resolve() != live.resolve():
+        pytest.skip("this platform does not resolve the target of a dangling link")
+    await _must_not_ask(ws, "write_file", file_path="payload/live/hooks.json", content=HOOKS)
+    await _must_ask(ws, "move_path", source="payload", destination="cfg")
+    assert not (ws / "cfg").exists()
+    assert _live_hook_commands(ws) == []
+
+
+def test_the_protected_descendant_scan_resolves_the_destination_through_links(ws, tmp_path):
+    live = _dot_velune_linked_into(ws)
+    (ws / "payload" / "live").mkdir(parents=True)
+    (ws / "payload" / "live" / "hooks.json").write_text(HOOKS)
+    import shutil
+
+    shutil.rmtree(ws / "cfg")
+    if (ws / ".velune").resolve() != live.resolve():
+        pytest.skip("this platform does not resolve the target of a dangling link")
+    reason = boundary_mod.protected_descendant_reason(
+        ws / "payload", ws / "cfg", [Boundary(ws).workspace_root]
+    )
+    assert reason
+
+
+async def test_a_workspace_without_links_is_not_made_noisier_by_the_ancestor_rule(ws):
+    """Ordinary folders next to ordinary files are still ordinary."""
+    (ws / "pkg").mkdir()
+    (ws / "pkg" / "a.py").write_text("x = 1\n")
+    await _must_not_ask(ws, "move_path", source="pkg", destination="pkg2")
+    (ws / "empty").mkdir()
+    await _must_not_ask(ws, "delete_directory", path="empty")
+    await _must_not_ask(ws, "move_path", source="pkg2/a.py", destination="pkg2/b.py")

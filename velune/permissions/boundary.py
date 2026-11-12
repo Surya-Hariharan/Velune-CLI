@@ -119,18 +119,28 @@ def _canonical_protected(root: Path) -> list[tuple[Path, bool, str]]:
     ]
 
 
-def _alias_reason(resolved: Path, roots: list[Path]) -> str:
-    """Is *resolved* the very place a protected location points at (whatever it is called)?
+def _folded(path: Path) -> str:
+    return str(path).casefold()
 
-    Catches a protected name that is a link to somewhere ordinary (``.velune`` -> ``cfg``
-    makes ``cfg/hooks.json`` the live hook file) and an ordinary name that links to a
-    protected target. Compares real identity, not just text.
+
+def _alias_reason(resolved: Path, roots: list[Path]) -> str:
+    """Is *resolved* a place a protected location really lives at, or a folder holding one?
+
+    Catches a protected name that is a link to somewhere ordinary (``.velune`` -> ``cfg/live``
+    makes ``cfg/live/hooks.json`` the live hook file), an ordinary name that links to a
+    protected target, and a **folder that contains** such a target (moving, replacing or
+    deleting ``cfg`` swaps the live hook file just as surely as writing it). Identity, not
+    just text, decides the first two; the containing-folder test compares real paths.
     """
+    folded = _folded(resolved)
     for root in roots:
         for location, whole_tree, reason in _canonical_protected(root):
             if _same_place(resolved, location):
                 return reason + _LINK_NOTE
             if whole_tree and any(_same_place(parent, location) for parent in resolved.parents):
+                return reason + _LINK_NOTE
+            # An ancestor of the live location: its subtree is what the protection guards.
+            if any(_folded(parent) == folded for parent in location.parents):
                 return reason + _LINK_NOTE
     return ""
 
@@ -162,19 +172,27 @@ def _is_link_entry(entry: os.DirEntry[str]) -> bool:
     return bool(attributes & _REPARSE_POINT)
 
 
-def protected_descendant_reason(source: Path, destination: Path) -> str:
+def protected_descendant_reason(
+    source: Path, destination: Path, roots: list[Path] | tuple[Path, ...] = ()
+) -> str:
     """Would moving the folder *source* to *destination* install something protected there?
 
     Walks the source tree (no link is followed, the walk is bounded) and judges each entry
-    by the path it would have under *destination*. A tree that is too big to inspect is
-    reported rather than assumed harmless.
+    twice: by the name it would have under *destination*, and by the real place it would
+    occupy (*destination* resolved through any links, below which the entry's relative path
+    is placed) against the live protected locations of *roots*. The second catches a folder
+    put where a protected link points, e.g. ``live/`` under a recreated ``cfg/`` when
+    ``.velune`` links to ``cfg/live``. A tree too big to inspect is reported rather than
+    assumed harmless.
     """
     if not source.is_dir():
         return ""
+    locations = [item for root in roots for item in _canonical_protected(root)]
+    real_destination = _safe_resolve(destination)
     seen = 0
-    stack: list[tuple[Path, Path, int]] = [(source, destination, 0)]
+    stack: list[tuple[Path, Path, Path, int]] = [(source, destination, real_destination, 0)]
     while stack:
-        folder, target, depth = stack.pop()
+        folder, target, real_target, depth = stack.pop()
         try:
             with os.scandir(folder) as entries:
                 for entry in entries:
@@ -185,7 +203,8 @@ def protected_descendant_reason(source: Path, destination: Path) -> str:
                             f"(more than {MAX_MOVE_SCAN_ENTRIES} entries)"
                         )
                     moved_to = target / entry.name
-                    reason = protected_reason(moved_to)
+                    real_moved_to = real_target / entry.name
+                    reason = protected_reason(moved_to) or _landing_reason(real_moved_to, locations)
                     if reason:
                         return reason
                     try:
@@ -195,9 +214,23 @@ def protected_descendant_reason(source: Path, destination: Path) -> str:
                     if descend:
                         if depth + 1 > MAX_MOVE_SCAN_DEPTH:
                             return "moves a folder nested too deeply to inspect for protected files"
-                        stack.append((Path(entry.path), moved_to, depth + 1))
+                        stack.append((Path(entry.path), moved_to, real_moved_to, depth + 1))
         except OSError:
             return "moves a folder that could not be fully inspected for protected files"
+    return ""
+
+
+def _landing_reason(real_path: Path, locations: list[tuple[Path, bool, str]]) -> str:
+    """Would something placed at *real_path* be a live protected location (or inside one)?
+
+    Text comparison on real paths only: the path does not exist yet, so there is nothing to
+    ``stat``, and the entries of a large tree must stay cheap to judge.
+    """
+    folded = _folded(real_path)
+    for location, whole_tree, reason in locations:
+        here = _folded(location)
+        if folded == here or (whole_tree and folded.startswith(here + os.sep.casefold())):
+            return reason + _LINK_NOTE
     return ""
 
 
@@ -225,11 +258,14 @@ class Boundary:
             candidate = self.workspace_root / candidate
         return Path(os.path.abspath(candidate))
 
+    def protected_roots(self) -> list[Path]:
+        """The roots whose protected locations (``.git``, ``.velune``, ``velune.toml``) count."""
+        return [self.workspace_root, *sorted(self.extra_roots)]
+
     def protected(self, raw: str | Path, resolved: Path | None = None) -> str:
         """Why changing *raw* is high-risk (see :func:`protected_for`), or ""."""
         resolved = resolved if resolved is not None else self.resolve(raw)
-        roots = [self.workspace_root, *sorted(self.extra_roots)]
-        return protected_for(self.lexical(raw), resolved, roots)
+        return protected_for(self.lexical(raw), resolved, self.protected_roots())
 
     def _within(self, path: Path, root: Path) -> bool:
         return path == root or root in path.parents
