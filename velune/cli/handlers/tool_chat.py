@@ -237,6 +237,7 @@ async def run_tool_chat(
         ProviderConnectionError,
         ProviderTimeoutError,
         RateLimitError,
+        StreamInterruptedError,
     )
     from velune.orchestration.tool_loop import ToolLoopResult, ToolLoopRunner
     from velune.tools.base.tool import ToolCallContext
@@ -326,7 +327,10 @@ async def run_tool_chat(
         RateLimitError,
         ModelNotFoundError,
         ProviderTimeoutError,
+        StreamInterruptedError,
     ) as exc:
+        # A reply stream that errored or was cut off (StreamInterruptedError) belongs here
+        # too: it says nothing about whether the model can take tools.
         # The provider itself is the problem (down, rejected the key, rate-
         # limited, timed out, or the model id/endpoint doesn't exist) — not a
         # "this model can't do tools" signal, so this must not fall through to

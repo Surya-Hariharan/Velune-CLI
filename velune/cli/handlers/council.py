@@ -279,6 +279,11 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
         repl.console.print("[yellow]Usage: /run <task>  or  /council <task>[/yellow]")
         return
 
+    # A Council run is the newest turn from the moment it starts. It may end without a proposal
+    # (so apply_council_edits never runs), fail or be cancelled; none of that may leave an older
+    # turn's journal for /rewind to undo.
+    repl._last_turn_journal = None
+
     orchestrator = repl.container.get("runtime.council_orchestrator")
     repl.console.print()
 

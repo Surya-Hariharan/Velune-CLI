@@ -289,3 +289,96 @@ async def test_rewinding_a_file_move_is_reported_without_the_caveat(tmp_path):
     report = journal.rewind()
     assert (tmp_path / "a.txt").exists()
     assert "not compared" not in report.restored[0]
+
+
+# ── The turn starts before it can fail: Council runs without edits, and a failing prompt setup ──
+
+
+def _older_turn(ws: Path):
+    (ws / "older.txt").write_text("from an older turn\n")
+    return _journal_that_created(ws / "older.txt")
+
+
+async def test_a_council_answer_with_no_proposal_must_not_expose_an_older_turn(ws):
+    """``/run`` can end with an answer and no edit blocks, so apply_council_edits never runs."""
+    from tests.test_council_phase0_characterization import _state
+    from tests.test_council_rendering_ownership import _PhasedOrchestrator, _repl_with
+    from velune.cli.handlers.council import execute_council_task
+
+    repl = _repl_with(_PhasedOrchestrator(_state()))
+    repl._last_turn_journal = _older_turn(ws)
+    await execute_council_task(repl, "explain this", force_tier=None)
+    assert repl._last_turn_journal is None
+    await cmd_rewind(repl, "")
+    assert (ws / "older.txt").exists()
+
+
+async def test_a_failed_council_run_must_not_expose_an_older_turn(ws):
+    from tests.test_council_phase0_characterization import _state
+    from tests.test_council_rendering_ownership import _ExplodingOrchestrator, _repl_with
+    from velune.cli.handlers.council import execute_council_task
+
+    repl = _repl_with(_ExplodingOrchestrator(_state()))
+    repl._last_turn_journal = _older_turn(ws)
+    await execute_council_task(repl, "explain this", force_tier=None)
+    assert repl._last_turn_journal is None
+
+
+async def test_a_cancelled_council_run_must_not_expose_an_older_turn(ws):
+    from tests.test_council_phase0_characterization import _state
+    from tests.test_council_rendering_ownership import _CancelledOrchestrator, _repl_with
+    from velune.cli.handlers.council import execute_council_task
+
+    repl = _repl_with(_CancelledOrchestrator(_state()), cancelled=True)
+    repl._last_turn_journal = _older_turn(ws)
+    await asyncio.wait_for(execute_council_task(repl, "explain this", force_tier=None), 5)
+    assert repl._last_turn_journal is None
+
+
+async def test_an_empty_run_command_does_not_count_as_a_turn(ws):
+    from tests.test_council_phase0_characterization import _state
+    from tests.test_council_rendering_ownership import _PhasedOrchestrator, _repl_with
+    from velune.cli.handlers.council import execute_council_task
+
+    repl = _repl_with(_PhasedOrchestrator(_state()))
+    repl._last_turn_journal = journal = _older_turn(ws)
+    await execute_council_task(repl, "   ", force_tier=None)  # only prints the usage line
+    assert repl._last_turn_journal is journal
+
+
+async def test_a_failure_while_assembling_the_prompt_context_must_not_expose_an_older_turn(
+    ws, monkeypatch
+):
+    """``build_turn_context`` can raise after the user turn is recorded; the main loop carries on."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from velune.cli.modes import ModeManager
+    from velune.cli.repl import VeluneREPL
+    from velune.hooks.types import HookResult
+
+    repl = VeluneREPL.__new__(VeluneREPL)
+    repl.console = MagicMock()
+    repl.active_model = MagicMock(provider_id="local")
+    registry = MagicMock()
+    registry.get.return_value = MagicMock()
+    services = {"runtime.provider_registry": registry, "runtime.workspace": str(ws)}
+    repl.container = MagicMock()
+    repl.container.get.side_effect = lambda key: services.get(key)
+    repl._conversation = []
+    repl._episodic_session_id = None
+    repl._hook_dispatcher = MagicMock()
+    repl._hook_dispatcher.session_id = "sess"
+    repl._hook_dispatcher.dispatch_user_prompt = AsyncMock(return_value=HookResult())
+    repl._mode_manager = ModeManager()
+    repl._last_turn_journal = _older_turn(ws)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("context assembly failed")
+
+    monkeypatch.setattr("velune.cli.handlers.prompt_context.build_turn_context", boom)
+    with pytest.raises(RuntimeError, match="context assembly failed"):
+        await repl._handle_prompt("hello")
+    assert repl._conversation[-1] == {"role": "user", "content": "hello"}  # the turn was accepted
+    assert repl._last_turn_journal is None
+    await cmd_rewind(repl, "")
+    assert (ws / "older.txt").exists()
