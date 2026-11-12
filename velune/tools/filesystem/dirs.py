@@ -184,7 +184,11 @@ class MovePath(_FsTool):
         # A folder carries its contents with it: moving one onto ``.velune`` (or a folder that
         # holds ``.git``/``.velune``/``velune.toml``) installs protected files at the destination
         # without ever naming them. Judge what the move would put there.
-        installs = protected_descendant_reason(source, dest) if source.is_dir() else ""
+        installs = (
+            protected_descendant_reason(source, dest, boundary.protected_roots())
+            if source.is_dir()
+            else ""
+        )
         dest_reason = "move destination"
         dest_risk = risk
         if installs:
