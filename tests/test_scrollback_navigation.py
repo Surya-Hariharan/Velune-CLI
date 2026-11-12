@@ -78,6 +78,22 @@ def _run(body):
     return asyncio.run(_main())
 
 
+async def _wait_until(predicate, *, timeout: float = 10.0, interval: float = 0.02) -> None:
+    """Poll *predicate* until it holds, instead of guessing how long a keypress takes.
+
+    A fixed ``sleep(_SETTLE)`` after a keystroke asserts on a screen that may not have been
+    rendered yet when the machine is busy (with a 10 ms wait this very test fails). This waits
+    for the state the test is about to assert on and only gives up after *timeout*, leaving the
+    caller's own assertion to report what was actually missing.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() > deadline:
+            return
+        await asyncio.sleep(interval)
+
+
 def _fill(ui: FullscreenREPLUI, n: int, prefix: str = "line") -> None:
     for i in range(n):
         ui.append_system(f"{prefix}-{i}")
@@ -100,10 +116,11 @@ def test_pinned_to_bottom_by_default_and_follows_new_output():
 def test_pageup_reveals_older_lines_without_losing_the_anchor():
     async def _body(ui: FullscreenREPLUI, inp):
         _fill(ui, _ROWS * 3)
-        await asyncio.sleep(_SETTLE)
+        tail = f"line-{_ROWS * 3 - 1}"
+        await _wait_until(lambda: tail in _visible_text(ui))  # live tail is on screen
 
         inp.send_bytes(b"\x1b[5~")  # PageUp (xterm sequence)
-        await asyncio.sleep(_SETTLE)
+        await _wait_until(lambda: ui._scroll_anchor is not None and tail not in _visible_text(ui))
         anchor_after_one_page = ui._scroll_anchor
         visible_after_one_page = _visible_text(ui)
 
