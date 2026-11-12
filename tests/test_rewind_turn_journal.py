@@ -94,7 +94,8 @@ async def _turn(repl, *responses) -> Any:
 
 
 def _out(repl) -> str:
-    return repl.console.file.getvalue()
+    """Console output with whitespace collapsed (Rich wraps long lines, e.g. long temp paths)."""
+    return " ".join(repl.console.file.getvalue().split())
 
 
 async def test_a_read_only_turn_does_not_leave_the_previous_turn_to_be_rewound(repl, ws):
@@ -231,7 +232,7 @@ async def test_a_council_turn_that_applies_nothing_must_not_expose_an_older_turn
     await apply_council_edits(council_repl, proposal, "bump x")
     await cmd_rewind(council_repl, "")
     assert (ws / "older.txt").exists()
-    assert "Nothing to rewind" in council_repl.console.file.getvalue()
+    assert "Nothing to rewind" in " ".join(council_repl.console.file.getvalue().split())
 
 
 async def test_a_council_turn_whose_changes_are_all_rejected_must_not_expose_an_older_turn(
