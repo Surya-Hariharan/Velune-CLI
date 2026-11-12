@@ -41,6 +41,7 @@ import shutil
 import stat
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -274,24 +275,59 @@ def _replace(source: str, target: Path) -> None:
             time.sleep(0.05 * (attempt + 1))
 
 
+#: On POSIX a new file gets the mode a plain ``open(path, "w")`` would give it: 0o666 with the
+#: process umask applied by the kernel. (``mkstemp`` would force 0o600.) Elsewhere — Windows,
+#: where permission bits are not the access model — the temporary file is left as created.
+_NEW_FILE_FOLLOWS_UMASK = os.name == "posix"
+_NEW_FILE_MODE = 0o666
+
+
+def _create_temp(directory: Path, *, follow_umask: bool) -> tuple[int, str]:
+    """Create a uniquely named temporary file next to the target; ``(fd, path)``.
+
+    With *follow_umask* the file is created with mode 0o666 and the **kernel** applies the
+    process umask atomically, exactly as for any ordinary new file. The umask is never read
+    or changed here (``os.umask`` can only be read by setting it, which would race with other
+    threads creating files), and no mode such as 0o644 is assumed. The file is never more
+    permissive than the umask allows, and it is exclusive (``O_EXCL``) and not followed
+    through a link (``O_NOFOLLOW``), like ``mkstemp``'s.
+    """
+    if not follow_umask:
+        fd, name = tempfile.mkstemp(dir=directory, prefix=_TMP_PREFIX, suffix=".part")
+        return fd, name
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    for _ in range(100):
+        name = str(directory / f"{_TMP_PREFIX}{uuid.uuid4().hex[:12]}.part")
+        try:
+            return os.open(name, flags, _NEW_FILE_MODE), name
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"could not create a unique temporary file in {directory}")
+
+
 def atomic_write(path: Path, data: bytes, *, expected_sha256: str | None = None) -> str:
     """Replace *path* with *data* atomically and return the new content's hash.
 
     *expected_sha256* (a hash, or :data:`ABSENT` for "must not exist yet") is
     compared with the file on disk immediately before the swap; a mismatch raises
-    :class:`FileConflictError` and leaves the file untouched. The file's permission
-    bits are kept. The temporary file is removed if anything fails.
+    :class:`FileConflictError` and leaves the file untouched. Replacing an existing file
+    keeps its permission bits; a new file gets the default a plain write would give it
+    (on POSIX 0o666 reduced by the process umask). The temporary file is removed if
+    anything fails.
     """
     _check_boundary(path)
     _refuse_unsafe_target(path)
     ensure_parent(path)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=_TMP_PREFIX, suffix=".part")
+    replacing = path.is_file()
+    fd, tmp = _create_temp(path.parent, follow_umask=_NEW_FILE_FOLLOWS_UMASK and not replacing)
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        if path.is_file():
+        if replacing:
             try:
                 shutil.copymode(path, tmp)
             except OSError:
