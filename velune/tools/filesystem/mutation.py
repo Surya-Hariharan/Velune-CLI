@@ -280,17 +280,20 @@ def _replace(source: str, target: Path) -> None:
 #: where permission bits are not the access model — the temporary file is left as created.
 _NEW_FILE_FOLLOWS_UMASK = os.name == "posix"
 _NEW_FILE_MODE = 0o666
+_PRIVATE_MODE = 0o600  # what a temporary file that will be given an explicit mode starts as
 
 
-def _create_temp(directory: Path, *, follow_umask: bool) -> tuple[int, str]:
+def _create_temp(
+    directory: Path, *, follow_umask: bool, create_mode: int = _NEW_FILE_MODE
+) -> tuple[int, str]:
     """Create a uniquely named temporary file next to the target; ``(fd, path)``.
 
-    With *follow_umask* the file is created with mode 0o666 and the **kernel** applies the
-    process umask atomically, exactly as for any ordinary new file. The umask is never read
-    or changed here (``os.umask`` can only be read by setting it, which would race with other
-    threads creating files), and no mode such as 0o644 is assumed. The file is never more
-    permissive than the umask allows, and it is exclusive (``O_EXCL``) and not followed
-    through a link (``O_NOFOLLOW``), like ``mkstemp``'s.
+    With *follow_umask* the file is created with *create_mode* (0o666 by default) and the
+    **kernel** applies the process umask atomically, exactly as for any ordinary new file. The
+    umask is never read or changed here (``os.umask`` can only be read by setting it, which
+    would race with other threads creating files), and no mode such as 0o644 is assumed. The
+    file is never more permissive than *create_mode* and the umask allow, and it is exclusive
+    (``O_EXCL``) and not followed through a link (``O_NOFOLLOW``), like ``mkstemp``'s.
     """
     if not follow_umask:
         fd, name = tempfile.mkstemp(dir=directory, prefix=_TMP_PREFIX, suffix=".part")
@@ -301,7 +304,7 @@ def _create_temp(directory: Path, *, follow_umask: bool) -> tuple[int, str]:
     for _ in range(100):
         name = str(directory / f"{_TMP_PREFIX}{uuid.uuid4().hex[:12]}.part")
         try:
-            return os.open(name, flags, _NEW_FILE_MODE), name
+            return os.open(name, flags, create_mode), name
         except FileExistsError:
             continue
     raise FileExistsError(f"could not create a unique temporary file in {directory}")
@@ -330,21 +333,28 @@ def atomic_write(
     :class:`FileConflictError` and leaves the file untouched. Replacing an existing file
     keeps its permission bits; a new file gets the default a plain write would give it
     (on POSIX 0o666 reduced by the process umask), or *mode* when one is given (used to give
-    a deleted file back the permissions it had; set before any data is written, so private
-    content is never readable in between). The temporary file is removed if anything fails.
+    a deleted file back the permissions it had). In that case the temporary file is created
+    owner-only (0o600) and only widened to *mode* once the content is in it, so no other user
+    can open it while its data is being written (a descriptor opened early would stay
+    readable after a later ``chmod``). The temporary file is removed if anything fails.
     """
     _check_boundary(path)
     _refuse_unsafe_target(path)
     ensure_parent(path)
     replacing = path.is_file()
-    fd, tmp = _create_temp(path.parent, follow_umask=_NEW_FILE_FOLLOWS_UMASK and not replacing)
+    explicit_mode = mode is not None and not replacing and _NEW_FILE_FOLLOWS_UMASK
+    fd, tmp = _create_temp(
+        path.parent,
+        follow_umask=_NEW_FILE_FOLLOWS_UMASK and not replacing,
+        create_mode=_PRIVATE_MODE if explicit_mode else _NEW_FILE_MODE,
+    )
     try:
-        if mode is not None and not replacing and _NEW_FILE_FOLLOWS_UMASK:
-            os.fchmod(fd, mode & 0o777)  # before the first byte is written
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
+            if explicit_mode and mode is not None:
+                os.fchmod(handle.fileno(), mode & 0o777)  # widen only after the data is in
         if replacing:
             try:
                 shutil.copymode(path, tmp)
