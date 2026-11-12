@@ -485,6 +485,12 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
         # Replace the previous turn's journal even when nothing was written (see run_tool_chat).
         repl._last_turn_journal = journal
 
+    for note in journal.irreversible:
+        repl.console.print(
+            f"[yellow]Note:[/yellow] {note} — too large to keep a copy, so [bold]/rewind[/bold] "
+            "cannot restore it."
+        )
+
     if not accepted_paths:
         repl.console.print("[dim]No changes applied.[/dim]")
         return
