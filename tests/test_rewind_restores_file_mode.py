@@ -80,28 +80,36 @@ async def test_rewinding_a_delete_gives_the_file_back_its_mode(tmp_path, restore
 
 
 @posix_only
-def test_a_private_file_is_never_readable_by_others_while_it_is_being_restored(
-    tmp_path, restore_umask, monkeypatch
+@pytest.mark.parametrize("final_mode", [0o600, 0o644, 0o755])
+def test_the_temporary_file_is_owner_only_from_the_moment_it_exists(
+    tmp_path, restore_umask, monkeypatch, final_mode
 ):
-    """The mode is set before the first byte is written, not after."""
-    os.umask(0o022)
+    """A reader who opens the temporary file early keeps access even after a later chmod.
+
+    So it must start private (0600, whatever the umask), receive its data, and only then be
+    widened to the recorded mode. Checked at the instant of creation, with a permissive umask.
+    """
+    os.umask(0o022)  # a plain create would make the file 0644 and world-readable
     secret = tmp_path / "token"
     secret.write_text("s3cret\n")
-    secret.chmod(0o600)
+    secret.chmod(final_mode)
     journal = _journaled(lambda: EditBlockApplier(tmp_path).write(secret, ""))
     assert not secret.exists()
 
-    seen: list[tuple[int, int]] = []
-    real_fchmod = os.fchmod
+    created: list[int] = []
+    real_open = os.open
 
-    def spy(fd, mode):
-        seen.append((os.fstat(fd).st_size, mode))  # size at the moment the mode is applied
-        return real_fchmod(fd, mode)
+    def spy(name, flags, mode=0o777, **kw):
+        fd = real_open(name, flags, mode, **kw)
+        if flags & os.O_CREAT and mut._TMP_PREFIX in str(name):
+            created.append(stat.S_IMODE(os.fstat(fd).st_mode))  # mode at the instant of creation
+        return fd
 
-    monkeypatch.setattr(os, "fchmod", spy)
+    monkeypatch.setattr(os, "open", spy)
     journal.rewind()
-    assert seen == [(0, 0o600)], seen  # empty file when 0600 was set
-    assert _mode(secret) == 0o600
+    assert created == [0o600], [oct(m) for m in created]
+    assert secret.read_text() == "s3cret\n"
+    assert _mode(secret) == final_mode  # widened (or kept) only after the content was in
 
 
 @posix_only
@@ -185,14 +193,29 @@ def test_a_deleted_files_mode_is_recorded_in_the_journal(tmp_path, monkeypatch):
     assert entry.mode is not None
 
 
-def test_atomic_write_applies_the_given_mode_to_a_new_file_before_writing(tmp_path, monkeypatch):
+def test_a_new_file_with_an_explicit_mode_is_created_private_and_widened_after_the_data(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(mut, "_NEW_FILE_FOLLOWS_UMASK", True)
-    calls: list[tuple[int, int]] = []
+    opened: list[int] = []
+    real_open = os.open
+
+    def open_spy(name, flags, mode=0o777, **kw):
+        if mut._TMP_PREFIX in str(name):
+            opened.append(mode)  # what the kernel is asked to create the temporary file with
+        return real_open(name, flags, mode, **kw)
+
+    monkeypatch.setattr(mut.os, "open", open_spy)
+    chmods: list[tuple[int, int]] = []
     monkeypatch.setattr(
-        mut.os, "fchmod", lambda fd, mode: calls.append((os.fstat(fd).st_size, mode)), raising=False
+        mut.os,
+        "fchmod",
+        lambda fd, mode: chmods.append((os.fstat(fd).st_size, mode)),
+        raising=False,
     )
-    mut.atomic_write(tmp_path / "new.txt", b"secret", expected_sha256=mut.ABSENT, mode=0o600)
-    assert calls == [(0, 0o600)]
+    mut.atomic_write(tmp_path / "new.txt", b"secret", expected_sha256=mut.ABSENT, mode=0o644)
+    assert opened == [0o600]  # owner-only from the first instant, never 0o666
+    assert chmods == [(6, 0o644)]  # widened afterwards, with all 6 bytes already written
     assert (tmp_path / "new.txt").read_bytes() == b"secret"
 
 
