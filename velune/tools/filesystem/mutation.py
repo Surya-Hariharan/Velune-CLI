@@ -307,15 +307,31 @@ def _create_temp(directory: Path, *, follow_umask: bool) -> tuple[int, str]:
     raise FileExistsError(f"could not create a unique temporary file in {directory}")
 
 
-def atomic_write(path: Path, data: bytes, *, expected_sha256: str | None = None) -> str:
+def file_mode(path: Path) -> int | None:
+    """The permission bits of *path* to restore later (POSIX; ``None`` elsewhere or on error).
+
+    Setuid/setgid/sticky bits are left out: restoring a file must never add privilege.
+    """
+    if not _NEW_FILE_FOLLOWS_UMASK:
+        return None
+    try:
+        return stat.S_IMODE(path.stat().st_mode) & 0o777
+    except OSError:
+        return None
+
+
+def atomic_write(
+    path: Path, data: bytes, *, expected_sha256: str | None = None, mode: int | None = None
+) -> str:
     """Replace *path* with *data* atomically and return the new content's hash.
 
     *expected_sha256* (a hash, or :data:`ABSENT` for "must not exist yet") is
     compared with the file on disk immediately before the swap; a mismatch raises
     :class:`FileConflictError` and leaves the file untouched. Replacing an existing file
     keeps its permission bits; a new file gets the default a plain write would give it
-    (on POSIX 0o666 reduced by the process umask). The temporary file is removed if
-    anything fails.
+    (on POSIX 0o666 reduced by the process umask), or *mode* when one is given (used to give
+    a deleted file back the permissions it had; set before any data is written, so private
+    content is never readable in between). The temporary file is removed if anything fails.
     """
     _check_boundary(path)
     _refuse_unsafe_target(path)
@@ -323,6 +339,8 @@ def atomic_write(path: Path, data: bytes, *, expected_sha256: str | None = None)
     replacing = path.is_file()
     fd, tmp = _create_temp(path.parent, follow_umask=_NEW_FILE_FOLLOWS_UMASK and not replacing)
     try:
+        if mode is not None and not replacing and _NEW_FILE_FOLLOWS_UMASK:
+            os.fchmod(fd, mode & 0o777)  # before the first byte is written
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
             handle.flush()
@@ -477,6 +495,9 @@ class FileChange:
     path: Path
     before: bytes | None  # None: the file did not exist
     after_sha: str  # ABSENT: the change deleted it
+    #: Permission bits of a file the change deleted (POSIX), so rewinding gives it back with the
+    #: mode it had (a private 0600 file must not come back umask-readable). None: not recorded.
+    mode: int | None = None
 
 
 @dataclass
@@ -498,6 +519,7 @@ class Moved:
     destination: Path
     overwritten: bytes | None  # a destination file the move replaced
     after_sha: str | None  # the moved file's hash (None for a folder)
+    overwritten_mode: int | None = None  # permission bits of that replaced file (POSIX)
 
 
 @dataclass
@@ -628,7 +650,9 @@ class TurnJournal:
             if entry.before is None:
                 entry.path.unlink()
             else:
-                atomic_write(entry.path, entry.before, expected_sha256=entry.after_sha)
+                atomic_write(
+                    entry.path, entry.before, expected_sha256=entry.after_sha, mode=entry.mode
+                )
             report.restored.append(str(entry.path))
         elif isinstance(entry, DirCreated):
             if entry.path.is_dir() and not any(entry.path.iterdir()):
@@ -661,7 +685,9 @@ class TurnJournal:
             src.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(dst), str(src))
             if entry.overwritten is not None:
-                atomic_write(dst, entry.overwritten, expected_sha256=ABSENT)
+                atomic_write(
+                    dst, entry.overwritten, expected_sha256=ABSENT, mode=entry.overwritten_mode
+                )
             note = (
                 " (folder moved back as a whole; its contents are not compared)"
                 if entry.after_sha is None and src.is_dir()

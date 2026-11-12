@@ -13,7 +13,7 @@ import json
 import httpx
 import pytest
 
-from velune.core.errors.provider import InferenceError
+from velune.core.errors.provider import InferenceError, StreamInterruptedError
 from velune.core.types.inference import InferenceRequest
 from velune.providers.adapters.lmstudio import LMStudioProvider
 
@@ -103,6 +103,7 @@ async def _fails(body) -> list:
         async for chunk in provider.stream(request):
             seen.append(chunk)
     await provider.shutdown()
+    assert isinstance(raised.value, StreamInterruptedError), type(raised.value)
     assert _published(seen) == [], "no tool call may be published from a failed stream"
     return [str(raised.value)]
 
@@ -164,6 +165,18 @@ async def test_a_unreadable_frame_while_building_tool_calls_is_an_error():
 async def test_a_connection_that_drops_mid_stream_is_an_error():
     first = _frame(_tool_fragment()).encode()
     await _fails(_BrokenStream(first))
+
+
+async def test_an_http_error_status_stays_a_plain_inference_error():
+    """A refusal by the server is a verdict on the request, not an interrupted stream."""
+    provider = LMStudioProvider("http://lm.invalid/v1")
+    provider.client = httpx.AsyncClient(
+        base_url="http://lm.invalid/v1",
+        transport=httpx.MockTransport(lambda request: httpx.Response(400, text="tools rejected")),
+    )
+    with pytest.raises(InferenceError) as raised:
+        await _collect(provider)
+    assert not isinstance(raised.value, StreamInterruptedError)
 
 
 async def test_an_http_error_status_is_an_error():
@@ -304,3 +317,58 @@ async def test_an_unreadable_frame_in_a_plain_text_stream_is_tolerated():
 async def test_a_text_reply_cut_off_by_length_is_reported_as_such_not_as_an_error():
     chunks = await _collect(_provider(_frame(_text("long")) + _frame(_finish("length")) + DONE))
     assert chunks[-1].finish_reason == "length"
+
+
+# ── What the tool loop does with an interrupted stream (CodeRabbit follow-up on #6) ─────────────
+
+
+def _tool_chat_fixtures(tmp_path):
+    from tests.test_tool_chat import _fake_repl, _model, _reg
+
+    return _fake_repl(tmp_path, registry=_reg()), _model()
+
+
+def _request():
+    return InferenceRequest(model_id="test-model", messages=[{"role": "user", "content": "go"}])
+
+
+async def test_a_stream_failure_does_not_mark_the_model_as_unable_to_use_tools(tmp_path):
+    from tests.test_tool_chat import ScriptedProvider
+    from velune.cli.handlers.tool_chat import TurnProviderError, run_tool_chat
+
+    repl, model = _tool_chat_fixtures(tmp_path)
+    provider = ScriptedProvider([StreamInterruptedError("LM Studio stream error: boom")])
+    with pytest.raises(TurnProviderError) as raised:
+        await run_tool_chat(repl, model, provider, _request())
+    assert isinstance(raised.value.original, StreamInterruptedError)
+    assert raised.value.safe_to_retry_elsewhere is True  # nothing ran yet
+    assert "test-model" not in repl._tools_unsupported_models  # tools stay available
+
+
+async def test_a_stream_failure_after_a_tool_ran_is_not_replayed_elsewhere(tmp_path):
+    from tests.test_tool_chat import ScriptedProvider, _tool_turn
+    from velune.cli.handlers.tool_chat import TurnProviderError, run_tool_chat
+    from velune.core.types.inference import ToolCall
+
+    repl, model = _tool_chat_fixtures(tmp_path)
+    provider = ScriptedProvider(
+        [
+            _tool_turn(ToolCall(id="c1", name="peek", arguments={})),
+            StreamInterruptedError("connection reset"),
+        ]
+    )
+    with pytest.raises(TurnProviderError) as raised:
+        await run_tool_chat(repl, model, provider, _request())
+    assert raised.value.safe_to_retry_elsewhere is False
+    assert "test-model" not in repl._tools_unsupported_models
+
+
+async def test_a_rejected_tool_payload_still_falls_back_to_plain_chat(tmp_path):
+    """The behavior the stream failure must not be confused with is unchanged."""
+    from tests.test_tool_chat import ScriptedProvider
+    from velune.cli.handlers.tool_chat import run_tool_chat
+
+    repl, model = _tool_chat_fixtures(tmp_path)
+    provider = ScriptedProvider([InferenceError("400: tools not supported")])
+    assert await run_tool_chat(repl, model, provider, _request()) is None
+    assert "test-model" in repl._tools_unsupported_models

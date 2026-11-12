@@ -79,6 +79,19 @@ class InferenceError(ProviderError):
     pass
 
 
+class StreamInterruptedError(InferenceError):
+    """A reply stream failed or ended before the reply was complete.
+
+    The server sent an error frame, the connection stopped without a terminal marker, or the
+    data could not be trusted (for example an unreadable frame while a tool call was being
+    built). It is a failure of *this reply*, not a verdict that the model cannot take tools,
+    so callers must not treat it like a rejected request. Still an :class:`InferenceError`, so
+    it is retried like any other transient failure.
+    """
+
+    pass
+
+
 class ProviderTimeoutError(InferenceError):
     """Raised when a provider does not send a first response chunk within the
     configured time budget — see
