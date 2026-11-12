@@ -36,6 +36,7 @@ from tests.council_wire import (
 )
 from tests.test_council_r1_independence import recording
 from velune.cognition.execution_trace import CallReason, trace_request
+from velune.council import seatflow
 from velune.council.adapters.runtime import FirewallScreen, RequestTraceSink
 from velune.council.domain import ArtifactKind, StageId
 from velune.council.profiles import GENERAL_PROFILE
@@ -438,7 +439,13 @@ def slow_invoker(slow):
     return invoker
 
 
-def test_reviews_that_finished_survive_the_stage_deadline():
+def test_reviews_that_finished_survive_the_stage_deadline(monkeypatch):
+    # With a 1s wall budget this stage's allowance is a few hundred ms, so the production
+    # margin (10% of the allowance, <=5s) between the seat-flow deadline and the runner's
+    # outer timeout is only tens of ms. On a loaded runner the outer timer can win, the stage
+    # times out with no seat results at all, and this test fails with KeyError('fact_checker').
+    # Widen the margin so the inner deadline -- the behaviour under test -- reliably fires first.
+    monkeypatch.setattr(seatflow, "DEADLINE_MARGIN_SHARE", 0.5)
     invoker = slow_invoker(("fact_checker", "practicalist"))
     request = make_request(settings=CouncilSettings(wall_budget_s=1.0, max_concurrency=5))
     outcome, _ = go(invoker, request)

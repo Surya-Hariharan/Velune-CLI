@@ -1,0 +1,18 @@
+# Gitleaks findings confirmed to be synthetic test fixtures, not credentials.
+#
+# One fingerprint per finding (commit:file:rule:line). This is deliberately not a path or
+# directory allowlist: a real secret added to the same files is still reported. CI scans each
+# commit a pull request introduces, so editing a fixture later cannot clear a finding in the
+# commit that added it; the fingerprint is the narrowest mechanism that can.
+#
+# Entries (what each fixture is is described, never quoted):
+#   test_integration_redaction.py:59 - a sample key=value input that redact_secrets must mask
+f67d787c69d459d2d0d4e2a18a8a376b076fdf77:tests/test_integration_redaction.py:generic-api-key:59
+#   test_process_connector.py:148 - a command line carrying a sample --api_key= argument, used to test redaction of job commands
+f86f844c1ead02f7cac6e80ee33566347efbb249:tests/test_process_connector.py:generic-api-key:148
+#   test_http_environments_auth.py:158,171,187 and test_http_connector.py:33 - placeholder bearer tokens and a sample
+#   password in HTTP fixtures that the redaction/credential-handling tests assert are never echoed
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_environments_auth.py:generic-api-key:158
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_environments_auth.py:generic-api-key:171
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_environments_auth.py:generic-api-key:187
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_connector.py:generic-api-key:33
