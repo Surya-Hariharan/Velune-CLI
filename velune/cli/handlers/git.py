@@ -113,7 +113,7 @@ async def cmd_undo(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_rewind(repl: VeluneREPL, args: str) -> None:
-    """Undo the file changes the agent made during its last turn.
+    """Undo the file changes the agent made during its most recent turn (and only that turn).
 
     Uses the turn's journal (velune/tools/filesystem/mutation.py), not git, so it
     also covers files git does not track. A file that changed again after the turn
@@ -121,7 +121,10 @@ async def cmd_rewind(repl: VeluneREPL, args: str) -> None:
     """
     journal = getattr(repl, "_last_turn_journal", None)
     if not journal:
-        repl.console.print("[dim]Nothing to rewind: the last agent turn changed no files.[/dim]")
+        repl.console.print(
+            "[dim]Nothing to rewind: the most recent agent turn changed no files "
+            "(or it was already rewound). /rewind only undoes that one turn.[/dim]"
+        )
         return
     changes = journal.describe()
     report = await asyncio.to_thread(journal.rewind)

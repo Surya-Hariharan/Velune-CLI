@@ -432,6 +432,10 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
 
     workspace = _Path(repl.container.get("runtime.workspace")).resolve()
 
+    # This is now the most recent turn: a proposal that is never applied (no blocks, refused,
+    # every change rejected) changed nothing, and /rewind must not reach back to an older turn.
+    repl._last_turn_journal = None
+
     family = detect_family(repl.active_model.model_id if repl.active_model else "")
     blocks = parse_with_fallback(coder_proposal, family, workspace_path=workspace)
 
@@ -478,8 +482,8 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
         await _write_accepted(repl, applier, preview, decisions, file_writes, accepted_paths)
     finally:
         reset_active_journal(journal_token)
-        if journal:
-            repl._last_turn_journal = journal
+        # Replace the previous turn's journal even when nothing was written (see run_tool_chat).
+        repl._last_turn_journal = journal
 
     if not accepted_paths:
         repl.console.print("[dim]No changes applied.[/dim]")
