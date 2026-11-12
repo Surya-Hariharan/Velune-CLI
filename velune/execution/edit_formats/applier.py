@@ -69,9 +69,10 @@ class EditBlockApplier:
         if content == "":
             if target.exists():
                 before, kept = mut.read_before_image(target)
+                mode = mut.file_mode(target)
                 target.unlink()
                 if kept:
-                    mut.journal(mut.FileChange(target, before or b"", mut.ABSENT))
+                    mut.journal(mut.FileChange(target, before or b"", mut.ABSENT, mode))
                 else:
                     mut.journal_irreversible(f"deleted {target}")
                 logger.info("Deleted: %s", target)
