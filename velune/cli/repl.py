@@ -1577,6 +1577,12 @@ class VeluneREPL:
 
         self._conversation.append({"role": "user", "content": text})
 
+        # The accepted prompt is the newest turn: clear the previous turn's journal now, before
+        # any fallible work (context assembly, provider setup). If one of those raises, the
+        # main loop carries on and /rewind must not reach back to an older turn. A turn that
+        # runs the tool loop replaces this with its own journal (run_tool_chat).
+        self._last_turn_journal = None
+
         mode_config = self._mode_manager.config
 
         # Canonical context assembly: ContextAssembler (priority ordering,
@@ -1623,11 +1629,6 @@ class VeluneREPL:
             ProviderTimeoutError,
             RateLimitError,
         )
-
-        # This prompt is the newest turn. If it never reaches the tool loop (plain chat, an
-        # unsupported model) it changed no files, so /rewind must not undo an older turn.
-        # A turn that does run replaces this with its own journal in run_tool_chat.
-        self._last_turn_journal = None
 
         tried_provider_ids = {provider.provider_id}
         while True:

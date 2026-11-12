@@ -262,12 +262,15 @@ class DeleteFile(_WriteToolBase):
         else:
             before, kept = mut.read_before_image(path)
         removed = len(before.decode("utf-8", errors="replace").splitlines()) if before else 0
+        mode = mut.file_mode(path)  # so a rewind gives the file back with its permissions
         path.unlink()
         if path.exists() or path.is_symlink():
             raise mut.MutationVerificationError(f"{label} still exists after deleting it")
         self.tracker.forget(path)
         if kept:
-            mut.journal(mut.FileChange(path, before if before is not None else b"", mut.ABSENT))
+            mut.journal(
+                mut.FileChange(path, before if before is not None else b"", mut.ABSENT, mode)
+            )
         else:
             mut.journal_irreversible(f"deleted {path}")
         if self.confirm:

@@ -184,7 +184,11 @@ class MovePath(_FsTool):
         # A folder carries its contents with it: moving one onto ``.velune`` (or a folder that
         # holds ``.git``/``.velune``/``velune.toml``) installs protected files at the destination
         # without ever naming them. Judge what the move would put there.
-        installs = protected_descendant_reason(source, dest) if source.is_dir() else ""
+        installs = (
+            protected_descendant_reason(source, dest, boundary.protected_roots())
+            if source.is_dir()
+            else ""
+        )
         dest_reason = "move destination"
         dest_risk = risk
         if installs:
@@ -214,6 +218,7 @@ class MovePath(_FsTool):
             raise ValueError(f"Cannot move folder {src} into itself ({dst})")
 
         overwritten: bytes | None = None
+        overwritten_mode: int | None = None
         if dst.exists() and not case_rename:
             if not overwrite:
                 raise FileExistsError(
@@ -222,6 +227,7 @@ class MovePath(_FsTool):
             if dst.is_dir() or src.is_dir():
                 raise FileExistsError(f"Cannot overwrite {dst}: only a file can replace a file")
             overwritten, kept = mut.read_before_image(dst)
+            overwritten_mode = mut.file_mode(dst)
             if not kept:
                 mut.journal_irreversible(f"overwrote {dst}")
 
@@ -248,5 +254,5 @@ class MovePath(_FsTool):
             self.tracker.forget(src)
             if sha_before is not None:
                 self.tracker.record(dst, sha_before)
-        mut.journal(mut.Moved(src, dst, overwritten, sha_before))
+        mut.journal(mut.Moved(src, dst, overwritten, sha_before, overwritten_mode))
         return f"Moved {src} → {dst} (verified)"
