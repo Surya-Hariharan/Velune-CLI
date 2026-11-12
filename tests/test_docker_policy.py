@@ -309,6 +309,21 @@ def compose(tmp_path, text):
     (tmp_path / "compose.yaml").write_text(text, encoding="utf-8")
 
 
+def stub_docker_cli(monkeypatch, *, compose: bool) -> None:
+    """Pin the host-CLI probe so no test depends on the machine running it.
+
+    ``execute()`` runs ``connect()`` for any connector that has not connected yet, and
+    ``connect()`` sets ``_has_compose`` from whether ``docker`` is on PATH and answers
+    ``compose version``. Assigning ``conn._has_compose`` by hand is therefore overwritten
+    before the handler runs, and the result used to differ per host (Compose present on
+    Linux/Windows runners, no docker on macOS runners). Patch the lookup the probe uses
+    instead, and let the real ``connect()`` derive the flag from it.
+    """
+    monkeypatch.setattr(
+        DockerConnector, "_docker_path", staticmethod(lambda: "docker" if compose else None)
+    )
+
+
 def test_compose_external_resources_and_container_namespaces_are_flagged(tmp_path):
     from velune.resources.docker import compose_scan as cs
 
@@ -325,14 +340,19 @@ def test_compose_external_resources_and_container_namespaces_are_flagged(tmp_pat
 
 
 async def test_compose_config_inspects_services_and_risks_without_running_anything(
-    tmp_path, daemon
+    tmp_path, daemon, monkeypatch
 ):
     compose(
         tmp_path,
         "services:\n  web:\n    image: nginx\n    privileged: true\n  db:\n    image: postgres\n",
     )
     conn = connector(tmp_path, daemon)
-    conn._has_compose = False
+    stub_docker_cli(monkeypatch, compose=False)
+
+    async def no_cli(*args, **kwargs):
+        raise AssertionError(f"compose_config must not run the docker CLI: {args}")
+
+    monkeypatch.setattr(conn, "_run", no_cli)
     result = await conn.execute("compose_config", {})
     assert result.ok and result.data["services"] == ["web", "db"] and result.data["needs_approval"]
     assert (
@@ -348,7 +368,7 @@ async def test_compose_up_records_only_the_resources_it_created(tmp_path, daemon
         "ext", labels={"com.docker.compose.project": tmp_path.name.lower()}
     )  # already running
     conn = connector(tmp_path, daemon)
-    conn._has_compose = True
+    stub_docker_cli(monkeypatch, compose=True)
 
     async def fake_run(args, *, timeout=20.0):
         from velune.resources.base import ResourceResult
@@ -374,7 +394,7 @@ async def test_compose_down_refuses_a_project_with_containers_velune_did_not_cre
 ):
     daemon.add_container("theirs", labels={"com.docker.compose.project": "demo"})
     conn = connector(tmp_path, daemon)
-    conn._has_compose = True
+    stub_docker_cli(monkeypatch, compose=True)
     ran = []
 
     async def fake_run(args, *, timeout=20.0):
@@ -394,7 +414,7 @@ async def test_compose_down_takes_down_an_owned_project_and_releases_it(
     tmp_path, daemon, monkeypatch
 ):
     conn = connector(tmp_path, daemon)
-    conn._has_compose = True
+    stub_docker_cli(monkeypatch, compose=True)
     from velune.resources.base import ResourceResult
 
     async def fake_run(args, *, timeout=20.0):
@@ -409,6 +429,43 @@ async def test_compose_down_takes_down_an_owned_project_and_releases_it(
     assert len(conn.store.owned("container")) == 1
     assert (await conn.execute("compose_down", {"project": "demo"})).ok
     assert conn.store.owned("container") == []
+
+
+async def test_compose_actions_report_that_compose_is_unavailable(tmp_path, daemon, monkeypatch):
+    """Without a docker CLI the answer is a clear refusal, not a guess or a crash."""
+    compose(tmp_path, "services:\n  web:\n    image: nginx\n")
+    stub_docker_cli(monkeypatch, compose=False)
+    conn = connector(tmp_path, daemon)
+    for action in (
+        "compose_up",
+        "compose_stop",
+        "compose_down",
+    ):  # the actions that need the plugin
+        result = await conn.execute(action, {"project": "demo"})
+        assert not result.ok and "docker compose is not available" in result.error, action
+    assert conn._has_compose is False
+
+
+@pytest.mark.parametrize("answer", [True, False])
+async def test_connect_derives_compose_availability_from_the_probe(
+    tmp_path, daemon, monkeypatch, answer
+):
+    from velune.resources.base import ResourceResult
+
+    stub_docker_cli(monkeypatch, compose=True)
+    conn = connector(tmp_path, daemon)
+    probes = []
+
+    async def fake_run(args, *, timeout=20.0):
+        probes.append(args)
+        if answer:
+            return ResourceResult.success(action=args[0], data="Docker Compose version v2.0.0")
+        return ResourceResult.failure("unknown command: docker compose", action=args[0])
+
+    monkeypatch.setattr(conn, "_run", fake_run)
+    opened = await conn.connect()
+    assert opened.ok and opened.data["compose"] is answer and conn._has_compose is answer
+    assert probes == [["compose", "version"]]
 
 
 def test_compose_down_and_stop_always_ask_in_auto(tmp_path, daemon):
