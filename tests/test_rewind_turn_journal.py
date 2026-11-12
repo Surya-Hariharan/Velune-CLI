@@ -245,3 +245,46 @@ async def test_a_council_turn_whose_changes_are_all_rejected_must_not_expose_an_
     await cmd_rewind(council_repl, "")
     assert (ws / "older.txt").exists()
     assert (ws / "edited.py").read_text() == "x = 1\n"
+
+
+# ── Directory moves: say what /rewind actually did (CodeRabbit #8, accepted with this wording) ──
+
+
+async def test_rewinding_a_folder_move_says_the_contents_were_not_compared(tmp_path):
+    """A moved folder has no content hash, so a later change inside it cannot be detected.
+    The folder is moved back as a whole, and the report must not claim more than that."""
+    from velune.tools.filesystem import mutation as mut
+    from velune.tools.filesystem.dirs import MovePath
+
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "f.txt").write_text("orig\n")
+    journal = mut.TurnJournal()
+    token = mut.set_active_journal(journal)
+    try:
+        await MovePath(workspace=tmp_path).execute(source="d", destination="moved")
+    finally:
+        mut.reset_active_journal(token)
+    (tmp_path / "moved" / "added_later.txt").write_text("added by the user\n")
+
+    report = journal.rewind()
+
+    assert (tmp_path / "d" / "f.txt").read_text() == "orig\n"
+    assert (tmp_path / "d" / "added_later.txt").exists()  # nothing was lost
+    (line,) = report.restored
+    assert "folder moved back as a whole" in line and "not compared" in line
+
+
+async def test_rewinding_a_file_move_is_reported_without_the_caveat(tmp_path):
+    from velune.tools.filesystem import mutation as mut
+    from velune.tools.filesystem.dirs import MovePath
+
+    (tmp_path / "a.txt").write_text("x\n")
+    journal = mut.TurnJournal()
+    token = mut.set_active_journal(journal)
+    try:
+        await MovePath(workspace=tmp_path).execute(source="a.txt", destination="b.txt")
+    finally:
+        mut.reset_active_journal(token)
+    report = journal.rewind()
+    assert (tmp_path / "a.txt").exists()
+    assert "not compared" not in report.restored[0]

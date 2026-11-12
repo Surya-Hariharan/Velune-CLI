@@ -662,7 +662,12 @@ class TurnJournal:
             shutil.move(str(dst), str(src))
             if entry.overwritten is not None:
                 atomic_write(dst, entry.overwritten, expected_sha256=ABSENT)
-            report.restored.append(f"{dst} → {src}")
+            note = (
+                " (folder moved back as a whole; its contents are not compared)"
+                if entry.after_sha is None and src.is_dir()
+                else ""
+            )
+            report.restored.append(f"{dst} → {src}{note}")
 
 
 def _entry_path(entry: FileChange | DirCreated | DirDeleted | Moved) -> Path:
