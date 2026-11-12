@@ -19,6 +19,8 @@ from velune.execution.sandbox import SubprocessSandbox
 from velune.tools.safety import ApprovalMode
 from velune.tools.terminal.execute import ExecuteCommand
 
+pytestmark = pytest.mark.usefixtures("interpreter_under_test_on_path")
+
 
 def _say(tmp_path, text):
     """Portable stand-in for `echo`, which is a shell builtin on Windows."""
