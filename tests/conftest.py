@@ -149,3 +149,24 @@ def sql_env(tmp_path, monkeypatch):
     from tests.sql_fakes import SQLEnv
 
     return SQLEnv(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def interpreter_under_test_on_path(monkeypatch):
+    """Make a bare ``python`` resolve to the interpreter that is running the suite.
+
+    The sandbox refuses an executable that is not under a system root, the running
+    interpreter's ``sys.prefix``/``sys.base_prefix`` or a workspace venv (PATH-hijack
+    defence). Tests that spawn ``python script.py`` through the sandbox are exercising
+    cancellation or job handling, not that policy, but they only work when the first
+    ``python`` on PATH belongs to the interpreter under test. On CI it does; on a machine
+    with another Python earlier on PATH (or a venv that is not activated) it is rejected
+    as untrusted. Prepending the interpreter's own directory makes the tests independent
+    of that, and leaves the trust policy untouched (and separately tested).
+    """
+    import os
+    import sys
+    from pathlib import Path
+
+    exe_dir = str(Path(sys.executable).parent)
+    monkeypatch.setenv("PATH", exe_dir + os.pathsep + os.environ.get("PATH", ""))

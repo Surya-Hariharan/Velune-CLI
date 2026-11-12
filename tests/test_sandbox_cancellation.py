@@ -24,6 +24,8 @@ from velune.execution import cancellation
 from velune.execution.command_spec import CommandSpec
 from velune.execution.sandbox import SubprocessSandbox
 
+pytestmark = pytest.mark.usefixtures("interpreter_under_test_on_path")
+
 
 def _long_running_spec(tmp_path):
     # `python -c` is blocked entirely (inline-code execution guard — bypasses
