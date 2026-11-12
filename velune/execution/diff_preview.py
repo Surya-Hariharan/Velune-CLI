@@ -49,10 +49,25 @@ class FileDiff:
     is_deletion: bool
 
 
+def _lf(text: str) -> str:
+    """*text* with every line ending (CRLF, lone CR) as LF — the form ``read_text`` yields."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def compute_file_diff(path: Path, proposed: str) -> FileDiff:
-    """Build a FileDiff against the current on-disk state (no console needed)."""
+    """Build a FileDiff against the current on-disk state (no console needed).
+
+    The original is read with universal newlines (every line ending becomes LF), but a
+    proposal built from a CRLF file keeps its CRLFs; compared as they are, *every* line
+    would differ and the approval diff would show the whole file as rewritten. Both sides
+    are compared with LF endings. This is for display and comparison only: the tools that
+    write the file keep its real encoding and line endings (``velune.tools.filesystem``).
+    A new file has nothing to compare against and keeps its text exactly.
+    """
     is_new = not path.exists()
     original = "" if is_new else path.read_text(errors="replace")
+    if not is_new:
+        original, proposed = _lf(original), _lf(proposed)
     return FileDiff(
         path=path,
         original=original,

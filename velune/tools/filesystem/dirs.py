@@ -117,7 +117,12 @@ class DeleteDirectory(_FsTool):
             if is_root
             else ("recursive deletion" if recursive else "delete empty folder")
         )
-        return [path_action(ActionType.DELETE_DIRECTORY, target, boundary, reason, risk=risk)]
+        # The path as requested, not the resolved one: protection judges both identities.
+        return [
+            path_action(
+                ActionType.DELETE_DIRECTORY, args.get("path", ""), boundary, reason, risk=risk
+            )
+        ]
 
     async def execute(self, path: str, recursive: bool = False) -> str:
         target = resolve_tool_path(path, self.workspace, label="delete_directory")
@@ -169,19 +174,30 @@ class MovePath(_FsTool):
 
     def describe_actions(self, args: dict[str, Any], boundary: Any) -> list[Any]:
         from velune.permissions.actions import ActionType, Risk
-        from velune.permissions.boundary import path_action
+        from velune.permissions.boundary import path_action, protected_descendant_reason
 
-        source = boundary.resolve(args.get("source", ""))
-        dest = boundary.resolve(args.get("destination", ""))
+        raw_source, raw_dest = args.get("source", ""), args.get("destination", "")
+        source = boundary.resolve(raw_source)
+        dest = boundary.resolve(raw_dest)
         overwrite = bool(args.get("overwrite")) and dest.exists()
         risk = Risk.MEDIUM if overwrite else Risk.LOW
+        # A folder carries its contents with it: moving one onto ``.velune`` (or a folder that
+        # holds ``.git``/``.velune``/``velune.toml``) installs protected files at the destination
+        # without ever naming them. Judge what the move would put there.
+        installs = protected_descendant_reason(source, dest) if source.is_dir() else ""
+        dest_reason = "move destination"
+        dest_risk = risk
+        if installs:
+            dest_risk = Risk.HIGH
+            dest_reason = f"move destination: {installs}"
+        # The paths are passed as requested (not resolved) so a link's own name is judged too.
         return [
             path_action(
-                ActionType.MOVE, source, boundary, "move / rename", risk=risk, detail=str(dest)
+                ActionType.MOVE, raw_source, boundary, "move / rename", risk=risk, detail=str(dest)
             ),
             # The destination is checked too: moving *into* an outside or secret
             # location must be caught just like moving out of one.
-            path_action(ActionType.CREATE_FILE, dest, boundary, "move destination", risk=risk),
+            path_action(ActionType.CREATE_FILE, raw_dest, boundary, dest_reason, risk=dest_risk),
         ]
 
     async def execute(self, source: str, destination: str, overwrite: bool = False) -> str:

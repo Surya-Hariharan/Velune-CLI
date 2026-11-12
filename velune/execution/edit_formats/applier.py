@@ -87,12 +87,20 @@ class EditBlockApplier:
         if current is not None:
             text = mut.to_newline(content, current.newline) if current.style != "none" else content
             data = mut.encode_text(text, current.encoding, current.bom)
-            before, expected = current.raw, current.sha256
+            before, expected, kept = current.raw, current.sha256, True
         else:
             data = content.encode("utf-8")
-            before, _kept = mut.read_before_image(target)
+            # ``kept`` is False for an existing file too large for the journal: its old bytes
+            # are not retained, which is not the same as "there was no old file".
+            before, kept = mut.read_before_image(target)
             expected = mut.file_sha256(target)
         new_sha = mut.atomic_write(target, data, expected_sha256=expected)
         mut.verify_written(target, new_sha)
-        mut.journal(mut.FileChange(target, before, new_sha))
+        if current is None and not kept:
+            # Overwrote a file whose contents cannot be kept. Journaling it as a creation
+            # (before=None) would make /rewind *delete* the file and call it restored; say
+            # plainly that it cannot be rewound instead (the same note the delete branch uses).
+            mut.journal_irreversible(f"overwrote {target}")
+        else:
+            mut.journal(mut.FileChange(target, before, new_sha))
         logger.info("Written: %s", target)
