@@ -113,8 +113,49 @@ def test_real_hostnames_that_merely_look_hexadecimal_are_accepted():
 )
 def test_ipv6_literals_are_normalized(raw, host):
     parsed = parse_url(raw)
-    assert parsed.host == host
+    # Compare addresses, not their text: how str() writes an IPv4-mapped IPv6 address changed
+    # between Python releases (::ffff:7f00:1 became ::ffff:127.0.0.1), and policy never depends
+    # on the spelling - it classifies the address object.
     assert parsed.ip is not None
+    assert parsed.ip == ipaddress.ip_address(host)
+    assert ipaddress.ip_address(parsed.host) == parsed.ip
+
+
+@pytest.mark.parametrize(
+    ("spellings", "kind"),
+    [
+        (("[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[0:0:0:0:0:ffff:7f00:1]"), Kind.LOOPBACK),
+        (("[::ffff:10.0.0.1]", "[::ffff:a00:1]"), Kind.PRIVATE),
+        (("[::ffff:192.168.1.20]", "[::ffff:c0a8:114]"), Kind.PRIVATE),
+        (("[::ffff:169.254.169.254]", "[::ffff:a9fe:a9fe]"), Kind.BLOCKED),
+        (("[::ffff:8.8.8.8]", "[::ffff:808:808]"), Kind.PUBLIC),
+    ],
+)
+def test_ipv4_mapped_urls_are_classified_by_the_address_they_embed_in_every_spelling(
+    spellings, kind
+):
+    """Dotted, hex and expanded spellings of one mapped address parse to the same address and
+    get the same class, so no spelling (or Python version) can slip a destination past a rule."""
+    policy = NetworkPolicy()
+    parsed = [parse_url(f"http://{spelling}/") for spelling in spellings]
+    assert len({p.ip for p in parsed}) == 1 and len({p.host for p in parsed}) == 1
+    for url in parsed:
+        assert policy.classify(url).kind is kind, url.host
+
+
+def test_mapped_private_and_loopback_targets_stay_blocked_or_gated_like_their_ipv4_form():
+    """A mapped private address needs the same trust a bare private IPv4 does; metadata never passes."""
+    for mapped, plain in (
+        ("[::ffff:192.168.1.20]", "192.168.1.20"),
+        ("[::ffff:10.0.0.1]", "10.0.0.1"),
+    ):
+        assert NetworkPolicy().classify(parse_url(f"http://{mapped}:3000/")).blocked
+        assert NetworkPolicy().classify(parse_url(f"http://{plain}:3000/")).blocked
+        trusted = NetworkPolicy.from_origins([f"http://{mapped}:3000"])
+        assert not trusted.classify(parse_url(f"http://{mapped}:3000/")).blocked
+    for text in ("http://[::ffff:a9fe:a9fe]/", "http://[::ffff:169.254.169.254]/"):
+        policy = NetworkPolicy.from_origins([text], allow_private_network=True)
+        assert policy.classify(parse_url(text)).blocked
 
 
 def test_ipv6_origins_round_trip_with_brackets():
