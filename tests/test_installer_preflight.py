@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,26 +78,42 @@ def test_sh_rejects_unsupported_platforms_with_a_reason(os_name, arch, needle):
     assert needle in reason, reason
 
 
-def test_sh_main_stops_before_any_download_on_unsupported_platform(tmp_path):
-    """Run the real entry point with a stub `uname`; curl/wget/uv must never run."""
-    sh = _sh()
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    marker = tmp_path / "network-was-touched"
-    for tool in ("curl", "wget", "uv"):
-        stub = fake_bin / tool
-        stub.write_text(f'#!/bin/sh\necho {tool} >> "{marker.as_posix()}"\nexit 1\n')
-        stub.chmod(0o755)
-    uname = fake_bin / "uname"
-    uname.write_text('#!/bin/sh\nif [ "$1" = "-m" ]; then echo armv7l; else echo Linux; fi\n')
-    uname.chmod(0o755)
+def _run_installer_main(tmp_path, *, system: str, machine: str, stubs: dict[str, Path]):
+    """Run the installer's real ``main`` with ``uname`` and other commands replaced.
 
-    env = {**os.environ, "PATH": f"{fake_bin.as_posix()}{os.pathsep}{os.environ['PATH']}"}
-    env.pop("VELUNE_INSTALLER_SOURCE_ONLY", None)
-    result = subprocess.run(
-        [sh, INSTALL_SH.as_posix()], capture_output=True, text=True, env=env,
-        timeout=60, check=False, cwd=tmp_path,
+    The replacements are shell *functions* defined after sourcing the script, not
+    executables on ``PATH``. A function wins over any command lookup in every POSIX
+    shell, whereas Git for Windows' ``sh`` puts its own ``/usr/bin`` first and so
+    never consults a ``PATH`` stub (it ran the real ``uname`` and reported
+    ``MINGW64_NT``). Each stub appends its name and arguments to its marker file and
+    fails, so a test can see exactly what ``main`` tried to run.
+    """
+    sh = _sh()
+    functions = [
+        'uname() { if [ "$1" = "-m" ]; then echo "$STUB_MACHINE"; else echo "$STUB_SYSTEM"; fi; }'
+    ]
+    env = {**os.environ, "STUB_SYSTEM": system, "STUB_MACHINE": machine}
+    for name, marker in stubs.items():
+        env[f"STUB_MARKER_{name.upper()}"] = marker.as_posix()
+        functions.append(f'{name}() {{ echo "$*" >> "$STUB_MARKER_{name.upper()}"; return 1; }}')
+    env["VELUNE_INSTALLER_SOURCE_ONLY"] = "1"  # define the functions, don't run yet
+    env["VELUNE_NO_MODIFY_PATH"] = "1"
+    script = '. "$1"; ' + "; ".join(functions) + "; main"
+    return subprocess.run(
+        [sh, "-c", script, "sh", INSTALL_SH.as_posix()],
+        capture_output=True, text=True, env=env, timeout=60, check=False, cwd=tmp_path,
     )  # fmt: skip
+
+
+def test_sh_main_stops_before_any_download_on_unsupported_platform(tmp_path):
+    """Run the real entry point on a stubbed armv7l host; curl/wget/uv must never run."""
+    marker = tmp_path / "network-was-touched"
+    result = _run_installer_main(
+        tmp_path,
+        system="Linux",
+        machine="armv7l",
+        stubs={"curl": marker, "wget": marker, "uv": marker},
+    )
     assert result.returncode != 0
     assert "unsupported CPU architecture: armv7l" in result.stderr
     assert SUPPORT_URL in result.stderr
@@ -106,24 +123,8 @@ def test_sh_main_stops_before_any_download_on_unsupported_platform(tmp_path):
 
 def test_sh_main_does_not_reject_a_supported_platform(tmp_path):
     """On supported x86-64 Linux the preflight passes and the flow reaches uv."""
-    sh = _sh()
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
     marker = tmp_path / "uv-was-called"
-    uv = fake_bin / "uv"
-    uv.write_text(f'#!/bin/sh\necho "$@" >> "{marker.as_posix()}"\nexit 1\n')
-    uv.chmod(0o755)
-    uname = fake_bin / "uname"
-    uname.write_text('#!/bin/sh\nif [ "$1" = "-m" ]; then echo x86_64; else echo Linux; fi\n')
-    uname.chmod(0o755)
-
-    env = {**os.environ, "PATH": f"{fake_bin.as_posix()}{os.pathsep}{os.environ['PATH']}"}
-    env.pop("VELUNE_INSTALLER_SOURCE_ONLY", None)
-    env["VELUNE_NO_MODIFY_PATH"] = "1"
-    result = subprocess.run(
-        [sh, INSTALL_SH.as_posix()], capture_output=True, text=True, env=env,
-        timeout=60, check=False, cwd=tmp_path,
-    )  # fmt: skip
+    result = _run_installer_main(tmp_path, system="Linux", machine="x86_64", stubs={"uv": marker})
     assert "not supported" not in result.stderr
     assert marker.exists(), "supported platform never reached the uv install step"
     assert "tool install" in marker.read_text()  # our stub uv failed on purpose
@@ -191,7 +192,12 @@ def test_ps_install_function_throws_actionable_message_on_arm64():
     )  # fmt: skip
     out = result.stdout
     assert "NO-THROW" not in out, out
-    assert "not supported" in out
+    # Install-Velune checks "is this Windows?" before "which architecture?" (and $IsWindows
+    # is a read-only automatic variable, so a test cannot pretend to be Windows). On Windows the
+    # forced ARM64 reaches the architecture check; elsewhere the correct, equally actionable
+    # refusal is the not-Windows one. The ARM64 reason itself is exercised on every OS by
+    # test_ps_rejects_windows_arm64, which passes the platform explicitly.
+    assert ("not supported" if sys.platform == "win32" else "not Windows") in out, out
     assert SUPPORT_URL in out
     assert "Nothing was downloaded or installed" in out
 
@@ -256,23 +262,8 @@ def test_other_supported_platforms_get_no_intel_note(os_name, arch):
 
 def test_intel_mac_is_still_allowed_and_install_continues(tmp_path):
     """The installer must not reject Intel macOS; it warns and proceeds to uv."""
-    sh = _sh()
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
     marker = tmp_path / "uv-was-called"
-    uv = fake_bin / "uv"
-    uv.write_text(f'#!/bin/sh\necho "$@" >> "{marker.as_posix()}"\nexit 1\n')
-    uv.chmod(0o755)
-    uname = fake_bin / "uname"
-    uname.write_text('#!/bin/sh\nif [ "$1" = "-m" ]; then echo x86_64; else echo Darwin; fi\n')
-    uname.chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake_bin.as_posix()}{os.pathsep}{os.environ['PATH']}"}
-    env.pop("VELUNE_INSTALLER_SOURCE_ONLY", None)
-    env["VELUNE_NO_MODIFY_PATH"] = "1"
-    result = subprocess.run(
-        [sh, INSTALL_SH.as_posix()], capture_output=True, text=True, env=env,
-        timeout=60, check=False, cwd=tmp_path,
-    )  # fmt: skip
+    result = _run_installer_main(tmp_path, system="Darwin", machine="x86_64", stubs={"uv": marker})
     assert "not supported" not in result.stderr
     assert "unverified" in result.stdout.lower()
     assert marker.exists(), "Intel macOS never reached the uv install step"

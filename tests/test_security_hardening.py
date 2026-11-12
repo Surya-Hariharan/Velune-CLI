@@ -7,6 +7,7 @@ lifecycle operation is touched.
 
 from __future__ import annotations
 
+import inspect
 import io
 import os
 import shutil
@@ -247,11 +248,19 @@ def _pretend_interpreter_has_no_extraction_filter(monkeypatch) -> None:
     from velune.recovery import archive
 
     original = tarfile.TarFile.extractall
+    # A genuinely old interpreter (e.g. some 3.10 builds) has no ``filter`` parameter at all, and
+    # its extractall already behaves as "fully_trusted", so forwarding the keyword there would
+    # raise the very TypeError this helper is simulating, from inside the helper itself.
+    real_accepts_filter = "filter" in inspect.signature(original).parameters
 
     def old_signature(self, path=".", members=None, *, numeric_owner=False, **kwargs):
         if "filter" in kwargs:
             raise TypeError("extractall() got an unexpected keyword argument 'filter'")
-        return original(self, path, members, numeric_owner=numeric_owner, filter="fully_trusted")
+        if real_accepts_filter:
+            return original(
+                self, path, members, numeric_owner=numeric_owner, filter="fully_trusted"
+            )
+        return original(self, path, members, numeric_owner=numeric_owner)
 
     monkeypatch.setattr(tarfile.TarFile, "extractall", old_signature)
     monkeypatch.setattr(archive, "_HAS_EXTRACTION_FILTER", False, raising=False)

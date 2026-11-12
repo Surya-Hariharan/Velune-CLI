@@ -189,7 +189,9 @@ def test_command_palette_opens_filters_and_dismisses(repl):
     s = repl
     s.type("/hel")
     s.wait_for("COMMAND PALETTE", 10)
-    assert "/help" in s.text()
+    # The header is drawn before the typed filter has been applied to the rows, so the matching
+    # entry can arrive a frame later (seen on a slow Windows runner). Wait for it, don't sample once.
+    s.wait_for("/help", 10)
     s.key("esc")
     s.wait_gone("COMMAND PALETTE", 10)
     assert_clean_frame(s)

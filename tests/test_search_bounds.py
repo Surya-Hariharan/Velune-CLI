@@ -204,6 +204,22 @@ async def test_pathological_regex_returns_within_the_budget(tmp_path, monkeypatc
     assert marker and any(r.startswith("time_budget=") for r in marker["reasons"])
 
 
+async def _calmest_gap(make_call, attempts: int = 3) -> float:
+    """Longest loop stall of the calmest of *attempts* runs of the same call.
+
+    Code that blocks the event loop does so on every run, so it still fails here. A single
+    long gap on a busy shared CI runner (one 275 ms outlier was seen where this machine
+    measures 15-25 ms) is the host being descheduled, not the search, and does not repeat.
+    """
+    worst = float("inf")
+    for _ in range(attempts):
+        _, gap = await heartbeat_gap(make_call())
+        worst = min(worst, gap)
+        if worst < 0.25:
+            break
+    return worst
+
+
 async def test_event_loop_stays_responsive_during_a_pathological_search(tmp_path, monkeypatch):
     monkeypatch.setattr(search_mod, "GREP_TIME_BUDGET_SECONDS", 2.0)
     (tmp_path / "evil.txt").write_text("a" * 40 + "!\n", encoding="utf-8")
@@ -217,8 +233,8 @@ async def test_event_loop_stays_responsive_during_ordinary_searches(tmp_path):
         sub.mkdir()
         for n in range(50):
             (sub / f"m{n}.py").write_text("def f():\n    return 1\n" * 200, encoding="utf-8")
-    _, worst_grep = await heartbeat_gap(GrepFiles(workspace=tmp_path).execute("return 2"))
-    _, worst_find = await heartbeat_gap(FindFiles(workspace=tmp_path).execute("m4*.py"))
+    worst_grep = await _calmest_gap(lambda: GrepFiles(workspace=tmp_path).execute("return 2"))
+    worst_find = await _calmest_gap(lambda: FindFiles(workspace=tmp_path).execute("m4*.py"))
     assert worst_grep < 0.25, f"grep stalled the loop for {worst_grep * 1000:.0f} ms"
     assert worst_find < 0.25, f"find stalled the loop for {worst_find * 1000:.0f} ms"
 
