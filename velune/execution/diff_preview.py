@@ -54,6 +54,21 @@ def _lf(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _read_for_preview(path: Path) -> str:
+    """The file's text for display, decoded as ``Path.read_text(errors="replace")`` would.
+
+    At most the editing limit (+1 byte) is read: a larger file raises
+    :class:`~velune.tools.filesystem.mutation.FileTooLargeError` instead of being loaded
+    whole just to draw an approval preview.
+    """
+    import io
+
+    from velune.tools.filesystem.mutation import MAX_MUTATION_BYTES, read_bounded
+
+    raw = read_bounded(path, MAX_MUTATION_BYTES)
+    return io.TextIOWrapper(io.BytesIO(raw), errors="replace").read()
+
+
 def compute_file_diff(path: Path, proposed: str) -> FileDiff:
     """Build a FileDiff against the current on-disk state (no console needed).
 
@@ -65,7 +80,7 @@ def compute_file_diff(path: Path, proposed: str) -> FileDiff:
     A new file has nothing to compare against and keeps its text exactly.
     """
     is_new = not path.exists()
-    original = "" if is_new else path.read_text(errors="replace")
+    original = "" if is_new else _read_for_preview(path)
     if not is_new:
         original, proposed = _lf(original), _lf(proposed)
     return FileDiff(
@@ -232,9 +247,26 @@ class DiffPreview:
         proposed: str,
         auto_accept: bool = False,
     ) -> DiffDecision:
-        diff = self.compute_diff(path, proposed)
-        self.render_diff(diff)
+        diff = self.show(path, proposed)
         return await self.prompt_decision(diff, auto_accept=auto_accept)
+
+    def show(self, path: Path, proposed: str) -> FileDiff:
+        """Compute and render the diff for *path*; return it for the decision prompt.
+
+        A file over the editing limit is not loaded to draw a diff: a notice says so, and
+        the change is still put to the user for a decision.
+        """
+        from velune.tools.filesystem.mutation import FileTooLargeError
+
+        try:
+            diff = self.compute_diff(path, proposed)
+        except FileTooLargeError as exc:
+            from rich.markup import escape
+
+            self.console.print(f"[yellow]{escape(str(exc))} No preview is shown.[/yellow]")
+            return FileDiff(path, "", proposed, is_new_file=False, is_deletion=(proposed == ""))
+        self.render_diff(diff)
+        return diff
 
     # ------------------------------------------------------------------
     # Helpers

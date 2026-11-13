@@ -518,6 +518,7 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
 async def _write_accepted(repl, applier, preview, decisions, file_writes, accepted_paths) -> None:
     """Write the edits the user accepted (hunk by hunk when hunk review is on)."""
     from velune.execution.diff_preview import DiffDecision
+    from velune.tools.filesystem.mutation import FileTooLargeError
 
     if repl._hunk_review_mode:
         from velune.execution.hunk_review import HunkReviewer
@@ -526,7 +527,14 @@ async def _write_accepted(repl, applier, preview, decisions, file_writes, accept
         for path, decision in decisions.items():
             if decision != DiffDecision.ACCEPT:
                 continue
-            file_diff = preview.preview.compute_diff(path, file_writes[path])
+            try:
+                file_diff = preview.preview.compute_diff(path, file_writes[path])
+            except FileTooLargeError:
+                # Too large to load and split into hunks: the change the user accepted
+                # is applied whole, as for a change with a single hunk.
+                applier.write(path, file_writes[path])
+                accepted_paths.append(path)
+                continue
             hunks = hunk_reviewer.split_into_hunks(file_diff)
             if len(hunks) <= 1 or file_diff.is_new_file or file_diff.is_deletion:
                 applier.write(path, file_writes[path])
