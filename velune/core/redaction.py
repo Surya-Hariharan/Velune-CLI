@@ -178,12 +178,22 @@ def redact_structure(value: Any, _depth: int = 0) -> Any:
     return value
 
 
+_TRACEBACK_FORMATTER = logging.Formatter()
+
+
 class SecretRedactingFilter(logging.Filter):
     """Logging filter that scrubs secrets from every record's rendered message.
 
     Rewrites ``record.msg`` to the fully-formatted, redacted string and clears
     ``record.args`` so downstream formatters don't re-expand the original
     (unredacted) arguments.
+
+    A traceback is rendered by the formatter from ``record.exc_info`` *after*
+    filters run, so an exception whose text carries a secret would otherwise
+    bypass the message redaction. When the rendered traceback contains a secret,
+    the redacted text is stored in ``record.exc_text`` and ``record.exc_info`` is
+    cleared, so no handler can render the original again. Records whose
+    traceback holds nothing to redact are left exactly as they were.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -195,4 +205,41 @@ class SecretRedactingFilter(logging.Filter):
         if redacted != rendered:
             record.msg = redacted
             record.args = None
+        try:
+            _redact_record_exception(record)
+        except Exception:
+            # Rendering the traceback failed, so it cannot be checked: drop it
+            # rather than let a handler print it unredacted.
+            record.exc_info = None
+            record.exc_text = "Traceback omitted: it could not be checked for secrets."
+        if record.stack_info:
+            record.stack_info = redact_secrets(record.stack_info)
         return True
+
+
+def _redact_record_exception(record: logging.LogRecord) -> None:
+    exc_info = record.exc_info
+    text = record.exc_text
+    if not text and exc_info and exc_info[0] is not None:
+        text = _TRACEBACK_FORMATTER.formatException(exc_info)
+    if not text:
+        return
+    cleaned = redact_secrets(text)
+    if cleaned != text:
+        record.exc_text = cleaned
+        record.exc_info = None
+
+
+def install_log_redaction(logger: logging.Logger | None = None) -> None:
+    """Attach :class:`SecretRedactingFilter` to every handler of *logger* (root by default).
+
+    Filters on a *handler* see every record it emits, including records
+    propagated from child loggers; a filter on the logger itself would not.
+    Idempotent: a handler that already has the filter is left alone. Levels,
+    formatters and destinations are not touched. Only handlers present at call
+    time are covered.
+    """
+    target = logger if logger is not None else logging.getLogger()
+    for handler in list(target.handlers):
+        if not any(isinstance(f, SecretRedactingFilter) for f in handler.filters):
+            handler.addFilter(SecretRedactingFilter())

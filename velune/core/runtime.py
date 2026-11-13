@@ -61,6 +61,11 @@ def build_runtime(
     # logs so users only ever see Rich-formatted output, not raw Python logs.
     logging.basicConfig(level=logging.DEBUG if verbose else logging.WARNING)
     logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
+    # Mask provider keys and registered integration secrets on every root handler,
+    # including handlers that existed before this call (basicConfig adds none then).
+    from velune.core.redaction import install_log_redaction
+
+    install_log_redaction()
 
     # 2. Configuration Service
     config_service = ConfigService(workspace=workspace, config_path=config_path)
