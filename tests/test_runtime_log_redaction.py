@@ -320,3 +320,228 @@ def test_a_traceback_already_rendered_by_another_handler_is_redacted(root_loggin
     record.exc_text = f"Traceback ...\nRuntimeError: {SECOND}"
     SecretRedactingFilter().filter(record)
     assert SECOND not in record.exc_text and REDACTION_PLACEHOLDER in record.exc_text
+
+
+# ── JSON logs keep a redacted ``exception`` field ────────────────────────────
+#
+# ``SecretRedactingFilter`` moves a traceback that holds a secret into ``exc_text`` (already
+# redacted) and clears ``exc_info``. ``JsonFormatter`` used to read only ``exc_info``, so the
+# JSON line silently lost its ``exception`` field for exactly those records. Every check here
+# is made on the serialized line a handler wrote, not on the record.
+
+JSON_SECRET = "hush-" + "charlie" + "-9150"
+
+
+def _json_handler(buffer: io.StringIO) -> logging.Handler:
+    from velune.core.logging import JsonFormatter
+
+    handler = logging.StreamHandler(buffer)
+    handler.setFormatter(JsonFormatter())
+    return handler
+
+
+@pytest.fixture
+def json_log(root_logging):
+    """A logger whose one handler writes JSON through the redaction filter, plus its lines."""
+    register_secret_value(JSON_SECRET)
+    root_logging.append(JSON_SECRET)
+    buffer = io.StringIO()
+    logger = logging.Logger("velune.test.json")
+    logger.addHandler(_json_handler(buffer))
+    install_log_redaction(logger)
+
+    def lines() -> list[dict]:
+        raw = buffer.getvalue()
+        assert JSON_SECRET not in raw, "a secret reached the serialized log"
+        return [json.loads(line) for line in raw.splitlines()]
+
+    return logger, lines
+
+
+def _module_with_secret_in_its_source(tmp_path: Path, body: str):
+    """Import a module whose source lines (shown in tracebacks and stacks) hold the secret."""
+    import importlib.util
+
+    path = tmp_path / "leaky_module.py"
+    path.write_text(textwrap.dedent(body).replace("SECRET", JSON_SECRET), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("leaky_module", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_json_keeps_the_exception_when_its_message_holds_a_secret(json_log):
+    logger, lines = json_log
+    try:
+        raise RuntimeError(f"connect failed for {JSON_SECRET}")
+    except RuntimeError:
+        logger.exception("database connect")
+    (line,) = lines()
+    assert line["msg"] == "database connect"
+    exception = line["exception"]
+    assert exception.startswith("Traceback (most recent call last):")
+    assert f"RuntimeError: connect failed for {REDACTION_PLACEHOLDER}" in exception
+    assert "test_json_keeps_the_exception_when_its_message_holds_a_secret" in exception
+
+
+def test_json_keeps_the_exception_when_a_traceback_source_line_holds_a_secret(json_log, tmp_path):
+    logger, lines = json_log
+    module = _module_with_secret_in_its_source(
+        tmp_path,
+        """
+        def fail():
+            token = "SECRET"; raise ValueError("bad token length " + str(len(token)))
+        """,
+    )
+    try:
+        module.fail()
+    except ValueError:
+        logger.exception("validate")
+    (line,) = lines()
+    assert "ValueError: bad token length" in line["exception"]
+    assert f'token = "{REDACTION_PLACEHOLDER}"' in line["exception"]
+
+
+@pytest.mark.parametrize("explicit", [True, False], ids=["raise-from", "during-handling"])
+def test_json_redacts_a_secret_held_only_by_a_chained_exception(json_log, explicit):
+    logger, lines = json_log
+    try:
+        try:
+            raise ConnectionError(f"dsn rejected: {JSON_SECRET}")
+        except ConnectionError as cause:
+            if explicit:
+                raise RuntimeError("storage unavailable") from cause
+            raise RuntimeError("storage unavailable")  # noqa: B904 - the implicit chain is the case
+    except RuntimeError:
+        logger.exception("startup")
+    (line,) = lines()
+    exception = line["exception"]
+    link = "direct cause" if explicit else "During handling of the above exception"
+    assert link in exception
+    assert f"ConnectionError: dsn rejected: {REDACTION_PLACEHOLDER}" in exception
+    assert exception.rstrip().endswith("RuntimeError: storage unavailable")
+
+
+def test_json_includes_redacted_stack_info_when_it_is_requested(json_log, tmp_path):
+    logger, lines = json_log
+    module = _module_with_secret_in_its_source(
+        tmp_path,
+        """
+        def report(logger):
+            logger.warning("checkpoint", stack_info=True); marker = "SECRET"
+        """,
+    )
+    module.report(logger)
+    (line,) = lines()
+    assert line["stack_info"].startswith("Stack (most recent call last):")
+    assert f'marker = "{REDACTION_PLACEHOLDER}"' in line["stack_info"]
+    assert "exception" not in line
+
+
+def test_json_for_an_ordinary_exception_is_unchanged(json_log):
+    logger, lines = json_log
+    try:
+        raise KeyError("missing-entry")
+    except KeyError:
+        logger.exception("lookup")
+        expected = logging.Formatter().formatException(sys.exc_info())
+    logger.info("no exception here")
+    first, second = lines()
+    assert first["exception"] == expected
+    assert set(first) == {
+        "ts",
+        "level",
+        "logger",
+        "msg",
+        "run_id",
+        "agent_id",
+        "step_id",
+        "exception",
+    }
+    assert "exception" not in second and "stack_info" not in second
+
+
+def test_json_reports_a_traceback_the_filter_could_not_check(json_log, monkeypatch):
+    """When rendering fails the filter drops the traceback; the JSON line says so."""
+    import velune.core.redaction as redaction
+
+    logger, lines = json_log
+
+    def broken(exc_info):
+        raise RuntimeError("formatter exploded")
+
+    monkeypatch.setattr(redaction._TRACEBACK_FORMATTER, "formatException", broken)
+    try:
+        raise ValueError(JSON_SECRET)
+    except ValueError:
+        logger.exception("unrenderable")
+    (line,) = lines()
+    assert line["exception"] == "Traceback omitted: it could not be checked for secrets."
+
+
+@pytest.mark.parametrize("json_first", [True, False], ids=["json-first", "text-first"])
+def test_json_and_text_handlers_on_one_logger_both_redact(root_logging, json_first):
+    register_secret_value(JSON_SECRET)
+    root_logging.append(JSON_SECRET)
+    json_buffer, text_buffer = io.StringIO(), io.StringIO()
+    json_handler = _json_handler(json_buffer)
+    text_handler = logging.StreamHandler(text_buffer)
+    text_handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+    logger = logging.Logger("velune.test.two")
+    for handler in (json_handler, text_handler) if json_first else (text_handler, json_handler):
+        logger.addHandler(handler)
+    install_log_redaction(logger)
+
+    try:
+        raise RuntimeError(f"auth failed: {JSON_SECRET}")
+    except RuntimeError:
+        logger.exception("login")
+
+    raw_json, text = json_buffer.getvalue(), text_buffer.getvalue()
+    assert JSON_SECRET not in raw_json and JSON_SECRET not in text
+    exception = json.loads(raw_json)["exception"]
+    assert f"RuntimeError: auth failed: {REDACTION_PLACEHOLDER}" in exception
+    assert text.startswith("ERROR login\nTraceback (most recent call last):")
+    assert f"RuntimeError: auth failed: {REDACTION_PLACEHOLDER}" in text
+
+
+def test_the_json_formatter_redacts_even_without_the_filter(root_logging):
+    """Defense in depth: a JSON handler someone added without the filter still masks."""
+    from velune.core.logging import JsonFormatter
+
+    register_secret_value(JSON_SECRET)
+    root_logging.append(JSON_SECRET)
+    try:
+        raise RuntimeError(JSON_SECRET)
+    except RuntimeError:
+        record = logging.LogRecord("x", logging.ERROR, __file__, 1, "m", None, sys.exc_info())
+    record.stack_info = f"Stack (most recent call last):\n  holds {JSON_SECRET}"
+    out = JsonFormatter().format(record)
+    assert JSON_SECRET not in out
+    line = json.loads(out)
+    assert line["exception"].endswith(f"RuntimeError: {REDACTION_PLACEHOLDER}")
+    assert REDACTION_PLACEHOLDER in line["stack_info"]
+
+
+async def test_repeated_runtime_initialization_keeps_json_exceptions_redacted(
+    root_logging, isolated_home, tmp_path
+):
+    buffer = io.StringIO()
+    handler = _json_handler(buffer)
+    logging.getLogger().addHandler(handler)
+    await _build(tmp_path / "ws1")
+    await _build(tmp_path / "ws2")
+    install_log_redaction()
+    assert _redactors(handler) == 1
+
+    register_secret_value(JSON_SECRET)
+    root_logging.append(JSON_SECRET)
+    try:
+        raise RuntimeError(f"token {JSON_SECRET}")
+    except RuntimeError:
+        logging.getLogger("velune.probe").exception("after reinit")
+    raw = buffer.getvalue()
+    assert JSON_SECRET not in raw
+    (line,) = [json.loads(x) for x in raw.splitlines() if '"after reinit"' in x]
+    assert line["exception"].endswith(f"RuntimeError: token {REDACTION_PLACEHOLDER}")
