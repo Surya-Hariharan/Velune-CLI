@@ -8,7 +8,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **`edit_file` tool: targeted edits instead of whole-file rewrites.** The agent replaces an exact
+  string that must match one place (or every place, with `replace_all`). Ambiguous or missing
+  matches are refused with line numbers or the closest line, so the model can correct the call.
+  It works on files larger than what `read_file` shows in one call.
+- **Every file change returns a verified diff to the model.** Writes, edits, creations, deletions
+  and moves report `+added -removed`, a unified diff and the new content hash, and are checked on
+  disk afterwards; a change that did not land is reported as an error, not a success.
+- **`/rewind`** undoes the file changes from the agent's last turn (or the last Council edit set).
+  Files changed again since the turn are skipped and reported, never overwritten.
+- [Filesystem tools](docs/filesystem-tools.md) documents every tool, the safety model, provider
+  support, and how to add a tool.
+
+### Fixed
+
+- **Line endings are no longer rewritten on Windows.** Writes used `Path.write_text`, which turned
+  every LF line ending into CRLF, so changing one line of an LF file rewrote every line. Existing files now
+  keep their encoding, byte-order mark and line-ending style (LF, CRLF or mixed); new files are
+  written exactly as given.
+- **Writes are atomic.** File content is written to a temporary file and swapped in, so an error
+  can no longer leave a half-written file. `move_path` with `overwrite` no longer deletes the
+  destination before moving.
+- **A file you edit while the agent works is not overwritten.** A write or edit to a file that
+  changed on disk since the agent read it is refused as a conflict, and the agent re-reads it. The
+  tool loop now lets the agent retry such a call after re-reading the file.
+- **LM Studio can use tools.** It advertised function calling but never sent the tool definitions
+  or read tool calls, so the agent could not act; tools and streamed tool calls now work (tested
+  against a mocked server).
+- `create_file` fails on an existing file instead of silently doing nothing, and the approval
+  preview no longer labels a new empty file as a deletion.
+
 ### Security
+
+- **Changing `.git/`, `.velune/hooks.json` or `velune.toml` always asks first**, in Auto mode too,
+  and is never covered by "always allow": these files can make git or Velune run commands.
+- The workspace boundary is re-checked right before a file is replaced, and the Council's edit
+  applier now refuses paths outside the workspace on its own instead of relying only on the caller.
 
 - **Windows: a program planted in the current directory is no longer run by bare name.** Velune runs
   `git` and other tools without a path, and Windows searched the current directory first, so a

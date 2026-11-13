@@ -165,6 +165,7 @@ A typical session in the REPL uses these real commands:
 /plan add input validation to signup  investigate and write a plan; no project files change
 approve                               run the plan; each change is shown for approval in Manual mode
 /diff                                 review what changed on disk
+/rewind                               undo the file changes from the agent's last turn
 /undo                                 revert the last Velune-authored commit if you disagree
 ```
 
@@ -376,13 +377,20 @@ Velune can read, create, edit, move and delete files and run commands in your pr
   the shell (`velune status` reports index freshness). Memory and retrieval stores live per workspace in your user data
   directory, not in the repository; a project's `.velune/` folder holds plans and small local files. `.veluneignore`
   excludes paths from indexing, and its default template excludes `.env`, `*.pem`, `*.key` and similar files.
+- **Targeted edits.** The agent changes part of a file with `edit_file` (exact, unique string replacement) instead of
+  rewriting it, and every change comes back to the model as a verified diff.
+- **Safe writes.** Writes are atomic, keep each file's encoding and line endings (a CRLF file stays CRLF), and are
+  refused if the file changed on disk since the agent last read it.
 - **Path guard.** Filesystem and git tools resolve paths, including symlinks, and refuse anything outside the workspace
-  unless you approve it.
+  unless you approve it. Changing `.git/`, `.velune/hooks.json` or `velune.toml` always asks first.
 - **Diff preview.** In Manual mode every change is shown as a diff and applied only after you approve it (`/hunk`
   enables hunk-by-hunk review).
 - **Snapshots and undo.** Plan-driven changes take a git stash or branch snapshot first and are restored if execution
-  fails. `/undo` reverts the last Velune-authored commit. Velune does not commit council edits unless you set
-  `execution.council_auto_commit = true`.
+  fails. `/rewind` undoes the file changes from the agent's last turn; `/undo` reverts the last Velune-authored commit.
+  Velune does not commit council edits unless you set `execution.council_auto_commit = true`.
+
+See [Filesystem tools](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/filesystem-tools.md) for every
+tool, the safety model and provider support.
 
 ## Memory and repository cognition
 
@@ -483,6 +491,7 @@ slash-command reference is in
 | :--- | :--- |
 | [Usage guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/usage-guide.md) | Day-to-day use: models, modes, review, memory, troubleshooting |
 | [Slash commands](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/slash-commands.md) | Every REPL command, alias and usage string |
+| [Filesystem tools](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/filesystem-tools.md) | How the agent edits files, the safety model, provider support |
 | [MCP guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/mcp.md) | MCP server and client, transports, trust gating |
 | [Native engine](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/native-engine.md) | The experimental `velune native` engine |
 | [Development guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/development.md) | Architecture, module boundaries, testing, CI |

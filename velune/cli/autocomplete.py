@@ -80,6 +80,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("normal", "Return to balanced normal mode"),
     ("diff", "Show uncommitted file changes from the last council run"),
     ("undo", "Revert the last Velune-generated git commit"),
+    ("rewind", "Undo the file changes from the agent's last turn"),
     ("hunk", "Toggle hunk-by-hunk review mode for edits"),
     ("approve", "Set tool/command approval mode: safe | ask | block"),
     ("bench", "View or run empirical model capability benchmarks"),

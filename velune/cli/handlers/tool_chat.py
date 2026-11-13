@@ -57,6 +57,7 @@ _TOOL_VERBS: dict[str, str] = {
     "read_file": "Read",
     "read_directory": "List",
     "write_file": "Write",
+    "edit_file": "Edit",
     "create_file": "Create",
     "delete_file": "Delete",
     "create_directory": "Create folder",
@@ -86,7 +87,7 @@ _TOOL_VERBS: dict[str, str] = {
     # call it directly.
 }
 
-_FILE_MUTATORS = {"write_file", "create_file", "delete_file"}
+_FILE_MUTATORS = {"write_file", "edit_file", "create_file", "delete_file"}
 _SEARCH_TOOLS = {
     "grep_files",
     "find_files",
@@ -236,6 +237,7 @@ async def run_tool_chat(
         ProviderConnectionError,
         ProviderTimeoutError,
         RateLimitError,
+        StreamInterruptedError,
     )
     from velune.orchestration.tool_loop import ToolLoopResult, ToolLoopRunner
     from velune.tools.base.tool import ToolCallContext
@@ -279,12 +281,28 @@ async def run_tool_chat(
         on_event=ui.on_event,
     )
 
+    # Every file change this turn is journaled so /rewind can put it back.
+    from velune.tools.filesystem.mutation import (
+        TurnJournal,
+        reset_active_journal,
+        set_active_journal,
+    )
+
+    journal = TurnJournal()
+    journal_token = set_active_journal(journal)
     try:
         async with repl._interrupts.foreground():
             try:
                 result = await runner.run(request)
             finally:
                 gate.boundary.clear_grants()
+                reset_active_journal(journal_token)
+                # Always replace the previous turn's journal, even with an empty one: /rewind
+                # means "undo the most recent turn", and a turn that changed nothing must
+                # not leave an older turn's changes behind it to be undone by mistake. This
+                # also runs when the turn failed or was cancelled, so whatever it did change
+                # before stopping stays rewindable and nothing else does.
+                repl._last_turn_journal = journal
     except asyncio.CancelledError:
         if not repl._interrupts.consume_user_cancelled():
             raise
@@ -309,7 +327,10 @@ async def run_tool_chat(
         RateLimitError,
         ModelNotFoundError,
         ProviderTimeoutError,
+        StreamInterruptedError,
     ) as exc:
+        # A reply stream that errored or was cut off (StreamInterruptedError) belongs here
+        # too: it says nothing about whether the model can take tools.
         # The provider itself is the problem (down, rejected the key, rate-
         # limited, timed out, or the model id/endpoint doesn't exist) — not a
         # "this model can't do tools" signal, so this must not fall through to
@@ -938,11 +959,21 @@ class _ToolActivityUI:
             file_path = args.get("file_path")
             if not isinstance(file_path, str) or not file_path:
                 return None
-            from velune.execution.diff_preview import compute_file_diff
+            from velune.execution.diff_preview import FileDiff, compute_file_diff
             from velune.execution.path_guard import resolve_in_workspace
 
             workspace = self._workspace or Path.cwd()
+            if name == "edit_file":
+                from velune.tools.filesystem.edit import EditFile
+
+                planned = EditFile(workspace=workspace).preview(args)
+                if planned is None:
+                    return None  # invalid edit: the tool reports why when it runs
+                path, proposed = planned
+                return compute_file_diff(path, proposed)
             path = resolve_in_workspace(file_path, workspace, label=name)
+            if name == "create_file":
+                return FileDiff(path, "", "", is_new_file=True, is_deletion=False)
             proposed = args.get("content", "") if name == "write_file" else ""
             if not isinstance(proposed, str):
                 return None

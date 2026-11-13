@@ -279,6 +279,11 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
         repl.console.print("[yellow]Usage: /run <task>  or  /council <task>[/yellow]")
         return
 
+    # A Council run is the newest turn from the moment it starts. It may end without a proposal
+    # (so apply_council_edits never runs), fail or be cancelled; none of that may leave an older
+    # turn's journal for /rewind to undo.
+    repl._last_turn_journal = None
+
     orchestrator = repl.container.get("runtime.council_orchestrator")
     repl.console.print()
 
@@ -432,6 +437,10 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
 
     workspace = _Path(repl.container.get("runtime.workspace")).resolve()
 
+    # This is now the most recent turn: a proposal that is never applied (no blocks, refused,
+    # every change rejected) changed nothing, and /rewind must not reach back to an older turn.
+    repl._last_turn_journal = None
+
     family = detect_family(repl.active_model.model_id if repl.active_model else "")
     blocks = parse_with_fallback(coder_proposal, family, workspace_path=workspace)
 
@@ -455,7 +464,6 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
 
     preview = MultiDiffPreview(repl.console)
     file_writes = dict(resolved)
-    from velune.execution.diff_preview import DiffDecision
 
     # The edit set goes through the same execution-mode policy as tool calls:
     # PLAN refuses it, AUTO applies it, MANUAL uses the batched diff review
@@ -466,6 +474,51 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
     decisions = await preview.preview_batch(file_writes, auto_accept=auto_accept)
 
     accepted_paths: list[_Path] = []
+    # Journal the Council's writes like an agent turn's, so /rewind can undo them.
+    from velune.tools.filesystem.mutation import (
+        TurnJournal,
+        reset_active_journal,
+        set_active_journal,
+    )
+
+    journal = TurnJournal()
+    journal_token = set_active_journal(journal)
+    try:
+        await _write_accepted(repl, applier, preview, decisions, file_writes, accepted_paths)
+    finally:
+        reset_active_journal(journal_token)
+        # Replace the previous turn's journal even when nothing was written (see run_tool_chat).
+        repl._last_turn_journal = journal
+
+    for note in journal.irreversible:
+        repl.console.print(
+            f"[yellow]Note:[/yellow] {note} — too large to keep a copy, so [bold]/rewind[/bold] "
+            "cannot restore it."
+        )
+
+    if not accepted_paths:
+        repl.console.print("[dim]No changes applied.[/dim]")
+        return
+
+    repl.console.print(f"[green]Applied {len(accepted_paths)} file(s).[/green]")
+
+    if not _council_auto_commit_enabled(repl):
+        repl.console.print(
+            "[dim]Changes left uncommitted. Review them with [bold]/diff[/bold]; set "
+            "[bold]execution.council_auto_commit = true[/bold] to have Velune commit them.[/dim]"
+        )
+        return
+
+    committed = await _auto_commit_edits(repl, accepted_paths, task, workspace)
+    if committed:
+        repl.console.print("[dim]Changes committed. Use [bold]/undo[/bold] to revert.[/dim]")
+        await _show_edit_summary_panel(repl, accepted_paths, workspace)
+
+
+async def _write_accepted(repl, applier, preview, decisions, file_writes, accepted_paths) -> None:
+    """Write the edits the user accepted (hunk by hunk when hunk review is on)."""
+    from velune.execution.diff_preview import DiffDecision
+
     if repl._hunk_review_mode:
         from velune.execution.hunk_review import HunkReviewer
 
@@ -486,24 +539,6 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
             if decision == DiffDecision.ACCEPT:
                 applier.write(path, file_writes[path])
                 accepted_paths.append(path)
-
-    if not accepted_paths:
-        repl.console.print("[dim]No changes applied.[/dim]")
-        return
-
-    repl.console.print(f"[green]Applied {len(accepted_paths)} file(s).[/green]")
-
-    if not _council_auto_commit_enabled(repl):
-        repl.console.print(
-            "[dim]Changes left uncommitted. Review them with [bold]/diff[/bold]; set "
-            "[bold]execution.council_auto_commit = true[/bold] to have Velune commit them.[/dim]"
-        )
-        return
-
-    committed = await _auto_commit_edits(repl, accepted_paths, task, workspace)
-    if committed:
-        repl.console.print("[dim]Changes committed. Use [bold]/undo[/bold] to revert.[/dim]")
-        await _show_edit_summary_panel(repl, accepted_paths, workspace)
 
 
 async def _authorize_council_edits(repl: VeluneREPL, file_writes: dict) -> bool | None:

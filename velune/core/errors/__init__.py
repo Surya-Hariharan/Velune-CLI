@@ -47,6 +47,7 @@ from velune.core.errors.provider import (
     ProviderError,
     ProviderNotFoundError,
     ProviderPermissionError,
+    StreamInterruptedError,
 )
 
 __all__ = [
@@ -72,6 +73,7 @@ __all__ = [
     "ProviderPermissionError",
     "ModelNotFoundError",
     "InferenceError",
+    "StreamInterruptedError",
     # Internal orchestration errors
     "OrchestrationError",
     "AgentExecutionError",

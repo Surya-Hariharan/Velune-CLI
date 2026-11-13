@@ -114,6 +114,8 @@ class VeluneREPL:
         # "always allow" for this session.
         self._tools_unsupported_models: set[str] = set()
         self._tool_session_grants: set[str] = set()
+        # File changes made by the last agent turn, for /rewind.
+        self._last_turn_journal = None
         from velune.orchestration.role_assignments import CouncilRoleMap
 
         self._assignments_path = Path.home() / ".velune" / "council_roles.json"
@@ -1555,6 +1557,12 @@ class VeluneREPL:
 
         self._conversation.append({"role": "user", "content": text})
 
+        # The accepted prompt is the newest turn: clear the previous turn's journal now, before
+        # any fallible work (context assembly, provider setup). If one of those raises, the
+        # main loop carries on and /rewind must not reach back to an older turn. A turn that
+        # runs the tool loop replaces this with its own journal (run_tool_chat).
+        self._last_turn_journal = None
+
         mode_config = self._mode_manager.config
 
         # Canonical context assembly: ContextAssembler (priority ordering,
@@ -2002,6 +2010,11 @@ class VeluneREPL:
         from velune.cli.handlers.git import cmd_undo
 
         await cmd_undo(self, args)
+
+    async def _cmd_rewind(self, args: str) -> None:
+        from velune.cli.handlers.git import cmd_rewind
+
+        await cmd_rewind(self, args)
 
     async def _cmd_retry(self, args: str) -> None:
         from velune.cli.handlers.retry import cmd_retry

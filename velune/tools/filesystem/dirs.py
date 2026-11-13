@@ -5,25 +5,35 @@ Windows (where ``mkdir``/``rmdir``/``move`` are cmd.exe builtins the
 shell-less sandbox can't run) and on POSIX. Every call is described as
 actions and authorized by the permission gate before it runs; paths resolve
 against the session boundary (the workspace, plus any location the user
-granted for this task).
+granted for this task). Each change is verified after it is made and recorded
+in the turn's undo journal (``/rewind``), see
+:mod:`velune.tools.filesystem.mutation`.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
 
 from velune.permissions.gate import resolve_tool_path
 from velune.tools.base.tool import BaseTool, ToolPermission
+from velune.tools.filesystem import mutation as mut
 
 
 class _FsTool(BaseTool):
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(
+        self, workspace: Path | None = None, tracker: mut.FileVersionTracker | None = None
+    ) -> None:
         self.workspace = workspace or Path.cwd()
+        self.tracker = tracker or mut.FileVersionTracker()
 
     def get_required_permissions(self) -> set[ToolPermission]:
         return {ToolPermission.FILESYSTEM_WRITE}
+
+    def _display(self, path: Path) -> str:
+        return mut.display_path(path, self.workspace)
 
 
 class CreateDirectory(_FsTool):
@@ -54,9 +64,20 @@ class CreateDirectory(_FsTool):
         target = resolve_tool_path(path, self.workspace, label="create_directory")
         if target.exists() and not target.is_dir():
             raise FileExistsError(f"A file already exists at {target}")
-        existed = target.exists()
+        if target.is_dir():
+            return f"Folder already existed: {target}"
+        # Record every folder this call creates, outermost first, so /rewind removes them all.
+        created: list[Path] = []
+        probe = target
+        while not probe.exists():
+            created.append(probe)
+            probe = probe.parent
         target.mkdir(parents=True, exist_ok=True)
-        return f"Folder already existed: {target}" if existed else f"Created folder {target}"
+        if not target.is_dir():
+            raise mut.MutationVerificationError(f"{target} is not a folder after creating it")
+        for folder in reversed(created):
+            mut.journal(mut.DirCreated(folder))
+        return f"Created folder {target}"
 
 
 class DeleteDirectory(_FsTool):
@@ -76,8 +97,7 @@ class DeleteDirectory(_FsTool):
                 "path": {"type": "string", "description": "Folder to delete"},
                 "recursive": {
                     "type": "boolean",
-                    "description": "Also delete everything inside the folder",
-                    "default": False,
+                    "description": "Also delete everything inside the folder (default false)",
                 },
             },
             "required": ["path"],
@@ -97,24 +117,38 @@ class DeleteDirectory(_FsTool):
             if is_root
             else ("recursive deletion" if recursive else "delete empty folder")
         )
-        return [path_action(ActionType.DELETE_DIRECTORY, target, boundary, reason, risk=risk)]
+        # The path as requested, not the resolved one: protection judges both identities.
+        return [
+            path_action(
+                ActionType.DELETE_DIRECTORY, args.get("path", ""), boundary, reason, risk=risk
+            )
+        ]
 
     async def execute(self, path: str, recursive: bool = False) -> str:
         target = resolve_tool_path(path, self.workspace, label="delete_directory")
         if not target.exists():
             raise FileNotFoundError(f"Folder not found: {target}")
-        if not target.is_dir():
+        if not target.is_dir() or mut.is_link(target):
             raise NotADirectoryError(f"Not a folder: {target} (use delete_file)")
         if any(target.iterdir()):
             if not recursive:
                 raise OSError(
                     f"Folder is not empty: {target}. Pass recursive=true to delete its contents."
                 )
-            count = sum(1 for _ in target.rglob("*"))
+            count = mut.count_entries(target)
+            snapshot = mut.snapshot_tree(target)
             shutil.rmtree(target)
-            return f"Deleted folder {target} and {count} item(s) inside it"
-        target.rmdir()
-        return f"Deleted empty folder {target}"
+            message = f"Deleted folder {target} and {count} item(s) inside it"
+        else:
+            snapshot = []
+            target.rmdir()
+            message = f"Deleted empty folder {target}"
+        if target.exists():
+            raise mut.MutationVerificationError(f"{target} still exists after deleting it")
+        mut.journal(mut.DirDeleted(target, snapshot))
+        if snapshot is None:
+            message += " (too large to keep a copy: /rewind cannot restore it)"
+        return message
 
 
 class MovePath(_FsTool):
@@ -132,8 +166,7 @@ class MovePath(_FsTool):
                 "destination": {"type": "string", "description": "New path"},
                 "overwrite": {
                     "type": "boolean",
-                    "description": "Replace an existing destination file",
-                    "default": False,
+                    "description": "Replace an existing destination file (default false)",
                 },
             },
             "required": ["source", "destination"],
@@ -141,19 +174,34 @@ class MovePath(_FsTool):
 
     def describe_actions(self, args: dict[str, Any], boundary: Any) -> list[Any]:
         from velune.permissions.actions import ActionType, Risk
-        from velune.permissions.boundary import path_action
+        from velune.permissions.boundary import path_action, protected_descendant_reason
 
-        source = boundary.resolve(args.get("source", ""))
-        dest = boundary.resolve(args.get("destination", ""))
+        raw_source, raw_dest = args.get("source", ""), args.get("destination", "")
+        source = boundary.resolve(raw_source)
+        dest = boundary.resolve(raw_dest)
         overwrite = bool(args.get("overwrite")) and dest.exists()
         risk = Risk.MEDIUM if overwrite else Risk.LOW
+        # A folder carries its contents with it: moving one onto ``.velune`` (or a folder that
+        # holds ``.git``/``.velune``/``velune.toml``) installs protected files at the destination
+        # without ever naming them. Judge what the move would put there.
+        installs = (
+            protected_descendant_reason(source, dest, boundary.protected_roots())
+            if source.is_dir()
+            else ""
+        )
+        dest_reason = "move destination"
+        dest_risk = risk
+        if installs:
+            dest_risk = Risk.HIGH
+            dest_reason = f"move destination: {installs}"
+        # The paths are passed as requested (not resolved) so a link's own name is judged too.
         return [
             path_action(
-                ActionType.MOVE, source, boundary, "move / rename", risk=risk, detail=str(dest)
+                ActionType.MOVE, raw_source, boundary, "move / rename", risk=risk, detail=str(dest)
             ),
             # The destination is checked too: moving *into* an outside or secret
             # location must be caught just like moving out of one.
-            path_action(ActionType.CREATE_FILE, dest, boundary, "move destination", risk=risk),
+            path_action(ActionType.CREATE_FILE, raw_dest, boundary, dest_reason, risk=dest_risk),
         ]
 
     async def execute(self, source: str, destination: str, overwrite: bool = False) -> str:
@@ -161,10 +209,50 @@ class MovePath(_FsTool):
         dst = resolve_tool_path(destination, self.workspace, label="move_path destination")
         if not src.exists():
             raise FileNotFoundError(f"Not found: {src}")
-        if dst.exists():
-            if not overwrite or dst.is_dir():
-                raise FileExistsError(f"Destination already exists: {dst}")
-            dst.unlink()
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
-        return f"Moved {src} → {dst}"
+        if src == dst:
+            raise ValueError(f"Source and destination are the same: {src}")
+        # On a case-insensitive filesystem renaming "Readme.md" to "README.md" finds the
+        # destination "already existing" — it is the same file, so it is a plain rename.
+        case_rename = dst.exists() and os.path.samefile(src, dst)
+        if src.is_dir() and (dst == src or src in dst.parents):
+            raise ValueError(f"Cannot move folder {src} into itself ({dst})")
+
+        overwritten: bytes | None = None
+        overwritten_mode: int | None = None
+        if dst.exists() and not case_rename:
+            if not overwrite:
+                raise FileExistsError(
+                    f"Destination already exists: {dst}. Pass overwrite=true to replace a file."
+                )
+            if dst.is_dir() or src.is_dir():
+                raise FileExistsError(f"Cannot overwrite {dst}: only a file can replace a file")
+            overwritten, kept = mut.read_before_image(dst)
+            overwritten_mode = mut.file_mode(dst)
+            if not kept:
+                mut.journal_irreversible(f"overwrote {dst}")
+
+        is_file = src.is_file()
+        sha_before = mut.file_sha256(src) if is_file else None
+        mut.ensure_parent(dst)
+        if is_file or case_rename:
+            try:
+                # Atomic on one filesystem, including replacing an existing destination file.
+                os.replace(src, dst)
+            except OSError:
+                if case_rename or dst.exists():
+                    raise
+                shutil.move(str(src), str(dst))  # across filesystems: copy, then delete
+        else:
+            shutil.move(str(src), str(dst))
+
+        if not dst.exists() or (src.exists() and not case_rename):
+            raise mut.MutationVerificationError(f"Move of {src} to {dst} did not complete")
+        if sha_before is not None and mut.file_sha256(dst) != sha_before:
+            raise mut.MutationVerificationError(f"{dst} does not have {src}'s content after moving")
+
+        if is_file:
+            self.tracker.forget(src)
+            if sha_before is not None:
+                self.tracker.record(dst, sha_before)
+        mut.journal(mut.Moved(src, dst, overwritten, sha_before, overwritten_mode))
+        return f"Moved {src} → {dst} (verified)"

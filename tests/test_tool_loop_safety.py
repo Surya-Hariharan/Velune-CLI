@@ -142,6 +142,49 @@ async def test_changed_arguments_may_retry():
     assert _AlwaysFails.runs == 2
 
 
+class _Reread(BaseTool):
+    def get_name(self):
+        return "reread"
+
+    def get_description(self):
+        return ""
+
+    def get_required_permissions(self):
+        return {ToolPermission.FILESYSTEM_READ}
+
+    async def execute(self, **kw):
+        return "fresh content"
+
+
+async def test_identical_call_may_retry_after_its_path_was_looked_at_again():
+    # The conflict-recovery pattern: edit fails (file changed), re-read, same edit again.
+    _AlwaysFails.runs = 0
+    turns = [
+        [_call(1, "flaky", path="conf.py")],
+        [_call(2, "reread", path="conf.py")],
+        [_call(3, "flaky", path="conf.py")],
+    ]
+    result = await ToolLoopRunner(
+        _Provider(turns), _reg(_AlwaysFails(), _Reread()), approver=_yes
+    ).run(InferenceRequest(model_id="m", messages=[]))
+    assert _AlwaysFails.runs == 2
+    assert "not retried" not in result.invocations[2].result
+
+
+async def test_a_success_on_another_path_does_not_unlock_a_failed_call():
+    _AlwaysFails.runs = 0
+    turns = [
+        [_call(1, "flaky", path="a.py")],
+        [_call(2, "reread", path="b.py")],
+        [_call(3, "flaky", path="a.py")],
+    ]
+    result = await ToolLoopRunner(
+        _Provider(turns), _reg(_AlwaysFails(), _Reread()), approver=_yes
+    ).run(InferenceRequest(model_id="m", messages=[]))
+    assert _AlwaysFails.runs == 1
+    assert "not retried" in result.invocations[2].result
+
+
 async def test_exit_code_reaches_the_event_stream():
     events = []
     provider = _Provider([[_call(1, "execute_command", command="pytest")]])

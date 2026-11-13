@@ -8,16 +8,45 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from velune.core.errors.provider import InferenceError, ProviderConnectionError
+from velune.core.errors.provider import (
+    InferenceError,
+    ProviderConnectionError,
+    StreamInterruptedError,
+)
 from velune.core.types.inference import InferenceRequest, InferenceResponse, StreamChunk
 from velune.core.types.model import CapabilityLevel, ModelDescriptor
 from velune.core.types.provider import ProviderCapabilities, ProviderHealth
 from velune.providers.adapters._messages import openai_messages
+from velune.providers.adapters._toolcalls import (
+    OpenAIStreamToolAccumulator,
+    attach_openai_tools,
+    parse_openai_tool_calls,
+)
 from velune.providers.base import ModelProvider
+
+#: Finish reasons that mean the model finished its tool calls (some servers say "stop").
+_COMPLETE_FINISH_REASONS = ("tool_calls", "stop", "function_call")
+
+
+def _stream_error_text(data: dict) -> str:
+    """The human-readable message of an error frame, whatever shape the server used."""
+    error = data.get("error")
+    if isinstance(error, dict):
+        error = error.get("message") or error
+    return str(error or data)[:300]
 
 
 class LMStudioProvider(ModelProvider):
-    """LM Studio provider for local OpenAI-compatible endpoints."""
+    """LM Studio provider for local OpenAI-compatible endpoints.
+
+    LM Studio serves the OpenAI chat-completions format, including ``tools`` and
+    streamed ``delta.tool_calls`` fragments (for models it loads with tool-use
+    support), so tool calling uses the shared OpenAI wire helpers.
+    """
+
+    # stream() accumulates delta.tool_calls fragments and emits a final
+    # metadata["tool_calls"] chunk, which the tool loop requires for streaming.
+    SUPPORTS_STREAMING_TOOL_CALLS = True
 
     def __init__(self, base_url: str = "http://localhost:1234/v1") -> None:
         self._base_url = base_url
@@ -89,18 +118,25 @@ class LMStudioProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["stop"] = request.stop_sequences
+            attach_openai_tools(payload, request)
 
             response = await self.client.post("/chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
             latency = (time.perf_counter() - start) * 1000.0
 
+            choice = data["choices"][0]
+            message = choice["message"]
+            tool_calls = parse_openai_tool_calls(message)
             return InferenceResponse(
-                content=data["choices"][0]["message"]["content"],
+                content=message.get("content") or "",
                 model_id=request.model_id,
-                finish_reason=data["choices"][0]["finish_reason"] or "stop",
-                tokens_used=data.get("usage", {}).get("total_tokens", 0),
+                finish_reason="tool_calls"
+                if tool_calls
+                else (choice.get("finish_reason") or "stop"),
+                tokens_used=(data.get("usage") or {}).get("total_tokens", 0),
                 latency_ms=latency,
+                tool_calls=tool_calls,
             )
         except httpx.HTTPError as e:
             raise InferenceError(f"LM Studio completion failed: {e}")
@@ -109,6 +145,7 @@ class LMStudioProvider(ModelProvider):
         """Streaming chat completions."""
         await self.initialize()
         assert self.client is not None
+        accumulator = OpenAIStreamToolAccumulator()
         try:
             payload = {
                 "model": request.model_id,
@@ -120,23 +157,89 @@ class LMStudioProvider(ModelProvider):
             }
             if request.stop_sequences:
                 payload["stop"] = request.stop_sequences
+            attach_openai_tools(payload, request)
+
+            finish_reason: str | None = None  # the last terminal reason the server sent
+            done = False  # saw the ``[DONE]`` sentinel
+            corrupt = False  # a data frame that could not be parsed
+            error_event = False  # an ``event: error`` line announced the next frame is an error
 
             async with self.client.stream("POST", "/chat/completions", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(data_str)
-                            delta = data["choices"][0]["delta"]
-                            yield StreamChunk(
-                                content=delta.get("content", ""),
-                                finish_reason=data["choices"][0].get("finish_reason"),
-                            )
-                        except (json.JSONDecodeError, KeyError):
-                            continue
+                    if line.startswith("event:"):
+                        error_event = line[6:].strip().lower() == "error"
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        done = True
+                        break
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        # Harmless in a text stream, but it may have carried a tool-call
+                        # fragment: remember it and decide when the stream ends.
+                        corrupt = True
+                        continue
+                    if not isinstance(data, dict):
+                        corrupt = True
+                        continue
+                    # An error frame is a failure, not a chunk: never fall through to a
+                    # "successful" finish that would publish half-built tool calls.
+                    if error_event or data.get("error"):
+                        raise StreamInterruptedError(
+                            f"LM Studio stream error: {_stream_error_text(data)}"
+                        )
+                    try:
+                        choice = data["choices"][0]
+                        delta = choice["delta"]
+                    except (KeyError, IndexError, TypeError):
+                        continue  # e.g. a usage-only frame with no choices
+                    reason = choice.get("finish_reason")
+                    if reason == "error":
+                        raise StreamInterruptedError(
+                            "LM Studio stream error: the server ended the reply"
+                        )
+                    if reason:
+                        finish_reason = reason
+                    accumulator.add(delta.get("tool_calls"))
+                    yield StreamChunk(content=delta.get("content") or "", finish_reason=reason)
+
+            # Past this point the stream ended without an error frame. It is only complete if
+            # the server said so; a connection that just stopped is a failure, and must never
+            # be turned into a "finished" reply or published tool calls.
+            if not (done or finish_reason):
+                raise StreamInterruptedError(
+                    "LM Studio stream ended before the reply was complete "
+                    "(no finish_reason and no [DONE])"
+                )
+            tool_calls = accumulator.finalize()
+            if tool_calls:
+                if corrupt:
+                    raise StreamInterruptedError(
+                        "LM Studio stream contained an unreadable frame while building tool "
+                        "calls; refusing to run a possibly incomplete call"
+                    )
+                if finish_reason not in (None, *_COMPLETE_FINISH_REASONS):
+                    raise StreamInterruptedError(
+                        f"LM Studio stream stopped early ({finish_reason!r}) while building "
+                        "tool calls; refusing to run an incomplete call"
+                    )
+                yield StreamChunk(
+                    content="",
+                    finish_reason="tool_calls",
+                    metadata={"tool_calls": tool_calls},
+                )
+        except httpx.HTTPStatusError as e:
+            # The server answered and refused: a verdict on the request (e.g. a tool payload it
+            # rejects), which callers may legitimately act on.
+            raise InferenceError(f"LM Studio stream failed: {e}")
+        except httpx.TransportError as e:
+            # The connection failed, dropped or timed out: this reply is lost, but nothing
+            # was said about the request itself.
+            raise StreamInterruptedError(f"LM Studio stream failed: {e}")
         except httpx.HTTPError as e:
             raise InferenceError(f"LM Studio stream failed: {e}")
 

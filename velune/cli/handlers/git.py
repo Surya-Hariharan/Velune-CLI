@@ -112,6 +112,34 @@ async def cmd_undo(repl: VeluneREPL, args: str) -> None:
         repl.console.print(f"[red]Undo failed:[/red] {reset.stderr.strip()}")
 
 
+async def cmd_rewind(repl: VeluneREPL, args: str) -> None:
+    """Undo the file changes the agent made during its most recent turn (and only that turn).
+
+    Uses the turn's journal (velune/tools/filesystem/mutation.py), not git, so it
+    also covers files git does not track. A file that changed again after the turn
+    is left alone and reported, so nothing the user did since is overwritten.
+    """
+    journal = getattr(repl, "_last_turn_journal", None)
+    if not journal:
+        repl.console.print(
+            "[dim]Nothing to rewind: the most recent agent turn changed no files "
+            "(or it was already rewound). /rewind only undoes that one turn.[/dim]"
+        )
+        return
+    changes = journal.describe()
+    report = await asyncio.to_thread(journal.rewind)
+    repl._last_turn_journal = None
+    for line in report.restored:
+        repl.console.print(f"  [green]↺[/green] restored {line}")
+    for line in report.skipped:
+        repl.console.print(f"  [yellow]![/yellow] skipped {line}")
+    total = len(changes)
+    repl.console.print(
+        f"[bold]Rewound {len(report.restored)} of {total} change(s)[/bold]"
+        + (f" — {len(report.skipped)} skipped" if report.skipped else "")
+    )
+
+
 async def cmd_hunk(repl: VeluneREPL, args: str) -> None:
     """Toggle hunk-by-hunk review mode for edit sessions.
 

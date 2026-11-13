@@ -118,6 +118,10 @@ Conventions worth knowing before adding tests:
 - **Isolate config.** Config and the default provider are discovered by walking up from the working
   directory for a `velune.toml`; run tests from a temp dir (`monkeypatch.chdir(tmp_path)`) and never leave a
   stray `velune.toml` in a parent folder.
+- **Agent tests go through the loop.** A tool the agent uses should be tested via the production
+  registry (`tests/_fs_registry.py::production_registry`), the permission gate and `ToolLoopRunner` with a
+  scripted model, asserting on the files on disk — see `tests/test_agent_filesystem_e2e.py` and
+  [Filesystem tools](filesystem-tools.md#adding-a-filesystem-tool).
 - **Doc tests:** `tests/test_slash_commands_doc.py` fails when `docs/slash-commands.md` drifts from the
   registered commands, and `tests/test_docs_links.py` fails on a broken relative link in the Markdown docs.
 

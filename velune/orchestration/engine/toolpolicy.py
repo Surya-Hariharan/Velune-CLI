@@ -50,6 +50,7 @@ EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "execute_command",
         "web_fetch",
         "write_file",
+        "edit_file",
         "create_file",
         "delete_file",
         "create_directory",

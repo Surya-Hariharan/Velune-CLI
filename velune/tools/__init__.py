@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from velune.tools.code.navigate import GoToDefinition as GoToDefinition
     from velune.tools.code.search import SemanticCodeSearch as SemanticCodeSearch
     from velune.tools.code.search import SymbolSearch as SymbolSearch
+    from velune.tools.filesystem.edit import EditFile as EditFile
     from velune.tools.filesystem.read import ReadDirectory as ReadDirectory
     from velune.tools.filesystem.read import ReadFile as ReadFile
     from velune.tools.filesystem.search import FindFiles as FindFiles
@@ -40,6 +41,7 @@ __all__ = [
     "ReadFile",
     "ReadDirectory",
     "WriteFile",
+    "EditFile",
     "CreateFile",
     "DeleteFile",
     "GrepFiles",
@@ -82,6 +84,10 @@ def __getattr__(name: str):
         import velune.tools.filesystem.read as mod
 
         return getattr(mod, name)
+    if name == "EditFile":
+        from velune.tools.filesystem.edit import EditFile
+
+        return EditFile
     if name in {"FindFiles", "GrepFiles"}:
         import velune.tools.filesystem.search as mod
 

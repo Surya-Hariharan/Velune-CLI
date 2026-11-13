@@ -50,6 +50,7 @@ A short example of the loop, in the REPL:
 /model use <id>            # pick a model you have connected
 /run add input validation to the signup handler
 /diff                      # see what changed on disk
+/rewind                    # undo the file changes from the agent's last turn
 /undo                      # revert the last Velune-authored commit, if you do not want it
 ```
 
@@ -201,8 +202,16 @@ Velune edits files on disk rather than pasting diffs into chat. After a run:
 - `/diff` shows what actually changed on disk from the last council run.
 - `/hunk` switches to hunk-by-hunk review before edits are accepted, for finer control than
   "accept everything".
+- `/rewind` undoes the file changes the agent made in its last turn: edited and deleted
+  files come back, created ones are removed, moved ones return. A file you changed after
+  the turn is left alone and reported.
 - `/undo` reverts the last Velune-authored git commit. The changes stay staged, so you can
   inspect them before deciding what to do next.
+
+The agent edits part of a file with `edit_file` rather than rewriting it, and keeps each
+file's encoding and line endings. If you save a file while the agent is working on it, its
+next change to that file is refused as a conflict and it re-reads the file first. See
+[Filesystem tools](filesystem-tools.md) for the full list of tools and the safety model.
 
 A council improves the odds of a good answer but does not guarantee one. Read the diff
 before you accept it, especially in Auto mode.

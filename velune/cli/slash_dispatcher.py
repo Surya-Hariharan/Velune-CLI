@@ -70,6 +70,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     # Git
     "diff": "Git",
     "undo": "Git",
+    "rewind": "Git",
     "hunk": "Git",
     "push": "Git",
     "pr": "Git",
@@ -667,6 +668,19 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             examples=("/undo",),
             search_terms=("revert", "rollback", "git undo", "undo commit", "take back"),
             shortcut="/u",
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="rewind",
+            aliases=[],
+            description=(
+                "Undo the file changes the agent made in its last turn (skips files changed since)"
+            ),
+            usage="/rewind",
+            handler=repl._cmd_rewind,
+            examples=("/rewind",),
+            search_terms=("undo turn", "revert files", "rollback", "restore files", "undo edit"),
         )
     )
     registry.register(

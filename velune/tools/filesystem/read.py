@@ -2,6 +2,7 @@
 
 import asyncio
 import codecs
+import hashlib
 import io
 import os
 from pathlib import Path
@@ -28,6 +29,8 @@ _READ_CHUNK_BYTES = 64 * 1024
 _SNIFF_BYTES = 8192
 _ENCODING_SAMPLE_BYTES = 64 * 1024
 _NUMBER_WIDTH = 6
+#: Files up to this size are hashed after a ranged read, for edit-conflict detection.
+_HASH_FOR_TRACKING_MAX_BYTES = 20 * 1024 * 1024
 
 #: Bytes that can appear in ordinary text (printable ASCII, high bytes, and the usual
 #: whitespace/escape controls). A sample made mostly of anything else is binary.
@@ -35,8 +38,11 @@ _TEXT_BYTES = bytes({7, 8, 9, 10, 12, 13, 27} | (set(range(0x20, 0x100)) - {0x7F
 _BINARY_RATIO = 0.30
 
 
-class _NotText(Exception):
+class NotTextError(Exception):
     """The file is readable but is not text; the message is the result to hand back."""
+
+
+_NotText = NotTextError
 
 
 def _file_size(handle: BinaryIO) -> int:
@@ -113,6 +119,11 @@ def _choose_encoding(sample: bytes, name: str, size: int, *, whole_file: bool) -
         ) from exc
 
 
+#: Public name for the encoding sniffer, shared with the write/edit tools
+#: (:mod:`velune.tools.filesystem.mutation`) so reading and writing agree on a file's encoding.
+detect_text_encoding = _choose_encoding
+
+
 def _row(number: int, text: str, length: int | None = None) -> str:
     """One numbered line, clipped if the single line alone exceeds the output budget.
 
@@ -142,8 +153,11 @@ def _plural(count: int, noun: str) -> str:
 class ReadFile(BaseTool):
     """Tool for reading file contents."""
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(self, workspace: Path | None = None, tracker: Any = None) -> None:
         self.workspace = workspace or Path.cwd()
+        # Shared with write_file/edit_file (see velune.tools.subsystems): records the hash of
+        # each file as read, so a later change made by someone else is caught as a conflict.
+        self.tracker = tracker
 
     def get_name(self) -> str:
         return "read_file"
@@ -190,32 +204,48 @@ class ReadFile(BaseTool):
         try:
             if start is None and path.stat().st_size <= _INLINE_MAX_BYTES:
                 # A small whole-file read costs less than a thread hand-off.
-                return self._read(path, file_path, start, end)
-            # Anything bigger, or a ranged scan, must not stall the event loop.
-            return await asyncio.to_thread(self._read, path, file_path, start, end)
+                text, sha = self._read(path, file_path, start, end)
+            else:
+                # Anything bigger, or a ranged scan, must not stall the event loop.
+                text, sha = await asyncio.to_thread(self._read, path, file_path, start, end)
         except _NotText as notice:
             return str(notice)
+        if self.tracker is not None and sha is not None:
+            self.tracker.record(path, sha)
+        return text
 
     # ── reading ──────────────────────────────────────────────────────────────
 
-    def _read(self, path: Path, name: str, start: int | None, end: int | None) -> str:
+    def _read(
+        self, path: Path, name: str, start: int | None, end: int | None
+    ) -> tuple[str, str | None]:
+        """``(result text, sha256 of the file as read)``; the hash is None when not known."""
         # Open once and do everything on this handle: no window for the path to be swapped
         # between the checks and the read, and the handle is released on every exit.
         with open(path, "rb") as handle:
             size = _file_size(handle)
             if start is None:
-                return self._read_whole(handle, name, size)
-            return self._read_range(handle, name, size, start, end)
+                data, text = self._read_whole(handle, name, size)
+                return text, (hashlib.sha256(data).hexdigest() if data is not None else None)
+            text = self._read_range(handle, name, size, start, end)
+        # A ranged read sees only part of the file; hash all of it (when it is small enough
+        # to edit at all) so an edit after this read can still detect a conflicting change.
+        sha = None
+        if self.tracker is not None and size <= _HASH_FOR_TRACKING_MAX_BYTES:
+            from velune.tools.filesystem.mutation import file_sha256
 
-    def _read_whole(self, handle: BinaryIO, name: str, size: int) -> str:
+            sha = file_sha256(path)
+        return text, sha
+
+    def _read_whole(self, handle: BinaryIO, name: str, size: int) -> tuple[bytes | None, str]:
         if size > READ_MAX_FILE_BYTES:
-            return _too_large(name, size, exact=True)
+            return None, _too_large(name, size, exact=True)
         # The size above may be stale (a log still being written): the read enforces the limit.
         data = _read_bounded(handle, READ_MAX_FILE_BYTES + 1)
         if len(data) > READ_MAX_FILE_BYTES:
-            return _too_large(name, len(data), exact=False)
+            return None, _too_large(name, len(data), exact=False)
         if not data:
-            return ""
+            return data, ""
 
         encoding = _choose_encoding(data, name, len(data), whole_file=True)
         try:
@@ -226,7 +256,7 @@ class ReadFile(BaseTool):
             ) from exc
         text = text.replace("\r\n", "\n").replace("\r", "\n")  # universal newlines, as before
         if len(text) <= READ_MAX_CHARS:
-            return text
+            return data, text
 
         lines = text.split("\n")
         if lines[-1] == "":
@@ -244,7 +274,7 @@ class ReadFile(BaseTool):
                 f"[showing lines 1-{len(out)} of {len(lines)}; call read_file again with "
                 f"start_line={len(out) + 1} to continue]"
             )
-        return "\n".join(out)
+        return data, "\n".join(out)
 
     def _read_range(
         self, handle: BinaryIO, name: str, size: int, start: int, end: int | None
