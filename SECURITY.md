@@ -133,6 +133,7 @@ toward that goal; they reduce risk and do not eliminate it.
 | Log, traceback and tool-output redaction of known key formats and of connector credentials loaded at runtime | Enabled | `velune/core/redaction.py` |
 | Integration permission scopes, resource ownership and compose-file inspection | Enabled | `velune/permissions/`, `velune/resources/` |
 | Dynamic integration discovery: tools offered to the model are exposure only, never permission | Enabled; `resources.expose_to_model` turns it off | `velune/resources/capabilities.py`, `velune/resources/tools.py` |
+| Docker Engine integration: SDK client, no unauthenticated network sockets, proven resource ownership, ownership-aware approvals | Enabled; `resources.docker.enabled` turns it off | `velune/resources/docker/` |
 | HTTP integration network policy, connection pinning (DNS-rebinding guard) and origin-bound credentials | Enabled; `resources.http.enabled` turns it off | `velune/resources/http/` |
 | Opt-in local crash reports | **Off by default** | `velune/cli/crash_reporter.py` |
 | Git snapshot and rollback for plan-driven changes | Enabled | `velune/execution/rollback.py` |
@@ -467,6 +468,32 @@ URL:
   `HTTPS_PROXY` / `ALL_PROXY` the proxy resolves the name itself, so only the
   URL-level validation applies.)
 
+### Docker integration
+
+Docker daemon access is effectively host-level privilege, so the `docker` integration
+(`velune/resources/docker/`, see [docs/docker.md](docs/docker.md)) treats the connection as a security boundary:
+
+- **Connection.** The official Docker SDK talks to a local socket or named pipe. An unauthenticated
+  `tcp://` endpoint is refused outright; a network endpoint needs TLS with a CA and client certificate and
+  certificate verification is never disabled; `ssh://` uses the system `ssh` client. `resources.docker.host`
+  is ignored for an untrusted workspace so a repository cannot redirect Docker. Every change to a remote
+  daemon needs a person. Reachability, not CLI presence, defines availability.
+- **Ownership is proven, not inferred.** Velune manages unattended only objects it created, recorded by
+  the daemon's stable id plus a creation fingerprint in its own data directory (outside the workspace). Labels
+  are only claims — an image can ship `dev.velune.managed=true` — so a label without a record is `external`, and
+  an inconsistent record is not trusted. A name is resolved to an id and the action runs on that id; a name
+  re-pointed after approval is refused. A pre-existing image tag is never owned, and name collisions never adopt.
+- **Authorization.** AUTO may create ordinary non-privileged containers and start/stop/restart/remove the
+  ones Velune created; everything else — other containers, images, volumes, networks in use, privileged mode,
+  capabilities, host networking, devices, non-loopback ports, Docker-socket or secret bind mounts, `compose
+  down` — needs a person, and a bind mount outside the workspace is refused in AUTO. Plan mode executes no
+  mutation.
+- **Containment of what the model can ask for.** No reflective or `exec` operation; validated references
+  that cannot be read as CLI options; commands are never run through a shell; ports bind to loopback by
+  default; reserved labels cannot be forged; environment variables are shown by name only; logs and output are
+  bounded and redacted; Compose files are scanned for privileged settings, host mounts, the Docker socket,
+  devices and external resources before `compose up`.
+
 ### HTTP and API integration
 
 The `http` integration (`velune/resources/http/`, see [docs/http.md](docs/http.md))
@@ -658,6 +685,17 @@ races:
 - Redaction matches known key formats, common credential patterns and the credentials
   connectors have loaded in the current session. A secret that Velune never loaded and that has
   no recognizable shape is not masked.
+
+**Docker integration**
+
+- Ownership records are stored unencrypted in Velune's data directory, per workspace and daemon; anyone who
+  can write there can forge one. Records are reconciled against the daemon on connect, not continuously.
+- Docker access is host-level privilege: an approved privileged container, Docker-socket mount or host-network
+  container can control the host. The approval prompt is the control.
+- The Compose file scan is a conservative line classifier (PyYAML is not a dependency); a construct it does
+  not recognize is not flagged, and `include` / `extends` are reported as unverified rather than followed.
+- `compose` and `build` use the `docker` CLI; registry credentials come from your own `docker login` and are
+  never read by Velune.
 
 **HTTP integration**
 

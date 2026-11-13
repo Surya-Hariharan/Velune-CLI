@@ -74,7 +74,7 @@ def definitions(tmp_path):
 @pytest.fixture
 def all_direct_definitions(tmp_path):
     """Every shipped operation as its own tool (a budget large enough for all of them)."""
-    runner, source = build(tmp_path, max_tools=64)
+    runner, source = build(tmp_path, max_tools=100)
     assert not source.scope.dispatched
     return runner.build_tool_definitions()
 
@@ -260,26 +260,34 @@ def test_initial_exposure_is_small(tmp_path):
 def test_per_tool_overhead_is_bounded(definitions):
     """Measured ~275 characters (~70 tokens) per operation tool."""
     extra = integration_defs(definitions)
-    assert size(extra) / len(extra) < 400
-    assert size(extra) < 9500  # every shipped integration, default budget (~1.9k tokens)
+    assert size(extra) / len(extra) < 450
+    assert size(extra) < 12500  # every shipped integration, default budget (~3k tokens)
 
 
 def test_one_integration_costs_what_it_should(tmp_path):
-    """Measured ~3.1k characters (~780 tokens) for all twelve Docker tools."""
+    """Measured ~13.4k characters (~3.3k tokens) for all 36 Docker operations as tool definitions."""
     runner, source = build(tmp_path, enable_all=False)
     docker = next(m for m in source.catalog.manifests() if m.id == "docker")
+    source.scope.max_tools = 100  # enough for every operation to be its own tool
     source.scope.enable(docker)
     docker_defs = [
         d for d in runner.build_tool_definitions() if d["function"]["name"].startswith("docker__")
     ]
-    assert len(docker_defs) == 12 and size(docker_defs) < 4200
+    assert len(docker_defs) == 36 and size(docker_defs) < 14500
+    # Enabling just one category (what a task usually needs) is far cheaper.
+    source.scope.reset()
+    source.scope.enable(docker, ["inspect"])
+    inspect_defs = [
+        d for d in runner.build_tool_definitions() if d["function"]["name"].startswith("docker__")
+    ]
+    assert len(inspect_defs) == 12 and size(inspect_defs) < 4200
 
 
 def test_a_larger_budget_exposes_more_a_smaller_one_less(tmp_path):
     small, s_src = build(tmp_path, max_tools=4)
     large, l_src = build(tmp_path, max_tools=64)
-    assert len(s_src.scope.exposed) == 3 and len(l_src.scope.exposed) == 48  # 37 + the 11 http operations
-    assert not l_src.scope.dispatched
+    assert len(s_src.scope.exposed) == 3 and len(l_src.scope.exposed) == 63  # the budget minus the dispatcher
+    assert l_src.scope.dispatched  # the rest stay reachable through integration_call
     assert size(small.build_tool_definitions()) < size(large.build_tool_definitions())
 
 
