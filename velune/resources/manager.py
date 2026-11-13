@@ -77,6 +77,7 @@ class ResourceManager:
         workspace: Any | None = None,
         context_factory: ContextFactory | None = None,
         ledger: OwnershipLedger | None = None,
+        job_registry: Any | None = None,
     ) -> None:
         """
         Args:
@@ -90,6 +91,9 @@ class ResourceManager:
                        its :class:`PermissionGate`). When set it takes
                        precedence over the default *approver*.
             ledger:    Ownership ledger for this session (created if absent).
+            job_registry: The session's background-job registry. When present
+                       the ``process`` connector (status, logs, readiness and
+                       stop for jobs the agent started) is registered.
         """
         self._factories: dict[str, ConnectorFactory] = {}
         # Instantiated connectors, keyed by resource_id. Lazily built from
@@ -100,19 +104,42 @@ class ResourceManager:
         self._workspace = workspace
         self._context_factory = context_factory
         self.ledger = ledger or OwnershipLedger()
+        self._job_registry = job_registry
         # One lock per resource so concurrent callers never open two sessions.
         self._locks: dict[str, asyncio.Lock] = {}
 
     # ── Registration ─────────────────────────────────────────────────────────
 
-    def register(self, resource_id: str, factory: ConnectorFactory) -> None:
+    def register(
+        self, resource_id: str, factory: ConnectorFactory, *, replace: bool = True
+    ) -> None:
         """Register a connector *factory* under *resource_id*.
 
         Adding a new resource type is exactly this call plus the connector
         class — no changes to the manager, CLI, or config machinery are required
-        beyond an optional config default.
+        beyond an optional config default. Re-registering an id replaces the
+        factory (the long-standing behaviour); pass ``replace=False`` to make a
+        duplicate an error instead.
         """
+        if not replace and resource_id in self._factories:
+            raise ValueError(f"A connector is already registered as '{resource_id}'.")
         self._factories[resource_id] = factory
+
+    def attach_job_registry(self, registry: Any | None) -> None:
+        """Give the manager the session's job registry and register ``process``.
+
+        Idempotent. Without a registry there is no ``process`` connector, so a
+        bare manager exposes exactly the connectors it was given.
+        """
+        self._job_registry = registry
+        if registry is None:
+            self._factories.pop("process", None)
+            self._connectors.pop("process", None)
+            return
+        from velune.resources.process.connector import ProcessConnector
+
+        self._connectors.pop("process", None)
+        self.register("process", lambda: ProcessConnector(registry))
 
     def register_defaults(self) -> None:
         """Register the built-in connectors (Docker, Postgres, MySQL, Supabase).
@@ -128,6 +155,8 @@ class ResourceManager:
         self.register("postgres", PostgresConnector)
         self.register("mysql", MySQLConnector)
         self.register("supabase", SupabaseConnector)
+        if self._job_registry is not None:
+            self.attach_job_registry(self._job_registry)
 
     def set_approver(self, approver: Approver) -> None:
         """Install the legacy approver (the *ask* callback of a MANUAL gate)."""
@@ -443,11 +472,51 @@ class ResourceManager:
                 started,
             )
 
+        return self._complete(connector, action, params, result, started)
+
+    def _complete(
+        self,
+        connector: ResourceConnector,
+        action: str,
+        params: dict[str, Any],
+        result: Any,
+        started: float | None,
+    ) -> ResourceResult:
+        """Normalize a finished call: wrap, record ownership, redact, time."""
         if not isinstance(result, ResourceResult):
             result = ResourceResult.success(action=action, data=result)
         if result.ok:
             self._record_ownership(connector, action, params, result)
-        return _finish(result, resource_id, started)
+        return _finish(result, connector.resource_id, started)
+
+    async def run_authorized(
+        self, connector: ResourceConnector, action: str, params: dict[str, Any]
+    ) -> ResourceResult:
+        """Run an action that has *already* been authorized by the permission gate.
+
+        The model-facing tools call this from inside ``authorize_and_execute``
+        (the gate decided before this runs), so it never authorizes anything
+        itself. It makes sure the session is open, runs the connector, and
+        returns the same normalized, redacted result as :meth:`execute`.
+        Operational failures are returned, never raised.
+        """
+        started = time.perf_counter()
+        params = dict(params or {})
+        if connector.lifecycle is not Lifecycle.STATELESS:
+            opened = await self._connect(connector.resource_id, connector, only_if_needed=True)
+            if not opened.ok:
+                opened.action = action
+                return opened
+        try:
+            result = await connector.execute(action, params)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("run_authorized(%s.%s) raised: %s", connector.resource_id, action, exc)
+            result = ResourceResult.failure(
+                _exception_message(exc), action=action, code=ErrorCode.ADAPTER_FAILURE
+            )
+        return self._complete(connector, action, params, result, started)
 
     def _resolve_context(
         self,

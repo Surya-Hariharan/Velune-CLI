@@ -203,13 +203,39 @@ class SQLConnector(ResourceConnector):
         return [
             *self._engine_capabilities(),
             ResourceCapability(
-                "query", read, "Run SQL. SELECT auto-approves; writes/DDL need confirmation"
+                "query",
+                read,
+                "Run SQL. SELECT auto-approves; writes/DDL need confirmation",
+                category="query",
+                params={
+                    "properties": {"sql": {"type": "string", "description": "The SQL statement."}},
+                    "required": ["sql"],
+                },
             ),
             ResourceCapability(
-                "explain", read, "EXPLAIN a query plan (read-only)", scope="database.query.read"
+                "explain",
+                read,
+                "EXPLAIN a query plan (read-only)",
+                scope="database.query.read",
+                category="query",
+                params={
+                    "properties": {"sql": {"type": "string", "description": "The SQL statement."}},
+                    "required": ["sql"],
+                },
             ),
-            ResourceCapability("health", read, "Check connection health", scope="database.health"),
+            ResourceCapability(
+                "health",
+                read,
+                "Check connection health",
+                scope="database.health",
+                category="status",
+            ),
         ]
+
+    def configuration_problem(self) -> str | None:
+        if self._explicit_config or load_resource_secret(self.resource_id, self.name):
+            return None
+        return f"Not configured — the user must run /resource configure {self.resource_id}."
 
     #: ``query`` spans several scopes; the concrete one follows the SQL itself.
     _QUERY_SCOPES = {

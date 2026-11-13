@@ -138,6 +138,9 @@ async def cmd_new(repl: VeluneREPL, args: str) -> None:
     repl.session_tokens = 0
     repl.session_cost = 0.0
     repl._context_tracker.update(repl._conversation)
+    from velune.cli.handlers.tool_chat import reset_integration_tools
+
+    reset_integration_tools(repl)
     await repl._start_episodic_session()
     repl.console.print(
         ui.notification(

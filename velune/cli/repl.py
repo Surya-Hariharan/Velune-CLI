@@ -153,6 +153,14 @@ class VeluneREPL:
             self._job_registry = self.container.get("runtime.job_registry")
         except Exception:
             self._job_registry = None
+        # The `process` integration (status, logs, readiness, stop for background
+        # commands the agent started) needs the session's job registry.
+        try:
+            self._resource_manager.attach_job_registry(self._job_registry)
+        except Exception as exc:
+            _log.debug("Could not attach the job registry to the resource manager: %s", exc)
+        # Built lazily by the tool-chat handler: which integrations the model has enabled.
+        self._integration_tools = None
         try:
             self._alert_store = self.container.get("runtime.alert_store")
         except Exception:

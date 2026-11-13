@@ -157,13 +157,19 @@ def _to_gemini_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]
     declarations = []
     for t in tools:
         fn = t.get("function", t)
-        declarations.append(
-            {
-                "name": fn.get("name", ""),
-                "description": fn.get("description", ""),
-                "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
-            }
-        )
+        declaration: dict[str, Any] = {
+            "name": fn.get("name", ""),
+            "description": fn.get("description", ""),
+        }
+        parameters = fn.get("parameters") or {}
+        # A function with no parameters is declared by *omitting* ``parameters``
+        # (it is optional in the API). An OBJECT schema with an empty
+        # ``properties`` is the shape Gemini is known to reject, and one rejected
+        # tool fails the whole request. Tools that do take parameters are
+        # unchanged.
+        if parameters.get("properties"):
+            declaration["parameters"] = parameters
+        declarations.append(declaration)
     return [{"functionDeclarations": declarations}] if declarations else None
 
 

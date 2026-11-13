@@ -20,7 +20,9 @@ Approval policy (per call):
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -119,7 +121,20 @@ def _describe_call(name: str, arguments: Any, workspace: Path | None) -> tuple[s
             target = _relativize(value, workspace)
             break
     if not target:
-        for key in ("command", "pattern", "query", "url", "symbol"):
+        for key in (
+            "command",
+            "pattern",
+            "query",
+            "url",
+            "symbol",
+            # integration tools: the thing being acted on
+            "container",
+            "job_id",
+            "integration",
+            "table",
+            "sql",
+            "target",
+        ):
             value = args.get(key)
             if isinstance(value, str) and value:
                 target = value
@@ -130,6 +145,39 @@ def _describe_call(name: str, arguments: Any, workspace: Path | None) -> tuple[s
     return verb, target
 
 
+# Integration tool results are JSON. The event payload is cut at 2000 characters, so these
+# read only the leading fields with regexes instead of parsing the whole document.
+_INTEGRATION_RESULT = re.compile(
+    r'^\{"ok": (true|false), "integration": "([^"]*)", "action": "([^"]*)"'
+)
+_INTEGRATION_ERROR = re.compile(r'"error": \{"code": "([a-z_]+)", "message": "((?:[^"\\]|\\.)*)"')
+_ENABLE_RESULT = re.compile(r'^\{"enabled": (true|false), "integration": "([^"]*)"')
+
+
+def _summarize_integration(result: str) -> list[tuple[str, str]] | None:
+    """A readable row for an integration tool's JSON result, or None if it is not one."""
+    found = _INTEGRATION_RESULT.match(result)
+    if found:
+        ok, integration, action = found.groups()
+        if ok == "true":
+            return [(_RESULT_STYLE, f"{integration} {action}: ok")]
+        error = _INTEGRATION_ERROR.search(result)
+        detail = "failed"
+        if error:
+            try:  # the message is a JSON string body: undo its escapes
+                message = json.loads(f'"{error.group(2)}"')
+            except ValueError:
+                message = error.group(2)
+            detail = f"{error.group(1)}: {message}"
+        return [("class:conversation.tool.err", f"{integration} {action}: {detail}"[:160])]
+    enabled = _ENABLE_RESULT.match(result)
+    if enabled:
+        flag, integration = enabled.groups()
+        text = f"Enabled {integration}" if flag == "true" else f"Could not enable {integration}"
+        return [(_RESULT_STYLE if flag == "true" else "class:conversation.tool.err", text)]
+    return None
+
+
 def _summarize_result(
     name: str, data: dict[str, Any], diff: FileDiff | None, target: str
 ) -> list[tuple[str, str]]:
@@ -138,6 +186,9 @@ def _summarize_result(
     first = result.splitlines()[0].strip() if result.strip() else ""
     if data.get("error"):
         return [("class:conversation.tool.err", (first or "failed")[:160])]
+    integration_row = _summarize_integration(result)
+    if integration_row is not None:
+        return integration_row
     if name in _FILE_MUTATORS and diff is not None:
         from velune.execution.diff_preview import diff_stats
 
@@ -207,6 +258,58 @@ def tool_loop_available(repl: VeluneREPL, model: ModelDescriptor, provider: Any)
         return repl.container.get("runtime.tool_registry") is not None
     except Exception:
         return False
+
+
+def reset_integration_tools(repl: VeluneREPL) -> None:
+    """Forget which integrations the model had enabled (a new conversation starts clean).
+
+    Called wherever the conversation is reset. The model has no memory of having
+    enabled anything in the new conversation, so it should start again from the
+    discovery tools rather than carry unexplained tools (and their token cost).
+    """
+    source = getattr(repl, "_integration_tools", None)
+    if source is not None:
+        source.scope.reset()
+
+
+def _last_user_text(messages: list[dict[str, Any]]) -> str:
+    """The user's latest plain-text message, used only to *suggest* integrations."""
+    for message in reversed(messages or []):
+        if message.get("role") == "user" and isinstance(message.get("content"), str):
+            return message["content"][:2000]
+    return ""
+
+
+def _integration_source(repl: VeluneREPL, request: InferenceRequest, workspace: Path | None):
+    """The session's integration tool source, primed for this run — or None.
+
+    None means the model is offered no integration tools: there is no resource
+    manager, or ``resources.expose_to_model`` is off. The source (and which
+    integrations the model has enabled) lives for the session; each run
+    re-validates it against the current connectors and re-reads the workspace
+    hints that *suggest* integrations. Nothing here grants any permission.
+    """
+    manager = getattr(repl, "_resource_manager", None)
+    if manager is None:
+        return None
+    cfg = getattr(getattr(getattr(repl, "runtime", None), "config", None), "resources", None)
+    if cfg is not None and not getattr(cfg, "expose_to_model", True):
+        return None
+    try:
+        from velune.resources.discovery import scan_workspace
+        from velune.resources.tools import IntegrationToolSource
+
+        source = getattr(repl, "_integration_tools", None)
+        if source is None:
+            source = IntegrationToolSource(
+                manager, max_tools=int(getattr(cfg, "max_exposed_tools", 24))
+            )
+            repl._integration_tools = source
+        source.begin_run(_last_user_text(request.messages), scan_workspace(workspace))
+        return source
+    except Exception as exc:  # never let discovery break a chat turn
+        _log.debug("Integration tools unavailable this turn: %s", exc)
+        return None
 
 
 async def run_tool_chat(
@@ -279,6 +382,7 @@ async def run_tool_chat(
         ctx=ctx,
         max_turns=max_turns,
         on_event=ui.on_event,
+        dynamic_tools=_integration_source(repl, request, Path(workspace) if workspace else None),
     )
 
     # Every file change this turn is journaled so /rewind can put it back.

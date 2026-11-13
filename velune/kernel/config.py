@@ -334,6 +334,13 @@ class ResourcesConfig(BaseModel):
     postgres: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
     mysql: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
     supabase: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
+    #: When False the model is never offered integration tools (the discovery tools
+    #: and every integration operation are withheld). ``/resource`` is unaffected.
+    expose_to_model: bool = True
+    #: Most integration operation tools (counting the ``integration_call``
+    #: dispatcher) shown to the model at once. Operations beyond it stay reachable
+    #: through the dispatcher instead of being dropped.
+    max_exposed_tools: int = Field(default=24, ge=4, le=64)
 
 
 class VeluneConfig(BaseSettings):

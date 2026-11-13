@@ -32,7 +32,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from velune.core.types.inference import InferenceRequest, InferenceResponse, ToolCall
 from velune.tools.base.tool import (
@@ -52,7 +52,11 @@ logger = logging.getLogger("velune.orchestration.tool_loop")
 
 # Read-only scopes that never need per-call approval.
 READONLY_PERMISSIONS: frozenset[ToolPermission] = frozenset(
-    {ToolPermission.FILESYSTEM_READ, ToolPermission.GIT_READ}
+    {
+        ToolPermission.FILESYSTEM_READ,
+        ToolPermission.GIT_READ,
+        ToolPermission.INTEGRATION_READ,
+    }
 )
 
 # OpenAI tool names must match this; MCP server/tool names may not.
@@ -66,6 +70,28 @@ Approver = Callable[[str, dict[str, Any], "set[ToolPermission]"], Awaitable[bool
 EventHook = Callable[[str, dict[str, Any]], None]
 
 
+class DynamicToolSource(Protocol):
+    """A provider of tools whose set can change *between* model turns.
+
+    The loop never mutates the tool list inside a turn: it compares ``version``
+    after each batch of tool calls and, if it changed, rebuilds the definitions
+    for the next request. Every provider adapter receives a fresh, complete tool
+    list on every request, so this needs no provider-specific support.
+
+    A tool returned here is called through the same enforced entry point as any
+    other (``authorize_and_execute``); being offered grants no permission. A tool
+    may expose ``resolve_call(arguments) -> (tool, arguments)`` to be authorized as
+    a different tool (the integration dispatcher is authorized as its target).
+    """
+
+    @property
+    def version(self) -> int: ...
+
+    def tools(self) -> list[BaseTool]: ...
+
+    def unknown_tool_hint(self, name: str) -> str | None: ...
+
+
 @dataclass(slots=True)
 class ToolInvocation:
     """Record of one executed (or attempted) tool call."""
@@ -74,7 +100,7 @@ class ToolInvocation:
     result: str
     error: bool = False
     duration_ms: float = 0.0
-    source: str = "local"  # "local" | "mcp"
+    source: str = "local"  # "local" | "mcp" | "integration"
 
 
 @dataclass(slots=True)
@@ -182,6 +208,7 @@ class ToolLoopRunner:
         max_turns: int = 10,
         max_result_chars: int = 16_000,
         on_event: EventHook | None = None,
+        dynamic_tools: DynamicToolSource | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
@@ -204,6 +231,9 @@ class ToolLoopRunner:
         # wrapped in MCPRegistryTool so they take the same gated path.
         self._route: dict[str, tuple[str, Any]] = {}
         self._executed_invocations: list[ToolInvocation] = []
+        # Optional source whose tools can change between turns (see DynamicToolSource).
+        self._dynamic = dynamic_tools
+        self._dynamic_version: int | None = None
 
     @property
     def executed_invocations(self) -> list[ToolInvocation]:
@@ -233,6 +263,29 @@ class ToolLoopRunner:
                     continue
                 exposed = _NAME_SAFE.sub("_", name)[:64]
                 self._route[exposed] = ("local", tool)
+                definitions.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": exposed,
+                            "description": tool.get_description(),
+                            "parameters": tool.get_schema() or {"type": "object", "properties": {}},
+                        },
+                    }
+                )
+
+        if self._dynamic is not None:
+            try:
+                dynamic_tools = self._dynamic.tools()
+                self._dynamic_version = self._dynamic.version
+            except Exception as exc:  # a broken source must not break the turn
+                logger.warning("Could not build dynamic tools: %s", exc)
+                dynamic_tools = []
+            for tool in dynamic_tools:
+                exposed = _NAME_SAFE.sub("_", tool.get_name())[:64]
+                if exposed in self._route:
+                    continue  # native tools win
+                self._route[exposed] = ("integration", tool)
                 definitions.append(
                     {
                         "type": "function",
@@ -372,6 +425,15 @@ class ToolLoopRunner:
                 gate = self._base_ctx.gate if self._base_ctx else None
                 if gate is not None:
                     gate.clear_batch()
+            if request.tools is None and self._dynamic_tools_changed():
+                # The set of tools changed (e.g. an integration was enabled): the
+                # next request carries the new, complete list. A call that failed
+                # only because its tool was not offered yet (the model batched
+                # "enable" with a use of it) must not be refused as "already
+                # failed" now that the tool exists, so that memory is reset.
+                tools = self.build_tool_definitions()
+                failed_calls.clear()
+                self._emit("tools_changed", {"turn": turn, "tools": len(tools)})
             if repeated >= _MAX_REPEATED_FAILURES:
                 logger.warning("Tool loop stopped: repeated identical failing calls.")
                 return ToolLoopResult(
@@ -399,6 +461,20 @@ class ToolLoopRunner:
         )
 
     # ── Execution ────────────────────────────────────────────────────────
+
+    def _dynamic_tools_changed(self) -> bool:
+        """True when the dynamic source now offers a different set of tools.
+
+        A source that raises is treated as unchanged: a broken integration
+        layer must never break the turn.
+        """
+        if self._dynamic is None:
+            return False
+        try:
+            return self._dynamic.version != self._dynamic_version
+        except Exception as exc:
+            logger.warning("Dynamic tool source failed; keeping the current tools: %s", exc)
+            return False
 
     async def _infer_turn(self, req: InferenceRequest) -> InferenceResponse:
         """One model turn — streamed when the provider supports streaming tool
@@ -454,29 +530,45 @@ class ToolLoopRunner:
         start = time.perf_counter()
         route = self._route.get(call.name)
         if route is None:
+            hint = ""
+            if self._dynamic is not None:
+                try:
+                    hint = self._dynamic.unknown_tool_hint(call.name) or ""
+                except Exception:
+                    hint = ""
             return ToolInvocation(
                 call=call,
-                result=f"Error: unknown tool '{call.name}'. Available tools: "
+                result=f"Error: unknown tool '{call.name}'.{hint} Available tools: "
                 + ", ".join(sorted(self._route)),
                 error=True,
             )
 
         kind, target = route
         exit_code: Any = None
+        name, arguments = call.name, call.arguments
+        resolver = getattr(target, "resolve_call", None)
+        if callable(resolver):
+            # A dispatcher is authorized as the operation it stands for: the gate,
+            # the approver and any session grant see the real tool and scope.
+            try:
+                target, arguments = resolver(call.arguments)
+            except (LookupError, ValueError) as exc:
+                return ToolInvocation(call=call, result=f"Error: {exc}", error=True, source=kind)
+            name = target.get_name()
         # MCP tools report {NETWORK_ACCESS}: remote calls, so read-only
         # auto-approval policies never green-light them silently.
         permissions: set[ToolPermission] = set(target.get_required_permissions())
 
         try:
-            approved = await self._approver(call.name, call.arguments, permissions)
+            approved = await self._approver(name, arguments, permissions)
         except Exception as exc:  # an approver crash must fail closed
-            logger.warning("Approver raised for %s; denying call: %s", call.name, exc)
+            logger.warning("Approver raised for %s; denying call: %s", name, exc)
             approved = False
         if not approved:
-            self._emit("tool_denied", {"id": call.id, "name": call.name})
+            self._emit("tool_denied", {"id": call.id, "name": name})
             return ToolInvocation(
                 call=call,
-                result=f"Error: the user denied permission to run '{call.name}'.",
+                result=f"Error: the user denied permission to run '{name}'.",
                 error=True,
                 duration_ms=(time.perf_counter() - start) * 1000.0,
                 source=kind,
@@ -484,12 +576,12 @@ class ToolLoopRunner:
 
         self._emit(
             "tool_start",
-            {"id": call.id, "name": call.name, "arguments": call.arguments},
+            {"id": call.id, "name": name, "arguments": arguments},
         )
         try:
             # Native and MCP tools alike: the enforced entry point (scope
             # check, permission gate, hooks). MCP calls no longer bypass it.
-            result = await self._run_local(target, call, permissions)
+            result = await self._run_local(target, call, permissions, arguments)
             text = _stringify(result)
             error = False
             if isinstance(result, dict) and "exit_code" in result:
@@ -517,12 +609,12 @@ class ToolLoopRunner:
             "tool_end",
             {
                 "id": call.id,
-                "name": call.name,
+                "name": name,
                 "error": error,
                 "duration_ms": duration,
                 "result": text[:2000],
                 "exit_code": exit_code,
-                "arguments": call.arguments,
+                "arguments": arguments,
             },
         )
         return ToolInvocation(
@@ -540,9 +632,12 @@ class ToolLoopRunner:
             if route is None:
                 continue
             try:
-                described.append(
-                    (call.name, route[1].describe_actions(call.arguments, gate.boundary))
-                )
+                tool, args, name = route[1], call.arguments, call.name
+                resolver = getattr(tool, "resolve_call", None)
+                if callable(resolver):
+                    tool, args = resolver(call.arguments)
+                    name = tool.get_name()
+                described.append((name, tool.describe_actions(args, gate.boundary)))
             except Exception as exc:  # bad arguments: the call itself will report it
                 logger.debug("describe_actions failed for %s: %s", call.name, exc)
         try:
@@ -553,7 +648,11 @@ class ToolLoopRunner:
             logger.debug("batch pre-authorization failed: %s", exc)
 
     async def _run_local(
-        self, tool: BaseTool, call: ToolCall, permissions: set[ToolPermission]
+        self,
+        tool: BaseTool,
+        call: ToolCall,
+        permissions: set[ToolPermission],
+        arguments: dict[str, Any] | None = None,
     ) -> Any:
         """Run a local tool through the enforced permission/hook entry point."""
         base = self._base_ctx
@@ -570,8 +669,9 @@ class ToolLoopRunner:
             # here would make every state change fail closed.
             gate=base.gate if base else None,
         )
-        tool.validate_input(call.arguments)
-        return await authorize_and_execute(tool, ctx, **call.arguments)
+        args = call.arguments if arguments is None else arguments
+        tool.validate_input(args)
+        return await authorize_and_execute(tool, ctx, **args)
 
     def _emit(self, event: str, data: dict[str, Any]) -> None:
         if self._on_event is None:

@@ -132,6 +132,7 @@ toward that goal; they reduce risk and do not eliminate it.
 | Encrypted credential store | Enabled | `velune/providers/crypto.py` |
 | Log, traceback and tool-output redaction of known key formats and of connector credentials loaded at runtime | Enabled | `velune/core/redaction.py` |
 | Integration permission scopes, resource ownership and compose-file inspection | Enabled | `velune/permissions/`, `velune/resources/` |
+| Dynamic integration discovery: tools offered to the model are exposure only, never permission | Enabled; `resources.expose_to_model` turns it off | `velune/resources/capabilities.py`, `velune/resources/tools.py` |
 | Opt-in local crash reports | **Off by default** | `velune/cli/crash_reporter.py` |
 | Git snapshot and rollback for plan-driven changes | Enabled | `velune/execution/rollback.py` |
 
@@ -155,6 +156,12 @@ toward that goal; they reduce risk and do not eliminate it.
   (a container that was already running is never assumed to be the task's
   own), and for a compose file that asks for a privileged container, the host
   network, a host bind mount, the Docker socket or a device.
+- The model is offered integrations through discovery tools, not all at once. Being offered a tool grants no
+  permission: discovery is read-only in every mode, a call to a tool that was not enabled is refused, arguments are
+  validated strictly before anything runs, and each call is decided by the rules above exactly as if it had been
+  made directly. Descriptions, schemas and discovery results never contain credentials or connection details. The
+  model can start, read, wait for and stop only the background commands it started, by job id, never by process id.
+  `resources.expose_to_model = false` withholds every integration tool from the model.
 - `/approve ask|safe|block` is a legacy alias for the execution modes: `ask`
   selects Manual, `safe` selects Auto and `block` selects Plan.
 

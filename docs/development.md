@@ -289,8 +289,103 @@ id (with its creation time), the command, a bounded live `ProcessLog` and the ex
 until it is stopped, not for the foreground 30 seconds, under the same sandbox limits as any command.
 `execution/processes.py` provides `wait_until_ready` (a log pattern and/or a *loopback-only* port),
 `terminate_job` (kills the whole tree; leaves a finished job untouched, because process ids are reused) and
-`cleanup_background_jobs`, which the REPL runs on exit. These are library functions; they are not yet exposed
-to the model as tools.
+`cleanup_background_jobs`, which the REPL runs on exit. The `process`
+integration below exposes them to the model.
+
+### Capability discovery and dynamic tool exposure
+
+The model does not get every integration operation up front. It starts with two discovery tools and asks for
+what it needs; the operations it enables appear on its **next** turn. This is built on the resource framework
+above and adds no execution path and no permission of its own.
+
+```
+turn N    model ── integrations_enable(integration="docker") ──▶ IntegrationToolSource.enable
+                                                                    └─▶ CapabilityScope  (version + 1)
+after the batch   ToolLoopRunner sees dynamic_tools.version changed ─▶ rebuilds the tool definitions
+turn N+1  model receives docker__ps, docker__stop, … ── calls one ──▶ authorize_and_execute ─▶ PermissionGate
+                                                                          └─▶ ResourceManager.run_authorized
+```
+
+| Piece | Where | Role |
+| --- | --- | --- |
+| Manifest | `resources/capabilities.py` (`IntegrationManifest`, `OperationManifest`, `build_manifest`) | An immutable, validated snapshot **derived from the connector's own `capabilities()`**, so there is one source of truth. A connector that declares something unsafe (bad id, duplicate or badly named operation, invalid scope, unsupported parameter type) gets a `ManifestError`, is reported as `invalid` and is never exposed. |
+| Catalog | `CapabilityCatalog` | Manifests plus **availability**: `connected`, `available`, `unavailable` (the Docker daemon is not running, not merely absent), `needs_configuration`, `invalid`. Probes are bounded and cached for 30 seconds; an open connection is reported from live status; a failed call marks the integration unavailable at once. It also *suggests* integrations for the task by whole-word keyword matching and workspace hints (a compose file suggests `docker`). Suggestions only highlight; they never expose anything. |
+| Scope | `CapabilityScope` | Which integrations (and categories) the model currently has. It is per session, re-validated at the start of every run, and has a tool budget. |
+| Tools | `resources/tools.py` | `integrations_list`, `integrations_enable`, `integrations_disable`, one `ModelOperationTool` per enabled operation, and the `integration_call` dispatcher. |
+| Loop hook | `DynamicToolSource` in `orchestration/tool_loop.py` | After each batch of tool calls the loop compares the source's `version`; if it changed it rebuilds the definitions for the next request. Nothing is mutated inside a turn. |
+
+**Naming.** An operation's tool is `<integration>__<operation>` (`docker__stop`). An integration id never contains
+`__`, so the split is unambiguous and two integrations cannot collide on a tool name.
+
+**Budget and fallback.** `resources.max_exposed_tools` (default 24) bounds the operation tools shown at once,
+counting the dispatcher. When more are enabled, the overflow stays reachable through `integration_call`, which the
+loop authorizes **as the target operation** (`resolve_call`): the gate, the approver, the audit record and any
+session "always allow" all see the real tool name and scope, never `integration_call`. Nothing is silently dropped.
+`resources.expose_to_model = false` removes every integration tool from the model; `/resource` is unaffected.
+
+**What discovery is not.** A discovered capability is not an authorized capability:
+
+- The discovery tools are READ actions in the policy, so they work in every mode, and enabling changes only what
+  the model is *shown*. Every call still goes through `authorize_and_execute` and the gate, and is decided exactly
+  as if it had been made directly (`tests/test_dynamic_tool_loop.py` asserts the same verdict for every mode and
+  operation through both paths).
+- A tool that is not enabled has no route: a hand-built call to it is an "unknown tool" error, with a hint to enable
+  it. The dispatcher refuses anything outside the enabled set, including categories the model did not enable.
+- Arguments are validated strictly against the exposed schema (unknown names, wrong types, enum and range
+  violations are rejected before anything runs; messages name the argument, never its value). The schema the model
+  sees is a whitelisted, flat subset; connector credentials and configuration never appear in a description,
+  schema or discovery row.
+- If a connector is redefined after its operations were exposed, a scope or tier mismatch is refused at call time.
+- A result is normalized JSON, redacted, and compacted to stay valid JSON when large (lists keep their leading
+  items and the true total; log output keeps the latest lines).
+- MCP tools are not part of this discovery: they are offered as before and authorized as described in
+  [mcp.md](mcp.md#tool-call-authorization-execution-mode-level).
+
+**Background processes.** The `process` integration (registered when the REPL has a job registry) lets the model
+read `status` and `logs`, `wait_ready` and `stop` for background commands **it started**. Only shell jobs the agent
+owns exist as far as it can tell, jobs are addressed by job id (a pid is never shown or accepted), a readiness
+check takes literal text rather than a regular expression and can only probe a loopback port, and `stop` goes
+through the process-identity protections described above.
+
+**Provider compatibility.** Every adapter receives a complete tool list on every request, so a changing set needs no
+provider-specific feature. Schemas stay in the portable subset (`type`, `description`, `enum`, `items`,
+`required`), and the Gemini translator omits `parameters` for a function with none. The tests translate the real
+definitions through the Anthropic, Gemini, Cohere and OpenAI-format paths (which Groq, OpenRouter, Ollama and LM
+Studio use) **offline**; no live provider was called, so acceptance by each provider is not verified, and the
+providers' own tool-count limits are not asserted. A changed tool list also invalidates a provider's prompt cache
+for the prefix that follows it, which is why tools keep a stable, append-only order.
+
+**Adding an integration.** Nothing here needs to change. Subclass `ResourceConnector`, give it a `description` and
+`keywords`, and declare each operation with a `scope`, a `category` and a flat `params` schema; implement
+`configuration_problem()` (what the user must configure, with no secrets in the text) and `probe_availability()`
+(is the application there right now). The manifest, the discovery tools, the schemas and the gate integration
+follow from that.
+
+The shipped integrations are Docker (through the Docker CLI), local PostgreSQL and MySQL, Supabase, and
+`process`. The example below is **illustrative**, not implemented:
+
+```python
+class RedisConnector(ResourceConnector):          # illustrative: there is no Redis connector yet
+    resource_id = "redis"
+    description = "A local Redis server: read and write keys."
+    keywords = ("redis", "cache", "key")
+
+    def capabilities(self):
+        key = {"type": "string", "description": "Key name."}
+        return [
+            ResourceCapability("get", ResourcePermission.READ, "Read a key",
+                               scope="redis.key.read", category="inspect",
+                               params={"properties": {"key": key}, "required": ["key"]}),
+            ResourceCapability("set", ResourcePermission.WRITE, "Write a key",
+                               scope="redis.key.write", category="change",
+                               params={"properties": {"key": key, "value": {"type": "string"}},
+                                       "required": ["key", "value"]}),
+        ]
+```
+
+An HTTP integration would follow the same shape (illustrative, and not part of this work): operations such as
+`http__request`, scoped `http.request.read` and `http.request.write`, with the network policy enforced at the
+execution boundary rather than in the model's instructions.
 
 To add a connector: subclass `ResourceConnector`, give every capability a scope, override `describe_actions`
 only to add risk, return `ResourceResult` with an `ErrorCode`, load secrets through `resources/secrets.py`,

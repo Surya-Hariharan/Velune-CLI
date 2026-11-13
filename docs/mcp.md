@@ -293,6 +293,11 @@ Annotations are asserted by the server, so Velune only lets them *raise* the
 risk: a `readOnlyHint` does not make a call skip approval. A call without a
 usable permission scope is refused.
 
+Integration discovery (`integrations_list` / `integrations_enable`, see the
+[development guide](development.md#capability-discovery-and-dynamic-tool-exposure)) covers
+Velune's own resource integrations only. MCP tools are not part of it: they are offered as before, and
+the rules above apply to every call.
+
 ### Workspace trust (project-config level)
 
 When you open a workspace that has its own `.mcp.json` or

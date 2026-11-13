@@ -24,6 +24,10 @@ class MySQLConnector(SQLConnector):
 
     resource_id = "mysql"
     display_name = "MySQL / MariaDB"
+    description = (
+        "A local MySQL or MariaDB server: inspect schemas and run SQL (read-only by default)."
+    )
+    keywords = ("mysql", "mariadb", "database", "sql", "query", "table", "tables")
     default_port = 3306
     driver_name = "pymysql"
 
@@ -71,9 +75,26 @@ class MySQLConnector(SQLConnector):
     def _engine_capabilities(self) -> list[ResourceCapability]:
         read = ResourcePermission.READ
         return [
-            ResourceCapability("list_databases", read, "SHOW DATABASES"),
-            ResourceCapability("list_tables", read, "SHOW TABLES"),
-            ResourceCapability("describe_table", read, "DESCRIBE a table"),
+            ResourceCapability("list_databases", read, "SHOW DATABASES", category="schema"),
+            ResourceCapability(
+                "list_tables",
+                read,
+                "SHOW TABLES",
+                category="schema",
+                params={
+                    "properties": {"database": {"type": "string", "description": "Database name."}}
+                },
+            ),
+            ResourceCapability(
+                "describe_table",
+                read,
+                "DESCRIBE a table",
+                category="schema",
+                params={
+                    "properties": {"table": {"type": "string", "description": "Table name."}},
+                    "required": ["table"],
+                },
+            ),
         ]
 
     async def _do_list_databases(self, params: dict[str, Any]) -> ResourceResult:
