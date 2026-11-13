@@ -956,13 +956,50 @@ def is_respelling(current: Path, wanted: Path) -> bool:
     return current.name in names and wanted.name not in names
 
 
+def _rename_no_replace(source: Path, target: Path) -> None:
+    """Rename *source* to *target*, failing rather than replacing anything already there.
+
+    POSIX ``rename`` silently replaces an existing file (or empty folder), and Python has no
+    ``RENAME_NOREPLACE``, so the name is claimed with an operation that fails atomically if
+    it is taken: a hard link for a file, ``mkdir`` for a folder (the folder is then renamed
+    onto that empty placeholder, which ``rename`` refuses if anything was put in it or it
+    was swapped for a file). On Windows ``rename`` never replaces. A filesystem without hard
+    links fails closed: the error is raised and nothing is renamed.
+    """
+    if os.name == "nt":
+        os.rename(source, target)
+        return
+    if os.path.isdir(source) and not os.path.islink(source):
+        os.mkdir(target)
+        try:
+            os.rename(source, target)
+        except OSError:
+            try:
+                os.rmdir(target)  # only succeeds while it is still our empty placeholder
+            except OSError:
+                pass
+            raise
+        return
+    if os.link in os.supports_follow_symlinks:
+        os.link(source, target, follow_symlinks=False)
+    else:
+        os.link(source, target)
+    try:
+        os.unlink(source)
+    except OSError:
+        os.unlink(target)  # undo the second name, so the entry is where it was
+        raise
+
+
 def respell(current: Path, wanted: Path) -> Path:
     """Rename the entry at *current* to *wanted*'s spelling; return its new path.
 
     Goes through a uniquely named temporary sibling, so the change of spelling is applied
     even by a filesystem that would treat a direct rename to the "same" name as a no-op.
-    If the second step fails the entry is put back under its old name; if even that fails,
-    the error says where it is.
+    No step ever renames onto an existing name (:func:`_rename_no_replace`), so a file
+    another program creates under either spelling meanwhile is never replaced. If the
+    second step fails the entry is put back under its old name; if even that is not
+    possible, the error says where it is.
     """
     target = current.parent / wanted.name
     for _ in range(100):
@@ -971,29 +1008,17 @@ def respell(current: Path, wanted: Path) -> Path:
             break
     else:
         raise FileExistsError(f"could not choose a unique temporary name in {current.parent}")
-    os.rename(current, temporary)
-    # Between the two steps another program could create a file under either spelling.
-    # POSIX rename would replace it silently, so neither name is ever renamed onto: if one
-    # is taken, the entry stays at the temporary name and the error says where.
-    if os.path.lexists(target):
-        raise MutationVerificationError(
-            f"{target} appeared while {current.name} was being renamed, so nothing was "
-            f"replaced; {current.name} is now at {temporary}"
-        )
+    _rename_no_replace(current, temporary)
     try:
-        os.rename(temporary, target)
+        _rename_no_replace(temporary, target)
     except OSError as exc:
-        if os.path.lexists(current):
-            raise MutationVerificationError(
-                f"Renaming {current.name} to {wanted.name} failed ({exc}), and {current} is "
-                f"taken now; it was left at {temporary}"
-            ) from exc
         try:
-            os.rename(temporary, current)
+            _rename_no_replace(temporary, current)
         except OSError:
             raise MutationVerificationError(
                 f"Renaming {current.name} to {wanted.name} failed ({exc}) and it could not be "
-                f"put back: it is now at {temporary}"
+                f"put back under its old name, so nothing was replaced; it is now at "
+                f"{temporary}"
             ) from exc
         raise
     return target
@@ -1043,7 +1068,9 @@ class TurnJournal:
         for entry in reversed(self.entries):
             try:
                 self._undo(entry, report)
-            except OSError as exc:
+            except (OSError, MutationVerificationError) as exc:
+                # A respelling that could not finish says where the entry was left; report it
+                # and carry on with the rest of the turn rather than abandoning the rewind.
                 report.skipped.append(f"{_entry_path(entry)}: {exc}")
         for description in self.irreversible:
             report.skipped.append(f"{description}: too large to keep, cannot be rewound")

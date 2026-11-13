@@ -274,6 +274,14 @@ class MovePath(_FsTool):
         else:
             shutil.move(str(src), str(dst))
 
+        # Journaled as soon as the move has happened, before the checks below can raise: a
+        # replaced destination must stay recoverable even if verification then fails. A
+        # rewind re-checks the moved file's content, so an entry for a move that went wrong
+        # is skipped there rather than acted on blindly.
+        if replacing and not kept:
+            mut.journal_irreversible(f"overwrote {dst}")
+        mut.journal(mut.Moved(src, dst, overwritten, sha_before, overwritten_mode))
+
         if not dst.exists() or src.exists():
             raise mut.MutationVerificationError(f"Move of {src} to {dst} did not complete")
         if sha_before is not None and mut.file_sha256(dst) != sha_before:
@@ -283,10 +291,6 @@ class MovePath(_FsTool):
             self.tracker.forget(src)
             if sha_before is not None:
                 self.tracker.record(dst, sha_before)
-        if replacing and not kept:
-            # Recorded only once the destination really was replaced.
-            mut.journal_irreversible(f"overwrote {dst}")
-        mut.journal(mut.Moved(src, dst, overwritten, sha_before, overwritten_mode))
         return f"Moved {src} → {dst} (verified)"
 
     def _rename_case_only(self, src: Path, dst: Path) -> str:
@@ -296,6 +300,7 @@ class MovePath(_FsTool):
         if sha_before is not None:
             self.tracker.check(src, sha_before)
         renamed = mut.respell(src, dst)
+        mut.journal(mut.Moved(src, renamed, None, sha_before))  # before checks that can raise
         listing = os.listdir(renamed.parent)
         if renamed.name not in listing or src.name in listing:
             raise mut.MutationVerificationError(f"Renaming {src} to {renamed} did not complete")
@@ -305,7 +310,6 @@ class MovePath(_FsTool):
             self.tracker.forget(src)
             if sha_before is not None:
                 self.tracker.record(renamed, sha_before)
-        mut.journal(mut.Moved(src, renamed, None, sha_before))
         return f"Renamed {src} → {renamed} (case only, verified)"
 
 

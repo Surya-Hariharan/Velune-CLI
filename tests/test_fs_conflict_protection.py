@@ -309,7 +309,7 @@ async def test_a_case_only_rename_checks_the_source_version(insensitive, journal
 async def test_a_failed_case_only_rename_puts_the_file_back(insensitive, journal, monkeypatch):
     _, _, move, _ = _tools(insensitive)
     (insensitive / "Readme.md").write_text("docs\n", newline="")
-    real_rename = os.rename
+    real_rename = mut._rename_no_replace
     calls = []
 
     def second_step_fails(a, b):
@@ -318,7 +318,7 @@ async def test_a_failed_case_only_rename_puts_the_file_back(insensitive, journal
             raise PermissionError("locked by another program")
         real_rename(a, b)
 
-    monkeypatch.setattr(mut.os, "rename", second_step_fails)
+    monkeypatch.setattr(mut, "_rename_no_replace", second_step_fails)
     with pytest.raises(PermissionError, match="locked"):
         await move.execute(source="Readme.md", destination="README.md")
     assert _listing(insensitive) == ["Readme.md"]
@@ -421,14 +421,14 @@ async def test_a_file_created_mid_rename_is_never_replaced(insensitive, journal,
     renamed onto it, and the error says where the original now is."""
     _, _, move, _ = _tools(insensitive)
     (insensitive / "Readme.md").write_text("docs\n", newline="")
-    real_rename = os.rename
+    real_rename = mut._rename_no_replace  # the real no-replace operation runs every step
 
     def then_someone_writes(a, b):
         real_rename(a, b)
         if Path(b).name.startswith(mut._TMP_PREFIX):
             (insensitive / "README.md").write_text("someone else's file\n", newline="")
 
-    monkeypatch.setattr(mut.os, "rename", then_someone_writes)
+    monkeypatch.setattr(mut, "_rename_no_replace", then_someone_writes)
     with pytest.raises(mut.MutationVerificationError, match="nothing was replaced") as caught:
         await move.execute(source="Readme.md", destination="README.md")
 
@@ -437,6 +437,99 @@ async def test_a_file_created_mid_rename_is_never_replaced(insensitive, journal,
     assert parked in str(caught.value)
     assert (insensitive / parked).read_text() == "docs\n"
     assert journal.entries == []
+
+
+@pytest.mark.parametrize("kind", ["file", "empty-folder", "folder"])
+def test_the_no_replace_rename_never_replaces_an_existing_entry(tmp_path, kind):
+    """POSIX rename would silently replace a file or an empty folder; this must not."""
+    source, target = tmp_path / "source", tmp_path / "target"
+    if kind == "file":
+        source.write_bytes(b"moving\n")
+        target.write_bytes(b"already there\n")
+    else:
+        source.mkdir()
+        (source / "inside.txt").write_bytes(b"moving\n")
+        target.mkdir()
+        if kind == "folder":
+            (target / "kept.txt").write_bytes(b"already there\n")
+    with pytest.raises(OSError):
+        mut._rename_no_replace(source, target)
+    if kind == "file":
+        assert source.read_bytes() == b"moving\n"
+        assert target.read_bytes() == b"already there\n"
+    else:
+        assert (source / "inside.txt").read_bytes() == b"moving\n"
+        assert _listing(target) == ([] if kind == "empty-folder" else ["kept.txt"])
+
+
+@pytest.mark.parametrize("kind", ["file", "folder"])
+def test_the_no_replace_rename_moves_to_a_free_name(tmp_path, kind):
+    source, target = tmp_path / "source", tmp_path / "target"
+    if kind == "file":
+        source.write_bytes(b"data\n")
+    else:
+        source.mkdir()
+        (source / "inside.txt").write_bytes(b"data\n")
+    mut._rename_no_replace(source, target)
+    assert not os.path.lexists(source)
+    assert (target if kind == "file" else target / "inside.txt").read_bytes() == b"data\n"
+
+
+def test_a_respelling_that_cannot_finish_does_not_abandon_the_rest_of_the_rewind(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "README.md").write_bytes(b"docs\n")
+    (tmp_path / "created.txt").write_bytes(b"made this turn\n")
+    journal = mut.TurnJournal()
+    journal.add(
+        mut.FileChange(tmp_path / "created.txt", None, mut.file_sha256(tmp_path / "created.txt"))
+    )
+    journal.add(
+        mut.Moved(
+            tmp_path / "Readme.md",
+            tmp_path / "README.md",
+            None,
+            mut.file_sha256(tmp_path / "README.md"),
+        )
+    )
+    monkeypatch.setattr(mut, "is_respelling", lambda current, wanted: True)
+
+    def stuck(current, wanted):
+        raise mut.MutationVerificationError(f"{current.name} is now at .velune-tmp-x.rename")
+
+    monkeypatch.setattr(mut, "respell", stuck)
+    report = journal.rewind()  # newest first: the respelling fails, the creation is undone
+
+    assert not (tmp_path / "created.txt").exists()
+    assert report.restored == [str(tmp_path / "created.txt")]
+    (skipped,) = report.skipped
+    assert "README.md" in skipped and ".velune-tmp-x.rename" in skipped
+
+
+async def test_a_replaced_destination_is_journaled_even_if_verification_then_fails(
+    tmp_path, journal, monkeypatch
+):
+    """Another program writes to the destination right after the swap: the check fails, but
+    the destination that was replaced is still in the journal."""
+    import velune.tools.filesystem.dirs as dirs_mod
+
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_bytes(b"source\n")
+    (tmp_path / "dst.txt").write_bytes(b"the destination it replaced\n")
+    real_replace = os.replace
+
+    def then_someone_writes(a, b):
+        real_replace(a, b)
+        with open(b, "ab") as handle:
+            handle.write(b"appended right after the swap\n")
+
+    monkeypatch.setattr(dirs_mod.os, "replace", then_someone_writes)
+    with pytest.raises(mut.MutationVerificationError, match="content"):
+        await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+
+    (entry,) = journal.entries
+    assert isinstance(entry, mut.Moved)
+    assert entry.overwritten == b"the destination it replaced\n"
 
 
 # ── #38: a ranged read records the version it returned ───────────────────────
