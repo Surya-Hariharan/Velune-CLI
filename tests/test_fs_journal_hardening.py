@@ -346,7 +346,7 @@ async def test_the_confirm_prompt_still_asks_for_an_oversized_file_without_a_pre
     preview = DiffPreview(Console(file=out, width=200))
     decision = await preview.preview_and_confirm(tmp_path / "big.txt", "", auto_accept=True)
     assert decision == DiffDecision.ACCEPT
-    assert "No preview is shown" in out.getvalue()
+    assert "No preview is shown" in " ".join(out.getvalue().split())  # Rich may wrap it
 
 
 async def test_the_council_batch_preview_handles_an_oversized_file_without_reading_it(
@@ -363,7 +363,7 @@ async def test_the_council_batch_preview_handles_an_oversized_file_without_readi
     meter = ReadMeter(monkeypatch)
     decisions = await batch.preview_batch({big: "new\n"}, auto_accept=True)
     assert decisions == {big: DiffDecision.ACCEPT}
-    assert "No preview is shown" in out.getvalue()
+    assert "No preview is shown" in " ".join(out.getvalue().split())  # Rich may wrap it
     assert meter.total == 0
 
 
