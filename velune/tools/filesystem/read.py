@@ -65,6 +65,30 @@ def _read_bounded(handle: BinaryIO, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+class _HashingReader(io.RawIOBase):
+    """Reads *handle* from where it is, hashing every byte it hands on, in order.
+
+    A ranged read decodes through this, so the hash it records covers exactly the bytes the
+    returned lines were decoded from, read once through one open handle (#38).
+    """
+
+    def __init__(self, handle: BinaryIO) -> None:
+        self._handle = handle
+        self.digest = hashlib.sha256()
+        self.consumed = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        data = self._handle.read(len(buffer))
+        size = len(data)
+        buffer[:size] = data
+        self.digest.update(data)
+        self.consumed += size
+        return size
+
+
 def _coerce_line(value: Any, name: str) -> int | None:
     """A 1-based line number from the model, which may send it as a number or a string."""
     if value is None:
@@ -222,20 +246,20 @@ class ReadFile(BaseTool):
         """``(result text, sha256 of the file as read)``; the hash is None when not known."""
         # Open once and do everything on this handle: no window for the path to be swapped
         # between the checks and the read, and the handle is released on every exit.
+        #
+        # The hash is always of the whole file, as read through this handle: it is what
+        # edit_file and write_file compare the file with later.
         with open(path, "rb") as handle:
             size = _file_size(handle)
             if start is None:
                 data, text = self._read_whole(handle, name, size)
                 return text, (hashlib.sha256(data).hexdigest() if data is not None else None)
-            text = self._read_range(handle, name, size, start, end)
-        # A ranged read sees only part of the file; hash all of it (when it is small enough
-        # to edit at all) so an edit after this read can still detect a conflicting change.
-        sha = None
-        if self.tracker is not None and size <= _HASH_FOR_TRACKING_MAX_BYTES:
-            from velune.tools.filesystem.mutation import file_sha256
-
-            sha = file_sha256(path)
-        return text, sha
+            # A ranged read sees only part of the file. It is hashed as it is decoded and the
+            # rest (when the file is small enough to edit at all) from the same handle, so the
+            # recorded version is the file the returned lines came from. Hashing the path
+            # again after closing it would record whatever is there by then (#38).
+            track = self.tracker is not None and size <= _HASH_FOR_TRACKING_MAX_BYTES
+            return self._read_range(handle, name, size, start, end, track)
 
     def _read_whole(self, handle: BinaryIO, name: str, size: int) -> tuple[bytes | None, str]:
         if size > READ_MAX_FILE_BYTES:
@@ -277,14 +301,21 @@ class ReadFile(BaseTool):
         return data, "\n".join(out)
 
     def _read_range(
-        self, handle: BinaryIO, name: str, size: int, start: int, end: int | None
-    ) -> str:
+        self, handle: BinaryIO, name: str, size: int, start: int, end: int | None, track: bool
+    ) -> tuple[str, str | None]:
+        """``(result text, sha256 of the whole file as read, or None)``.
+
+        The hash is None when *track* is False, or when the file turned out to be larger than
+        :data:`_HASH_FOR_TRACKING_MAX_BYTES` (it grew after it was measured).
+        """
         sample = handle.read(_ENCODING_SAMPLE_BYTES)
         encoding = _choose_encoding(
             sample, name, size, whole_file=len(sample) < _ENCODING_SAMPLE_BYTES
         )
         handle.seek(0)
-        text = io.TextIOWrapper(handle, encoding=encoding, errors="strict", newline=None)
+        hashing = _HashingReader(handle)
+        buffered = io.BufferedReader(hashing, _READ_CHUNK_BYTES)
+        text = io.TextIOWrapper(buffered, encoding=encoding, errors="strict", newline=None)
 
         out: list[str] = []
         used = 0
@@ -337,14 +368,29 @@ class ReadFile(BaseTool):
         finally:
             text.detach()  # the caller's ``with`` owns and closes the handle
 
+        sha = self._finish_hash(buffered, hashing) if track else None
         if not out:  # the loop only ends with nothing to show by reaching the end of the file
-            return f"[{name} has {_plural(number, 'line')}; start_line={start} is past the end.]"
+            notice = f"[{name} has {_plural(number, 'line')}; start_line={start} is past the end.]"
+            return notice, sha
         if cut_at is not None:
             out.append(
                 f"[showing lines {start}-{cut_at - 1}; call read_file again with "
                 f"start_line={cut_at} to continue]"
             )
-        return "\n".join(out)
+        return "\n".join(out), sha
+
+    @staticmethod
+    def _finish_hash(buffered: io.BufferedReader, hashing: "_HashingReader") -> str | None:
+        """Hash the rest of the file through the same handle; None if it is over the limit.
+
+        Bytes the decoder already read ahead were hashed as they were read, so draining what
+        is left covers every byte exactly once, in order. At most the limit plus one chunk is
+        read, even if the file grows while this runs.
+        """
+        while hashing.consumed <= _HASH_FOR_TRACKING_MAX_BYTES:
+            if not buffered.read(_READ_CHUNK_BYTES):
+                return hashing.digest.hexdigest()
+        return None
 
     def get_schema(self) -> dict:
         return {
