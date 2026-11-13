@@ -312,8 +312,10 @@ def plan_overwrite(path: Path, content: str, display: str | None = None) -> Over
     * A text file up to :data:`MAX_MUTATION_BYTES` keeps its encoding, BOM and dominant
       line ending.
     * A binary file is replaced by the UTF-8 text, as before.
-    * A larger file is never read whole. With a byte-order mark its encoding is known
-      for certain, so the BOM, encoding and the line ending seen at the start are kept.
+    * A larger file is never loaded whole. With a byte-order mark its encoding is known
+      for certain, so the BOM, encoding and the line ending seen at the start are kept,
+      once the whole file has been streamed through a strict decoder (a file corrupt
+      anywhere is refused, not only one corrupt in the sample).
       Without one, a binary file is replaced as above, but a text file is refused
       (:class:`FileTooLargeError`): its encoding cannot be confirmed without reading it all,
       and converting it silently is not acceptable.
@@ -370,16 +372,26 @@ def _plan_oversized(path: Path, content: str, name: str) -> Overwrite:
             limit=MAX_MUTATION_BYTES,
         )
     # A partial sample may end inside a character; only the bytes before that are decoded.
-    decoder = codecs.getincrementaldecoder(encoding)()
+    # It decides only the line ending; whether the file is valid text is checked on all of it.
     try:
-        head = decoder.decode(sample[len(bom) :], final=False)
+        head = codecs.getincrementaldecoder(encoding)().decode(sample[len(bom) :], final=False)
     except UnicodeDecodeError as exc:
         raise TextEncodingError(
             f"{name}: could not decode as {encoding}; the file is corrupt. It was not replaced."
         ) from exc
     style, newline = newline_style(head)
     text = to_newline(content, newline) if style != "none" else content
-    before, kept, sha = _journal_copy(path)
+    sha = _validate_whole_text(path, bom, encoding, name)
+    before, kept = None, False
+    if size <= JOURNAL_MAX_BYTES:  # only when the journal limit is set above the edit limit
+        before, kept, journal_sha = _journal_copy(path)
+        if journal_sha != sha:
+            raise FileConflictError(
+                f"{name} changed while it was being checked, so it was not replaced. "
+                "Read it again before replacing it."
+            )
+    # Otherwise nothing is kept, and the hash of the bytes just validated is what
+    # atomic_write compares against right before the swap: a file changed since is refused.
     return Overwrite(
         encode_text(text, encoding, bom),
         sha,
@@ -390,6 +402,46 @@ def _plan_oversized(path: Path, content: str, name: str) -> Overwrite:
         note=f"(previous content: {size} bytes, too large to show a diff; kept its {encoding} "
         "encoding and byte-order mark)",
     )
+
+
+def _validate_whole_text(path: Path, bom: bytes, encoding: str, name: str) -> str:
+    """Strictly decode all of *path* as *encoding* in bounded chunks; return its hash.
+
+    A destructive replacement keeps the file's encoding, so the whole file must be valid in
+    it, not just the sample its encoding was read from. The decoder is incremental, so a
+    character or surrogate pair split across two chunks is decoded as one, and the final
+    call rejects a file that ends inside one (an odd trailing byte, a lone high surrogate).
+    Nothing is replaced on error. The hash is of the same bytes that were validated, so a
+    file changed afterwards fails the conflict check rather than being trusted.
+    """
+    decoder = codecs.getincrementaldecoder(encoding)()  # strict
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        first = handle.read(len(bom))
+        digest.update(first)
+        if first != bom:
+            raise FileConflictError(
+                f"{name} changed while it was being checked, so it was not replaced. "
+                "Read it again before replacing it."
+            )
+        offset = len(bom)  # file offset of the first byte not yet given to the decoder
+        pending = 0  # bytes the decoder holds back: the start of a split character
+        try:
+            while chunk := handle.read(_HASH_CHUNK):
+                digest.update(chunk)
+                pending = len(decoder.getstate()[0])
+                decoder.decode(chunk)
+                offset += len(chunk)
+            pending = len(decoder.getstate()[0])
+            decoder.decode(b"", final=True)
+        except UnicodeDecodeError as exc:
+            # The failing input was the held-back bytes followed by the current chunk.
+            at = offset - pending + exc.start
+            raise TextEncodingError(
+                f"{name}: not valid {encoding} text (byte {at}: {exc.reason}); the file is "
+                "corrupt. It was not replaced."
+            ) from exc
+    return digest.hexdigest()
 
 
 def journal_overwrite(path: Path, plan: Overwrite, new_sha256: str) -> None:

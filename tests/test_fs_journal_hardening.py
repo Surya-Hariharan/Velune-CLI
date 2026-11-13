@@ -254,6 +254,240 @@ async def test_an_oversized_file_with_a_bom_but_corrupt_text_is_refused(tmp_path
     assert (tmp_path / "bad.txt").stat().st_size == len(raw)
 
 
+# ── #39 follow-up: an oversized file with a BOM is validated to its last byte ─────────────
+#
+# Only the 64 KiB sample of an oversized BOM file used to be decoded, so text that was
+# corrupt further in was still overwritten "in its encoding". The whole file is now decoded
+# strictly in chunks before anything is replaced; the chunk size is shrunk to an odd number
+# in some tests so code units and surrogate pairs straddle chunk boundaries.
+
+BOMS = {
+    "utf-16-le": codecs.BOM_UTF16_LE,
+    "utf-16-be": codecs.BOM_UTF16_BE,
+    "utf-8": codecs.BOM_UTF8,
+}
+UTF16 = ["utf-16-le", "utf-16-be"]
+EMOJI_LINE = "registro \U0001f600 línea\r\n"  # a surrogate pair in UTF-16, 4 bytes in UTF-8
+
+
+def _units(text: str, encoding: str) -> bytes:
+    """*text* encoded with lone surrogates allowed, to build deliberately corrupt files."""
+    return text.encode(encoding, "surrogatepass")
+
+
+def _oversized(encoding: str, *, tail: bytes = b"", line: str = EMOJI_LINE) -> bytes:
+    body = _units(line, encoding) * (LIMIT // len(_units(line, encoding)) + 2)
+    return BOMS[encoding] + body + tail
+
+
+async def _assert_refused_untouched(tmp_path: Path, raw: bytes, match: str = "not valid"):
+    path = tmp_path / "f.txt"
+    path.write_bytes(raw)
+    journal = mut.TurnJournal()
+    token = mut.set_active_journal(journal)
+    try:
+        with pytest.raises(mut.TextEncodingError, match=match) as caught:
+            await WriteFile(workspace=tmp_path, confirm=False).execute(
+                file_path="f.txt", content="replacement\n"
+            )
+    finally:
+        mut.reset_active_journal(token)
+    assert path.read_bytes() == raw, "a refused overwrite changed the file"
+    assert journal.entries == [] and journal.irreversible == []
+    assert _no_temp_files(tmp_path)
+    return str(caught.value)
+
+
+@pytest.mark.parametrize("encoding", [*UTF16, "utf-8"])
+async def test_a_valid_oversized_bom_file_is_replaced_in_its_own_encoding(
+    tmp_path, small_limits, encoding
+):
+    raw = _oversized(encoding)
+    assert len(raw) > LIMIT
+    (tmp_path / "f.txt").write_bytes(raw)
+    journal, out = await _write(tmp_path, "f.txt", "uno\ndos \U0001f600\n")
+    expected = BOMS[encoding] + "uno\r\ndos \U0001f600\r\n".encode(encoding)
+    assert (tmp_path / "f.txt").read_bytes() == expected
+    assert f"kept its {encoding} encoding" in out
+    assert journal.irreversible == [f"overwrote {tmp_path / 'f.txt'}"]
+
+
+@pytest.mark.parametrize("encoding", UTF16)
+@pytest.mark.parametrize(
+    ("defect", "reason"),
+    [
+        ("\ude00", "illegal encoding"),  # a low surrogate with no high one before it
+        ("\ud83d" + "a", "illegal UTF-16 surrogate"),  # a high surrogate not followed by a low
+    ],
+    ids=["lone-low-surrogate", "unpaired-high-surrogate"],
+)
+async def test_corrupt_utf16_after_the_sample_is_refused(
+    tmp_path, small_limits, encoding, defect, reason
+):
+    good = _oversized(encoding)
+    at = len(good) // 2 // 2 * 2  # well past the 64 KiB sample, on a code-unit boundary
+    assert at > mut._SAMPLE_BYTES
+    raw = good[:at] + _units(defect, encoding) + good[at:]
+    message = await _assert_refused_untouched(tmp_path, raw)
+    assert f"byte {at}: {reason}" in message
+
+
+@pytest.mark.parametrize("encoding", UTF16)
+async def test_corrupt_utf16_at_the_start_is_still_refused(tmp_path, small_limits, encoding):
+    raw = BOMS[encoding] + _units("\ude00", encoding) + _oversized(encoding)[2:]
+    await _assert_refused_untouched(tmp_path, raw, match="corrupt")
+
+
+async def test_invalid_utf8_after_the_sample_of_a_utf8_bom_file_is_refused(tmp_path, small_limits):
+    good = _oversized("utf-8", line="plain line\n")
+    at = len(good) - 1000
+    raw = good[:at] + b"\xc3\x28" + good[at:]  # a lead byte followed by a non-continuation
+    message = await _assert_refused_untouched(tmp_path, raw)
+    assert f"byte {at}:" in message
+
+
+@pytest.mark.parametrize("encoding", UTF16)
+async def test_an_odd_trailing_byte_is_refused(tmp_path, small_limits, encoding):
+    raw = _oversized(encoding, tail=b"\x41")
+    message = await _assert_refused_untouched(tmp_path, raw)
+    assert f"byte {len(raw) - 1}: truncated data" in message
+
+
+@pytest.mark.parametrize("encoding", UTF16)
+async def test_a_high_surrogate_at_the_very_end_is_refused(tmp_path, small_limits, encoding):
+    raw = _oversized(encoding, tail=_units("\ud83d", encoding))
+    message = await _assert_refused_untouched(tmp_path, raw)
+    assert f"byte {len(raw) - 2}: unexpected end of data" in message
+
+
+@pytest.mark.parametrize("encoding", UTF16)
+async def test_surrogate_pairs_split_across_chunks_are_valid(
+    tmp_path, small_limits, monkeypatch, encoding
+):
+    """With an odd chunk size every pair and code unit is split somewhere: none is refused."""
+    monkeypatch.setattr(mut, "_HASH_CHUNK", 4097)
+    raw = _oversized(encoding)
+    assert len(raw) > 4097 * 20
+    (tmp_path / "f.txt").write_bytes(raw)
+    await _write(tmp_path, "f.txt", "ok\n")
+    assert (tmp_path / "f.txt").read_bytes() == BOMS[encoding] + "ok\r\n".encode(encoding)
+
+
+@pytest.mark.parametrize("encoding", UTF16)
+async def test_an_unpaired_surrogate_split_across_a_chunk_boundary_is_refused(
+    tmp_path, small_limits, monkeypatch, encoding
+):
+    chunk = 4097
+    monkeypatch.setattr(mut, "_HASH_CHUNK", chunk)
+    # After the 2-byte BOM the file is read in 4097-byte chunks, so the code unit starting at
+    # 2 + 17 * 4097 - 1 has one byte at the end of a chunk and the other at the next start.
+    at = 2 + 17 * chunk - 1
+    assert at > mut._SAMPLE_BYTES and (at - 2) % 2 == 0
+    body = _units("a", encoding) * ((at - 2) // 2)
+    raw = BOMS[encoding] + body + _units("\ud83d" + "a", encoding)
+    raw += _units("a", encoding) * ((LIMIT - len(raw)) // 2 + 2)
+    message = await _assert_refused_untouched(tmp_path, raw)
+    assert f"byte {at}: illegal UTF-16 surrogate" in message
+
+
+async def test_whole_file_validation_reads_every_byte_in_bounded_chunks(
+    tmp_path, small_limits, monkeypatch
+):
+    # A chunk far smaller than the file, so one unbounded read() of it would show up.
+    monkeypatch.setattr(mut, "_HASH_CHUNK", 4097)
+    raw = _oversized("utf-16-le")
+    assert len(raw) > 2 * max(mut._SAMPLE_BYTES, mut._HASH_CHUNK)
+    (tmp_path / "f.txt").write_bytes(raw)
+    meter = ReadMeter(monkeypatch)  # also makes any Path.read_bytes() call fail
+    await _write(tmp_path, "f.txt", "replaced\n")
+    assert meter.total >= len(raw), "the whole file was not checked"
+    assert meter.largest <= max(mut._SAMPLE_BYTES, mut._HASH_CHUNK)
+
+
+async def test_a_corrupt_oversized_file_is_refused_before_the_approval_prompt(
+    tmp_path, small_limits, monkeypatch
+):
+    good = _oversized("utf-16-le")
+    raw = good[: len(good) - 200] + _units("\ude00", "utf-16-le") + good[len(good) - 200 :]
+    (tmp_path / "f.txt").write_bytes(raw)
+
+    from rich.console import Console
+
+    async def never(self, path, content):
+        raise AssertionError("the user was asked to approve a write that cannot be done")
+
+    monkeypatch.setattr(DiffPreview, "preview_and_confirm", never)
+    with pytest.raises(mut.TextEncodingError):
+        await WriteFile(
+            workspace=tmp_path, confirm=True, console=Console(file=io.StringIO())
+        ).execute(file_path="f.txt", content="x\n")
+    assert (tmp_path / "f.txt").read_bytes() == raw
+
+
+async def test_a_file_changed_after_validation_is_not_replaced(tmp_path, small_limits, monkeypatch):
+    raw = _oversized("utf-16-le")
+    path = tmp_path / "f.txt"
+    path.write_bytes(raw)
+    real = mut._validate_whole_text
+
+    def then_changed(p, bom, encoding, name):
+        sha = real(p, bom, encoding, name)
+        with open(p, "ab") as handle:  # another process appends after the check
+            handle.write(_units("late\r\n", "utf-16-le"))
+        return sha
+
+    monkeypatch.setattr(mut, "_validate_whole_text", then_changed)
+    with pytest.raises(mut.FileConflictError):  # refused by the hash check before the swap
+        await _write(tmp_path, "f.txt", "x\n")
+    assert path.read_bytes() == raw + _units("late\r\n", "utf-16-le")
+    assert _no_temp_files(tmp_path)
+
+
+async def test_a_journaled_oversized_file_changed_during_the_check_is_not_replaced(
+    tmp_path, monkeypatch
+):
+    """With the journal limit above the edit limit the previous bytes are kept for /rewind,
+    so they must be the same bytes that were validated."""
+    monkeypatch.setattr(mut, "MAX_MUTATION_BYTES", LIMIT)
+    monkeypatch.setattr(mut, "JOURNAL_MAX_BYTES", 4 * LIMIT)
+    raw = _oversized("utf-16-le")
+    path = tmp_path / "f.txt"
+    path.write_bytes(raw)
+    real = mut._validate_whole_text
+
+    def then_changed(p, bom, encoding, name):
+        sha = real(p, bom, encoding, name)
+        with open(p, "ab") as handle:
+            handle.write(_units("late\r\n", "utf-16-le"))
+        return sha
+
+    monkeypatch.setattr(mut, "_validate_whole_text", then_changed)
+    with pytest.raises(mut.FileConflictError, match="changed while it was being checked"):
+        await _write(tmp_path, "f.txt", "x\n")
+    assert path.read_bytes() == raw + _units("late\r\n", "utf-16-le")
+    assert _no_temp_files(tmp_path)
+
+
+async def test_a_journaled_oversized_file_is_validated_then_rewindable(tmp_path, monkeypatch):
+    monkeypatch.setattr(mut, "MAX_MUTATION_BYTES", LIMIT)
+    monkeypatch.setattr(mut, "JOURNAL_MAX_BYTES", 4 * LIMIT)
+    raw = _oversized("utf-16-be")
+    (tmp_path / "f.txt").write_bytes(raw)
+    journal, _ = await _write(tmp_path, "f.txt", "new\n")
+    (entry,) = journal.entries
+    assert entry.before == raw and journal.irreversible == []
+    journal.rewind()
+    assert (tmp_path / "f.txt").read_bytes() == raw
+
+
+async def test_the_refusal_message_holds_no_file_content(tmp_path, small_limits):
+    marker = "CONTENT-MARKER-7"
+    good = _oversized("utf-16-le", line=f"{marker}\r\n")
+    raw = good[: len(good) - 100] + _units("\ude00", "utf-16-le") + good[len(good) - 100 :]
+    message = await _assert_refused_untouched(tmp_path, raw)
+    assert marker not in message
+
+
 # ── #39: binary files keep their behaviour ───────────────────────────────────
 
 
