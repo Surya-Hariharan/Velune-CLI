@@ -133,6 +133,7 @@ toward that goal; they reduce risk and do not eliminate it.
 | Log, traceback and tool-output redaction of known key formats and of connector credentials loaded at runtime | Enabled | `velune/core/redaction.py` |
 | Integration permission scopes, resource ownership and compose-file inspection | Enabled | `velune/permissions/`, `velune/resources/` |
 | Dynamic integration discovery: tools offered to the model are exposure only, never permission | Enabled; `resources.expose_to_model` turns it off | `velune/resources/capabilities.py`, `velune/resources/tools.py` |
+| HTTP integration network policy, connection pinning (DNS-rebinding guard) and origin-bound credentials | Enabled; `resources.http.enabled` turns it off | `velune/resources/http/` |
 | Opt-in local crash reports | **Off by default** | `velune/cli/crash_reporter.py` |
 | Git snapshot and rollback for plan-driven changes | Enabled | `velune/execution/rollback.py` |
 
@@ -456,8 +457,57 @@ URL:
   `169.254.169.254`, ECS `169.254.170.2`, GCP `metadata.google.internal`,
   Alibaba `100.100.100.200`, and the IPv6 metadata address).
 - It resolves hostnames with `getaddrinfo` and checks all returned addresses
-  (defeating DNS-rebinding and CNAME tricks), and rejects numeric-escape IP forms
+  (defeating CNAME tricks), and rejects numeric-escape IP forms
   (hexadecimal, octal, decimal), embedded credentials and non-HTTP(S) schemes.
+- Because a check followed by a second, independent lookup by the HTTP client is
+  open to DNS rebinding, `web_fetch` now also connects through the pinned
+  transport described under [HTTP and API integration](#http-and-api-integration):
+  the name is resolved once, the answer is validated, and the socket is opened to
+  exactly that address. (When a proxy is configured through `HTTP_PROXY` /
+  `HTTPS_PROXY` / `ALL_PROXY` the proxy resolves the name itself, so only the
+  URL-level validation applies.)
+
+### HTTP and API integration
+
+The `http` integration (`velune/resources/http/`, see [docs/http.md](docs/http.md))
+sends requests on the agent's behalf. It runs through the same permission gate as
+every other integration; what is specific to it:
+
+- **Outbound policy.** URLs are parsed strictly and rebuilt from their validated
+  parts. Cloud-metadata, link-local, unspecified, multicast and reserved addresses
+  are never reachable, whatever is configured; IPv4-mapped, NAT64, 6to4 and Teredo
+  forms are judged by the IPv4 address they embed; unusual IP notations, embedded
+  credentials, backslashes, control characters and percent-encoded hosts are
+  rejected. Loopback (`localhost`, `127.0.0.1`, `[::1]`) is reachable because
+  testing a local backend is the main use, but an untrusted local origin is
+  confirmed in manual mode and sensitive local ports (Docker's engine API,
+  databases, Redis, etcd, the Kubernetes API, …) are high-risk. Private ranges
+  need a trusted origin. `trusted_origins` are exact `scheme://host:port` matches
+  and are honoured only in a trusted workspace (`velune trust add`).
+- **DNS rebinding.** The hostname is resolved exactly once, *inside* the
+  connection attempt, by an httpcore network backend; every returned address is
+  validated and the socket is opened to a validated address as an IP literal.
+  TLS still uses the original name for SNI and certificate validation, and the
+  `Host` header is unchanged. A public name that resolves to loopback or a private
+  range is refused unless the origin is trusted. Proxies and Unix sockets are not
+  used.
+- **Redirects** are followed by Velune: every hop is re-parsed and re-classified,
+  blocked destinations, HTTPS→HTTP downgrades and public→local jumps are rejected,
+  credentials/cookies are dropped when the origin changes, and an unsafe method is
+  not re-sent to a different origin.
+- **Credentials** are stored in the encrypted keystore, referred to by name, and
+  **bound to one origin**: never sent to another host, port or scheme, nor
+  after a redirect. They are registered for redaction and are masked in results,
+  errors, audit records, approval previews and `httpx` logs. Collections cannot
+  hold literal credentials and cannot add trust.
+- **Limits.** Connect/read/write/pool timeouts, an overall deadline, a request cap,
+  a streamed response cap with bounded gzip/deflate decompression, a redirect cap
+  and a connection cap.
+- **Authorization.** The method sets the base tier and the destination and path
+  escalate it (production environments, untrusted remote origins, uploads,
+  state-changing-looking paths). Collections are authorized against every request
+  at once and refuse to run if they changed after approval. OpenAPI documents are
+  untrusted input and cannot change what is trusted.
 
 ### MCP trust gating
 
@@ -608,6 +658,21 @@ races:
 - Redaction matches known key formats, common credential patterns and the credentials
   connectors have loaded in the current session. A secret that Velune never loaded and that has
   no recognizable shape is not masked.
+
+**HTTP integration**
+
+- A request's tier comes from its method and URL text. A server can change state on a `GET`, and
+  method-override conventions such as `?_method=DELETE` cannot all be recognized; the header forms
+  (`X-HTTP-Method-Override` and friends) are refused. GraphQL mutations are `POST` requests and are
+  treated as writes.
+- Loopback is reachable without being listed (confirmed in manual mode): another local service on a
+  port Velune does not know is sensitive can be spoken to once the user approves it.
+- A response body is untrusted text. The model sees it as data, but a model can still be
+  influenced by what an API returns; approval prompts are the control, not the response content.
+- OAuth2 authorization-code and device flows, mutual TLS, cookie jars and proxies are not
+  implemented. Behind a mandatory proxy, `web_fetch` falls back to URL-level validation.
+- A compressed response chunk is inflated in memory up to the response cap before an oversize
+  response is rejected.
 
 **Data sent to providers.** Prompts and the repository or memory context included
 with them are sent to the provider you select. Velune does not control what the

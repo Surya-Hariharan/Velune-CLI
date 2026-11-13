@@ -155,8 +155,15 @@ class ResourceManager:
         self.register("postgres", PostgresConnector)
         self.register("mysql", MySQLConnector)
         self.register("supabase", SupabaseConnector)
+        self.register("http", self._http_connector)
         if self._job_registry is not None:
             self.attach_job_registry(self._job_registry)
+
+    def _http_connector(self) -> ResourceConnector:
+        """The HTTP integration, built from the ``resources.http`` settings."""
+        from velune.resources.http.connector import HttpConnector
+
+        return HttpConnector(config=self._config.get("http"), workspace=self._workspace)
 
     def set_approver(self, approver: Approver) -> None:
         """Install the legacy approver (the *ask* callback of a MANUAL gate)."""

@@ -127,9 +127,11 @@ class ModelOperationTool(ResourceOperationTool):
         result = await self._manager.run_authorized(self._connector, self._op.action, kwargs)
         if result.ok and self._on_success is not None:
             self._on_success(self._op.integration)
-        if not result.ok and result.code in (
-            ErrorCode.UNAVAILABLE,
-            ErrorCode.CONNECTION_FAILED,
+        if (
+            not result.ok
+            and result.code in (ErrorCode.UNAVAILABLE, ErrorCode.CONNECTION_FAILED)
+            # An HTTP client is usable even when the API it called is down.
+            and getattr(self._connector, "failures_mark_unavailable", True)
         ):
             if self._on_unavailable is not None:
                 self._on_unavailable(self._op.integration, result.error or "became unavailable")

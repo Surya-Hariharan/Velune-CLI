@@ -141,8 +141,14 @@ async def _configure(repl: VeluneREPL, resource_id: str) -> None:
     """
     from rich.prompt import Prompt
 
+    resource_id, _, argument = resource_id.strip().partition(" ")
     if not resource_id:
-        repl.console.print("[yellow]Usage: /resource configure <postgres|mysql|supabase>[/yellow]")
+        repl.console.print(
+            "[yellow]Usage: /resource configure <postgres|mysql|supabase|http <reference>>[/yellow]"
+        )
+        return
+    if resource_id == "http":
+        await _configure_http(repl, argument.strip())
         return
     if resource_id == "docker":
         repl.console.print(
@@ -236,6 +242,82 @@ async def _configure(repl: VeluneREPL, resource_id: str) -> None:
     repl.console.print(
         f"[green]Saved {resource_id} configuration.[/green] "
         f"[dim]Connect with /resource connect {resource_id}[/dim]"
+    )
+
+
+_HTTP_FIELDS: dict[str, tuple[tuple[str, str, bool], ...]] = {
+    "bearer": (("token", "Token", True),),
+    "basic": (("username", "Username", False), ("password", "Password", True)),
+    "api_key_header": (("name", "Header name", False), ("value", "API key", True)),
+    "api_key_query": (("name", "Query parameter name", False), ("value", "API key", True)),
+    "oauth2_client_credentials": (
+        ("token_url", "Token URL", False),
+        ("client_id", "Client id", False),
+        ("client_secret", "Client secret", True),
+        ("scope", "Scope (optional)", False),
+    ),
+    "secret": (("value", "Secret value", True),),
+}
+
+
+async def _configure_http(repl: VeluneREPL, reference: str) -> None:
+    """Store an HTTP credential (encrypted) under a reference name.
+
+    The reference is what configuration, collections and requests name; the secret
+    itself goes only into the encrypted keystore. A credential is bound to one
+    origin and is never sent anywhere else.
+    """
+    from rich.prompt import Prompt
+
+    from velune.resources.http.auth import CredentialError, save_credential, valid_reference
+
+    if not valid_reference(reference):
+        repl.console.print(
+            "[yellow]Usage: /resource configure http <reference>  "
+            "(lowercase letters, digits, '.', '_' or '-', e.g. aidly-dev-token)[/yellow]"
+        )
+        return
+
+    def ask(label: str, *, secret: bool = False, default: str = "") -> object:
+        return asyncio.to_thread(
+            Prompt.ask, f"  {label}", password=secret, default=default, console=repl.console
+        )
+
+    repl.console.print(
+        f"[dim]Credential '{reference}' — values are encrypted at rest and bound to one origin.[/dim]"
+    )
+    try:
+        kind = str(
+            await asyncio.to_thread(
+                Prompt.ask,
+                "  Type",
+                choices=list(_HTTP_FIELDS),
+                default="bearer",
+                console=repl.console,
+            )
+        )
+        document: dict[str, object] = {"type": kind}
+        if kind != "secret":
+            document["origin"] = await ask("Origin it is valid for (e.g. https://api.example.com)")
+        for key, label, secret in _HTTP_FIELDS[kind]:
+            value = await ask(
+                label,
+                secret=secret,
+                default="X-API-Key" if key == "name" and kind == "api_key_header" else "",
+            )
+            if value:
+                document[key] = value
+    except (EOFError, KeyboardInterrupt):
+        repl.console.print("\n[yellow]Cancelled.[/yellow]")
+        return
+    try:
+        save_credential(reference, document)  # type: ignore[arg-type]
+    except CredentialError as exc:
+        repl.console.print(f"[red]Not saved: {exc}[/red]")
+        return
+    repl.console.print(
+        f"[green]Saved credential '{reference}'.[/green] "
+        f'[dim]Use it as auth = "{reference}" in an environment or request.[/dim]'
     )
 
 

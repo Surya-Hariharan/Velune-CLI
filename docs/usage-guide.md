@@ -303,6 +303,16 @@ for where each configuration file lives.
   its next turn) and can also start, read the output of, wait for and stop its own background
   commands. Enabling a tool never approves it; every call is still checked as above. Set
   `resources.expose_to_model = false` in `velune.toml` to keep integrations away from the model.
+- **HTTP and API testing.** The agent can send requests to a local dev server or a remote API,
+  check responses with assertions, run saved API collections and explore an OpenAPI spec, with
+  no Postman installation. Describe your API once in `velune.toml` (`[resources.http]` with
+  `trusted_origins` and `[resources.http.environments.<name>]` for `base_url`, variables and a
+  credential reference), store tokens with `/resource configure http <reference>` (encrypted,
+  and each one is sent only to its own origin), then ask, for example, "test the login API on my
+  local backend". Reads run; Manual asks before a change; Plan refuses one; Auto still asks for a
+  DELETE, for changes to a production environment and for changes to a remote service you have not
+  trusted. Running a collection is approved for all of its requests at once. Cloud-metadata and
+  private-network addresses are never reachable. See [http.md](http.md).
 - **GitHub and GitLab.** `/push`, `/pr` and `/issue` use the same git and REST integrations
   as the git tools. They need no separate setup beyond a configured `git` and, for pull
   request and issue commands, a token available to the underlying REST client.

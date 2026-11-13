@@ -158,6 +158,9 @@ git = []
 gguf = ["gguf>=0.6.0"]
 # Docker sandbox isolation — install to enable execution.docker_sandbox = true.
 docker = ["docker>=7.0.0"]
+# YAML OpenAPI specifications for the HTTP integration (JSON specifications and every
+# other HTTP feature work without it). Parsed with yaml.safe_load only.
+api = ["pyyaml>=6.0.1"]
 # NOTE: the former [llamacpp] extra (llama-cpp-python) has been permanently
 # removed. llama-cpp-python transitively depends on diskcache<=5.6.3, which
 # deserialises cache entries with pickle and allows arbitrary code execution
@@ -166,7 +169,7 @@ docker = ["docker>=7.0.0"]
 # velune/providers/adapters/llamacpp.py is retained but its is_available()
 # guard returns False when llama-cpp-python is not installed; it will not be
 # re-enabled until a safe replacement for diskcache is available.
-all = ["velune-cli[rag,parsing,telemetry,git,gguf,docker]"]
+all = ["velune-cli[rag,parsing,telemetry,git,gguf,docker,api]"]
 dev = [
     "ruff>=0.1.0",
     "pyright>=1.1.350",

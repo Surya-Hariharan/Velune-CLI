@@ -10,3 +10,9 @@
 f67d787c69d459d2d0d4e2a18a8a376b076fdf77:tests/test_integration_redaction.py:generic-api-key:59
 #   test_process_connector.py:148 - a command line carrying a sample --api_key= argument, used to test redaction of job commands
 f86f844c1ead02f7cac6e80ee33566347efbb249:tests/test_process_connector.py:generic-api-key:148
+#   test_http_environments_auth.py:158,171,187 and test_http_connector.py:33 - placeholder bearer tokens and a sample
+#   password in HTTP fixtures that the redaction/credential-handling tests assert are never echoed
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_environments_auth.py:generic-api-key:158
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_environments_auth.py:generic-api-key:171
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_environments_auth.py:generic-api-key:187
+0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_connector.py:generic-api-key:33

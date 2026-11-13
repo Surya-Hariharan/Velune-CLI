@@ -231,7 +231,7 @@ Prefer extending one of these registries over inventing a new loading mechanism.
 ### Resource connectors and the authorization pipeline
 
 `velune/resources/` connects Velune to applications on the developer's machine (Docker, local PostgreSQL
-and MySQL, Supabase). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
+and MySQL, Supabase, background processes, and HTTP APIs — see [http.md](http.md)). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
 `ResourceManager.register`; nothing else needs to change.
 
 **What a connector declares.** `capabilities()` lists each action with a permission tier
@@ -383,9 +383,28 @@ class RedisConnector(ResourceConnector):          # illustrative: there is no Re
         ]
 ```
 
-An HTTP integration would follow the same shape (illustrative, and not part of this work): operations such as
-`http__request`, scoped `http.request.read` and `http.request.write`, with the network policy enforced at the
-execution boundary rather than in the model's instructions.
+The HTTP integration (`resources/http/`, documented in [http.md](http.md)) is a connector of exactly this shape:
+`http__request` is declared `READ` with scope `http.request.read` and is *escalated per call* by
+`effective_permission` / `describe_actions` (method, destination, environment, path), the way the SQL `query`
+action is. What it adds beyond the Docker and database connectors:
+
+- `netpolicy.py` (strict URL parsing, address classes, trusted origins) and `transport.py` (an httpcore backend
+  that resolves a name once, validates the answer and connects to it — the DNS-rebinding guard, shared with
+  `web_fetch`);
+- `client.py` (the executor: manual, re-validated redirects, streamed size caps, bounded decompression, error
+  normalization), `present.py` (structured, redacted results) and `assertions.py` (a deterministic engine);
+- `auth.py` / `environments.py` (origin-bound credentials in the existing keystore; `{{variables}}`),
+  `collections.py` and `openapi.py`.
+
+A connector may add a network-destination `NETWORK` action next to its `INTEGRATION_*` actions (the bridge
+accepts exactly that combination); anything else unscoped is still refused. A connector whose failures are about
+the *target* rather than the connector (an HTTP client whose API is down) sets
+`failures_mark_unavailable = False` so a refused connection does not mark the integration unavailable.
+
+**Testing the HTTP integration.** `tests/http_server.py` is a real local HTTP/1.1 server (with an optional
+throw-away TLS certificate); `tests/http_env.py` builds a connector, decides a call exactly as the bridge
+describes it, and wires the production manager, gate and tool source. DNS is injected (`resolver=`), so tests
+cover rebinding without a network. Run `python -m pytest tests/test_http_*.py tests/test_web_fetch_pinning.py`.
 
 To add a connector: subclass `ResourceConnector`, give every capability a scope, override `describe_actions`
 only to add risk, return `ResourceResult` with an `ErrorCode`, load secrets through `resources/secrets.py`,

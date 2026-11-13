@@ -214,7 +214,7 @@ def test_scan_workspace_env_db_url_drops_password(tmp_path):
 
 def test_default_manager_registers_four():
     m = build_default_manager()
-    assert set(m.list_ids()) == {"docker", "postgres", "mysql", "supabase"}
+    assert set(m.list_ids()) == {"docker", "postgres", "mysql", "supabase", "http"}
 
 
 def test_manager_respects_disabled_config():

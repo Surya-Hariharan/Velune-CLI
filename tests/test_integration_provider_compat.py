@@ -153,7 +153,7 @@ def test_discovery_tools_are_always_present_and_enum_constrained(tmp_path):
     runner, source = build(tmp_path, enable_all=False)
     defs = {d["function"]["name"]: d["function"] for d in runner.build_tool_definitions()}
     enable = defs["integrations_enable"]["parameters"]["properties"]["integration"]
-    assert set(enable["enum"]) == {"docker", "postgres", "mysql", "supabase", "process"}
+    assert set(enable["enum"]) == {"docker", "postgres", "mysql", "supabase", "process", "http"}
     assert "integrations_list" in defs and "integrations_disable" not in defs
 
 
@@ -278,7 +278,7 @@ def test_one_integration_costs_what_it_should(tmp_path):
 def test_a_larger_budget_exposes_more_a_smaller_one_less(tmp_path):
     small, s_src = build(tmp_path, max_tools=4)
     large, l_src = build(tmp_path, max_tools=64)
-    assert len(s_src.scope.exposed) == 3 and len(l_src.scope.exposed) == 37
+    assert len(s_src.scope.exposed) == 3 and len(l_src.scope.exposed) == 48  # 37 + the 11 http operations
     assert not l_src.scope.dispatched
     assert size(small.build_tool_definitions()) < size(large.build_tool_definitions())
 
