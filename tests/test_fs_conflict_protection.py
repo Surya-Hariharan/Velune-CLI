@@ -101,6 +101,344 @@ class _NothingMoves:
         monkeypatch.setattr(mut, "respell", refuse, raising=False)  # absent before #37
 
 
+# ── #34: move_path checks the destination and the source ─────────────────────
+
+
+async def test_overwriting_a_destination_changed_since_it_was_read_is_a_conflict(
+    tmp_path, journal, monkeypatch
+):
+    _, read, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_text("source\n", newline="")
+    (tmp_path / "dst.txt").write_text("version 1\n", newline="")
+    await read.execute(file_path="dst.txt")
+    (tmp_path / "dst.txt").write_text("version 2, the user's edit\n", newline="")
+    _NothingMoves(monkeypatch)
+
+    with pytest.raises(mut.FileConflictError, match="dst.txt"):
+        await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+
+    assert (tmp_path / "dst.txt").read_text() == "version 2, the user's edit\n"
+    assert (tmp_path / "src.txt").read_text() == "source\n"
+    assert journal.entries == [] and journal.irreversible == []
+
+
+async def test_overwriting_an_unchanged_tracked_destination_works_and_rewinds(tmp_path, journal):
+    tracker, read, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_text("source\n", newline="")
+    (tmp_path / "dst.txt").write_text("destination\n", newline="")
+    await read.execute(file_path="dst.txt")
+
+    await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+
+    assert (tmp_path / "dst.txt").read_text() == "source\n"
+    assert not (tmp_path / "src.txt").exists()
+    (entry,) = journal.entries
+    assert isinstance(entry, mut.Moved) and entry.overwritten == b"destination\n"
+    assert tracker.seen(tmp_path / "dst.txt") == _sha(b"source\n")
+    assert tracker.seen(tmp_path / "src.txt") is None
+
+    report = journal.rewind()
+    assert report.skipped == []
+    assert (tmp_path / "src.txt").read_text() == "source\n"
+    assert (tmp_path / "dst.txt").read_text() == "destination\n"
+
+
+async def test_overwriting_a_destination_the_agent_never_read_keeps_working(tmp_path, journal):
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_text("source\n", newline="")
+    (tmp_path / "dst.txt").write_text("changed by someone, never read by the agent\n", newline="")
+    await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+    assert (tmp_path / "dst.txt").read_text() == "source\n"
+    (entry,) = journal.entries
+    assert entry.overwritten == b"changed by someone, never read by the agent\n"
+
+
+@pytest.mark.parametrize("overwrite", [False, True], ids=["new-destination", "overwrite"])
+async def test_moving_a_source_changed_since_it_was_read_is_a_conflict(
+    tmp_path, journal, monkeypatch, overwrite
+):
+    _, read, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_text("what the agent read\n", newline="")
+    if overwrite:
+        (tmp_path / "dst.txt").write_text("destination\n", newline="")
+    await read.execute(file_path="src.txt")
+    (tmp_path / "src.txt").write_text("changed afterwards\n", newline="")
+    _NothingMoves(monkeypatch)
+
+    with pytest.raises(mut.FileConflictError, match="src.txt"):
+        await move.execute(source="src.txt", destination="dst.txt", overwrite=overwrite)
+
+    assert (tmp_path / "src.txt").read_text() == "changed afterwards\n"
+    assert (tmp_path / "dst.txt").exists() is overwrite
+    assert journal.entries == []
+
+
+async def test_a_destination_changed_after_the_checks_is_not_overwritten(
+    tmp_path, journal, monkeypatch
+):
+    """The destination is compared again right before the swap, as atomic_write does."""
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_text("source\n", newline="")
+    (tmp_path / "dst.txt").write_text("destination\n", newline="")
+    real_file_mode = mut.file_mode
+
+    def then_changed(path):  # runs after the version checks, before the swap
+        mode = real_file_mode(path)
+        (tmp_path / "dst.txt").write_text("written in the gap\n", newline="")
+        return mode
+
+    monkeypatch.setattr(mut, "file_mode", then_changed)
+    with pytest.raises(mut.FileConflictError, match="dst.txt"):
+        await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+
+    assert (tmp_path / "dst.txt").read_text() == "written in the gap\n"
+    assert (tmp_path / "src.txt").read_text() == "source\n"
+    assert journal.entries == [] and journal.irreversible == []
+
+
+async def test_an_irreversible_overwrite_is_recorded_only_once_it_happens(
+    tmp_path, journal, monkeypatch
+):
+    monkeypatch.setattr(mut, "JOURNAL_MAX_BYTES", 10)
+    tracker, read, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_text("source\n", newline="")
+    (tmp_path / "dst.txt").write_text("a destination too big for the journal\n", newline="")
+    await read.execute(file_path="dst.txt")
+    (tmp_path / "dst.txt").write_text("a different destination, still too big\n", newline="")
+
+    with pytest.raises(mut.FileConflictError):
+        await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+    assert journal.irreversible == []  # nothing was overwritten, so nothing is claimed
+
+    tracker.forget(tmp_path / "dst.txt")
+    await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+    assert journal.irreversible == [f"overwrote {tmp_path / 'dst.txt'}"]
+
+
+async def test_overwrite_without_the_flag_and_folder_rules_are_unchanged(tmp_path, journal):
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "a.txt").write_text("a\n", newline="")
+    (tmp_path / "b.txt").write_text("b\n", newline="")
+    (tmp_path / "folder").mkdir()
+    with pytest.raises(FileExistsError, match="overwrite=true"):
+        await move.execute(source="a.txt", destination="b.txt")
+    with pytest.raises(FileExistsError, match="only a file can replace a file"):
+        await move.execute(source="a.txt", destination="folder", overwrite=True)
+    with pytest.raises(ValueError, match="the same"):
+        await move.execute(source="a.txt", destination="a.txt")
+    assert (tmp_path / "b.txt").read_text() == "b\n" and journal.entries == []
+
+
+# ── #37: case-only renames, and rewinding them ───────────────────────────────
+
+
+async def test_case_only_file_rename_is_applied_and_rewound(insensitive, journal):
+    tracker, read, move, _ = _tools(insensitive)
+    (insensitive / "Readme.md").write_text("docs\n", newline="")
+    await read.execute(file_path="Readme.md")
+
+    out = await move.execute(source="Readme.md", destination="README.md")
+
+    assert "case only" in out
+    assert _listing(insensitive) == ["README.md"]
+    assert (insensitive / "README.md").read_text() == "docs\n"
+    assert tracker.seen(insensitive / "README.md") == _sha(b"docs\n")
+    (entry,) = journal.entries
+    assert entry.source.name == "Readme.md" and entry.destination.name == "README.md"
+
+    report = journal.rewind()
+
+    assert report.skipped == [] and len(report.restored) == 1
+    assert _listing(insensitive) == ["Readme.md"]
+    assert (insensitive / "Readme.md").read_text() == "docs\n"
+    assert _no_temporaries(insensitive)
+
+
+async def test_case_only_folder_rename_is_applied_and_rewound(insensitive, journal):
+    _, _, move, _ = _tools(insensitive)
+    (insensitive / "docs").mkdir()
+    (insensitive / "docs" / "a.txt").write_text("a\n", newline="")
+
+    await move.execute(source="docs", destination="Docs")
+
+    assert _listing(insensitive) == ["Docs"]
+    assert (insensitive / "Docs" / "a.txt").read_text() == "a\n"
+    report = journal.rewind()
+    assert report.skipped == []
+    assert _listing(insensitive) == ["docs"]
+    assert (insensitive / "docs" / "a.txt").read_text() == "a\n"
+
+
+async def test_rewind_restores_the_spelling_on_disk_not_the_one_typed(insensitive, journal):
+    """The agent may type the source in another case; the original spelling is what returns."""
+    _, _, move, _ = _tools(insensitive)
+    (insensitive / "Config.json").write_text("{}\n", newline="")
+    await move.execute(source="config.json", destination="CONFIG.json")
+    assert _listing(insensitive) == ["CONFIG.json"]
+    journal.rewind()
+    assert _listing(insensitive) == ["Config.json"]
+
+
+async def test_a_file_changed_after_a_case_only_rename_is_not_rewound(insensitive, journal):
+    _, _, move, _ = _tools(insensitive)
+    (insensitive / "Readme.md").write_text("docs\n", newline="")
+    await move.execute(source="Readme.md", destination="README.md")
+    (insensitive / "README.md").write_text("edited by the user\n", newline="")
+
+    report = journal.rewind()
+
+    assert report.restored == []
+    assert report.skipped == [
+        f"{insensitive / 'README.md'}: changed since this turn, left as it is"
+    ]
+    assert _listing(insensitive) == ["README.md"]
+    assert (insensitive / "README.md").read_text() == "edited by the user\n"
+
+
+async def test_a_case_only_rename_checks_the_source_version(insensitive, journal, monkeypatch):
+    _, read, move, _ = _tools(insensitive)
+    (insensitive / "Readme.md").write_text("docs\n", newline="")
+    await read.execute(file_path="Readme.md")
+    (insensitive / "Readme.md").write_text("changed by the user\n", newline="")
+    _NothingMoves(monkeypatch)
+    with pytest.raises(mut.FileConflictError):
+        await move.execute(source="Readme.md", destination="README.md")
+    assert _listing(insensitive) == ["Readme.md"] and journal.entries == []
+
+
+async def test_a_failed_case_only_rename_puts_the_file_back(insensitive, journal, monkeypatch):
+    _, _, move, _ = _tools(insensitive)
+    (insensitive / "Readme.md").write_text("docs\n", newline="")
+    real_rename = os.rename
+    calls = []
+
+    def second_step_fails(a, b):
+        calls.append((Path(a).name, Path(b).name))
+        if len(calls) == 2:
+            raise PermissionError("locked by another program")
+        real_rename(a, b)
+
+    monkeypatch.setattr(mut.os, "rename", second_step_fails)
+    with pytest.raises(PermissionError, match="locked"):
+        await move.execute(source="Readme.md", destination="README.md")
+    assert _listing(insensitive) == ["Readme.md"]
+    assert (insensitive / "Readme.md").read_text() == "docs\n"
+    assert _no_temporaries(insensitive) and journal.entries == []
+
+
+async def test_case_only_rename_on_a_case_sensitive_filesystem_is_an_ordinary_move(
+    sensitive, journal
+):
+    _, _, move, _ = _tools(sensitive)
+    (sensitive / "Readme.md").write_text("docs\n", newline="")
+    out = await move.execute(source="Readme.md", destination="README.md")
+    assert "case only" not in out
+    assert _listing(sensitive) == ["README.md"]
+    journal.rewind()
+    assert _listing(sensitive) == ["Readme.md"]
+
+
+async def test_two_files_differing_only_in_case_stay_two_files(sensitive, journal):
+    _, _, move, _ = _tools(sensitive)
+    (sensitive / "Readme.md").write_text("one\n", newline="")
+    (sensitive / "README.md").write_text("two\n", newline="")
+    with pytest.raises(FileExistsError):
+        await move.execute(source="Readme.md", destination="README.md")
+    assert _listing(sensitive) == ["README.md", "Readme.md"]
+
+
+@pytest.mark.skipif(not hasattr(os, "link"), reason="needs hard links")
+async def test_hard_links_differing_only_in_case_are_not_a_case_only_rename(sensitive):
+    (sensitive / "Readme.md").write_text("one inode\n", newline="")
+    os.link(sensitive / "Readme.md", sensitive / "README.md")
+    assert not mut.is_respelling(sensitive / "Readme.md", sensitive / "README.md")
+
+
+def test_rewinding_a_respelled_entry_renames_it_back_on_any_filesystem(tmp_path, monkeypatch):
+    """The undo decision with the case-insensitive same-entry check injected (#37).
+
+    The state after a case-only rename is built directly: only ``README.md`` exists. The
+    real check would say the two spellings are one entry only on a case-insensitive
+    filesystem; here it is injected, so the decision runs on Linux too.
+    """
+    (tmp_path / "README.md").write_text("docs\n", newline="")
+    sha = mut.file_sha256(tmp_path / "README.md")
+    journal = mut.TurnJournal()
+    journal.add(mut.Moved(tmp_path / "Readme.md", tmp_path / "README.md", None, sha))
+    monkeypatch.setattr(
+        mut, "is_respelling", lambda current, wanted: current.name.lower() == wanted.name.lower()
+    )
+    if not _case_insensitive(tmp_path):
+        # Without the injection the old spelling is absent here and the ordinary undo runs;
+        # with it, the respelling branch must run instead. Prove it took that branch.
+        monkeypatch.setattr(mut.shutil, "move", lambda *a: pytest.fail("ordinary undo ran"))
+
+    report = journal.rewind()
+
+    assert report.skipped == []
+    assert _listing(tmp_path) == ["Readme.md"]
+    assert (tmp_path / "Readme.md").read_text() == "docs\n"
+
+
+def test_the_respelling_check_on_a_real_filesystem(tmp_path):
+    (tmp_path / "Readme.md").write_text("docs\n", newline="")
+    insensitive = _case_insensitive(tmp_path)
+    assert mut.is_respelling(tmp_path / "Readme.md", tmp_path / "README.md") is insensitive
+    assert not mut.is_respelling(tmp_path / "Readme.md", tmp_path / "Readme.md")
+    assert not mut.is_respelling(tmp_path / "Readme.md", tmp_path / "Other.md")
+    (tmp_path / "sub").mkdir()
+    assert not mut.is_respelling(tmp_path / "Readme.md", tmp_path / "sub" / "README.md")
+
+
+def test_a_link_named_like_its_target_is_not_respelled(tmp_path):
+    """A destination given as a link that resolves to the source is not a case-only rename."""
+    from velune.tools.filesystem.dirs import _case_only_rename
+
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "data").write_text("x\n", newline="")
+    try:
+        os.symlink(tmp_path / "sub" / "data", tmp_path / "Data")
+    except (OSError, NotImplementedError):
+        pytest.skip("cannot create symlinks here")
+    src = tmp_path / "sub" / "data"
+    assert _case_only_rename(src, src, "Data", tmp_path) is None
+
+
+async def test_a_case_only_rename_is_shown_for_approval_with_the_spelling_asked_for(insensitive):
+    """Resolving rewrites the name to its stored spelling on Windows; the approval prompt
+    must not read "Readme.md -> Readme.md"."""
+    from velune.permissions.boundary import Boundary
+
+    (insensitive / "Readme.md").write_text("docs\n", newline="")
+    actions = MovePath(workspace=insensitive).describe_actions(
+        {"source": "Readme.md", "destination": "README.md"}, Boundary(insensitive)
+    )
+    assert Path(actions[0].detail).name == "README.md"
+
+
+async def test_a_file_created_mid_rename_is_never_replaced(insensitive, journal, monkeypatch):
+    """Another program creates the new spelling between the two rename steps: nothing is
+    renamed onto it, and the error says where the original now is."""
+    _, _, move, _ = _tools(insensitive)
+    (insensitive / "Readme.md").write_text("docs\n", newline="")
+    real_rename = os.rename
+
+    def then_someone_writes(a, b):
+        real_rename(a, b)
+        if Path(b).name.startswith(mut._TMP_PREFIX):
+            (insensitive / "README.md").write_text("someone else's file\n", newline="")
+
+    monkeypatch.setattr(mut.os, "rename", then_someone_writes)
+    with pytest.raises(mut.MutationVerificationError, match="nothing was replaced") as caught:
+        await move.execute(source="Readme.md", destination="README.md")
+
+    assert (insensitive / "README.md").read_text() == "someone else's file\n"
+    (parked,) = [n for n in os.listdir(insensitive) if n.startswith(mut._TMP_PREFIX)]
+    assert parked in str(caught.value)
+    assert (insensitive / parked).read_text() == "docs\n"
+    assert journal.entries == []
+
+
 # ── #38: a ranged read records the version it returned ───────────────────────
 
 

@@ -195,10 +195,20 @@ class MovePath(_FsTool):
         if installs:
             dest_risk = Risk.HIGH
             dest_reason = f"move destination: {installs}"
+        # Resolving rewrites an existing name to its stored spelling on Windows; show a
+        # case-only rename with the spelling asked for, not "Readme.md → Readme.md".
+        requested = Path(str(raw_dest)).name
+        shown = dest
+        if (
+            requested
+            and requested != dest.name
+            and mut.fold_name(requested) == mut.fold_name(dest.name)
+        ):
+            shown = dest.parent / requested
         # The paths are passed as requested (not resolved) so a link's own name is judged too.
         return [
             path_action(
-                ActionType.MOVE, raw_source, boundary, "move / rename", risk=risk, detail=str(dest)
+                ActionType.MOVE, raw_source, boundary, "move / rename", risk=risk, detail=str(shown)
             ),
             # The destination is checked too: moving *into* an outside or secret
             # location must be caught just like moving out of one.
@@ -210,43 +220,61 @@ class MovePath(_FsTool):
         dst = resolve_tool_path(destination, self.workspace, label="move_path destination")
         if not src.exists():
             raise FileNotFoundError(f"Not found: {src}")
+        respelled = _case_only_rename(src, dst, destination, self.workspace)
+        if respelled is not None:
+            return self._rename_case_only(*respelled)
         if src == dst:
             raise ValueError(f"Source and destination are the same: {src}")
-        # On a case-insensitive filesystem renaming "Readme.md" to "README.md" finds the
-        # destination "already existing" — it is the same file, so it is a plain rename.
-        case_rename = dst.exists() and os.path.samefile(src, dst)
         if src.is_dir() and (dst == src or src in dst.parents):
             raise ValueError(f"Cannot move folder {src} into itself ({dst})")
+        if dst.exists() and not overwrite:
+            raise FileExistsError(
+                f"Destination already exists: {dst}. Pass overwrite=true to replace a file."
+            )
+        replacing = dst.exists()
+        if replacing and (dst.is_dir() or src.is_dir()):
+            raise FileExistsError(f"Cannot overwrite {dst}: only a file can replace a file")
 
-        overwritten: bytes | None = None
-        overwritten_mode: int | None = None
-        if dst.exists() and not case_rename:
-            if not overwrite:
-                raise FileExistsError(
-                    f"Destination already exists: {dst}. Pass overwrite=true to replace a file."
-                )
-            if dst.is_dir() or src.is_dir():
-                raise FileExistsError(f"Cannot overwrite {dst}: only a file can replace a file")
-            overwritten, kept = mut.read_before_image(dst)
-            overwritten_mode = mut.file_mode(dst)
-            if not kept:
-                mut.journal_irreversible(f"overwrote {dst}")
-
+        # Conflict checks, all before anything is moved (#34). A file the agent read and that
+        # changed since is never moved, and never overwritten, without it seeing the change.
         is_file = src.is_file()
         sha_before = mut.file_sha256(src) if is_file else None
+        if sha_before is not None:
+            self.tracker.check(src, sha_before)
+        overwritten: bytes | None = None
+        overwritten_mode: int | None = None
+        kept = True
+        dst_sha: str | None = None
+        if replacing:
+            overwritten, kept = mut.read_before_image(dst)
+            # Hash the bytes kept for /rewind, so the version checked is the one kept.
+            dst_sha = (
+                mut.sha256_bytes(overwritten)
+                if overwritten is not None and kept
+                else mut.file_sha256(dst)
+            )
+            self.tracker.check(dst, dst_sha)
+            overwritten_mode = mut.file_mode(dst)
+
         mut.ensure_parent(dst)
-        if is_file or case_rename:
+        if is_file:
+            if dst_sha is not None:
+                # As atomic_write does: compare the destination again right before the swap,
+                # so a change made after the checks above is not overwritten either.
+                current = mut.file_sha256(dst)
+                if current != dst_sha:
+                    raise mut.FileConflictError(mut.conflict_message(dst, dst_sha, current))
             try:
                 # Atomic on one filesystem, including replacing an existing destination file.
                 os.replace(src, dst)
             except OSError:
-                if case_rename or dst.exists():
+                if dst.exists():
                     raise
                 shutil.move(str(src), str(dst))  # across filesystems: copy, then delete
         else:
             shutil.move(str(src), str(dst))
 
-        if not dst.exists() or (src.exists() and not case_rename):
+        if not dst.exists() or src.exists():
             raise mut.MutationVerificationError(f"Move of {src} to {dst} did not complete")
         if sha_before is not None and mut.file_sha256(dst) != sha_before:
             raise mut.MutationVerificationError(f"{dst} does not have {src}'s content after moving")
@@ -255,5 +283,53 @@ class MovePath(_FsTool):
             self.tracker.forget(src)
             if sha_before is not None:
                 self.tracker.record(dst, sha_before)
+        if replacing and not kept:
+            # Recorded only once the destination really was replaced.
+            mut.journal_irreversible(f"overwrote {dst}")
         mut.journal(mut.Moved(src, dst, overwritten, sha_before, overwritten_mode))
         return f"Moved {src} → {dst} (verified)"
+
+    def _rename_case_only(self, src: Path, dst: Path) -> str:
+        """Respell *src* as *dst* (same entry, a case-insensitive filesystem) (#37)."""
+        is_file = src.is_file()
+        sha_before = mut.file_sha256(src) if is_file else None
+        if sha_before is not None:
+            self.tracker.check(src, sha_before)
+        renamed = mut.respell(src, dst)
+        listing = os.listdir(renamed.parent)
+        if renamed.name not in listing or src.name in listing:
+            raise mut.MutationVerificationError(f"Renaming {src} to {renamed} did not complete")
+        if sha_before is not None and mut.file_sha256(renamed) != sha_before:
+            raise mut.MutationVerificationError(f"{renamed} does not have {src}'s content")
+        if is_file:
+            self.tracker.forget(src)
+            if sha_before is not None:
+                self.tracker.record(renamed, sha_before)
+        mut.journal(mut.Moved(src, renamed, None, sha_before))
+        return f"Renamed {src} → {renamed} (case only, verified)"
+
+
+def _case_only_rename(
+    src: Path, dst: Path, raw_destination: str, workspace: Path
+) -> tuple[Path, Path] | None:
+    """``(source as spelled on disk, destination as requested)`` for a case-only rename.
+
+    Resolving a path on Windows rewrites an existing name to its stored spelling, so the
+    spelling asked for is taken from the destination argument itself. Anything other than a
+    respelling of the same entry in the same folder returns None and is moved as usual.
+    The destination as typed must itself be that folder's entry, not a link that resolves
+    to it: a link's name says nothing about how its target should be spelled.
+    """
+    raw = Path(raw_destination).expanduser()
+    lexical = Path(os.path.abspath(raw if raw.is_absolute() else workspace / raw))
+    if not lexical.name or mut.fold_name(lexical.name) != mut.fold_name(src.name):
+        return None  # not two spellings of one name: an ordinary move (the common case)
+    if os.path.islink(lexical):
+        return None
+    current = mut.on_disk_spelling(src)
+    wanted = dst.parent / lexical.name
+    if not os.path.isdir(lexical.parent) or not os.path.samefile(lexical.parent, current.parent):
+        return None
+    if not mut.is_respelling(current, wanted):
+        return None
+    return current, wanted

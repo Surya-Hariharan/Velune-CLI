@@ -41,6 +41,7 @@ import shutil
 import stat
 import tempfile
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -896,6 +897,108 @@ def read_before_image(path: Path) -> tuple[bytes | None, bool]:
         return None, False
 
 
+# ── Case-only renames ──────────────────────────────────────────────────────────
+#
+# On a case-insensitive filesystem (macOS by default, Windows) "Readme.md" and "README.md"
+# name the same entry, so "does the old name still exist?" is true after renaming it and
+# "is the destination taken?" is true before. Only the folder listing tells the two
+# spellings apart, so that is what these helpers consult (#37).
+
+
+def fold_name(name: str) -> str:
+    """*name* as a case- and normalization-insensitive filesystem compares it."""
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def _same_entry(a: Path, b: Path) -> bool:
+    try:
+        return os.path.samestat(os.lstat(a), os.lstat(b))  # a link is compared, not followed
+    except OSError:
+        return False
+
+
+def on_disk_spelling(path: Path) -> Path:
+    """*path* with its last component spelled as the folder listing stores it.
+
+    A path typed as "readme.md" for the file "Readme.md" opens it on a case-insensitive
+    filesystem; this returns ".../Readme.md". Anything not found exactly once is returned
+    unchanged.
+    """
+    try:
+        names = os.listdir(path.parent)
+    except OSError:
+        return path
+    if path.name in names:
+        return path
+    matches = [name for name in names if fold_name(name) == fold_name(path.name)]
+    if len(matches) == 1 and _same_entry(path.parent / matches[0], path):
+        return path.parent / matches[0]
+    return path
+
+
+def is_respelling(current: Path, wanted: Path) -> bool:
+    """True when *wanted* is the entry at *current* under another spelling of its name.
+
+    That is: the same folder, names equal apart from case or Unicode normalization, the same
+    file or folder on disk, and only *current*'s spelling present in the listing. On a
+    case-sensitive filesystem *wanted* is a different (usually absent) entry, so this is
+    False and a rename there behaves as it always has. Two hard links whose names differ
+    only in case are also two listing entries, so they are not mistaken for one.
+    """
+    if current.name == wanted.name or fold_name(current.name) != fold_name(wanted.name):
+        return False
+    if not _same_entry(current.parent, wanted.parent) or not _same_entry(current, wanted):
+        return False
+    try:
+        names = os.listdir(current.parent)
+    except OSError:
+        return False
+    return current.name in names and wanted.name not in names
+
+
+def respell(current: Path, wanted: Path) -> Path:
+    """Rename the entry at *current* to *wanted*'s spelling; return its new path.
+
+    Goes through a uniquely named temporary sibling, so the change of spelling is applied
+    even by a filesystem that would treat a direct rename to the "same" name as a no-op.
+    If the second step fails the entry is put back under its old name; if even that fails,
+    the error says where it is.
+    """
+    target = current.parent / wanted.name
+    for _ in range(100):
+        temporary = current.parent / f"{_TMP_PREFIX}{uuid.uuid4().hex[:12]}.rename"
+        if not os.path.lexists(temporary):
+            break
+    else:
+        raise FileExistsError(f"could not choose a unique temporary name in {current.parent}")
+    os.rename(current, temporary)
+    # Between the two steps another program could create a file under either spelling.
+    # POSIX rename would replace it silently, so neither name is ever renamed onto: if one
+    # is taken, the entry stays at the temporary name and the error says where.
+    if os.path.lexists(target):
+        raise MutationVerificationError(
+            f"{target} appeared while {current.name} was being renamed, so nothing was "
+            f"replaced; {current.name} is now at {temporary}"
+        )
+    try:
+        os.rename(temporary, target)
+    except OSError as exc:
+        if os.path.lexists(current):
+            raise MutationVerificationError(
+                f"Renaming {current.name} to {wanted.name} failed ({exc}), and {current} is "
+                f"taken now; it was left at {temporary}"
+            ) from exc
+        try:
+            os.rename(temporary, current)
+        except OSError:
+            raise MutationVerificationError(
+                f"Renaming {current.name} to {wanted.name} failed ({exc}) and it could not be "
+                f"put back: it is now at {temporary}"
+            ) from exc
+        raise
+    return target
+
+
 class TurnJournal:
     """The file changes made during one agent turn, in order, for ``/rewind``."""
 
@@ -978,6 +1081,20 @@ class TurnJournal:
         else:
             dst, src = entry.destination, entry.source
             unchanged = entry.after_sha is None or file_sha256(dst) == entry.after_sha
+            if is_respelling(dst, src):
+                # A case-only rename: the old spelling "exists" because it is the same entry.
+                # Rename it back, unless its content changed since this turn.
+                if not unchanged:
+                    report.skipped.append(f"{dst}: changed since this turn, left as it is")
+                    return
+                respell(dst, src)
+                note = (
+                    " (folder renamed back as a whole; its contents are not compared)"
+                    if entry.after_sha is None and src.is_dir()
+                    else ""
+                )
+                report.restored.append(f"{dst} → {src}{note}")
+                return
             if not dst.exists() or src.exists() or not unchanged:
                 report.skipped.append(f"{dst}: changed since this turn, left as it is")
                 return
