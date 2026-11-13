@@ -83,6 +83,24 @@ class ServerConfig:
         return d
 
 
+def tool_annotations(tool: Any) -> dict[str, Any]:
+    """Extract MCP tool annotations from an SDK ``Tool`` object or a raw dict.
+
+    Returns a plain dict of boolean hints only. Anything malformed yields
+    ``{}`` — which Velune treats as the most cautious case, never the least.
+    """
+    raw = tool.get("annotations") if isinstance(tool, dict) else getattr(tool, "annotations", None)
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        dump = getattr(raw, "model_dump", None)
+        try:
+            raw = dump(exclude_none=True) if callable(dump) else dict(vars(raw))
+        except Exception:
+            return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, bool)}
+
+
 @dataclass
 class ToolInfo:
     """Metadata about a tool exposed by an MCP server."""
@@ -91,6 +109,9 @@ class ToolInfo:
     description: str
     input_schema: dict[str, Any]
     server_name: str = ""
+    #: The server's MCP tool annotations (``readOnlyHint``, ``destructiveHint``,
+    #: …). Server-asserted, so Velune only ever lets them *raise* risk.
+    annotations: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

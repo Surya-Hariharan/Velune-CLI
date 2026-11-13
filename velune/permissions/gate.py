@@ -170,6 +170,7 @@ class PermissionGate:
                             "target": a.target,
                             "risk": a.risk.value,
                             "outside_workspace": a.outside_workspace,
+                            **({"scope": a.scope} if a.scope else {}),
                         }
                         for a in actions
                     ],

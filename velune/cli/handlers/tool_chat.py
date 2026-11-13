@@ -481,40 +481,16 @@ def _make_approver(repl: VeluneREPL, ui: _ToolActivityUI, intent_confidence: flo
     The decision itself is made by the session's permission gate, which
     :func:`velune.tools.base.tool.authorize_and_execute` consults with the
     tool's described actions, so it sees exact targets, the execution mode and
-    the workspace boundary. MCP tools are remote calls that never pass through
-    ``authorize_and_execute``, so they are decided here by the same gate.
+    the workspace boundary. That now includes external MCP tools: the loop runs
+    them through the same entry point (described as ``mcp.<server>.<tool>``
+    integration actions), so there is no MCP-specific approval path here.
     """
 
     async def approver(name: str, arguments: dict[str, Any], permissions: set) -> bool:
         ui.pending_args[name] = arguments
-        if not _is_mcp_call(repl, name):
-            return True
-        from velune.permissions.actions import Action, ActionType
-        from velune.permissions.gate import ActionDeniedError
-
-        gate = session_gate(repl, ui, intent_confidence=intent_confidence)
-        try:
-            await gate.check(name, [Action(ActionType.NETWORK, name, "MCP tool call")])
-        except ActionDeniedError as exc:
-            ui.note(f"[red]✗[/red] {exc}")
-            return False
         return True
 
     return approver
-
-
-def _is_mcp_call(repl: VeluneREPL, name: str) -> bool:
-    try:
-        registry = repl.container.get("runtime.tool_registry")
-    except Exception:
-        registry = None
-    if registry is not None:
-        try:
-            if registry.get(name) is not None:
-                return False
-        except Exception:
-            pass
-    return getattr(repl, "_mcp_registry", None) is not None
 
 
 async def _ask_decision(

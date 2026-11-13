@@ -12,9 +12,11 @@ Design constraints:
   :class:`InferenceResponse`; adapters translate to each provider's wire
   format. Tool definitions use the OpenAI function format (Velune's normal
   form).
-- **Permission-gated by construction.** Tools run only through
-  ``authorize_and_execute``; permissions are granted per-call, only after the
-  approver says yes. There is no code path that executes an unapproved call.
+- **Permission-gated by construction.** Tools — native *and* external MCP
+  tools — run only through ``authorize_and_execute``; permissions are granted
+  per-call, only after the approver says yes, and the session's permission
+  gate decides on the described actions. There is no code path that executes
+  an unapproved call.
 - **Failure is data.** Unknown tools, denied calls, and execution errors are
   reported back to the model as error tool-results so it can adapt, instead
   of aborting the turn.
@@ -142,9 +144,8 @@ async def approve_readonly_only(
 ) -> bool:
     """Default approver: allow only calls whose scopes are all read-only.
 
-    MCP tools carry no Velune permission metadata and therefore never satisfy
-    the read-only test (their permission set is reported as
-    ``{NETWORK_ACCESS}``), so they are denied by this policy too.
+    MCP tools are remote calls (their permission set is ``{NETWORK_ACCESS}``)
+    and therefore never satisfy the read-only test, so this policy denies them.
     """
     return bool(permissions) and permissions <= READONLY_PERMISSIONS
 
@@ -199,7 +200,8 @@ class ToolLoopRunner:
         from velune.context.cache.manager import make_cache_manager
 
         self._cache_manager = make_cache_manager(getattr(provider, "provider_id", ""))
-        # exposed (sanitized) name → ("local", BaseTool) | ("mcp", qualified_name)
+        # exposed (sanitized) name → ("local" | "mcp", BaseTool). MCP tools are
+        # wrapped in MCPRegistryTool so they take the same gated path.
         self._route: dict[str, tuple[str, Any]] = {}
         self._executed_invocations: list[ToolInvocation] = []
 
@@ -243,6 +245,8 @@ class ToolLoopRunner:
                 )
 
         if self._mcp is not None:
+            from velune.mcp.authorization import MCPRegistryTool
+
             try:
                 mcp_tools = self._mcp.all_tools()
             except Exception as exc:
@@ -253,7 +257,7 @@ class ToolLoopRunner:
                 exposed = _NAME_SAFE.sub("_", qualified)[:64]
                 if exposed in self._route:
                     continue  # local tools win; duplicate MCP names keep first
-                self._route[exposed] = ("mcp", qualified)
+                self._route[exposed] = ("mcp", MCPRegistryTool(self._mcp, info, qualified))
                 definitions.append(
                     {
                         "type": "function",
@@ -459,13 +463,9 @@ class ToolLoopRunner:
 
         kind, target = route
         exit_code: Any = None
-        permissions: set[ToolPermission]
-        if kind == "local":
-            permissions = set(target.get_required_permissions())
-        else:
-            # MCP tools are remote calls; model them as network access so
-            # read-only-auto-approval policies never green-light them silently.
-            permissions = {ToolPermission.NETWORK_ACCESS}
+        # MCP tools report {NETWORK_ACCESS}: remote calls, so read-only
+        # auto-approval policies never green-light them silently.
+        permissions: set[ToolPermission] = set(target.get_required_permissions())
 
         try:
             approved = await self._approver(call.name, call.arguments, permissions)
@@ -487,11 +487,9 @@ class ToolLoopRunner:
             {"id": call.id, "name": call.name, "arguments": call.arguments},
         )
         try:
-            if kind == "local":
-                result = await self._run_local(target, call, permissions)
-            else:
-                assert self._mcp is not None
-                result = await self._mcp.call_tool(target, call.arguments)
+            # Native and MCP tools alike: the enforced entry point (scope
+            # check, permission gate, hooks). MCP calls no longer bypass it.
+            result = await self._run_local(target, call, permissions)
             text = _stringify(result)
             error = False
             if isinstance(result, dict) and "exit_code" in result:
@@ -539,7 +537,7 @@ class ToolLoopRunner:
         described: list[tuple[str, list[Any]]] = []
         for call in calls:
             route = self._route.get(call.name)
-            if route is None or route[0] != "local":
+            if route is None:
                 continue
             try:
                 described.append(

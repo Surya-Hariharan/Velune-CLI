@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from rich.table import Table
 
 from velune.cli import design
-from velune.resources.base import AuthorizationRequest, ResourcePermission, ResourceState
+from velune.resources.base import ResourcePermission, ResourceState
 
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
@@ -286,71 +286,54 @@ def _info(repl: VeluneREPL, resource_id: str) -> None:
         pad_edge=False,
         padding=design.PADDING_DEFAULT,
     )
-    for col in ("Action", "Permission", "Description"):
+    for col in ("Action", "Permission", "Scope", "Description"):
         table.add_column(col, style=design.MUTED)
     for cap in caps:
         style = _perm_style.get(cap.permission, "white")
         label = cap.permission.value.upper() + (" ⚠" if cap.destructive else "")
-        table.add_row(cap.action, f"[{style}]{label}[/{style}]", cap.description)
+        table.add_row(
+            cap.action,
+            f"[{style}]{label}[/{style}]",
+            cap.scope or f"{resource_id}.{cap.action}",
+            cap.description,
+        )
 
     repl.console.print(ui.header(f"{resource_id} capabilities"))
     repl.console.print(ui.rule())
     repl.console.print(table)
     repl.console.print(
-        "\n[dim]READ actions run without prompting; WRITE/EXECUTE/ADMIN require approval.[/dim]"
+        "\n[dim]Actions follow your execution mode: reads always run; MANUAL asks before any "
+        "change; PLAN refuses changes; AUTO runs ordinary changes but still asks for "
+        "destructive ones and for anything this task did not create.[/dim]"
     )
 
 
-def make_resource_approver(repl: VeluneREPL):
-    """Build the interactive approver the ResourceManager uses for gated actions.
+def make_resource_context_factory(repl: VeluneREPL):
+    """Execution context for resource actions: the session's permission gate.
 
-    Mirrors the tool-loop approval UX: READ never reaches here (auto-approved in
-    the manager); ``/approve block`` denies without prompting; a destructive
-    ADMIN action demands a stronger confirmation.
+    Every resource action is authorized by the same
+    :class:`~velune.permissions.gate.PermissionGate` as the agent's own tools —
+    the session's execution mode (PLAN / MANUAL / AUTO), its "always allow"
+    grants, its approval prompts and its audit trail. ``/approve block`` needs no
+    special case: it selects PLAN mode, which refuses every change.
     """
-    from velune.tools.safety import ApprovalMode
+    from pathlib import Path
 
-    async def approver(request: AuthorizationRequest) -> bool:
-        if repl._approval_mode is ApprovalMode.BLOCK:
-            repl.console.print(
-                f"[red]✗ {request.resource_id}.{request.action} denied (approval mode: block)[/red]"
-            )
-            return False
-        return await _prompt(repl, request)
+    from velune.tools.base.tool import ToolCallContext
 
-    return approver
+    def factory() -> ToolCallContext:
+        from velune.cli.handlers.tool_chat import _ToolActivityUI, session_gate
 
-
-async def _prompt(repl: VeluneREPL, request: AuthorizationRequest) -> bool:
-    from rich.panel import Panel
-    from rich.prompt import Prompt
-
-    tier = request.permission.value.upper()
-    warn = (
-        "  [red bold]This is a destructive operation.[/red bold]\n" if request.destructive else ""
-    )
-    body = (
-        f"[bold]{request.display_name}[/bold] → [cyan]{request.action}[/cyan] "
-        f"([yellow]{tier}[/yellow])\n{warn}"
-        f"[dim]{request.preview}[/dim]"
-    )
-    repl.console.print(
-        Panel(
-            body,
-            title="[yellow]Resource action approval[/yellow]",
-            border_style="yellow",
-            padding=(0, 2),
+        ui = _ToolActivityUI(repl)
+        gate = session_gate(repl, ui)
+        return ToolCallContext(
+            run_id=getattr(repl, "_session_id", "repl"),
+            actor="resource",
+            workspace=Path(gate.boundary.workspace_root),
+            hook_dispatcher=getattr(repl, "_hook_dispatcher", None),
+            session_id=getattr(repl, "_episodic_session_id", None)
+            or getattr(repl, "_session_id", ""),
+            gate=gate,
         )
-    )
-    try:
-        answer = await asyncio.to_thread(
-            Prompt.ask,
-            "  Allow? [bold]y[/bold]es / [bold]n[/bold]o",
-            choices=["y", "n"],
-            default="n",
-            console=repl.console,
-        )
-    except (EOFError, KeyboardInterrupt, Exception) as exc:
-        _log.debug("Resource approval prompt unavailable (%s); denying %s", exc, request.action)
-        return False
-    return answer == "y"
+
+    return factory

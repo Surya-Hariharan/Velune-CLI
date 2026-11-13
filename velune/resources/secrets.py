@@ -49,7 +49,12 @@ def save_resource_secret(resource_type: str, name: str, config: dict[str, Any]) 
 
 
 def load_resource_secret(resource_type: str, name: str) -> dict[str, Any] | None:
-    """Return the decrypted config for a named connector instance, or None."""
+    """Return the decrypted config for a named connector instance, or None.
+
+    Every secret field of the returned config is registered with the redaction
+    layer, so the value is masked in tool results, logs and previews even when
+    it has no recognizable shape.
+    """
     raw = get_key(_storage_id(resource_type, name))
     if not raw:
         return None
@@ -58,7 +63,30 @@ def load_resource_secret(resource_type: str, name: str) -> dict[str, Any] | None
     except (ValueError, TypeError):
         logger.warning("Stored config for %s:%s is corrupt; ignoring", resource_type, name)
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    register_config_secrets(data)
+    return data
+
+
+def register_config_secrets(config: dict[str, Any]) -> None:
+    """Register every secret value in *config* (and any URL password) for redaction."""
+    from urllib.parse import urlparse
+
+    from velune.core.redaction import is_sensitive_key, register_secret_value
+
+    for key, value in config.items():
+        if not isinstance(value, str) or not value:
+            continue
+        if key.lower() in _SECRET_FIELDS or is_sensitive_key(key):
+            register_secret_value(value)
+        elif "://" in value:
+            try:
+                password = urlparse(value).password
+            except ValueError:
+                password = None
+            if password:
+                register_secret_value(password)
 
 
 def delete_resource_secret(resource_type: str, name: str) -> None:
@@ -72,9 +100,11 @@ def redact_config(config: dict[str, Any]) -> dict[str, Any]:
     Use this anywhere a config is rendered to a table, a log, or an approval
     preview so a password can never leak to a display sink.
     """
+    from velune.core.redaction import is_sensitive_key
+
     redacted: dict[str, Any] = {}
     for key, value in config.items():
-        if key.lower() in _SECRET_FIELDS and value:
+        if (key.lower() in _SECRET_FIELDS or is_sensitive_key(key)) and value:
             redacted[key] = "***"
         else:
             redacted[key] = value

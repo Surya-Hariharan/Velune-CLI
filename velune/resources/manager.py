@@ -6,41 +6,54 @@ loads their configuration, drives discovery, manages connect/disconnect, and —
 critically — is the single choke point where authorization is enforced before
 any non-read action runs.
 
-It is designed to be handed to the (future) AI tool bridge as a service: an
-`execute_resource_action` tool would call :meth:`execute` and inherit the exact
-same approval gating the REPL uses, because the gate lives here, not in the UI.
+Authorization is *not* decided here. Every action runs as a
+:class:`~velune.resources.bridge.ResourceOperationTool` through
+:func:`velune.tools.base.tool.authorize_and_execute`, so the session's
+:class:`~velune.permissions.gate.PermissionGate` applies the same PLAN / MANUAL /
+AUTO policy, session grants, audit trail and hooks as every native tool. A
+legacy :data:`Approver` callback (``ResourceManager(approver=...)``) is still
+accepted: it becomes the gate's *ask* callback for a MANUAL-mode gate, so it is
+consulted exactly when the policy says a human must decide — never instead of
+the policy.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Callable
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from velune.resources.base import (
     Approver,
     AuthorizationRequest,
     DiscoveryHint,
+    ErrorCode,
+    Lifecycle,
     ResourceConnector,
     ResourcePermission,
     ResourceResult,
     ResourceState,
     ResourceStatus,
+    resolve_effective,
 )
 from velune.resources.discovery import scan_workspace
+from velune.resources.ownership import OwnershipLedger
+
+if TYPE_CHECKING:
+    from velune.tools.base.tool import ToolCallContext
+
+#: Builds the execution context (with the session's permission gate) for one
+#: resource call. Returning None, or a context without a gate, fails closed for
+#: every state-changing action.
+ContextFactory = Callable[[], "ToolCallContext | None"]
 
 logger = logging.getLogger("velune.resources.manager")
 
 #: Factory that builds a connector on demand (mirrors ProviderRegistry factories).
 ConnectorFactory = Callable[[], ResourceConnector]
-
-# Tier ordering for "stronger wins" when resolving an escalated permission.
-_PERM_RANK: dict[ResourcePermission, int] = {
-    ResourcePermission.READ: 0,
-    ResourcePermission.WRITE: 1,
-    ResourcePermission.EXECUTE: 1,
-    ResourcePermission.ADMIN: 2,
-}
 
 
 async def approve_read_only(request: AuthorizationRequest) -> bool:
@@ -62,6 +75,8 @@ class ResourceManager:
         config: dict[str, Any] | None = None,
         approver: Approver | None = None,
         workspace: Any | None = None,
+        context_factory: ContextFactory | None = None,
+        ledger: OwnershipLedger | None = None,
     ) -> None:
         """
         Args:
@@ -71,6 +86,10 @@ class ResourceManager:
             approver:  Authorization policy for non-read actions. Defaults to
                        :func:`approve_read_only` (fail-closed).
             workspace: Project root used by file-based auto-discovery.
+            context_factory: Supplies the session's execution context (with
+                       its :class:`PermissionGate`). When set it takes
+                       precedence over the default *approver*.
+            ledger:    Ownership ledger for this session (created if absent).
         """
         self._factories: dict[str, ConnectorFactory] = {}
         # Instantiated connectors, keyed by resource_id. Lazily built from
@@ -79,6 +98,10 @@ class ResourceManager:
         self._config = config or {}
         self._approver: Approver = approver or approve_read_only
         self._workspace = workspace
+        self._context_factory = context_factory
+        self.ledger = ledger or OwnershipLedger()
+        # One lock per resource so concurrent callers never open two sessions.
+        self._locks: dict[str, asyncio.Lock] = {}
 
     # ── Registration ─────────────────────────────────────────────────────────
 
@@ -107,8 +130,18 @@ class ResourceManager:
         self.register("supabase", SupabaseConnector)
 
     def set_approver(self, approver: Approver) -> None:
-        """Install the authorization policy used to gate non-read actions."""
+        """Install the legacy approver (the *ask* callback of a MANUAL gate)."""
         self._approver = approver
+
+    def set_context_factory(self, factory: ContextFactory | None) -> None:
+        """Route authorization through the session's permission gate."""
+        self._context_factory = factory
+
+    def _lock(self, resource_id: str) -> asyncio.Lock:
+        lock = self._locks.get(resource_id)
+        if lock is None:
+            lock = self._locks[resource_id] = asyncio.Lock()
+        return lock
 
     # ── Connector access ─────────────────────────────────────────────────────
 
@@ -192,25 +225,87 @@ class ResourceManager:
         """Connect the named resource. Structured result — never raises."""
         connector = self.get(resource_id)
         if connector is None:
-            return ResourceResult.failure(
-                f"No connector '{resource_id}' (unknown or disabled).", action="connect"
+            return _finish(
+                ResourceResult.failure(
+                    f"No connector '{resource_id}' (unknown or disabled).",
+                    action="connect",
+                    code=ErrorCode.UNAVAILABLE,
+                ),
+                resource_id,
             )
+        return await self._connect(resource_id, connector, only_if_needed=False)
+
+    async def _connect(
+        self, resource_id: str, connector: ResourceConnector, *, only_if_needed: bool
+    ) -> ResourceResult:
+        # The state check and the connect happen under one per-resource lock,
+        # so concurrent callers never open two sessions.
+        async with self._lock(resource_id):
+            if only_if_needed and _safe_state(connector) is ResourceState.CONNECTED:
+                return _finish(ResourceResult.success(action="connect"), resource_id)
+            try:
+                result = await connector.connect()
+            except Exception as exc:
+                logger.debug("connect(%s) raised: %s", resource_id, exc, exc_info=True)
+                result = ResourceResult.failure(
+                    _exception_message(exc), action="connect", code=ErrorCode.CONNECTION_FAILED
+                )
+        if not result.ok and result.code is None:
+            result.code = ErrorCode.CONNECTION_FAILED
+        return _finish(result, resource_id)
+
+    async def ensure_connected(self, resource_id: str) -> ResourceResult:
+        """Connect only if not already connected (stateless connectors: no-op).
+
+        Safe under concurrency: callers racing on the same resource share one
+        connection attempt (the state is re-checked under a per-resource lock).
+        """
+        connector = self.get(resource_id)
+        if connector is None:
+            return _finish(
+                ResourceResult.failure(
+                    f"No connector '{resource_id}' (unknown or disabled).",
+                    action="connect",
+                    code=ErrorCode.UNAVAILABLE,
+                ),
+                resource_id,
+            )
+        if connector.lifecycle is Lifecycle.STATELESS:
+            return _finish(ResourceResult.success(action="connect"), resource_id)
+        return await self._connect(resource_id, connector, only_if_needed=True)
+
+    async def health(self, resource_id: str) -> bool:
+        """Liveness of an active session. Never raises."""
+        connector = self.get(resource_id)
+        if connector is None:
+            return False
         try:
-            return await connector.connect()
+            return bool(await connector.health())
         except Exception as exc:
-            logger.debug("connect(%s) raised: %s", resource_id, exc, exc_info=True)
-            return ResourceResult.failure(f"{type(exc).__name__}: {exc}", action="connect")
+            logger.debug("health(%s) raised: %s", resource_id, exc)
+            return False
 
     async def disconnect(self, resource_id: str) -> ResourceResult:
         """Disconnect the named resource. Structured result — never raises."""
         connector = self.get(resource_id)
         if connector is None:
-            return ResourceResult.failure(f"No connector '{resource_id}'.", action="disconnect")
-        try:
-            return await connector.disconnect()
-        except Exception as exc:
-            logger.debug("disconnect(%s) raised: %s", resource_id, exc, exc_info=True)
-            return ResourceResult.failure(f"{type(exc).__name__}: {exc}", action="disconnect")
+            return _finish(
+                ResourceResult.failure(
+                    f"No connector '{resource_id}'.",
+                    action="disconnect",
+                    code=ErrorCode.UNAVAILABLE,
+                ),
+                resource_id,
+            )
+        async with self._lock(resource_id):
+            try:
+                result = await connector.disconnect()
+            except Exception as exc:
+                logger.debug("disconnect(%s) raised: %s", resource_id, exc, exc_info=True)
+                result = ResourceResult.failure(
+                    _exception_message(exc), action="disconnect", code=ErrorCode.ADAPTER_FAILURE
+                )
+        return _finish(result, resource_id)
 
     async def disconnect_all(self) -> None:
         """Best-effort teardown of every active session (called on REPL exit)."""
@@ -273,66 +368,214 @@ class ResourceManager:
         params: dict[str, Any] | None = None,
         *,
         approver: Approver | None = None,
+        ctx: ToolCallContext | None = None,
     ) -> ResourceResult:
-        """Run *action* on *resource_id*, enforcing authorization first.
+        """Run *action* on *resource_id* through the central authorization pipeline.
 
-        The permission tier comes from the connector's declared capability for
-        the action. READ runs immediately; WRITE/EXECUTE/ADMIN must be approved
-        by *approver* (or the manager's default). A denial returns a structured
-        ``denied`` result — it is never raised — so the caller (and the model,
-        via the tool bridge) can adapt.
+        The connector describes the call (scope, risk, ownership); the call then
+        runs as a :class:`~velune.resources.bridge.ResourceOperationTool` via
+        :func:`~velune.tools.base.tool.authorize_and_execute`, where the
+        permission gate decides. The gate comes from, in order: *ctx*, a
+        per-call *approver* (wrapped as a MANUAL-mode gate), the manager's
+        context factory, or the manager's default approver (likewise wrapped).
+
+        A denial, an unknown action, or a connector failure is returned as a
+        structured, redacted :class:`ResourceResult` — never raised.
         """
+        from velune.permissions.gate import ActionDeniedError
+        from velune.resources.bridge import ResourceOperationTool
+        from velune.tools.base.tool import (
+            ToolBlockedError,
+            ToolPermissionError,
+            authorize_and_execute,
+        )
+
+        started = time.perf_counter()
+        params = dict(params or {})
         connector = self.get(resource_id)
         if connector is None:
-            return ResourceResult.failure(
-                f"No connector '{resource_id}' (unknown or disabled).", action=action
+            return _finish(
+                ResourceResult.failure(
+                    f"No connector '{resource_id}' (unknown or disabled).",
+                    action=action,
+                    code=ErrorCode.UNAVAILABLE,
+                ),
+                resource_id,
+                started,
             )
 
         cap = connector.capability_for(action)
         if cap is None:
             available = ", ".join(sorted(c.action for c in connector.capabilities()))
-            return ResourceResult.failure(
-                f"Unknown action '{action}' for {resource_id}. Available: {available}",
-                action=action,
+            return _finish(
+                ResourceResult.failure(
+                    f"Unknown action '{action}' for {resource_id}. Available: {available}",
+                    action=action,
+                    code=ErrorCode.UNSUPPORTED_OPERATION,
+                ),
+                resource_id,
+                started,
             )
 
-        # Resolve the *effective* tier: a connector may escalate a call above its
-        # action's declared tier based on the parameters (e.g. a DROP passed to a
-        # read-only ``query``). It can only raise, never weaken — we take the
-        # stronger of the declared and computed tiers.
-        permission, destructive = cap.permission, cap.destructive
-        override = connector.effective_permission(action, params)
-        if override is not None:
-            ov_perm, ov_destructive = override
-            if _PERM_RANK[ov_perm] >= _PERM_RANK[permission]:
-                permission = ov_perm
-            destructive = destructive or ov_destructive
-
-        if permission is not ResourcePermission.READ:
-            request = AuthorizationRequest(
-                resource_id=resource_id,
-                display_name=connector.display_name,
-                action=action,
-                permission=permission,
-                destructive=destructive,
-                preview=connector.authorization_preview(action, params),
-            )
-            approve = approver or self._approver
-            try:
-                allowed = await approve(request)
-            except Exception as exc:  # an approver crash must fail closed
-                logger.warning("Approver raised for %s.%s; denying: %s", resource_id, action, exc)
-                allowed = False
-            if not allowed:
-                return ResourceResult.denied_result(
-                    action, f"Permission denied for {cap.permission.value} action '{action}'."
-                )
-
+        tool = ResourceOperationTool(connector, action, ledger=self.ledger)
+        call_ctx = self._resolve_context(connector, action, params, approver=approver, ctx=ctx)
         try:
-            return await connector.execute(action, params)
+            result = await authorize_and_execute(tool, call_ctx, params=params)
+        except (ActionDeniedError, ToolPermissionError) as exc:
+            return _finish(
+                ResourceResult.denied_result(action, _denial_reason(exc)), resource_id, started
+            )
+        except ToolBlockedError as exc:
+            return _finish(
+                ResourceResult.denied_result(action, f"Blocked by a hook: {exc.reason}"),
+                resource_id,
+                started,
+            )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.debug("execute(%s.%s) raised: %s", resource_id, action, exc, exc_info=True)
-            return ResourceResult.failure(f"{type(exc).__name__}: {exc}", action=action)
+            return _finish(
+                ResourceResult.failure(
+                    _exception_message(exc), action=action, code=ErrorCode.ADAPTER_FAILURE
+                ),
+                resource_id,
+                started,
+            )
+
+        if not isinstance(result, ResourceResult):
+            result = ResourceResult.success(action=action, data=result)
+        if result.ok:
+            self._record_ownership(connector, action, params, result)
+        return _finish(result, resource_id, started)
+
+    def _resolve_context(
+        self,
+        connector: ResourceConnector,
+        action: str,
+        params: dict[str, Any],
+        *,
+        approver: Approver | None,
+        ctx: ToolCallContext | None,
+    ) -> ToolCallContext | None:
+        if ctx is not None:
+            return ctx
+        if approver is None and self._context_factory is not None:
+            try:
+                return self._context_factory()
+            except Exception as exc:  # no context → authorize_and_execute fails closed
+                logger.warning("Resource context factory failed; refusing changes: %s", exc)
+                return None
+        return self._legacy_context(connector, action, params, approver or self._approver)
+
+    def _legacy_context(
+        self,
+        connector: ResourceConnector,
+        action: str,
+        params: dict[str, Any],
+        approver: Approver,
+    ) -> ToolCallContext:
+        """A MANUAL-mode gate whose *ask* callback is the legacy approver.
+
+        The policy still decides first (READ allowed; blocked or unscoped
+        denied); the approver is consulted only for what the policy would put
+        to a human, and an approver crash denies (fail closed).
+        """
+        from velune.core.redaction import redact_secrets
+        from velune.permissions.boundary import Boundary
+        from velune.permissions.gate import Approval, PermissionGate
+        from velune.permissions.policy import PolicyState
+        from velune.tools.base.tool import ToolCallContext
+
+        cap = connector.capability_for(action)
+        if cap is not None:
+            permission, destructive = resolve_effective(connector, cap, action, params)
+        else:
+            permission, destructive = ResourcePermission.ADMIN, True
+        try:
+            preview = connector.authorization_preview(action, params) or ""
+        except Exception:
+            preview = ""
+        request = AuthorizationRequest(
+            resource_id=connector.resource_id,
+            display_name=connector.display_name,
+            action=action,
+            permission=permission,
+            destructive=destructive,
+            preview=redact_secrets(preview),
+        )
+
+        async def ask(tool_name: str, decision: Any) -> Approval:
+            try:
+                allowed = await approver(request)
+            except Exception as exc:  # an approver crash must fail closed
+                logger.warning(
+                    "Approver raised for %s.%s; denying: %s", connector.resource_id, action, exc
+                )
+                return Approval.DENY
+            return Approval.ALLOW_ONCE if allowed else Approval.DENY
+
+        workspace = Path(self._workspace) if self._workspace else Path.cwd()
+        gate = PermissionGate(state=PolicyState(), boundary=Boundary(workspace), ask=ask)
+        return ToolCallContext(
+            run_id="resource-manager",
+            actor="resource-manager",
+            workspace=workspace,
+            gate=gate,
+        )
+
+    def _record_ownership(
+        self,
+        connector: ResourceConnector,
+        action: str,
+        params: dict[str, Any],
+        result: ResourceResult,
+    ) -> None:
+        try:
+            effects = connector.ownership_effects(action, params, result)
+        except Exception as exc:
+            logger.debug("ownership_effects(%s.%s) failed: %s", connector.resource_id, action, exc)
+            return
+        for ref, created in effects:
+            if created:
+                self.ledger.record_created(ref)
+            else:
+                self.ledger.release(ref)
+            if ref.identifier not in result.resource_ids:
+                result.resource_ids.append(ref.identifier)
+
+
+def _denial_reason(exc: BaseException) -> str:
+    reason = getattr(exc, "reason", None) or str(exc)
+    return f"Permission denied: {reason}"
+
+
+def _exception_message(exc: BaseException) -> str:
+    """A redacted, bounded description of an unexpected connector exception."""
+    from velune.core.redaction import redact_secrets
+
+    return redact_secrets(f"{type(exc).__name__}: {exc}")[:500]
+
+
+def _finish(
+    result: ResourceResult, resource_id: str, started: float | None = None
+) -> ResourceResult:
+    """Normalize every result leaving the manager: code, integration, timing, redaction."""
+    from velune.core.redaction import redact_secrets, redact_structure
+
+    result.integration = result.integration or resource_id
+    if started is not None:
+        result.duration_ms = (time.perf_counter() - started) * 1000.0
+    if not result.ok and result.code is None:
+        result.code = ErrorCode.ADAPTER_FAILURE
+    if result.error:
+        result.error = redact_secrets(result.error)
+    if result.hint:
+        result.hint = redact_secrets(result.hint)
+    if result.data is not None:
+        result.data = redact_structure(result.data)
+    result.warnings = [redact_secrets(w) for w in result.warnings]
+    return result
 
 
 def _safe_state(connector: ResourceConnector) -> ResourceState:
@@ -347,8 +590,16 @@ def build_default_manager(
     config: dict[str, Any] | None = None,
     workspace: Any | None = None,
     approver: Approver | None = None,
+    context_factory: ContextFactory | None = None,
+    ledger: OwnershipLedger | None = None,
 ) -> ResourceManager:
     """Construct a ResourceManager with all built-in connectors registered."""
-    manager = ResourceManager(config=config, workspace=workspace, approver=approver)
+    manager = ResourceManager(
+        config=config,
+        workspace=workspace,
+        approver=approver,
+        context_factory=context_factory,
+        ledger=ledger,
+    )
     manager.register_defaults()
     return manager

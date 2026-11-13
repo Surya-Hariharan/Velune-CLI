@@ -21,6 +21,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   Files changed again since the turn are skipped and reported, never overwritten.
 - [Filesystem tools](docs/filesystem-tools.md) documents every tool, the safety model, provider
   support, and how to add a tool.
+- **Integration permission scopes.** Operations on an application (a container, a database, an MCP
+  server) are now described to the permission system as dedicated `INTEGRATION_READ`, `_WRITE`,
+  `_EXECUTE` and `_DELETE` actions carrying a dotted scope such as `docker.container.start`,
+  `database.query.write` or `mcp.<server>.<tool>`. An integration action without a valid scope is
+  refused in every mode. See [Development guide](docs/development.md#resource-connectors-and-the-authorization-pipeline).
+- **Resource ownership.** A per-session ledger records which resources this task created. Anything
+  else, including containers that already existed, is never assumed to be the task's own: starting,
+  stopping or restarting it is high-risk and asks in every mode, Auto included.
+- **Compose files decide how risky `compose up` is.** The compose file is inspected; a privileged
+  container, host network or namespaces, a host bind mount, the Docker socket, a device, or an
+  `include`/`extends` it cannot inspect needs explicit approval and is never started unattended.
+- **Background process supervision.** A background command now records its process id, keeps a
+  bounded live log, and can be waited on (`wait_until_ready`: a log pattern and/or a loopback port),
+  stopped with its whole process tree (`terminate_job`) and cleaned up at exit. A background job runs
+  until stopped instead of being killed after 30 seconds, and a Ctrl+C on a foreground command no
+  longer kills it.
+- **Secret redaction for integrations.** Credentials loaded for a connector are registered and masked
+  wherever they appear; URL passwords, `password=` / `api_key=` pairs and values under sensitive keys
+  (`Authorization`, `Set-Cookie`, `token`, …) are masked in structured results.
+- Resource results are structured: normalized error codes (`connection_failed`,
+  `authorization_denied`, `timeout`, …), the integration, resource ids, duration and warnings.
+- `/resource info <id>` shows each action's permission scope.
+
+### Changed
+
+- **Resource actions and external MCP tool calls are authorized by the same permission gate as every
+  other tool.** They follow your execution mode, "always allow" grants and the audit trail
+  (`velune trace --type permission`) instead of a separate approver. In Plan mode they are refused
+  (an MCP call previously only asked); in Manual they ask; in Auto ordinary changes run, while
+  destructive operations and anything this task did not create still ask. An MCP tool that declares
+  itself destructive always needs a person; a `readOnlyHint` is never trusted to lower the risk.
 
 ### Fixed
 
@@ -65,6 +96,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   [SECURITY.md](SECURITY.md#supply-chain-ci-and-releases) for the remaining accepted risks.
 
 ---
+- **Docker names are never parsed as options.** A container, image, path or tag starting with `-`
+  (`--help`, `-a`) is rejected before `docker` runs; read actions run without asking, so this was
+  reachable without a prompt.
+- **Stopping a background job can no longer signal an unrelated process.** The job's process
+  creation time is recorded and checked, and a job that has already finished is left untouched,
+  because operating systems reuse process ids.
+- **Integration credentials are masked wherever they could surface.** Secrets resolved for a
+  connector are registered with the redaction layer, so they are scrubbed from resource results,
+  errors and approval previews, and from any tool output that echoes them.
 
 ## [0.9.9] - 2026-11-07
 

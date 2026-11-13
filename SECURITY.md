@@ -130,7 +130,8 @@ toward that goal; they reduce risk and do not eliminate it.
 | Outbound URL validation for web fetch and MCP | Enabled | `velune/tools/web/validator.py`, `velune/mcp/security.py` |
 | Workspace trust for project-level MCP servers, hooks and `base_url` overrides | Enabled | `velune/core/trust.py` |
 | Encrypted credential store | Enabled | `velune/providers/crypto.py` |
-| Log and traceback redaction of known key formats | Enabled | `velune/core/redaction.py` |
+| Log, traceback and tool-output redaction of known key formats and of connector credentials loaded at runtime | Enabled | `velune/core/redaction.py` |
+| Integration permission scopes, resource ownership and compose-file inspection | Enabled | `velune/permissions/`, `velune/resources/` |
 | Opt-in local crash reports | **Off by default** | `velune/cli/crash_reporter.py` |
 | Git snapshot and rollback for plan-driven changes | Enabled | `velune/execution/rollback.py` |
 
@@ -145,9 +146,17 @@ toward that goal; they reduce risk and do not eliminate it.
   commands such as `sudo` and disk formatting are not run. These rules are
   enforced in the tool layer rather than by instructions to the model, and each
   decision is logged (`velune trace --type permission`).
-- `/approve safe|ask|block` is a separate, session-scoped control over whether
-  individual tool calls need confirmation (`ask`, the default), run unattended
-  when known to be read-only (`safe`), or are rejected (`block`).
+- Operations on applications (Docker, databases, external MCP servers) are
+  described as integration actions with a permission scope such as
+  `docker.container.stop` or `mcp.<server>.<tool>` and decided by the same
+  rules. An integration action without a valid scope is refused in every mode.
+  Plan refuses every change. Manual asks. Auto runs ordinary changes but still
+  asks for destructive operations, for anything the current task did not create
+  (a container that was already running is never assumed to be the task's
+  own), and for a compose file that asks for a privileged container, the host
+  network, a host bind mount, the Docker socket or a device.
+- `/approve ask|safe|block` is a legacy alias for the execution modes: `ask`
+  selects Manual, `safe` selects Auto and `block` selects Plan.
 
 ### Zero telemetry
 
@@ -379,8 +388,18 @@ to run.
   key shapes (`sk-…`, `sk-ant-…`, `xai-…`, `gsk_…`, `hf_…`, `AIza…`, OpenRouter,
   Fireworks, Replicate), `Authorization: Bearer` and `Token` headers, and the
   live values of configured provider environment variables from emitted log
-  records and JSON exception traces. This covers known formats and cannot
-  recognize every secret.
+  records and JSON exception traces. The same redaction is applied to tool
+  output before it is returned to the model. It also masks `scheme://user:password@host`
+  passwords, `password=` / `api_key=` style pairs, and the exact value of every
+  connector credential loaded during the session (below). This covers known
+  formats and registered values and cannot recognize every secret.
+- **Connector credentials.** Database passwords and Supabase keys entered with
+  `/resource configure` are stored in the same AES-GCM-encrypted store, under a
+  `resource:<type>:<name>` id that cannot collide with a provider. When a
+  connector loads one, the value is registered with the redaction layer, so it is
+  masked in resource results, errors, approval previews, logs and tool output even
+  though it has no recognizable shape. Structured results also mask the values
+  of sensitive keys (`password`, `token`, `authorization`, `cookie`, …).
 - **Indexing exclusions.** The `.veluneignore` template excludes `.env`, `*.pem`,
   `*.key` and other credential files from indexing. Runtime artifacts
   (`*.db-wal`, `*.db-shm`, `velune.local.toml`) are excluded from commits and
@@ -445,6 +464,13 @@ validates every server URL before the client connects:
 - An optional host allowlist (`[mcp] allowed_hosts` in `velune.toml`) restricts
   connections to the listed hosts only; when it is set, every other host is
   denied.
+
+Connecting is not permission to call. Every call to an external server's tool
+runs through the same permission gate as a built-in tool, in the scope
+`mcp.<server>.<tool>`: Plan refuses it, Manual asks, Auto runs it unless the
+server declares the tool destructive, and the decision is audited. A server's
+tool annotations can only raise the risk, never lower it, because the server is
+not trusted to describe itself. See [docs/mcp.md](docs/mcp.md#tool-call-authorization-execution-mode-level).
 
 The MCP server that Velune exposes (`velune mcp serve`) uses stdio and offers
 read-only tools unless `VELUNE_MCP_ALLOW_MUTATIONS=1` is set. See
@@ -572,7 +598,9 @@ races:
   same key. Raising the iteration count or randomising the salt would make every
   existing store undecryptable and needs a versioned migration, which has not
   been done. Use a long random passphrase.
-- Log redaction matches known key formats only.
+- Redaction matches known key formats, common credential patterns and the credentials
+  connectors have loaded in the current session. A secret that Velune never loaded and that has
+  no recognizable shape is not masked.
 
 **Data sent to providers.** Prompts and the repository or memory context included
 with them are sent to the provider you select. Velune does not control what the

@@ -273,6 +273,26 @@ expected, not blocked.
 > does not re-validate on HTTP redirects mid-connection — treat it as a
 > pre-connection gate, not a persistent network firewall.
 
+### Tool-call authorization (execution-mode level)
+
+Connecting to a server and being allowed to call its tools are separate
+decisions. Every call to an external server's tool runs through
+`authorize_and_execute` and the session's permission gate, exactly like a
+built-in tool (`velune/mcp/authorization.py`). The call is described as an
+integration action with the scope `mcp.<server>.<tool>`, so your execution mode
+decides it and it appears in the audit trail (`velune trace --type permission`):
+
+| Mode | An MCP tool call |
+| --- | --- |
+| Manual | asks first |
+| Plan | refused (planning makes no changes); record the step in the plan instead |
+| Auto | runs, unless the server declares the tool destructive |
+| Any | a tool with `destructiveHint: true` always needs a person, and is never covered by "always allow" |
+
+Annotations are asserted by the server, so Velune only lets them *raise* the
+risk: a `readOnlyHint` does not make a call skip approval. A call without a
+usable permission scope is refused.
+
 ### Workspace trust (project-config level)
 
 When you open a workspace that has its own `.mcp.json` or
