@@ -401,6 +401,54 @@ class HttpConfig(ResourceEntry):
     max_collection_requests: int = Field(default=100, ge=1, le=500)
 
 
+class DatabaseConnectionConfig(BaseModel):
+    """One named database connection (``[resources.postgres.connections.<name>]``).
+
+    Holds **no secrets and, normally, no endpoint**: the host, port, user, database and
+    password of a connection live together in the encrypted keystore (written by
+    ``/resource configure``), so a repository's ``velune.toml`` can never redirect a
+    stored password to another server. This entry only names a credential and sets
+    the *policy* for using it.
+    """
+
+    #: Name of the stored credential (``resource:<type>:<credential>``). Defaults to
+    #: the connection's own name.
+    credential: str | None = None
+    #: A free label (``development``, ``staging``, ``production``). Only ever makes
+    #: things stricter: a production connection's changes always need a person.
+    environment: str = ""
+    #: Refuse every statement that changes anything on this connection.
+    read_only: bool = False
+    statement_timeout: float | None = Field(default=None, gt=0, le=600)
+    max_rows: int | None = Field(default=None, ge=1, le=5000)
+    #: Extra column-name patterns whose values are masked in results.
+    redact_columns: list[str] = Field(default_factory=list)
+    #: Endpoint, used only when no credential is stored and the workspace is trusted
+    #: (there is then no password to protect). Normally leave empty.
+    host: str = ""
+    port: int | None = Field(default=None, ge=1, le=65535)
+    database: str = ""
+    username: str = ""
+
+
+class DatabaseConfig(ResourceEntry):
+    """Settings for a database integration (``[resources.postgres]`` / ``mysql`` / ``supabase``)."""
+
+    connections: dict[str, DatabaseConnectionConfig] = Field(default_factory=dict)
+    #: Connection used when an operation names none. Empty: the only configured one.
+    default_connection: str = ""
+    connect_timeout: float = Field(default=5.0, gt=0, le=60)
+    #: Server-side and client-side limit for one statement, in seconds.
+    statement_timeout: float = Field(default=30.0, gt=0, le=600)
+    #: A transaction left idle this long is rolled back (seconds).
+    idle_transaction_timeout: float = Field(default=60.0, gt=0, le=3600)
+    max_rows: int = Field(default=200, ge=1, le=5000)
+    max_cell_chars: int = Field(default=500, ge=20, le=20000)
+    max_result_chars: int = Field(default=20000, ge=1000, le=200000)
+    #: Column-name patterns masked in every result of every connection.
+    redact_columns: list[str] = Field(default_factory=list)
+
+
 class ResourcesConfig(BaseModel):
     """Configuration for external resource connectors (Docker, DBs, Supabase).
 
@@ -410,9 +458,9 @@ class ResourcesConfig(BaseModel):
     """
 
     docker: DockerConfig = Field(default_factory=DockerConfig)
-    postgres: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
-    mysql: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
-    supabase: ResourceEntry = Field(default_factory=lambda: ResourceEntry(auto_connect=False))
+    postgres: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    mysql: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    supabase: DatabaseConfig = Field(default_factory=DatabaseConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
     #: When False the model is never offered integration tools (the discovery tools
     #: and every integration operation are withheld). ``/resource`` is unaffected.

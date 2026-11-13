@@ -338,11 +338,17 @@ class _FakeCursor:
         self.description = description
         self._rows = rows
 
-    def execute(self, sql):
+    rowcount = -1
+
+    def execute(self, sql, params=None):
         self._sql = sql
+        self._params = params
 
     def fetchall(self):
         return self._rows
+
+    def fetchmany(self, size):
+        return self._rows[:size]
 
     def close(self):
         pass
@@ -355,6 +361,12 @@ class _FakeConn:
 
     def cursor(self):
         return _FakeCursor(self._description, self._rows)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
 
     def close(self):
         pass
@@ -645,9 +657,9 @@ async def test_sql_health_and_explain(monkeypatch):
 
     orig = c._execute_sql
 
-    def spy(conn, sql):
+    def spy(conn, sql, *args, **kwargs):
         captured.append(sql)
-        return orig(conn, sql)
+        return orig(conn, sql, *args, **kwargs)
 
     monkeypatch.setattr(c, "_execute_sql", spy)
     assert (await c.execute("health", {})).ok
@@ -740,7 +752,9 @@ async def test_mysql_list_tables_from_database(monkeypatch):
     monkeypatch.setattr(c, "_open_connection", spy_open)
     orig = c._execute_sql
     monkeypatch.setattr(
-        c, "_execute_sql", lambda conn, sql: (captured.append(sql), orig(conn, sql))[1]
+        c,
+        "_execute_sql",
+        lambda conn, sql, *a, **k: (captured.append(sql), orig(conn, sql, *a, **k))[1],
     )
     assert (await c.execute("list_tables", {"database": "app"})).ok
     assert any("`app`" in s for s in captured)

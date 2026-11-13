@@ -11,7 +11,7 @@ what it manages is proven, never guessed from a name**.
 ## Install and connect
 
 ```text
-pip install "velune-cli[docker]"      # the Docker SDK (pywin32 is pulled in on Windows)
+pip install "velune-cli[docker]"      # the Docker SDK (pywin32 is pulled in on Windows) and PyYAML
 /resource connect docker              # or let the agent enable it
 ```
 
@@ -94,6 +94,15 @@ Velune manages unattended only what it **created and can prove it created**.
 - Name collisions never adopt: creating a container, volume or network whose name exists fails with a conflict and
   records nothing.
 - On connect, records are **reconciled** against the daemon: vanished, re-created or relabelled objects are dropped.
+- **The record file is authenticated** (VAIR A5). Each daemon's records carry an HMAC-SHA256 computed with a random key kept in
+  the encrypted keystore (outside the workspace and outside the record directory) and bound to the daemon and the workspace.
+  A file that was edited, forged, copied from another workspace or daemon, written by an older format, or sealed with another
+  key fails verification and **nothing in it is trusted** (it is set aside as `*.tampered-*`, `*.corrupt-*` or
+  `*.unauthenticated-*`, never read). Encryption alone would not prove ownership; a MAC proves "Velune wrote this". If the
+  keystore is unavailable, records live in memory for the session only and nothing is read from or written to disk.
+  Writes are atomic (unique temp file, flush, fsync, replace), serialized across Velune processes by a lock, merged with what
+  other processes recorded, and owner-only on POSIX (on Windows the user-profile ACL applies). A replayed older file can
+  only restore records Velune genuinely wrote, and each is still checked against the live daemon (id, fingerprint, labels).
 - Compose: after `compose_up`, only resources that did **not** exist before the call (new ids) are recorded, so a
   project never takes ownership of existing or external resources. `compose_down` removes only a project whose
   containers are all proven Velune's; otherwise it refuses and each container can be removed separately (each with
@@ -133,8 +142,16 @@ compose file's directory) and an argv that never carries model-controlled option
 file is scanned (`compose_config` shows the same result): privileged containers, `cap_add`, `security_opt`,
 host network / PID / IPC namespaces, joining another container's namespace, Docker-socket and host bind mounts
 (including `driver_opts` devices), `devices`, **external volumes and networks**, `volumes_from`, and
-`include` / `extends` (reported as unverified) each raise an extra high-risk action. The scan is a conservative
-line classifier, not a YAML parser: it errs toward asking.
+`include` / `extends` (reported as unverified) each raise an extra high-risk action.
+
+The scan has two passes and reports their union. A line classifier needs nothing but the text; a **structural pass** parses
+the file with PyYAML's `safe_load` (never `load`; size, depth, node and document limits) and walks `services.*` and the
+top-level `volumes`, `networks`, `configs`, `secrets` and `include`, so it sees what a line scan cannot: flow-style YAML
+(`{privileged: true}`, `volumes: ["/:/host"]`), quoted keys, anchors and merge keys, JSON-formatted files, and bind sources
+that are variables (`${HOME}:/h`). A file that does not parse, is too deep or has too many documents is *unverified*. Without
+PyYAML (the `docker` extra installs it) a file using syntax the line scan cannot read is also reported unverified instead of
+being waved through. The line pass is kept as a second opinion, so an environment variable spelled like a Compose key is
+flagged too — a false positive costs one confirmation.
 
 ## Configuration
 
@@ -168,8 +185,10 @@ VELUNE_DOCKER_LIVE=1 python -m pytest tests/test_docker_live.py   # optional, re
   working directory and go through the same gate.
 - Image pulls use your existing `docker login` credentials; Velune never reads, stores or logs registry
   credentials. Very long pulls are bounded by the SDK's request timeout.
-- Ownership records are per workspace and per daemon, stored unencrypted in Velune's data directory; anyone
-  with write access to that directory can forge a record.
+- Ownership records are per workspace and per daemon, in Velune's data directory, authenticated with a key held in the
+  keystore: something that can read your keystore (your own user account) can forge one; something that can only write the
+  file cannot. Records are reconciled when a daemon is connected, not continuously, and a stale process that never saw
+  another process's release can write a released record back (the daemon's id and fingerprint still have to match).
 - Windows/macOS/Linux connection selection is unit-tested; a real daemon was exercised only by the optional live
   test. Podman's Docker-compatible socket is untested.
 - `exec`, `commit`, `export`/`import`, swarm, plugins and daemon configuration are not supported.

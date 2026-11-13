@@ -231,7 +231,7 @@ Prefer extending one of these registries over inventing a new loading mechanism.
 ### Resource connectors and the authorization pipeline
 
 `velune/resources/` connects Velune to applications on the developer's machine (Docker through the Docker SDK — see [docker.md](docker.md) —
-local PostgreSQL and MySQL, Supabase, background processes, and HTTP APIs — see [http.md](http.md)). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
+PostgreSQL, MySQL and Supabase — see [database.md](database.md) —, background processes, and HTTP APIs — see [http.md](http.md); the overall design is in [integrations.md](integrations.md)). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
 `ResourceManager.register`; nothing else needs to change.
 
 **What a connector declares.** `capabilities()` lists each action with a permission tier
@@ -381,6 +381,18 @@ class RedisConnector(ResourceConnector):          # illustrative: there is no Re
                                params={"properties": {"key": key, "value": {"type": "string"}},
                                        "required": ["key", "value"]}),
         ]
+```
+
+The database integrations (`resources/sql_base.py`, `postgres/`, `mysql/`, `supabase/`, documented in
+[database.md](database.md)) share one core, so a new SQL engine is a subclass that supplies only its driver, how a
+transaction starts (`_begin`), query cancellation (`_cancel`) and its catalog SQL (`_schema_sql`). Named connections
+come from `NamedConnections` (`resources/connections.py`). The suite needs no database:
+`tests/sql_fakes.py` is an in-memory server (`FakeDatabase`) with transactions, read-only enforcement, failure
+injection, blocking statements and cancellation, plus a fake keystore (`SQLEnv`):
+
+```text
+python -m pytest tests/test_sql_*.py tests/test_supabase_connector.py tests/test_docker_ledger_integrity.py tests/test_compose_structural.py
+VELUNE_SQL_LIVE=1 VELUNE_LIVE_PG="localhost:5432:postgres:postgres:pw" python -m pytest tests/test_sql_live.py   # optional, throwaway server
 ```
 
 The HTTP integration (`resources/http/`, documented in [http.md](http.md)) is a connector of exactly this shape:

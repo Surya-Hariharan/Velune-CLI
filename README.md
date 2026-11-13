@@ -129,6 +129,7 @@ when the extra is missing (semantic search is disabled while keyword search keep
 | `parsing` | Tree-sitter parsing for repository cognition; lighter heuristics are used without it |
 | `telemetry` | Export spans and metrics to an OTLP collector |
 | `gguf`, `docker`, `api` | GGUF metadata reading; the Docker sandbox and the native Docker Engine integration (see [docs/docker.md](docs/docker.md)); YAML OpenAPI specs for the HTTP integration |
+| `postgres`, `mysql` | Drivers for the PostgreSQL and MySQL / MariaDB integrations (named connections, schema discovery, read-only queries, approved changes and transactions; see [docs/database.md](docs/database.md)) |
 | `all` | Every optional feature |
 
 ```bash

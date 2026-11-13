@@ -18,3 +18,5 @@ f86f844c1ead02f7cac6e80ee33566347efbb249:tests/test_process_connector.py:generic
 0d307940814c5552e98cae1acd5846012d1abece:tests/test_http_connector.py:generic-api-key:33
 #   test_docker_connector.py:107 - a generated multi-line log body containing a sample password=... token, used to test output redaction/truncation
 66f4a2fa5cdd6cb2878883c1d2b54c14c55afdc0:tests/test_docker_connector.py:generic-api-key:107
+#   sql_fakes.py:24 - a placeholder database password in the in-memory SQL server fake, used to assert passwords never reach tool output
+02f772e011f3df0d40d97d8770a2803f6d5498f8:tests/sql_fakes.py:generic-api-key:24

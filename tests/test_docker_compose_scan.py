@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+
 import pytest
 
 from velune.resources.docker import compose_scan as cs
@@ -10,6 +13,24 @@ from velune.resources.docker.compose_scan import compose_risks, scan_compose_tex
 
 def _scopes(text: str) -> set[str]:
     return {r.scope for r in scan_compose_text(text)}
+
+
+# PyYAML is optional (the ``docker`` and ``api`` extras). The scanner has two modes and both are
+# contract: with it, a structural pass reads any valid YAML; without it, a line classifier reads
+# ordinary block-style files and anything it cannot read is reported *unverified*, never clean.
+# "Absent" is simulated by making ``import yaml`` fail, so it runs on every machine, including the
+# lowest-dependency CI job that installs no extras. "Present" needs the real package and so runs
+# wherever the extra is installed (the full-extras test job).
+HAS_PYYAML = importlib.util.find_spec("yaml") is not None
+needs_pyyaml = pytest.mark.skipif(
+    not HAS_PYYAML, reason="PyYAML (docker/api extra) is not installed; the absent-path tests run"
+)
+
+
+@pytest.fixture
+def without_pyyaml(monkeypatch):
+    """Behave as an install without the docker/api extra: ``import yaml`` raises ImportError."""
+    monkeypatch.setitem(sys.modules, "yaml", None)
 
 
 BENIGN = """\
@@ -43,8 +64,52 @@ volumes:
 """
 
 
-def test_an_ordinary_project_has_no_risks():
-    assert scan_compose_text(BENIGN) == []
+# The same project written without flow syntax: what the line classifier can fully read.
+BENIGN_BLOCK_STYLE = BENIGN.replace("  data: {}\n", "  data:\n    driver: local\n")
+
+
+@needs_pyyaml
+def test_an_ordinary_project_has_no_risks_with_pyyaml():
+    assert scan_compose_text(BENIGN) == []  # includes ``data: {}``, which the structural pass reads
+
+
+def test_an_ordinary_block_style_project_has_no_risks_without_pyyaml(without_pyyaml):
+    assert BENIGN_BLOCK_STYLE != BENIGN
+    assert scan_compose_text(BENIGN_BLOCK_STYLE) == []
+
+
+def test_syntax_the_fallback_cannot_read_is_unverified_not_clean_without_pyyaml(without_pyyaml):
+    """``data: {}`` is an ordinary idiom but a flow mapping; without a YAML parser the fallback
+    says so (and how to fix it) instead of either crashing or reporting the file as safe."""
+    (risk,) = scan_compose_text(BENIGN)
+    assert risk.scope == cs.SCOPE_UNVERIFIED
+    assert "PyYAML" in risk.reason and "docker extra" in risk.reason
+
+
+#: Files that hide a privileged container from a line scan. None may ever come back as ``[]``.
+_HIDDEN_PRIVILEGE = {
+    "flow mapping": "services: {web: {image: x, privileged: true}}\n",
+    "quoted key": 'services:\n  web:\n    image: x\n    "privileged": true\n',
+    "anchor and merge": (
+        "x-base: &base\n  privileged: true\nservices:\n  web:\n    <<: *base\n    image: x\n"
+    ),
+    "json document": '{"services": {"web": {"image": "x", "privileged": true}}}\n',
+}
+
+
+@pytest.mark.parametrize("name", sorted(_HIDDEN_PRIVILEGE))
+def test_a_hidden_privileged_container_is_never_reported_clean_without_pyyaml(name, without_pyyaml):
+    risks = scan_compose_text(_HIDDEN_PRIVILEGE[name])
+    assert risks, f"{name}: a file the fallback cannot read must not come back clean"
+    assert {r.scope for r in risks} & {cs.SCOPE_UNVERIFIED, cs.SCOPE_PRIVILEGED}
+
+
+@needs_pyyaml
+@pytest.mark.parametrize("name", sorted(_HIDDEN_PRIVILEGE))
+def test_a_hidden_privileged_container_is_found_structurally_with_pyyaml(name):
+    scopes = _scopes(_HIDDEN_PRIVILEGE[name])
+    assert cs.SCOPE_PRIVILEGED in scopes, f"{name}: the structural pass should see it"
+    assert cs.SCOPE_UNVERIFIED not in scopes, f"{name}: parsed in full, so it is verified"
 
 
 @pytest.mark.parametrize(
@@ -117,8 +182,8 @@ def test_explicit_file_relative_to_the_base(tmp_path):
 
 
 def test_compose_yaml_takes_precedence_like_docker(tmp_path):
-    (tmp_path / "compose.yaml").write_text("services: {}\n")
-    (tmp_path / "docker-compose.yml").write_text("    privileged: true\n")
+    (tmp_path / "compose.yaml").write_text("services:\n  a:\n    image: nginx\n")
+    (tmp_path / "docker-compose.yml").write_text("services:\n  a:\n    privileged: true\n")
     assert compose_risks(None, tmp_path) == []
 
 

@@ -137,6 +137,20 @@ def _reset_published_endpoints():
         endpoints.configure_base_url(provider_id, None)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_docker_ledger_key(monkeypatch):
+    """Never create or read the Docker ledger's HMAC key in the developer's real keystore."""
+    monkeypatch.setattr("velune.resources.docker.ownership.default_ledger_key", lambda: b"\x07" * 32)
+
+
+@pytest.fixture
+def sql_env(tmp_path, monkeypatch):
+    """An in-memory database server plus a fake keystore for the SQL integration tests."""
+    from tests.sql_fakes import SQLEnv
+
+    return SQLEnv(tmp_path, monkeypatch)
+
+
 @pytest.fixture
 def interpreter_under_test_on_path(monkeypatch):
     """Make a bare ``python`` resolve to the interpreter that is running the suite.
