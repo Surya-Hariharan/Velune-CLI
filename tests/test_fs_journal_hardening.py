@@ -393,7 +393,10 @@ async def test_an_unpaired_surrogate_split_across_a_chunk_boundary_is_refused(
 async def test_whole_file_validation_reads_every_byte_in_bounded_chunks(
     tmp_path, small_limits, monkeypatch
 ):
+    # A chunk far smaller than the file, so one unbounded read() of it would show up.
+    monkeypatch.setattr(mut, "_HASH_CHUNK", 4097)
     raw = _oversized("utf-16-le")
+    assert len(raw) > 2 * max(mut._SAMPLE_BYTES, mut._HASH_CHUNK)
     (tmp_path / "f.txt").write_bytes(raw)
     meter = ReadMeter(monkeypatch)  # also makes any Path.read_bytes() call fail
     await _write(tmp_path, "f.txt", "replaced\n")
