@@ -88,25 +88,15 @@ class WriteFile(_WriteToolBase):
         kind = ActionType.MODIFY_FILE if target.exists() else ActionType.CREATE_FILE
         return [path_action(kind, target, boundary, "write file contents")]
 
-    def prepare(self, path: Path, content: str) -> tuple[bytes, str, str, bytes | None]:
-        """``(new bytes, old text, expected hash, previous bytes)`` for writing *content* to *path*.
+    def prepare(self, path: Path, content: str) -> mut.Overwrite:
+        """How to write *content* to *path* (see :func:`~velune.tools.filesystem.mutation.plan_overwrite`).
 
         An existing text file keeps its encoding, BOM and dominant line ending; a new file
-        (or a binary file being replaced) is written as UTF-8 exactly as given.
+        (or a binary file being replaced) is written as UTF-8 exactly as given. A file too
+        large to load is never read whole; an oversized text file whose encoding cannot be
+        confirmed, or text that cannot be decoded, is refused rather than converted.
         """
-        if path.is_dir():
-            raise IsADirectoryError(f"{self._display(path)} is a folder, not a file")
-        if not path.exists():
-            return content.encode("utf-8"), "", mut.ABSENT, None
-        try:
-            current = mut.load_text(path, self._display(path))
-        except ValueError:
-            # Binary or undecodable: replaced wholesale as UTF-8.
-            raw = path.read_bytes()
-            return content.encode("utf-8"), "", mut.sha256_bytes(raw), raw
-        text = mut.to_newline(content, current.newline) if current.style != "none" else content
-        data = mut.encode_text(text, current.encoding, current.bom)
-        return data, current.text, current.sha256, current.raw
+        return mut.plan_overwrite(path, content, self._display(path))
 
     async def execute(
         self, file_path: str, content: str, expected_sha256: str | None = None
@@ -114,7 +104,8 @@ class WriteFile(_WriteToolBase):
         if not isinstance(content, str):
             raise TypeError("content must be a string")
         path = resolve_tool_path(file_path, self.workspace, label="WriteFile")
-        data, old_text, current_sha, before = self.prepare(path, content)
+        plan = self.prepare(path, content)
+        current_sha = plan.expected_sha256
         if expected_sha256 and expected_sha256 != current_sha:
             raise mut.FileConflictError(mut.conflict_message(path, expected_sha256, current_sha))
         self.tracker.check(path, current_sha)
@@ -127,14 +118,23 @@ class WriteFile(_WriteToolBase):
                 self.console.print(f"[yellow]Skipped:[/yellow] {path}")
                 return f"Skipped (rejected by user): {path}"
 
-        new_sha = mut.atomic_write(path, data, expected_sha256=current_sha)
+        new_sha = mut.atomic_write(path, plan.data, expected_sha256=current_sha)
         mut.verify_written(path, new_sha)
         self.tracker.record(path, new_sha)
-        mut.journal(mut.FileChange(path, before, new_sha))
+        mut.journal_overwrite(path, plan, new_sha)
 
         label = self._display(path)
-        diff, added, removed = mut.unified_diff(old_text, content, label)
-        notes = [] if before is not None else ["(new file)"]
+        added: int | None
+        removed: int | None
+        if plan.old_text is None:
+            diff, added, removed = "", None, None
+        else:
+            diff, added, removed = mut.unified_diff(plan.old_text, content, label)
+        notes = [] if plan.exists else ["(new file)"]
+        if plan.note:
+            notes.append(plan.note)
+        if plan.exists and not plan.kept:
+            notes.append("(too large to keep a copy: /rewind cannot restore the previous content)")
         if self.confirm:
             self.console.print(f"[green]Written:[/green] {path}")
         return mut.MutationResult(

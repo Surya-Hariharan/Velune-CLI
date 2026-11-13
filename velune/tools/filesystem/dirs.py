@@ -136,16 +136,17 @@ class DeleteDirectory(_FsTool):
                     f"Folder is not empty: {target}. Pass recursive=true to delete its contents."
                 )
             count = mut.count_entries(target)
-            snapshot = mut.snapshot_tree(target)
+            tree = mut.capture_tree(target)
             shutil.rmtree(target)
             message = f"Deleted folder {target} and {count} item(s) inside it"
         else:
-            snapshot = []
+            tree = mut.TreeSnapshot([], {})
             target.rmdir()
             message = f"Deleted empty folder {target}"
         if target.exists():
             raise mut.MutationVerificationError(f"{target} still exists after deleting it")
-        mut.journal(mut.DirDeleted(target, snapshot))
+        snapshot = None if tree is None else tree.entries
+        mut.journal(mut.DirDeleted(target, snapshot, None if tree is None else tree.modes))
         if snapshot is None:
             message += " (too large to keep a copy: /rewind cannot restore it)"
         return message

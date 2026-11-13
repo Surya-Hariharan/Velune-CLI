@@ -34,8 +34,7 @@ class MultiDiffPreview:
 
         for i, (path, content) in enumerate(file_writes.items(), 1):
             self.console.print(f"[dim]Change {i} of {len(file_writes)}[/dim]")
-            diff = self.preview.compute_diff(path, content)
-            self.preview.render_diff(diff)
+            self.preview.show(path, content)
 
             if auto_accept_all:
                 decisions[path] = DiffDecision.ACCEPT
