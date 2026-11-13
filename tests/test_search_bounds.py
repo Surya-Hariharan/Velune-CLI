@@ -225,18 +225,21 @@ async def test_pathological_regex_returns_within_the_budget(tmp_path, monkeypatc
     assert marker and any(r.startswith("time_budget=") for r in marker["reasons"])
 
 
-async def _calmest_gap(make_call, attempts: int = 3) -> tuple[list, float]:
+async def _calmest_gap(make_call, attempts: int = 3, measure=heartbeat_gap) -> tuple[list, float]:
     """Run the same call up to *attempts* times; return (every result, calmest run's stall).
 
     Code that blocks the event loop does so on every run, so it still fails here. A single
     long gap on a busy shared CI runner (one 275 ms outlier was seen where this machine
     measures 15-25 ms) is the host being descheduled, not the search, and does not repeat.
     Stops at the first run under ``STALL_LIMIT``.
+
+    *measure* is :func:`heartbeat_gap` for every real check. The tests of this helper's own
+    retry logic pass a scripted one, so what they assert does not depend on the host.
     """
     results: list = []
     worst = float("inf")
     for _ in range(attempts):
-        result, gap = await heartbeat_gap(make_call())
+        result, gap = await measure(make_call())
         results.append(result)
         worst = min(worst, gap)
         if worst < STALL_LIMIT:
@@ -412,15 +415,71 @@ async def test_a_call_that_blocks_the_loop_still_fails_on_every_attempt():
     assert gc.get_freeze_count() == 0
 
 
+def _scripted(gaps: list[float]):
+    """A stand-in for :func:`heartbeat_gap` that runs the call and reports *gaps* in turn.
+
+    Each measured call is still awaited, so its result and side effects are real; only the
+    stall figure, which on a real host depends on scheduling, is fixed in advance.
+    """
+    remaining = list(gaps)
+    measured: list[float] = []
+
+    async def measure(coro):
+        result = await coro
+        measured.append(remaining.pop(0))
+        return result, measured[-1]
+
+    measure.measured = measured  # type: ignore[attr-defined]
+    return measure
+
+
+def _counting_call():
+    calls: list[int] = []
+
+    async def call():
+        calls.append(len(calls) + 1)
+        return calls[-1]
+
+    return calls, call
+
+
 async def test_calmest_gap_stops_at_the_first_calm_run_and_returns_its_result():
-    calls = 0
+    calls, call = _counting_call()
+    results, worst = await _calmest_gap(call, measure=_scripted([0.02, 0.02, 0.02]))
+    assert calls == [1] and results == [1]
+    assert worst == 0.02
 
-    async def calm():
-        nonlocal calls
-        calls += 1
-        await asyncio.sleep(0.02)
-        return calls
 
-    results, worst = await _calmest_gap(calm)
-    assert calls == 1 and results == [1]
-    assert worst < STALL_LIMIT
+async def test_calmest_gap_retries_a_run_the_host_descheduled_and_keeps_every_result():
+    """The flake this helper exists for: one run stalled by the host, the next one calm.
+
+    Measured for real, this case could only be produced by the host pausing the test, so
+    the helper test itself used to fail (``calls == 2``) on a slow runner.
+    """
+    calls, call = _counting_call()
+    measure = _scripted([0.30, 0.02, 0.02])
+    results, worst = await _calmest_gap(call, measure=measure)
+    assert calls == [1, 2] and results == [1, 2]
+    assert measure.measured == [0.30, 0.02]
+    assert worst == 0.02 and worst < STALL_LIMIT
+
+
+async def test_calmest_gap_reports_the_calmest_stall_when_every_run_stalls():
+    """A defect that stalls the loop on every run is never excused, however many retries."""
+    calls, call = _counting_call()
+    results, worst = await _calmest_gap(call, measure=_scripted([0.50, 0.26, 0.40]))
+    assert calls == [1, 2, 3] and results == [1, 2, 3]
+    assert worst == 0.26 and worst >= STALL_LIMIT
+
+
+async def test_calmest_gap_treats_a_stall_of_exactly_the_limit_as_a_stall():
+    calls, call = _counting_call()
+    _, worst = await _calmest_gap(call, measure=_scripted([STALL_LIMIT] * 3))
+    assert calls == [1, 2, 3] and worst == STALL_LIMIT
+
+
+async def test_real_checks_measure_with_the_heartbeat():
+    """Only the helper's own tests script the gap; every search check measures for real."""
+    import inspect
+
+    assert inspect.signature(_calmest_gap).parameters["measure"].default is heartbeat_gap
