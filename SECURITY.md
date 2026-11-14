@@ -254,9 +254,11 @@ shell by design, outside the runner above: lifecycle **hooks**
 (`velune/cli/commands/file_commands.py`). Project-level hooks are loaded only for
 trusted directories. Custom slash commands are read from
 `~/.velune/commands/` and from `<workspace>/.velune/commands/`; a command of type
-`shell` runs with your privileges when you invoke it, and workspace-level
-definitions are not currently covered by directory trust. Review those files in
-repositories you do not control. CI allows only these two call sites to use a
+`shell` runs with your privileges when you invoke it. Workspace-level definitions are
+loaded only for a directory you have trusted (`velune trust add`, or answer yes to the
+trust prompt, which also appears when a repository ships only such files), exactly like
+project hooks and project MCP servers; user-level definitions always load. Review those
+files in repositories you do not control. CI allows only these two call sites to use a
 shell.
 
 > **Known limitation.** Allowlisted interpreters and build tools (`python`,

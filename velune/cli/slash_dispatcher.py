@@ -974,8 +974,15 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     return registry
 
 
-def _load_file_commands(repl: VeluneREPL, registry: SlashCommandRegistry) -> None:
-    """Discover and register TOML command files from user + workspace dirs."""
+def _load_file_commands(
+    repl: VeluneREPL, registry: SlashCommandRegistry, trusted: bool | None = None
+) -> None:
+    """Discover and register TOML command files from user + workspace dirs.
+
+    Workspace command files are shell commands chosen by the repository's author, so they
+    load only for a trusted workspace. *trusted* is the decision just made; ``None`` reads
+    the stored one.
+    """
     from velune.cli.commands.file_commands import FileCommandLoader
 
     workspace_path: Path | None = None
@@ -986,7 +993,11 @@ def _load_file_commands(repl: VeluneREPL, registry: SlashCommandRegistry) -> Non
     except Exception:
         pass
 
-    loader = FileCommandLoader(workspace=workspace_path)
+    if trusted is None:
+        from velune.core import trust
+
+        trusted = workspace_path is not None and trust.is_trusted(workspace_path)
+    loader = FileCommandLoader(workspace=workspace_path, trusted=bool(trusted))
     existing = {cmd.name for cmd in registry.all_unique()}
     try:
         new_cmds = loader.load(repl.console, existing_names=existing)
