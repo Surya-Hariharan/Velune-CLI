@@ -59,6 +59,9 @@ class ServerEntry:
     tools: list[ToolInfo] = field(default_factory=list)
     resources: list[ResourceInfo] = field(default_factory=list)
     error: str = ""
+    #: The plugin that registered this server, or "" for one the user configured. Lets the
+    #: registry refuse a clash between owners and remove a plugin's servers as a unit.
+    owner: str = ""
 
     @property
     def name(self) -> str:
@@ -144,12 +147,65 @@ class MCPServerRegistry:
 
         logger.debug("MCPServerRegistry loaded %d server config(s).", len(self._entries))
 
-    def register(self, config: ServerConfig) -> None:
-        """Manually register a server config (e.g. from CLI flags)."""
-        if config.name in self._entries and self._entries[config.name].is_connected:
-            logger.debug("Server '%s' already connected; skipping re-register.", config.name)
+    def register(self, config: ServerConfig, *, owner: str = "") -> None:
+        """Register a server config (from CLI flags, or from a plugin with *owner* set).
+
+        A name held by a different owner is never taken over: a plugin cannot replace a
+        server the user configured, nor another plugin's, whichever came first.
+        """
+        existing = self._entries.get(config.name)
+        if existing is not None:
+            if existing.owner != owner:
+                logger.warning(
+                    "Refusing to register MCP server '%s': it is already registered by %s.",
+                    config.name,
+                    f"plugin '{existing.owner}'" if existing.owner else "the user's config",
+                )
+                return
+            if existing.is_connected:
+                logger.debug("Server '%s' already connected; skipping re-register.", config.name)
+                return
+        self._entries[config.name] = ServerEntry(config=config, owner=owner)
+
+    def owned_entries(self, owner: str) -> dict[str, ServerEntry]:
+        """The servers *owner* registered, by name."""
+        if not owner:
+            return {}
+        return {name: entry for name, entry in self._entries.items() if entry.owner == owner}
+
+    def detach_owner(self, owner: str) -> list[ServerEntry]:
+        """Stop offering *owner*'s servers, immediately and synchronously.
+
+        The entries leave the registry and the tool index, so none of their tools can be
+        listed or called from this moment on. The connections are *not* closed here (that
+        is asynchronous): hand the returned entries to :meth:`close_entry`.
+        """
+        detached = list(self.owned_entries(owner).values())
+        for entry in detached:
+            self._entries.pop(entry.name, None)
+        if detached:
+            self._rebuild_tool_index()
+        return detached
+
+    async def close_entry(self, entry: ServerEntry) -> None:
+        """Close a detached entry's connection. Never raises: cleanup must not fail a command."""
+        connection, entry.connection = entry.connection, None
+        entry.state = ServerState.DISCONNECTED
+        entry.tools = []
+        entry.resources = []
+        if connection is None:
             return
-        self._entries[config.name] = ServerEntry(config=config)
+        try:
+            await connection.disconnect()
+        except Exception as exc:  # one server failing to close must not strand the others
+            logger.warning("Error closing MCP server '%s': %s", entry.name, exc)
+
+    async def unregister_owner(self, owner: str) -> list[str]:
+        """Detach *owner*'s servers and close their connections. Idempotent."""
+        entries = self.detach_owner(owner)
+        for entry in entries:
+            await self.close_entry(entry)
+        return [entry.name for entry in entries]
 
     # ------------------------------------------------------------------
     # Connect / disconnect

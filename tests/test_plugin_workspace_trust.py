@@ -387,7 +387,7 @@ async def test_load_and_register_plugins_registers_a_trusted_workspace(workspace
 
 
 async def test_the_decision_reaches_the_manager_before_it_loads():
-    repl = SimpleNamespace(_plugin_manager=MagicMock(), console=MagicMock())
+    repl = SimpleNamespace(_plugin_manager=MagicMock(), console=MagicMock(), _registry=MagicMock())
     repl._plugin_manager.load.return_value = []
     calls: list[str] = []
     repl._plugin_manager.set_workspace_trusted.side_effect = lambda v: calls.append(f"trust={v}")

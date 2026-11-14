@@ -55,6 +55,9 @@ async def cmd_plugin(repl: VeluneREPL, args: str) -> None:
             repl.console.print("[yellow]Usage: /plugin enable <name>[/yellow]")
             return
         ok = repl._plugin_manager.enable(arg)
+        if ok:
+            await _connect_owned(repl, arg)
+            _refresh_command_ui(repl)
         repl.console.print(
             f"[green]Plugin '{arg}' enabled.[/green]"
             if ok
@@ -65,7 +68,9 @@ async def cmd_plugin(repl: VeluneREPL, args: str) -> None:
         if not arg:
             repl.console.print("[yellow]Usage: /plugin disable <name>[/yellow]")
             return
-        ok = repl._plugin_manager.disable(arg)
+        ok = repl._plugin_manager.disable(arg)  # revokes hooks, commands and MCP servers
+        await repl._plugin_manager.flush()  # wait for the server processes to be closed
+        _refresh_command_ui(repl)
         repl.console.print(
             f"[yellow]Plugin '{arg}' disabled.[/yellow]"
             if ok
@@ -74,13 +79,17 @@ async def cmd_plugin(repl: VeluneREPL, args: str) -> None:
 
     elif sub == "reload":
         name = arg or None
+        # reload revokes what the plugin(s) registered, rescans, and wires what is found
+        # again (hooks, MCP servers and commands) into the registries already in use.
         new_plugins = repl._plugin_manager.reload(name)
+        await repl._plugin_manager.flush()
+        for plugin in new_plugins:
+            await _connect_owned(repl, plugin.name)
+        _refresh_command_ui(repl)
         label = f"'{name}'" if name else "all"
         repl.console.print(
             f"[green]Reloaded {label} — {len(new_plugins)} plugin(s) active.[/green]"
         )
-        if new_plugins:
-            register_plugin_commands(repl, new_plugins)
 
     elif sub == "show":
         if not arg:
@@ -163,6 +172,11 @@ def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
                     owner=plugin_name,
                 )
             )
+    _refresh_command_ui(repl)
+
+
+def _refresh_command_ui(repl: VeluneREPL) -> None:
+    """Tell the completer and the palette what the registry holds now."""
     if repl._completer is not None:
         from velune.cli.autocomplete import CommandEntry
 
@@ -181,6 +195,14 @@ def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
         repl._command_palette.set_commands(repl._registry.all_unique())
 
 
+async def _connect_owned(repl: VeluneREPL, owner: str) -> None:
+    """Connect the MCP servers a plugin has registered but that are not connected yet."""
+    registry = repl._mcp_registry
+    for name, entry in registry.owned_entries(owner).items():
+        if not entry.is_connected:
+            await registry.connect(name)
+
+
 async def load_and_register_plugins(repl: VeluneREPL, *, workspace_trusted: bool = False) -> None:
     """Load plugins and wire their commands/hooks/MCP servers into the REPL.
 
@@ -195,6 +217,11 @@ async def load_and_register_plugins(repl: VeluneREPL, *, workspace_trusted: bool
     """
     try:
         repl._plugin_manager.set_workspace_trusted(workspace_trusted)
+        # Lets the manager take plugin commands back out again (disable, reload) and put them
+        # back (enable) without knowing anything about the REPL.
+        repl._plugin_manager.attach_commands(
+            repl._registry, lambda plugins: register_plugin_commands(repl, plugins)
+        )
         new_plugins = repl._plugin_manager.load()
         if new_plugins:
             register_plugin_commands(repl, new_plugins)

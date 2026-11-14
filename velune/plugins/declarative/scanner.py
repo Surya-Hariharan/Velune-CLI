@@ -1,9 +1,11 @@
 """Plugin scanner — discovers declarative plugins in search paths.
 
-Search order (highest priority first):
+Search order:
 1. ``<workspace>/.velune/plugins/``    — project-specific plugins
 2. ``~/.velune/plugins/``              — user global plugins
 3. Extra paths supplied at runtime
+
+If two plugins share a name, the user's wins over a repository's (see ``scan``).
 
 Each sub-directory that contains a valid ``plugin.json`` is a plugin.
 
@@ -47,6 +49,13 @@ ORIGINS = frozenset({ORIGIN_USER, ORIGIN_WORKSPACE, ORIGIN_EXTRA})
 #: * ``workspace`` wins over ``extra``: a repository's folder never becomes trusted just
 #:   because embedding code also listed it as an extra path.
 _ORIGIN_PRECEDENCE = {ORIGIN_USER: 2, ORIGIN_WORKSPACE: 1, ORIGIN_EXTRA: 0}
+
+#: When two plugins share a *name*, the one from the higher-ranked origin is used and the
+#: other is skipped with a warning, whatever order the folders were searched in. A repository
+#: must never replace a plugin the user (or the embedding code) installed, so ``workspace`` is
+#: the lowest. (This is separate from ``_ORIGIN_PRECEDENCE``, which settles what origin a
+#: *directory* has when it is registered more than once.)
+_NAME_PRECEDENCE = {ORIGIN_USER: 2, ORIGIN_EXTRA: 1, ORIGIN_WORKSPACE: 0}
 
 _WORKSPACE_PLUGINS_SUBDIR = (".velune", "plugins")
 
@@ -183,15 +192,16 @@ class PluginScanner:
     def scan(self, *, workspace_trusted: bool = False) -> list[DiscoveredPlugin]:
         """Scan the search paths and return the plugins found.
 
-        A plugin appearing in multiple search paths is only loaded from the
-        highest-priority path (first match by name wins).
+        Two plugins with the same name are never both used: the higher-ranked origin wins
+        (user, then extra, then workspace), and within one origin the first in search order.
+        The skipped one is reported with a warning. The result does not depend on the order
+        the search paths were added in.
 
         Workspace paths are skipped unless *workspace_trusted* is true (fail closed: the
         default is untrusted), so an untrusted repository's plugins are never even parsed,
         and cannot occupy a name that a user-level plugin should hold.
         """
-        seen_names: set[str] = set()
-        plugins: list[DiscoveredPlugin] = []
+        found: list[DiscoveredPlugin] = []
 
         for search_path, key in zip(self._search_paths, self._keys, strict=True):
             if _path_key(search_path) != key:
@@ -223,27 +233,45 @@ class PluginScanner:
                 if not candidate.is_dir():
                     continue
                 plugin = self._try_load(candidate, origin)
-                if plugin is None:
-                    continue
-                if plugin.name in seen_names:
-                    logger.debug(
-                        "Plugin '%s' already loaded from a higher-priority path; skipping %s.",
-                        plugin.name,
-                        candidate,
-                    )
-                    continue
-                seen_names.add(plugin.name)
-                plugins.append(plugin)
-                logger.info(
-                    "Discovered plugin '%s' v%s (%d cmd(s), %d skill(s)) at %s",
-                    plugin.name,
-                    plugin.manifest.version,
-                    len(plugin.commands),
-                    len(plugin.skills),
-                    candidate,
-                )
+                if plugin is not None:
+                    found.append(plugin)
 
-        return plugins
+        return self._resolve_names(found)
+
+    @staticmethod
+    def _resolve_names(found: list[DiscoveredPlugin]) -> list[DiscoveredPlugin]:
+        """Keep one plugin per name (see :meth:`scan`), in discovery order."""
+        winners: dict[str, DiscoveredPlugin] = {}
+        for plugin in found:
+            held = winners.get(plugin.name)
+            if held is None:
+                winners[plugin.name] = plugin
+                continue
+            if _NAME_PRECEDENCE.get(plugin.origin, -1) > _NAME_PRECEDENCE.get(held.origin, -1):
+                winner, loser = plugin, held
+                winners[plugin.name] = plugin
+            else:
+                winner, loser = held, plugin
+            logger.warning(
+                "Plugin '%s' at %s (%s) was skipped: a plugin of that name from %s is used "
+                "instead (%s).",
+                loser.name,
+                loser.root,
+                loser.origin,
+                winner.origin,
+                winner.root,
+            )
+        ordered = [plugin for plugin in found if winners[plugin.name] is plugin]
+        for plugin in ordered:
+            logger.info(
+                "Discovered plugin '%s' v%s (%d cmd(s), %d skill(s)) at %s",
+                plugin.name,
+                plugin.manifest.version,
+                len(plugin.commands),
+                len(plugin.skills),
+                plugin.root,
+            )
+        return ordered
 
     def _try_load(self, directory: Path, origin: str = ORIGIN_WORKSPACE) -> DiscoveredPlugin | None:
         """Attempt to load a single plugin from *directory*."""
