@@ -288,24 +288,72 @@ def test_non_text_aliases_are_ignored_not_raised():
 
 
 @pytest.mark.parametrize(
-    ("frontmatter", "expected"),
+    ("value", "expected"),
     [
-        ("aliases: [1, 2, null]", []),
-        ("aliases: 5", []),
-        ("aliases: {a: b}", []),
-        ("aliases: [good, 7, null, fine]", ["good", "fine"]),
-        ("aliases: solo", ["solo"]),
+        ("solo", ["solo"]),
+        (["good", 7, None, "fine"], ["good", "fine"]),
+        ([1, 2, None], []),
+        (5, []),
+        (2.5, []),
+        (None, []),
+        ({"a": "b"}, []),
+        (("t", "u"), ["t", "u"]),
+        ([["x"], {"y": 1}], []),
+        ([], []),
     ],
 )
-def test_frontmatter_aliases_are_only_ever_text(tmp_path, frontmatter, expected):
+def test_string_list_keeps_only_text(value, expected):
+    """Frontmatter is whatever the author wrote, so only text ever survives."""
+    from velune.plugins.declarative.command import _string_list
+
+    assert _string_list(value) == expected
+
+
+def test_typed_frontmatter_yields_only_text_aliases_and_args(tmp_path, monkeypatch):
+    """What PyYAML returns for ``aliases: [1, null]``, simulated, so the test does not depend
+    on whether PyYAML is installed (without it the stdlib fallback parser returns strings)."""
+    from velune.plugins.declarative import command as command_module
+    from velune.plugins.declarative.command import parse_command_file
+
+    monkeypatch.setattr(
+        command_module,
+        "_parse_simple_yaml",
+        lambda text: {"aliases": [1, 2, None, "good"], "args": [1, "name", {"x": 1}]},
+    )
+    path = tmp_path / "cmd.md"
+    path.write_text("---\nignored: by the patch\n---\nbody", encoding="utf-8")
+
+    parsed = parse_command_file(path, "p")
+
+    assert parsed is not None
+    assert parsed.aliases == ["good"]
+    assert parsed.args == ["name"]
+
+
+@pytest.mark.parametrize(
+    "frontmatter",
+    [
+        "aliases: [1, 2, null]",
+        "aliases: 5",
+        "aliases: {a: b}",
+        "aliases: [good, 7, null]",
+        "aliases: solo",
+    ],
+)
+def test_hostile_frontmatter_never_breaks_parsing_whichever_parser_is_installed(
+    tmp_path, frontmatter
+):
+    """Holds with PyYAML (typed values) and without it (everything is a string)."""
     from velune.plugins.declarative.command import parse_command_file
 
     path = tmp_path / "cmd.md"
     path.write_text(f"---\n{frontmatter}\nargs: [1, name]\n---\nbody", encoding="utf-8")
+
     parsed = parse_command_file(path, "p")
+
     assert parsed is not None
-    assert parsed.aliases == expected
-    assert parsed.args == ["name"]
+    assert all(isinstance(alias, str) for alias in parsed.aliases)
+    assert all(isinstance(arg, str) for arg in parsed.args)
 
 
 def test_one_plugin_failing_to_register_does_not_stop_the_others(repl, caplog):
