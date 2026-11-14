@@ -246,9 +246,13 @@ isolation is available only through the optional Docker sandbox described below.
   command *and* uses no option that writes, deletes or runs a program: `find` with
   `-delete`/`-exec`/`-fprint`, `git` with `--output`/`--upload-pack`/`--receive-pack`, `git fetch`,
   and the non-listing forms of `git branch`/`tag`/`remote`/`stash`, `rg --pre` and `fd -x` all
-  ask for approval first. A read that names a credentials file (`cat .env`) asks too, as
-  `read_file` does; a recursive search that happens to read one (`grep -r KEY .`) is not
-  detected.
+  ask for approval first. A git subcommand is recognised by its exact name, not by a prefix:
+  only `status`, `log`, `diff`, `show`, `branch`, `remote`, `stash list`, `tag`, `rev-parse` and
+  `shortlog` can be a read, so `git difftool`/`mergetool` (which run a program) and look-alikes
+  such as `git diff-tree` ask. A read that names a credentials file (`cat .env`) asks too, as
+  `read_file` does, including a committed or staged copy named as a git object (`git show
+  HEAD:.env`, `git show :.env`); a recursive search or a history listing that happens to read
+  one (`grep -r KEY .`, `git log -p`) is not detected.
 - **Environment scrubbing.** `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `PYTHONPATH`,
   `PYTHONSTARTUP`, `BASH_ENV` and similar injection vectors are removed from the
   child environment.

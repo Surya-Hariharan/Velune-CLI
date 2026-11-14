@@ -368,6 +368,29 @@ def command_paths_outside(command: str, boundary: Boundary) -> list[Path]:
     return outside
 
 
+def _git_object_path(token: str) -> str | None:
+    """The path inside a git object name: ``REV:path``, ``:path`` or ``:N:path`` (None if none).
+
+    ``git show HEAD:.env`` and ``git show :.env`` print a file's committed or staged contents
+    and name it only inside that one argument, so the argument as a whole ("HEAD:.env") is not a
+    secret file name. Deliberately lenient about what counts as one: any argument of a git
+    command with a ``:`` is split, and only its path half is looked at, so an argument that is
+    not an object name at all can at worst ask for an approval it did not need. A Windows drive
+    path (a drive letter, as in C:/dir) is a path, not an object name, and is left to the usual check.
+    """
+    if ":" not in token:
+        return None
+    if len(token) >= 2 and token[0].isalpha() and token[1] == ":" and token[2:3] in ("", "\\", "/"):
+        return None
+    if token.startswith(":"):
+        rest = token[1:]  # ":path" (index) or ":N:path" (stage N of a merge)
+        if len(rest) >= 2 and rest[0] in "0123" and rest[1] == ":":
+            rest = rest[2:]
+        return rest or None
+    path = token.split(":", 1)[1]
+    return path or None
+
+
 def command_paths_secret(command: str, boundary: Boundary, cwd: Path | None = None) -> list[Path]:
     """Credential/secret files (``.env``, keys, ``~/.ssh``) that a command line names.
 
@@ -385,6 +408,8 @@ def command_paths_secret(command: str, boundary: Boundary, cwd: Path | None = No
     except ValueError:
         tokens = command.split()
     base = cwd if cwd is not None else boundary.workspace_root
+    program = tokens[0].replace("\\", "/").rsplit("/", 1)[-1].lower() if tokens else ""
+    is_git = program in ("git", "git.exe")
     found: list[Path] = []
     for token in tokens[1:]:
         if token.startswith("-"):
@@ -393,6 +418,19 @@ def command_paths_secret(command: str, boundary: Boundary, cwd: Path | None = No
             token = token.split("=", 1)[1]
         if not token or "://" in token:
             continue
+        if is_git:
+            # git reads a committed or staged file through an object name (HEAD:.env), which
+            # names the file without being a path to it; check the path half of it.
+            blob = _git_object_path(token)
+            if blob:
+                # A path never contains ":" in a well-formed object name, so a stray one
+                # (HEAD::.env) is ambiguous: look at each piece too, and ask rather than guess.
+                hit = next(
+                    (p for p in (blob, *blob.split(":")) if p and is_secret_path(Path(p))), None
+                )
+                if hit is not None:
+                    found.append(base / hit)
+                    continue
         try:
             candidate = Path(token).expanduser()
             if not candidate.is_absolute():

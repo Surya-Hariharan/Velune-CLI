@@ -226,11 +226,24 @@ def _is_dangerous_git_option(arg: str) -> bool:
     return len(name) > 2 and any(opt.startswith(name) for opt in _GIT_DANGEROUS_OPTIONS)
 
 
+# The git subcommands that may be SAFE, matched *exactly*. The prefix table above is only a
+# first filter: "git diff" is also the start of ``git difftool`` (``-x CMD`` runs CMD, ``git
+# difftool -y -x cp`` overwrote a modified file), "git show" of ``git show-branch`` and "git
+# branch" of anything else that begins with it. A subcommand that is not listed here is ASK,
+# whatever it is spelled like, so a new or look-alike subcommand never inherits SAFE.
+_GIT_READ_SUBCOMMANDS = frozenset(
+    {"status", "log", "diff", "show", "branch", "remote", "stash", "tag", "rev-parse", "shortlog"}
+)
+
+
 def _git_is_read_only(args: list[str]) -> bool:
-    if any(_is_dangerous_git_option(a) for a in args):
-        return False
     sub, rest = (args[0], args[1:]) if args else ("", [])
-    if sub == "fetch":  # reaches the network, writes refs and objects, can run --upload-pack
+    # No subcommand (``git`` alone, or a global option such as ``-c`` first) or one that is not
+    # exactly a known read-only subcommand: fetch (network, refs, --upload-pack), difftool and
+    # mergetool (run a program), diff-tree/show-ref/... (read-only, but not part of the SAFE set).
+    if sub not in _GIT_READ_SUBCOMMANDS:
+        return False
+    if any(_is_dangerous_git_option(a) for a in args):
         return False
     if sub == "branch":
         return all(a in _GIT_BRANCH_LISTING for a in rest)
