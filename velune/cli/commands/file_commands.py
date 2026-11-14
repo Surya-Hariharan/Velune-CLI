@@ -214,7 +214,7 @@ class FileCommandLoader:
         elif self._workspace and has_workspace_commands(self._workspace):
             _log.info(
                 "Workspace %s is not trusted; its .velune/commands files were not loaded "
-                "(run /trust to allow them)",
+                "(run 'velune trust add' to allow them)",
                 self._workspace,
             )
 

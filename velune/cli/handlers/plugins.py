@@ -127,11 +127,21 @@ def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
     from velune.cli.slash_commands import SlashCommand
 
     for plugin in plugins:
+        plugin_name = getattr(plugin, "name", "")
         for cmd in plugin.commands:
             plugin_root = plugin.root
 
-            def _make_handler(c=cmd, root=plugin_root):
+            def _make_handler(c=cmd, root=plugin_root, owner=plugin_name):
                 async def _handler(args: str) -> None:
+                    # Checked when the command runs, not only when it was registered: a
+                    # reference kept by the palette or completer must not outlive the plugin.
+                    manager = getattr(repl, "_plugin_manager", None)
+                    if owner and manager is not None and not manager.is_active(owner):
+                        repl.console.print(
+                            f"[yellow]/{c.name} belongs to plugin '{owner}', which is not "
+                            "active.[/yellow]"
+                        )
+                        return
                     rendered = c.render(args, root)
                     repl.console.print(
                         f"[dim]Plugin command [bold]/{c.name}[/bold] → sending to model[/dim]"
@@ -140,14 +150,17 @@ def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
 
                 return _handler
 
+            # The registry refuses a built-in or reserved name (and an alias of one) and
+            # a name another plugin already holds; it logs why, so nothing to do here.
             repl._registry.register(
                 SlashCommand(
                     name=cmd.name,
-                    aliases=cmd.aliases,
+                    aliases=list(cmd.aliases),
                     description=f"{cmd.description}  {cmd.help_label}",
                     usage=cmd.usage,
                     handler=_make_handler(),
                     category="Tools",
+                    owner=plugin_name,
                 )
             )
     if repl._completer is not None:

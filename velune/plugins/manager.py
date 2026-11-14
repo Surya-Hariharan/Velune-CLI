@@ -157,6 +157,16 @@ class PluginManager:
             return True
         return False
 
+    def is_active(self, name: str) -> bool:
+        """True when plugin *name* is loaded, enabled and allowed to be used right now."""
+        plugin = self._plugins.get(name)
+        return (
+            plugin is not None
+            and plugin.enabled
+            and name not in self._disabled
+            and self._is_authorized(plugin)
+        )
+
     def is_enabled(self, name: str) -> bool:
         return name not in self._disabled and (
             name in self._plugins and self._plugins[name].enabled

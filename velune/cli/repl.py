@@ -228,7 +228,7 @@ class VeluneREPL:
         if decision:
             trust.trust(workspace)
             self.console.print(
-                "[dim]Workspace trusted. Use [bold]/trust forget[/bold] to revoke.[/dim]"
+                "[dim]Workspace trusted. Run [bold]velune trust forget[/bold] to revoke.[/dim]"
             )
             return True
 

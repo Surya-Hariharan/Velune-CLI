@@ -966,6 +966,10 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     for cmd in registry.all_unique():
         cmd.category = _BUILTIN_CATEGORIES.get(cmd.name, cmd.category)
 
+    # Everything registered above is a built-in. Seal it: a command file or a plugin loaded
+    # from here on cannot take any of these names or aliases, or a reserved name.
+    registry.seal_builtins()
+
     # ── TOML-defined user / workspace commands ────────────────────────────────
     # Registered after categorisation so they keep their own category (default
     # "General", surfaced under a trailing group in /help).
