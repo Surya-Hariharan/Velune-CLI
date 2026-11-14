@@ -177,6 +177,41 @@ def test_the_approval_preview_counts_every_form(tmp_path):
     assert planned[1] == "X\nY\nsep\nX\r\nY\r\n"
 
 
+import re
+import time
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_a_near_match_on_a_huge_repetitive_file_costs_linear_time(newline):
+    """CodeRabbit on #47: a regex scan cost ~ file length x needle lines on near-matches.
+
+    100,000 lines of "a" and a 2,000-line needle that only matches at the very end: a
+    per-position scan examines ~2e8 lines; a literal search examines the file once.
+    """
+    text = ("a" + newline) * 100_000 + "b" + newline
+    needle = "a\n" * 2_000 + "b"
+    started = time.perf_counter()
+    new_text, count = plan_edit(_file(text), needle, "done")
+    elapsed = time.perf_counter() - started
+    assert count == 1
+    assert new_text == ("a" + newline) * 98_000 + "done" + newline
+    assert elapsed < 3.0, f"{elapsed:.1f}s"
+
+
+def test_offsets_are_mapped_back_exactly_on_a_large_mixed_file():
+    """Every match is replaced in place, whatever number of CRLFs precede it."""
+    endings = ["\n", "\r\n", "\r"]
+    text = "".join(
+        f"x{n}{e}needle{e}y{n}{e}" for n, e in ((n, endings[n % 3]) for n in range(3_000))
+    )
+    # Oracle: an independent, slow reference that rewrites each match with a regex.
+    pattern = re.compile("needle(\r\n|\n|\r(?!\n))y")
+    reference, hits = pattern.subn(lambda m: f"NEEDLE{m[1]}Z{m[1]}y", text)
+    new_text, count = plan_edit(_file(text), "needle\ny", "NEEDLE\nZ\ny", replace_all=True)
+    assert count == hits == 3_000
+    assert new_text == reference
+
+
 # ── #36 ────────────────────────────────────────────────────────────────────────────────────────
 
 

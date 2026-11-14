@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import difflib
 import re
+from array import array
+from bisect import bisect_left
 from pathlib import Path
 from typing import Any
 
@@ -49,37 +51,32 @@ def _first_match_lines(text: str, needle: str, limit: int) -> list[int]:
 # One line break of any kind. CRLF is tried first and a bare CR must not be the first half of
 # a CRLF, so a CRLF is never split into a CR and an LF.
 _BREAK = re.compile(r"\r\n|\n|\r(?!\n)")
+_CRLF = re.compile(r"\r\n")
 
 
-def _break_pattern(old_string: str) -> re.Pattern[str]:
-    """A pattern for *old_string* in which every line break matches LF, CRLF or CR.
+def _to_lf(text: str) -> str:
+    """*text* with every CRLF and every bare CR turned into LF (one linear pass in C)."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
-    ``old_string`` comes from the model with LF endings, but the file may use any mix of
-    LF, CRLF and CR. Each break in ``old_string`` matches whichever break the file has at
-    that spot, so every occurrence is found, whatever its endings.
+
+def _normalized(text: str) -> tuple[str, array | None]:
+    """``(text with LF-only breaks, offset shifts)``; the shifts are None for a CR-free text.
+
+    Each CRLF loses one character in the normalized text. ``shifts`` holds, per CRLF, the
+    normalized index of its LF, so :func:`_original_offset` can map an index of the
+    normalized text back to the original text in O(log n) without a second scan.
     """
-    lines = _BREAK.sub("\n", old_string).split("\n")
-    joiner = "(?:" + _BREAK.pattern + ")"
-    return re.compile(joiner.join(re.escape(line) for line in lines))
+    if "\r" not in text:
+        return text, None
+    shifts = array("Q")
+    for removed, match in enumerate(_CRLF.finditer(text)):
+        shifts.append(match.start() - removed)
+    return _to_lf(text), shifts
 
 
-def _breaks_between(text: str, start: int, end: int) -> int:
-    """Line breaks (LF, CRLF or CR) in ``text[start:end]``."""
-    return sum(1 for _ in _BREAK.finditer(text, start, end))
-
-
-def _first_regex_match_lines(text: str, pattern: re.Pattern[str], limit: int) -> list[int]:
-    """Like :func:`_first_match_lines`, for a pattern; counts every kind of line break."""
-    lines: list[int] = []
-    line = 1
-    counted_to = 0
-    for match in pattern.finditer(text):
-        line += _breaks_between(text, counted_to, match.start())
-        counted_to = match.start()
-        lines.append(line)
-        if len(lines) >= limit:
-            break
-    return lines
+def _original_offset(shifts: array | None, index: int) -> int:
+    """Index in the original text of normalized index *index* (a CRLF maps to its CR)."""
+    return index if shifts is None else index + bisect_left(shifts, index)
 
 
 def _in_style_of(replaced: str, new_lf: str) -> str:
@@ -144,25 +141,24 @@ def plan_edit(
         raise EditError("old_string and new_string are identical; there is nothing to change.")
 
     text = current.text
+    # A multi-line old_string is searched in a copy of the file whose line breaks are all LF,
+    # so one literal, linear-time search finds every occurrence whatever mix of LF, CRLF and
+    # CR the file has. Matches are mapped back to the original text, which is never altered
+    # outside them.
     multiline = "\n" in old_string or "\r" in old_string
     if multiline:
-        # Every line break in old_string matches LF, CRLF or CR, so a file that mixes line
-        # endings is searched as a whole and the count covers every occurrence.
-        pattern = _break_pattern(old_string)
-        new_lf = _BREAK.sub("\n", new_string)
-        total = sum(1 for _ in pattern.finditer(text))
+        haystack, shifts = _normalized(text)
+        needle, new_lf = _to_lf(old_string), _to_lf(new_string)
     else:
-        # ``str.count`` and ``str.replace`` agree on what a match is (non-overlapping, left to
-        # right) and run in one linear pass in C, however many matches there are.
-        total = text.count(old_string)
+        haystack, shifts, needle = text, None, old_string
+    # ``str.count`` and ``str.replace`` agree on what a match is (non-overlapping, left to
+    # right) and run in one linear pass in C, however many matches there are.
+    total = haystack.count(needle)
     if total:
         if total > 1 and not replace_all:
             # Only a rejected, ambiguous edit needs line numbers, and only for the few that
             # the message lists.
-            if multiline:
-                listed = _first_regex_match_lines(text, pattern, _MAX_LISTED_MATCHES)
-            else:
-                listed = _first_match_lines(text, old_string, _MAX_LISTED_MATCHES)
+            listed = _first_match_lines(haystack, needle, _MAX_LISTED_MATCHES)
             shown = ", ".join(str(n) for n in listed)
             more = "…" if total > _MAX_LISTED_MATCHES else ""
             raise EditError(
@@ -173,10 +169,20 @@ def plan_edit(
         count = total if replace_all else 1
         if not multiline:
             return text.replace(old_string, new_string, -1 if replace_all else 1), count
-        new_text = pattern.sub(
-            lambda found: _in_style_of(found.group(), new_lf), text, 0 if replace_all else 1
-        )
-        return new_text, count
+        if shifts is None:
+            return text.replace(needle, new_lf, -1 if replace_all else 1), count
+        pieces: list[str] = []
+        copied = 0
+        index = haystack.find(needle)
+        for _ in range(count):
+            begin = _original_offset(shifts, index)
+            end = _original_offset(shifts, index + len(needle))
+            pieces.append(text[copied:begin])
+            pieces.append(_in_style_of(text[begin:end], new_lf))
+            copied = end
+            index = haystack.find(needle, index + len(needle))
+        pieces.append(text[copied:])
+        return "".join(pieces), count
     raise EditError(f"old_string was not found in the file.{_missing_hint(text, old_string)}")
 
 
