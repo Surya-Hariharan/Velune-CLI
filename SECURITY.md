@@ -376,7 +376,8 @@ loaded, registered and connected only for a directory you have trusted
 (`velune trust add`, or answer yes to the trust prompt, which also appears when a
 repository ships only a plugin). Declining leaves workspace plugins completely inactive:
 they are not read, not registered and their MCP servers are never started. Plugins under
-`~/.velune/plugins` belong to you and load whatever the workspace trust. The decision is
+`~/.velune/plugins` belong to you and load whatever the workspace trust, including when
+the workspace is your home directory and the two folders are the same. The decision is
 taken once, before any plugin is loaded, and the plugin manager refuses a workspace plugin
 again when it wires hooks or registers MCP servers. Trust is recorded per directory, not
 per plugin or per version of its contents; a trusted workspace's plugins can change with

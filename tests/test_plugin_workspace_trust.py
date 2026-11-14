@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -394,6 +395,181 @@ async def test_the_decision_reaches_the_manager_before_it_loads():
     await load_and_register_plugins(repl, workspace_trusted=True)
 
     assert calls == ["trust=True", "load"]
+
+
+# ── one directory registered under two origins (workspace == HOME) ────────────────────────────
+
+
+def _link_to(target: Path, link: Path) -> Path:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available here")
+    return link
+
+
+def _spellings(home: Path, tmp_path: Path, monkeypatch) -> dict[str, Path]:
+    """Different ways of naming ``<home>/.velune/plugins``."""
+    (home / ".velune" / "elsewhere").mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+    spellings = {
+        "plain": user_plugins(home),
+        "dotdot": home / ".velune" / "elsewhere" / ".." / "plugins",
+        "relative": Path(home.name) / ".velune" / "plugins",
+    }
+    if os.path.normcase("A") != "A":  # a case-insensitive platform (Windows)
+        spellings["other-case"] = Path(str(user_plugins(home)).upper())
+    return spellings
+
+
+def test_a_home_directory_workspace_keeps_its_user_plugins_without_trust(home):
+    make_plugin(user_plugins(home), "mine")
+    manager = PluginManager(workspace=home)  # untrusted
+    dispatcher = HookDispatcher(workspace=home)
+    registry = MCPServerRegistry(workspace=home)
+
+    assert [p.name for p in manager.load()] == ["mine"]
+
+    assert manager.get_plugin("mine").origin == ORIGIN_USER
+    assert manager.find_command("review").body == "BODY OF mine"
+    assert manager.wire_hooks(dispatcher) == 1  # as for any user plugin
+    assert manager.wire_mcp(registry) == 1
+    assert hook_commands(dispatcher) == ["echo HOOK"]
+    assert list(registry._entries) == ["mine:srv"]
+
+
+def test_a_home_directory_workspace_does_not_open_its_project_folders(home):
+    make_plugin(user_plugins(home), "mine")
+    make_plugin(workspace_plugins(home / "project"), "evil")  # not <workspace>/.velune/plugins
+    manager = PluginManager(workspace=home)
+    manager.load()
+    assert [p.name for p in manager._active_plugins()] == ["mine"]
+
+
+def test_a_trusted_home_directory_workspace_loads_its_plugin_once(home):
+    make_plugin(user_plugins(home), "mine")
+    manager = PluginManager(workspace=home, workspace_trusted=True)
+    assert [p.name for p in manager.load()] == ["mine"]
+    assert manager.get_plugin("mine").origin == ORIGIN_USER
+
+
+def test_separate_home_and_workspace_untrusted_loads_only_the_user_plugin(workspace, home):
+    make_plugin(user_plugins(home), "mine", command="mine-cmd")
+    make_plugin(workspace_plugins(workspace), "evil", command="evil-cmd")
+    manager = PluginManager(workspace=workspace)  # untrusted
+    dispatcher = HookDispatcher(workspace=workspace)
+    registry = MCPServerRegistry(workspace=workspace)
+
+    assert [p.name for p in manager.load()] == ["mine"]
+
+    assert manager.find_command("mine-cmd") is not None
+    assert manager.find_command("evil-cmd") is None
+    assert manager.wire_hooks(dispatcher) == 1 and manager.wire_mcp(registry) == 1
+    assert list(registry._entries) == ["mine:srv"]
+
+
+def test_separate_home_and_workspace_trusted_loads_both(workspace, home):
+    make_plugin(user_plugins(home), "mine", command="mine-cmd")
+    make_plugin(workspace_plugins(workspace), "good", command="good-cmd")
+    manager = PluginManager(workspace=workspace, workspace_trusted=True)
+    origins = {p.name: p.origin for p in manager.load()}
+    assert origins == {"good": ORIGIN_WORKSPACE, "mine": ORIGIN_USER}
+
+
+@pytest.mark.parametrize("order", ["workspace-first", "user-first"])
+@pytest.mark.parametrize("spelling", ["plain", "dotdot", "relative", "other-case"])
+def test_the_user_origin_wins_for_one_directory_however_it_is_spelled_or_ordered(
+    home, tmp_path, monkeypatch, spelling, order
+):
+    spellings = _spellings(home, tmp_path, monkeypatch)
+    if spelling not in spellings:
+        pytest.skip("this spelling only differs on a case-insensitive platform")
+    make_plugin(user_plugins(home), "mine")
+    as_workspace = spellings[spelling]
+    as_user = user_plugins(home)
+    scanner = PluginScanner()
+    steps = [(as_workspace, ORIGIN_WORKSPACE), (as_user, ORIGIN_USER)]
+    for path, origin in steps if order == "workspace-first" else reversed(steps):
+        scanner.add_path(path, origin=origin)
+
+    found = scanner.scan(workspace_trusted=False)
+
+    assert [(p.name, p.origin) for p in found] == [("mine", ORIGIN_USER)]
+    assert len(scanner._search_paths) == 1  # one directory, scanned once
+
+
+@pytest.mark.parametrize("order", ["workspace-first", "user-first"])
+def test_a_symlinked_spelling_of_the_user_directory_gets_the_user_origin(home, tmp_path, order):
+    make_plugin(user_plugins(home), "mine")
+    link = _link_to(home, tmp_path / "home-link")
+    scanner = PluginScanner()
+    steps = [(workspace_plugins(link), ORIGIN_WORKSPACE), (user_plugins(home), ORIGIN_USER)]
+    for path, origin in steps if order == "workspace-first" else reversed(steps):
+        scanner.add_path(path, origin=origin)
+
+    assert [p.origin for p in scanner.scan(workspace_trusted=False)] == [ORIGIN_USER]
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        (ORIGIN_USER, ORIGIN_WORKSPACE, ORIGIN_USER),
+        (ORIGIN_USER, ORIGIN_EXTRA, ORIGIN_USER),
+        (ORIGIN_WORKSPACE, ORIGIN_EXTRA, ORIGIN_WORKSPACE),  # a repository is never "extra"
+    ],
+)
+def test_origin_precedence_is_user_then_workspace_then_extra_in_either_order(
+    tmp_path, first, second, expected
+):
+    make_plugin(tmp_path / "shared", "p")
+    for a, b in ((first, second), (second, first)):
+        scanner = PluginScanner()
+        scanner.add_path(tmp_path / "shared", origin=a)
+        scanner.add_path(tmp_path / "shared", origin=b)
+        assert [p.origin for p in scanner.scan(workspace_trusted=True)] == [expected]
+
+
+def test_a_workspace_directory_stays_untrusted_when_also_given_as_an_extra_path(workspace, home):
+    make_plugin(workspace_plugins(workspace), "evil")
+    manager = PluginManager(workspace=workspace, extra_search_paths=[workspace_plugins(workspace)])
+    assert manager.load() == []  # embedding code cannot launder a repository's folder
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_a_search_path_whose_identity_changes_after_registration_is_not_scanned(
+    workspace, home, monkeypatch, caplog, trusted
+):
+    """The origin was decided for one directory; it must not be applied to another one."""
+    from velune.plugins.declarative import scanner as scanner_module
+
+    make_plugin(workspace_plugins(workspace), "evil")
+    scanner = PluginScanner()
+    scanner.add_path(workspace_plugins(workspace), origin=ORIGIN_WORKSPACE)
+    # The path now resolves somewhere else (for instance a link was swapped after start-up).
+    monkeypatch.setattr(scanner_module, "_path_key", lambda path: "somewhere-else")
+
+    with caplog.at_level(logging.WARNING, logger="velune.plugins.declarative.scanner"):
+        assert scanner.scan(workspace_trusted=trusted) == []
+
+    assert "no longer refers to the directory it was registered for" in caplog.text
+
+
+def test_a_directory_given_to_the_constructor_twice_is_scanned_once(tmp_path):
+    make_plugin(tmp_path / "dir", "p")
+    scanner = PluginScanner([tmp_path / "dir", tmp_path / "dir" / ".." / "dir"])
+    assert [p.name for p in scanner.scan()] == ["p"]
+    assert len(scanner._search_paths) == 1
+
+
+def test_distinct_directories_keep_their_own_origins(workspace, home):
+    make_plugin(user_plugins(home), "mine")
+    make_plugin(workspace_plugins(workspace), "theirs")
+    scanner = PluginScanner.default_paths(workspace)
+    assert {p.name: p.origin for p in scanner.scan(workspace_trusted=True)} == {
+        "mine": ORIGIN_USER,
+        "theirs": ORIGIN_WORKSPACE,
+    }
+    assert [p.name for p in scanner.scan(workspace_trusted=False)] == ["mine"]
 
 
 # ── the trust prompt ──────────────────────────────────────────────────────────────────────────

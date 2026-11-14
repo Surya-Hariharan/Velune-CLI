@@ -16,6 +16,7 @@ stages can refuse a workspace plugin without guessing from names or order.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,7 +33,30 @@ ORIGIN_USER = "user"
 #: A path the embedding code added explicitly (``PluginManager(extra_search_paths=...)``).
 ORIGIN_EXTRA = "extra"
 
+#: When one directory is registered under several origins (``workspace == HOME`` makes
+#: ``<workspace>/.velune/plugins`` and ``~/.velune/plugins`` the same folder) the highest
+#: rank wins, whatever the order of registration:
+#:
+#: * ``user`` wins over everything: it is the user's own folder, so it must stay available
+#:   whatever the workspace trust;
+#: * ``workspace`` wins over ``extra``: a repository's folder never becomes trusted just
+#:   because embedding code also listed it as an extra path.
+_ORIGIN_PRECEDENCE = {ORIGIN_USER: 2, ORIGIN_WORKSPACE: 1, ORIGIN_EXTRA: 0}
+
 _WORKSPACE_PLUGINS_SUBDIR = (".velune", "plugins")
+
+
+def _path_key(path: Path) -> str:
+    """A key that is equal for two spellings of the same physical directory.
+
+    ``resolve()`` folds ``..``, relative spellings and symlinks; ``normcase`` folds case on
+    case-insensitive platforms (Windows).
+    """
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):  # unreadable path or a symlink loop: compare as spelled
+        resolved = path.absolute()
+    return os.path.normcase(str(resolved))
 
 
 def workspace_plugins_dir(workspace: Path) -> Path:
@@ -109,9 +133,14 @@ class PluginScanner:
     """
 
     def __init__(self, search_paths: list[Path] | None = None) -> None:
-        self._search_paths: list[Path] = list(search_paths or [])
+        self._search_paths: list[Path] = []
+        # The physical identity of each search path, taken when it was added (parallel to
+        # ``_search_paths``), and the origin of each identity. See ``_path_key``.
+        self._keys: list[str] = []
+        self._origins: dict[str, str] = {}
         # Paths given to the constructor were chosen by the caller, like ``add_path``.
-        self._origins: dict[Path, str] = dict.fromkeys(self._search_paths, ORIGIN_EXTRA)
+        for path in search_paths or []:
+            self.add_path(path)
 
     @classmethod
     def default_paths(cls, workspace: Path | None = None) -> PluginScanner:
@@ -125,9 +154,17 @@ class PluginScanner:
         return scanner
 
     def add_path(self, path: Path, origin: str = ORIGIN_EXTRA) -> None:
-        if path not in self._search_paths:
+        """Add a search path. A directory already present keeps its position in the search
+        order; its origin becomes the higher-ranked of the two (``user`` > ``workspace`` >
+        ``extra``), so the result does not depend on the order paths were added in."""
+        key = _path_key(path)
+        known = self._origins.get(key)
+        if known is None:
             self._search_paths.append(path)
-            self._origins[path] = origin
+            self._keys.append(key)
+            self._origins[key] = origin
+        elif _ORIGIN_PRECEDENCE.get(origin, -1) > _ORIGIN_PRECEDENCE.get(known, -1):
+            self._origins[key] = origin
 
     def scan(self, *, workspace_trusted: bool = False) -> list[DiscoveredPlugin]:
         """Scan the search paths and return the plugins found.
@@ -142,8 +179,18 @@ class PluginScanner:
         seen_names: set[str] = set()
         plugins: list[DiscoveredPlugin] = []
 
-        for search_path in self._search_paths:
-            origin = self._origins.get(search_path, ORIGIN_EXTRA)
+        for search_path, key in zip(self._search_paths, self._keys, strict=True):
+            if _path_key(search_path) != key:
+                # The origin was decided for the directory this path named when it was
+                # added. If it now names another one (a link was swapped), that decision
+                # does not apply, and guessing an origin would fail open: skip it.
+                logger.warning(
+                    "Plugin path %s no longer refers to the directory it was registered "
+                    "for; it was not scanned.",
+                    search_path,
+                )
+                continue
+            origin = self._origins[key]
             if origin == ORIGIN_WORKSPACE and not workspace_trusted:
                 if has_workspace_plugins(search_path.parents[1]):
                     logger.info(
