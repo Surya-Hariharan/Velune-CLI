@@ -366,3 +366,33 @@ def command_paths_outside(command: str, boundary: Boundary) -> list[Path]:
         if not boundary.inside(resolved):
             outside.append(resolved)
     return outside
+
+
+def command_paths_secret(command: str, boundary: Boundary) -> list[Path]:
+    """Credential/secret files (``.env``, keys, ``~/.ssh``) that a command line names.
+
+    The first token (the executable) is skipped and ``--opt=value`` is checked by its value.
+    Relative names are resolved against the workspace. Best effort, like
+    :func:`command_paths_outside`: it catches what a command *names* (``cat .env``), not a
+    recursive search that happens to read one (``grep -r KEY .``).
+    """
+    try:
+        tokens = shlex.split(command, posix=os.name != "nt")
+    except ValueError:
+        tokens = command.split()
+    found: list[Path] = []
+    for raw in tokens[1:]:
+        token = raw.strip("\"'")
+        if token.startswith("-"):
+            if "=" not in token:
+                continue
+            token = token.split("=", 1)[1].strip("\"'")
+        if not token or "://" in token:
+            continue
+        try:
+            resolved = boundary.resolve(token)
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if is_secret_path(resolved) or is_secret_path(Path(token)):
+            found.append(resolved)
+    return found
