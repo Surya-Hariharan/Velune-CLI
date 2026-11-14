@@ -70,6 +70,18 @@ NEEDS_APPROVAL = [
     "rg --pre cmd foo",
     "fd -x rm",
     "fd --exec rm",
+    "fd pattern -xtouch marker.txt",
+    "fd pattern -Xtouch marker.txt",
+    "fd pattern -Hxtouch marker.txt",
+    # quotes inside a token are removed by the executor: the classifier must see what it sees
+    'find . -de"lete"',
+    "find . -dele'te'",
+    'find . -"exec" rm {} +',
+    'git log --out"put"=keep.txt',
+    # helpers a repository can configure
+    "git log -p --ext-diff",
+    "git diff --textconv",
+    "git show --ext-diff",
 ]
 
 READ_ONLY = [
@@ -101,6 +113,9 @@ READ_ONLY = [
     "git remote",
     "git remote -v",
     "git remote get-url origin",
+    "fd -H pattern",
+    "fd -e py -E node_modules foo",
+    'git log --format="%h %s"',
 ]
 
 
@@ -135,6 +150,31 @@ def test_dangerous_commands_are_still_blocked_before_anything_else():
     assert classify("git status; sudo id")[0] is CommandClass.BLOCKED
 
 
+def test_the_classifier_sees_the_arguments_the_executor_runs():
+    """The reviewer's bypass: quotes inside a token vanish at execution, so judge the result."""
+    from velune.core.argv import split_command
+    from velune.execution.command_spec import CommandSpec
+
+    for command in (
+        'find . -de"lete"',
+        "find . -dele'te'",
+        'cat .e"nv"',
+        "git log --format='%h %s' -n 3",
+        r"python C:\work\run.py --flag # not a comment",
+        "grep -r 'a b' src",
+    ):
+        spec = CommandSpec.from_string(command, Path("."))
+        assert split_command(command) == [command.split()[0], *spec.args], command
+
+
+def test_an_unbalanced_quote_is_not_a_read():
+    from velune.core.argv import split_command
+
+    with pytest.raises(ValueError):
+        split_command('git log --format="oops')
+    assert classify_command('git log --format="oops').mode is ApprovalMode.ASK
+
+
 # ── naming a secret file ───────────────────────────────────────────────────────────────────────
 
 
@@ -146,6 +186,7 @@ def test_command_paths_secret_finds_the_files_a_command_names(tmp_path):
     assert names('cat "id_rsa"') == ["id_rsa"]
     assert names("grep --file=.npmrc x") == [".npmrc"]
     assert names("cat .ssh/config") == ["config"]
+    assert names('cat .e"nv"') == [".env"]  # quotes vanish at execution
     assert names("cat README.md src/app.py") == []
     assert names("cat .env.example") == []  # a template that only looks like a secret
     assert names("git log --oneline -5") == []
@@ -284,3 +325,31 @@ async def test_cat_of_a_secret_file_asks_but_cat_of_a_normal_file_does_not(tmp_p
     normal, approver = await _run(tmp_path, "cat README.md")
     assert not approver.prompts
     assert "hello" in str(normal)
+
+
+def _symlink_to_secret(tmp_path: Path) -> Path:
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / ".env").write_text("DB_PASSWORD=not-real", encoding="utf-8")
+    try:
+        (sub / "public.txt").symlink_to(sub / ".env")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+    return sub
+
+
+def test_a_link_to_a_secret_is_seen_from_the_folder_the_command_runs_in(tmp_path):
+    sub = _symlink_to_secret(tmp_path)
+    boundary = Boundary(tmp_path)
+    assert command_paths_secret("cat public.txt", boundary, cwd=sub)  # sub/public.txt -> .env
+    assert not command_paths_secret("cat public.txt", boundary)  # tmp_path/public.txt: nothing
+
+
+def test_the_action_resolves_the_command_in_its_directory(tmp_path):
+    _symlink_to_secret(tmp_path)
+    tool = production_registry(tmp_path).get("execute_command")
+    boundary = Boundary(tmp_path)
+    [action] = tool.describe_actions({"command": "cat public.txt", "directory": "sub"}, boundary)
+    assert action.secret
+    [action] = tool.describe_actions({"command": "cat public.txt"}, boundary)
+    assert not action.secret  # a different, ordinary path when run from the workspace root
