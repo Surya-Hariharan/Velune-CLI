@@ -146,6 +146,56 @@ def test_the_default_source_is_the_real_environment(secret_env, monkeypatch):
     assert not set(env) & set(secret_env)
 
 
+# ── entries the operating system would refuse ──────────────────────────────────────────────────
+
+INVALID_DECLARED = [
+    ("A=B", "value"),  # a name containing "="
+    ("", "value"),  # an empty name
+    ("NUL_IN_NAME\x00x", "value"),
+    ("NUL_IN_VALUE", "a\x00b"),
+    ("NOT_TEXT", 5),
+    ("LIST", ["a"]),
+    (7, "value"),
+    ("NONE_VALUE", None),
+]
+
+
+@pytest.mark.parametrize(("key", "value"), INVALID_DECLARED)
+def test_an_invalid_declared_entry_is_dropped_and_the_rest_kept(key, value, caplog):
+    declared = {"GOOD": "yes", key: value}
+    with caplog.at_level(logging.WARNING, logger="velune.core.child_env"):
+        env = plugin_child_env(declared, base=SYSTEM, windows=False)
+    assert env["GOOD"] == "yes"
+    assert key not in env
+    assert "Ignoring an invalid environment entry" in caplog.text
+
+
+def test_a_dropped_entrys_value_is_never_logged(caplog):
+    with caplog.at_level(logging.DEBUG):
+        plugin_child_env({"BAD=NAME": "super-SECRET-value"}, base=SYSTEM, windows=False)
+    assert "super-SECRET-value" not in caplog.text
+
+
+@pytest.mark.parametrize("scrub_env", [True, False])
+@pytest.mark.parametrize(
+    "env", [{"A=B": "v"}, {"X": "a\x00SECRET"}, {"": "v"}, {"X": 5}, {"X": ["a"]}]
+)
+async def test_a_hook_that_cannot_start_is_a_no_op_not_an_error(tmp_path, caplog, scrub_env, env):
+    """The OS refuses some environments (a NUL, a name with "="). That used to raise out of
+    run_hook into the tool call that fired it."""
+    definition = HookDefinition(
+        type="command",
+        command=f'"{sys.executable}" -c "print(1)"',
+        timeout=20,
+        env=env,
+        scrub_env=scrub_env,
+    )
+    with caplog.at_level(logging.DEBUG):
+        result = await run_hook(definition, {}, workspace=tmp_path)  # must not raise
+    assert result.blocked is False
+    assert "SECRET" not in caplog.text
+
+
 # ── hooks: a real child process ───────────────────────────────────────────────────────────────
 
 

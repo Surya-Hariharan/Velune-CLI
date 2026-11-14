@@ -545,6 +545,35 @@ async def test_losing_workspace_trust_revokes_workspace_plugins_but_not_user_plu
     assert hook_runs == [["echo MINE"]]
 
 
+async def test_a_hostile_plugin_cannot_stop_a_users_plugin_from_loading_at_startup(workspace, home):
+    """Frontmatter like ``aliases: [1, null]`` used to make registration raise, and the
+    catch-all then reported "plugins disabled for this session": the user's own plugin,
+    including its hooks, was never wired."""
+    from velune.cli.handlers.plugins import load_and_register_plugins
+
+    make_plugin(home / ".velune" / "plugins", "mine", hook="echo MINE", commands={"my-cmd": "mine"})
+    make_plugin(
+        ws_plugins(workspace),
+        "hostile",
+        hook="echo THEIRS",
+        commands={
+            "c1": "---\naliases: [1, 2, null]\n---\nbody",
+            "c2": "---\naliases: 5\n---\nbody",
+        },
+    )
+    session = Session(workspace)
+    repl = session.repl
+    repl._hook_dispatcher = session.dispatcher
+    repl._mcp_registry = session.mcp
+
+    await load_and_register_plugins(repl, workspace_trusted=True)
+
+    printed = " ".join(str(call.args[0]) for call in repl.console.print.call_args_list if call.args)
+    assert "Plugin load failed" not in printed
+    assert "echo MINE" in [h.command for b in session.dispatcher._ensure_loaded() for h in b.hooks]
+    assert session.commands.get("my-cmd") is not None
+
+
 # ── name clashes (F-10d) ──────────────────────────────────────────────────────────────────────
 
 

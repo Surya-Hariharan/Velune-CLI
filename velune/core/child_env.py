@@ -24,10 +24,13 @@ environment, as before.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+
+_log = logging.getLogger("velune.core.child_env")
 
 #: Needed by almost any program to start and find its way around.
 _POSIX_ALLOW = frozenset(
@@ -87,5 +90,27 @@ def plugin_child_env(
 
     if workspace is not None:
         env["VELUNE_WORKSPACE"] = str(workspace)
-    env.update(declared or {})
+    for key, value in (declared or {}).items():
+        if _valid_entry(key, value):
+            env[key] = value
+        else:
+            # Only the name is logged, never the value: it may well be a credential.
+            _log.warning("Ignoring an invalid environment entry declared for a child: %r", key)
     return env
+
+
+def _valid_entry(key: object, value: object) -> bool:
+    """Whether (key, value) can be put in a process environment without making the spawn fail.
+
+    A plugin declares its own ``env``; a name containing ``=``, an empty name, a NUL, or a
+    non-text value makes the operating system refuse to start the process, which would break
+    every call that fires the hook or server.
+    """
+    return (
+        isinstance(key, str)
+        and isinstance(value, str)
+        and bool(key)
+        and "=" not in key
+        and "\x00" not in key
+        and "\x00" not in value
+    )

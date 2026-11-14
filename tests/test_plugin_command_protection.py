@@ -276,6 +276,62 @@ def test_normalize_command_key(raw, expected):
     assert normalize_command_key(raw) == expected
 
 
+# ── hostile data in a command file must not stop anything else registering ─────────────────────
+
+
+def test_non_text_aliases_are_ignored_not_raised():
+    registry = SlashCommandRegistry()
+    registry.seal_builtins()
+    refused = registry.register(command("ok-cmd", aliases=(1, None, 2.5, "fine", ["x"])))
+    assert refused == [1, None, 2.5, ["x"]]  # reported, never raised
+    assert registry.get("ok-cmd") is not None and registry.get("fine") is not None
+
+
+@pytest.mark.parametrize(
+    ("frontmatter", "expected"),
+    [
+        ("aliases: [1, 2, null]", []),
+        ("aliases: 5", []),
+        ("aliases: {a: b}", []),
+        ("aliases: [good, 7, null, fine]", ["good", "fine"]),
+        ("aliases: solo", ["solo"]),
+    ],
+)
+def test_frontmatter_aliases_are_only_ever_text(tmp_path, frontmatter, expected):
+    from velune.plugins.declarative.command import parse_command_file
+
+    path = tmp_path / "cmd.md"
+    path.write_text(f"---\n{frontmatter}\nargs: [1, name]\n---\nbody", encoding="utf-8")
+    parsed = parse_command_file(path, "p")
+    assert parsed is not None
+    assert parsed.aliases == expected
+    assert parsed.args == ["name"]
+
+
+def test_one_plugin_failing_to_register_does_not_stop_the_others(repl, caplog):
+    registry = repl._registry
+    real = registry.register
+
+    def fussy(cmd):
+        if cmd.owner == "bad":
+            raise TypeError("simulated bad command data")
+        return real(cmd)
+
+    registry.register = fussy
+    with caplog.at_level("WARNING", logger="velune.cli.handlers.plugins"):
+        register_plugin_commands(
+            repl,
+            [
+                plugin("bad", plugin_command("bad-cmd")),
+                plugin("good", plugin_command("good-cmd")),
+            ],
+        )
+
+    assert registry.get("good-cmd") is not None
+    assert registry.get("bad-cmd") is None
+    assert "Could not register commands from plugin 'bad'" in caplog.text
+
+
 # ── the corrected /trust guidance ─────────────────────────────────────────────────────────────
 
 

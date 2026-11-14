@@ -132,47 +132,58 @@ async def cmd_plugin(repl: VeluneREPL, args: str) -> None:
 
 
 def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
-    """Inject plugin slash commands into the live REPL registry."""
-    from velune.cli.slash_commands import SlashCommand
+    """Inject plugin slash commands into the live REPL registry.
 
+    Each plugin is registered on its own: bad command data in one plugin is reported and
+    skipped, and never stops the others (or the hooks and MCP servers wired after this).
+    """
     for plugin in plugins:
         plugin_name = getattr(plugin, "name", "")
-        for cmd in plugin.commands:
-            plugin_root = plugin.root
-
-            def _make_handler(c=cmd, root=plugin_root, owner=plugin_name):
-                async def _handler(args: str) -> None:
-                    # Checked when the command runs, not only when it was registered: a
-                    # reference kept by the palette or completer must not outlive the plugin.
-                    manager = getattr(repl, "_plugin_manager", None)
-                    if owner and manager is not None and not manager.is_active(owner):
-                        repl.console.print(
-                            f"[yellow]/{c.name} belongs to plugin '{owner}', which is not "
-                            "active.[/yellow]"
-                        )
-                        return
-                    rendered = c.render(args, root)
-                    repl.console.print(
-                        f"[dim]Plugin command [bold]/{c.name}[/bold] → sending to model[/dim]"
-                    )
-                    await repl._handle_prompt(rendered)
-
-                return _handler
-
-            # The registry refuses a built-in or reserved name (and an alias of one) and
-            # a name another plugin already holds; it logs why, so nothing to do here.
-            repl._registry.register(
-                SlashCommand(
-                    name=cmd.name,
-                    aliases=list(cmd.aliases),
-                    description=f"{cmd.description}  {cmd.help_label}",
-                    usage=cmd.usage,
-                    handler=_make_handler(),
-                    category="Tools",
-                    owner=plugin_name,
-                )
-            )
+        try:
+            _register_plugin_commands(repl, plugin, plugin_name)
+        except (AttributeError, TypeError, ValueError) as exc:
+            _log.warning("Could not register commands from plugin '%s': %s", plugin_name, exc)
     _refresh_command_ui(repl)
+
+
+def _register_plugin_commands(repl: VeluneREPL, plugin, plugin_name: str) -> None:
+    from velune.cli.slash_commands import SlashCommand
+
+    for cmd in plugin.commands:
+        plugin_root = plugin.root
+
+        def _make_handler(c=cmd, root=plugin_root, owner=plugin_name):
+            async def _handler(args: str) -> None:
+                # Checked when the command runs, not only when it was registered: a
+                # reference kept by the palette or completer must not outlive the plugin.
+                manager = getattr(repl, "_plugin_manager", None)
+                if owner and manager is not None and not manager.is_active(owner):
+                    repl.console.print(
+                        f"[yellow]/{c.name} belongs to plugin '{owner}', which is not "
+                        "active.[/yellow]"
+                    )
+                    return
+                rendered = c.render(args, root)
+                repl.console.print(
+                    f"[dim]Plugin command [bold]/{c.name}[/bold] → sending to model[/dim]"
+                )
+                await repl._handle_prompt(rendered)
+
+            return _handler
+
+        # The registry refuses a built-in or reserved name (and an alias of one) and
+        # a name another plugin already holds; it logs why, so nothing to do here.
+        repl._registry.register(
+            SlashCommand(
+                name=cmd.name,
+                aliases=list(cmd.aliases),
+                description=f"{cmd.description}  {cmd.help_label}",
+                usage=cmd.usage,
+                handler=_make_handler(),
+                category="Tools",
+                owner=plugin_name,
+            )
+        )
 
 
 def _refresh_command_ui(repl: VeluneREPL) -> None:
@@ -224,6 +235,8 @@ async def load_and_register_plugins(repl: VeluneREPL, *, workspace_trusted: bool
         )
         new_plugins = repl._plugin_manager.load()
         if new_plugins:
+            # Three independent steps: a failure in one must not stop the others, or one
+            # plugin's bad data could keep another plugin's hooks from being wired.
             register_plugin_commands(repl, new_plugins)
             repl._plugin_manager.wire_hooks(repl._hook_dispatcher)
             repl._plugin_manager.wire_mcp(repl._mcp_registry)

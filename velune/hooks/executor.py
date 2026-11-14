@@ -96,7 +96,10 @@ async def run_hook(
     except FileNotFoundError:
         logger.warning("Hook command not found: %s", cmd)
         return HookResult()
-    except OSError as exc:
+    except (OSError, ValueError, TypeError) as exc:
+        # ValueError/TypeError: the OS refused the environment or arguments (a NUL, a name with
+        # "="). A hook that cannot start is a no-op like any other failure; it must never raise
+        # into the tool call that fired it. Only the reason is logged, never the environment.
         logger.warning("Hook command failed to start (%s): %s", cmd, exc)
         return HookResult()
 

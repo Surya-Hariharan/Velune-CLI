@@ -82,6 +82,11 @@ class SlashCommandRegistry:
         and a key already held by a *different owner* is refused too (the first one wins), so
         the outcome does not depend on anything but registration order.
         """
+        if not isinstance(key, str):
+            # Frontmatter is untrusted data: an alias can arrive as a number or null. Ignore
+            # it; never let it raise, or one command file could stop everything registering.
+            _log.warning("Ignoring non-text command key %r for /%s.", key, cmd.name)
+            return False
         normalized = normalize_command_key(key)
         if not normalized or any(ch.isspace() for ch in normalized):
             _log.warning("Ignoring command key %r for /%s: it cannot be typed.", key, cmd.name)

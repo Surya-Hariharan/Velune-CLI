@@ -76,6 +76,19 @@ class PluginCommand:
         return text.strip()
 
 
+def _string_list(value: Any) -> list[str]:
+    """A frontmatter value as a list of strings. Anything that is not text is dropped.
+
+    Frontmatter is whatever the plugin's author wrote (``aliases: [1, null]``,
+    ``aliases: 5``), so it is never trusted to be a list of strings.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
 def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
     """Parse a command ``.md`` file and return a ``PluginCommand``.
 
@@ -99,10 +112,8 @@ def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
     name = path.stem.lower().replace(" ", "-")
 
     description = str(fm.get("description", fm.get("desc", "")))
-    aliases_raw = fm.get("aliases", fm.get("alias", []))
-    aliases = [aliases_raw] if isinstance(aliases_raw, str) else list(aliases_raw)
-    args_raw = fm.get("args", fm.get("argument-hint", []))
-    args = [args_raw] if isinstance(args_raw, str) else list(args_raw)
+    aliases = _string_list(fm.get("aliases", fm.get("alias", [])))
+    args = _string_list(fm.get("args", fm.get("argument-hint", [])))
 
     # Build usage string
     usage = f"/{name}"
