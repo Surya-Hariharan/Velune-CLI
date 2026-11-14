@@ -29,7 +29,6 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -415,7 +414,9 @@ class ToolLoopRunner:
                             # identical call that failed on that path may now succeed.
                             target = _call_target(call, workspace)
                             if target is not None:
-                                for stale in [k for k, t in failed_calls.items() if t == target]:
+                                for stale in [
+                                    k for k, t in failed_calls.items() if _same_target(t, target)
+                                ]:
                                     del failed_calls[stale]
                     invocations.append(invocation)
                     messages.append(
@@ -694,37 +695,48 @@ _MAX_REPEATED_FAILURES = 3
 
 
 def _target_key(raw: str, workspace: Path | None) -> str:
-    """One key for the file or folder *raw* names, however the model spelled it.
+    """The resolved location the file or folder *raw* names, however the model spelled it.
 
     The location is resolved the way the filesystem tools resolve a path argument: relative
     paths are anchored to the workspace (not the process CWD), ``~`` is expanded, ``.``/``..``
     and doubled or foreign separators collapse, and symbolic links are followed, so a link and
-    its target are one file. Nothing is checked or refused here: a location outside the
+    its target are one location. Nothing is checked or refused here: a location outside the
     workspace simply gets its own key, and the tool's own boundary check still decides whether
-    it may be used. Case is folded only where the filesystem is case-insensitive by default,
-    and Unicode normalization only where the filesystem normalizes names (macOS), so two
-    distinct files are never merged.
+    it may be used. Case and Unicode normalization are deliberately left alone: whether two
+    spellings are one file is the filesystem's call, so :func:`_same_target` asks it.
     """
     base = workspace if workspace is not None else Path.cwd()
     try:
         candidate = Path(raw).expanduser()
         if not candidate.is_absolute():
             candidate = Path(base) / candidate
-        resolved = str(candidate.resolve())
+        return str(candidate.resolve())
     except (OSError, RuntimeError, ValueError):
         # Not resolvable (an embedded NUL, a symlink loop, an unreadable parent): fall back to
         # the lexical location so the same spelling still maps to the same key.
         try:
-            resolved = os.path.abspath(os.path.join(str(base), os.path.expanduser(raw)))
+            return os.path.abspath(os.path.join(str(base), os.path.expanduser(raw)))
         except (OSError, RuntimeError, ValueError):
-            resolved = raw
-    if sys.platform == "win32":
-        return os.path.normcase(resolved)
-    if sys.platform == "darwin":
-        from velune.tools.filesystem.mutation import fold_name
+            return raw
 
-        return fold_name(resolved)
-    return resolved
+
+def _same_target(a: str | None, b: str | None) -> bool:
+    """True when two keys from :func:`_target_key` are the same file or folder.
+
+    Equal keys are the same location. Different keys are the same entry only if both exist
+    and the filesystem says they are one object, which is how a case-insensitive or
+    normalizing volume (Windows, default macOS) is recognized without guessing from the
+    platform: on a case-sensitive volume ``A.py`` and ``a.py`` are different objects, or only
+    one exists, and stay distinct.
+    """
+    if a is None or b is None:
+        return False
+    if a == b:
+        return True
+    try:
+        return os.path.samestat(os.stat(a), os.stat(b))
+    except (OSError, ValueError):
+        return False
 
 
 def _call_target(call: ToolCall, workspace: Path | None = None) -> str | None:
