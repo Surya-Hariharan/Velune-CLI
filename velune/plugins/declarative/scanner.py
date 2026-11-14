@@ -6,6 +6,11 @@ Search order (highest priority first):
 3. Extra paths supplied at runtime
 
 Each sub-directory that contains a valid ``plugin.json`` is a plugin.
+
+Trust: a workspace plugin is project-controlled content (its hooks and MCP servers run local
+commands), so the workspace search path is only scanned when the caller says the workspace
+is trusted. Every discovered plugin records the *origin* of the path it came from, so later
+stages can refuse a workspace plugin without guessing from names or order.
 """
 
 from __future__ import annotations
@@ -20,6 +25,40 @@ from velune.plugins.declarative.skill import PluginSkill, load_plugin_skills
 
 logger = logging.getLogger("velune.plugins.declarative.scanner")
 
+#: ``<workspace>/.velune/plugins`` -- controlled by whoever wrote the repository.
+ORIGIN_WORKSPACE = "workspace"
+#: ``~/.velune/plugins`` -- owned by the user.
+ORIGIN_USER = "user"
+#: A path the embedding code added explicitly (``PluginManager(extra_search_paths=...)``).
+ORIGIN_EXTRA = "extra"
+
+_WORKSPACE_PLUGINS_SUBDIR = (".velune", "plugins")
+
+
+def workspace_plugins_dir(workspace: Path) -> Path:
+    """Where a workspace keeps its own plugins."""
+    return workspace.joinpath(*_WORKSPACE_PLUGINS_SUBDIR)
+
+
+def has_workspace_plugins(workspace: Path) -> bool:
+    """True when *workspace* ships at least one plugin manifest.
+
+    Used to decide whether the workspace-trust prompt is needed: a repository whose only
+    project config is a plugin still carries hooks and MCP servers that run local commands.
+    """
+    try:
+        plugins_dir = workspace_plugins_dir(workspace)
+        if not plugins_dir.is_dir():
+            return False
+        return any(
+            manifest.exists()
+            for candidate in plugins_dir.iterdir()
+            if candidate.is_dir()
+            for manifest in DeclarativePluginManifest.manifest_candidates(candidate)
+        )
+    except OSError:
+        return False
+
 
 @dataclass
 class DiscoveredPlugin:
@@ -30,6 +69,9 @@ class DiscoveredPlugin:
     skills: list[PluginSkill] = field(default_factory=list)
     has_hooks: bool = False
     has_mcp: bool = False
+    #: Where the plugin was found. Defaults to the *workspace* origin so a plugin built
+    #: without saying where it came from is treated as project-controlled, not trusted.
+    origin: str = ORIGIN_WORKSPACE
 
     @property
     def name(self) -> str:
@@ -55,6 +97,7 @@ class DiscoveredPlugin:
             "hooks": self.has_hooks,
             "mcp": self.has_mcp,
             "root": str(self.root),
+            "origin": self.origin,
         }
 
 
@@ -67,32 +110,48 @@ class PluginScanner:
 
     def __init__(self, search_paths: list[Path] | None = None) -> None:
         self._search_paths: list[Path] = list(search_paths or [])
+        # Paths given to the constructor were chosen by the caller, like ``add_path``.
+        self._origins: dict[Path, str] = dict.fromkeys(self._search_paths, ORIGIN_EXTRA)
 
     @classmethod
     def default_paths(cls, workspace: Path | None = None) -> PluginScanner:
         """Build a scanner with the standard search paths."""
-        paths: list[Path] = []
+        scanner = cls()
         # Project-level (highest priority)
         if workspace:
-            paths.append(workspace / ".velune" / "plugins")
+            scanner.add_path(workspace_plugins_dir(workspace), origin=ORIGIN_WORKSPACE)
         # User global
-        paths.append(Path.home() / ".velune" / "plugins")
-        return cls(paths)
+        scanner.add_path(Path.home() / ".velune" / "plugins", origin=ORIGIN_USER)
+        return scanner
 
-    def add_path(self, path: Path) -> None:
+    def add_path(self, path: Path, origin: str = ORIGIN_EXTRA) -> None:
         if path not in self._search_paths:
             self._search_paths.append(path)
+            self._origins[path] = origin
 
-    def scan(self) -> list[DiscoveredPlugin]:
-        """Scan all search paths and return all discovered plugins.
+    def scan(self, *, workspace_trusted: bool = False) -> list[DiscoveredPlugin]:
+        """Scan the search paths and return the plugins found.
 
         A plugin appearing in multiple search paths is only loaded from the
         highest-priority path (first match by name wins).
+
+        Workspace paths are skipped unless *workspace_trusted* is true (fail closed: the
+        default is untrusted), so an untrusted repository's plugins are never even parsed,
+        and cannot occupy a name that a user-level plugin should hold.
         """
         seen_names: set[str] = set()
         plugins: list[DiscoveredPlugin] = []
 
         for search_path in self._search_paths:
+            origin = self._origins.get(search_path, ORIGIN_EXTRA)
+            if origin == ORIGIN_WORKSPACE and not workspace_trusted:
+                if has_workspace_plugins(search_path.parents[1]):
+                    logger.info(
+                        "Workspace plugins in %s were not loaded: the workspace is not "
+                        "trusted (run 'velune trust add' to allow them).",
+                        search_path,
+                    )
+                continue
             if not search_path.exists() or not search_path.is_dir():
                 continue
             logger.debug("Scanning plugin path: %s", search_path)
@@ -100,7 +159,7 @@ class PluginScanner:
             for candidate in sorted(search_path.iterdir()):
                 if not candidate.is_dir():
                     continue
-                plugin = self._try_load(candidate)
+                plugin = self._try_load(candidate, origin)
                 if plugin is None:
                     continue
                 if plugin.name in seen_names:
@@ -123,7 +182,7 @@ class PluginScanner:
 
         return plugins
 
-    def _try_load(self, directory: Path) -> DiscoveredPlugin | None:
+    def _try_load(self, directory: Path, origin: str = ORIGIN_WORKSPACE) -> DiscoveredPlugin | None:
         """Attempt to load a single plugin from *directory*."""
         manifest = DeclarativePluginManifest.load(directory)
         if manifest is None:
@@ -143,4 +202,5 @@ class PluginScanner:
             skills=skills,
             has_hooks=has_hooks,
             has_mcp=has_mcp,
+            origin=origin,
         )

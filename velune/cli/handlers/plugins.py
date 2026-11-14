@@ -168,15 +168,20 @@ def register_plugin_commands(repl: VeluneREPL, plugins) -> None:
         repl._command_palette.set_commands(repl._registry.all_unique())
 
 
-async def load_and_register_plugins(repl: VeluneREPL) -> None:
+async def load_and_register_plugins(repl: VeluneREPL, *, workspace_trusted: bool = False) -> None:
     """Load plugins and wire their commands/hooks/MCP servers into the REPL.
 
-    Called once from ``VeluneREPL.run()`` at startup. A failure here (a bad
-    plugin, a broken import) must never be fatal to the session, but it also
-    must never be invisible: it's logged at WARNING (the app's default log
+    Called once from ``VeluneREPL.run()`` at startup, after the workspace-trust decision.
+    *workspace_trusted* is that decision: workspace plugins (``<workspace>/.velune/plugins``)
+    are only loaded and wired when it is true. It defaults to false, so a caller that forgets
+    to pass it fails closed; user-level plugins load either way.
+
+    A failure here (a bad plugin, a broken import) must never be fatal to the session, but
+    it also must never be invisible: it's logged at WARNING (the app's default log
     threshold) and printed to the console, not swallowed at DEBUG.
     """
     try:
+        repl._plugin_manager.set_workspace_trusted(workspace_trusted)
         new_plugins = repl._plugin_manager.load()
         if new_plugins:
             register_plugin_commands(repl, new_plugins)

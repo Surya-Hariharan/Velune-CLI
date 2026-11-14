@@ -101,6 +101,14 @@ class DeclarativePluginManifest:
             root=root,
         )
 
+    @staticmethod
+    def manifest_candidates(plugin_root: Path) -> list[Path]:
+        """The places a plugin manifest may live, in priority order."""
+        return [
+            plugin_root / ".velune-plugin" / "plugin.json",
+            plugin_root / "plugin.json",
+        ]
+
     @classmethod
     def load(cls, plugin_root: Path) -> DeclarativePluginManifest | None:
         """Try to load a manifest from *plugin_root*.
@@ -109,11 +117,7 @@ class DeclarativePluginManifest:
         1. ``<root>/.velune-plugin/plugin.json``   (preferred)
         2. ``<root>/plugin.json``                  (flat layout)
         """
-        candidates = [
-            plugin_root / ".velune-plugin" / "plugin.json",
-            plugin_root / "plugin.json",
-        ]
-        for path in candidates:
+        for path in cls.manifest_candidates(plugin_root):
             if path.exists():
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))

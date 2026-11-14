@@ -28,7 +28,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from velune.plugins.declarative.command import PluginCommand
-from velune.plugins.declarative.scanner import DiscoveredPlugin, PluginScanner
+from velune.plugins.declarative.scanner import (
+    ORIGIN_WORKSPACE,
+    DiscoveredPlugin,
+    PluginScanner,
+)
 from velune.plugins.declarative.skill import PluginSkill
 
 if TYPE_CHECKING:
@@ -42,14 +46,23 @@ class PluginManager:
     """Coordinates plugin discovery, registration, and runtime management.
 
     Create one per session, call ``load()`` after the REPL is ready.
+
+    Workspace trust: plugins under ``<workspace>/.velune/plugins`` are project-controlled
+    (their hooks and MCP servers run local commands), so they are only loaded, wired or
+    exposed while the workspace is trusted. The manager starts *untrusted*; the session
+    reports the user's decision with :meth:`set_workspace_trusted` before ``load()``.
+    User-level plugins (``~/.velune/plugins``) are not affected.
     """
 
     def __init__(
         self,
         workspace: Path | None = None,
         extra_search_paths: list[Path] | None = None,
+        *,
+        workspace_trusted: bool = False,
     ) -> None:
         self.workspace = workspace
+        self._workspace_trusted = workspace_trusted
         self._scanner = PluginScanner.default_paths(workspace)
         if extra_search_paths:
             for p in extra_search_paths:
@@ -59,12 +72,41 @@ class PluginManager:
         self._disabled: set[str] = set()  # names disabled at runtime
 
     # ------------------------------------------------------------------
+    # Workspace trust
+    # ------------------------------------------------------------------
+
+    @property
+    def workspace_trusted(self) -> bool:
+        """Whether workspace plugins may be loaded, wired and exposed."""
+        return self._workspace_trusted
+
+    def set_workspace_trusted(self, trusted: bool) -> None:
+        """Record the user's workspace-trust decision (call before :meth:`load`)."""
+        self._workspace_trusted = bool(trusted)
+
+    def _is_authorized(self, plugin: DiscoveredPlugin) -> bool:
+        """A workspace plugin needs a trusted workspace; every other origin is allowed.
+
+        Evaluated live rather than cached, so it also covers a plugin that reached the
+        manager through some path other than :meth:`load`.
+        """
+        return plugin.origin != ORIGIN_WORKSPACE or self._workspace_trusted
+
+    def _refuse(self, plugin: DiscoveredPlugin, what: str) -> None:
+        logger.warning(
+            "Refusing to %s from workspace plugin '%s': the workspace is not trusted "
+            "(run 'velune trust add' to allow it).",
+            what,
+            plugin.name,
+        )
+
+    # ------------------------------------------------------------------
     # Discovery
     # ------------------------------------------------------------------
 
     def load(self) -> list[DiscoveredPlugin]:
         """Scan all search paths and load plugins.  Returns newly found plugins."""
-        discovered = self._scanner.scan()
+        discovered = self._scanner.scan(workspace_trusted=self._workspace_trusted)
         new: list[DiscoveredPlugin] = []
         for plugin in discovered:
             if plugin.name not in self._plugins:
@@ -144,10 +186,16 @@ class PluginManager:
     # ------------------------------------------------------------------
 
     def wire_hooks(self, dispatcher: HookDispatcher) -> int:
-        """Load plugin hook configs into *dispatcher*.  Returns count wired."""
+        """Load plugin hook configs into *dispatcher*.  Returns count wired.
+
+        A workspace plugin is refused (and logged) unless the workspace is trusted.
+        """
         count = 0
-        for plugin in self._active_plugins():
+        for plugin in self._enabled_plugins():
             if not plugin.has_hooks:
+                continue
+            if not self._is_authorized(plugin):
+                self._refuse(plugin, "wire hooks")
                 continue
             hooks_file = plugin.manifest.hooks_file
             if not hooks_file.exists():
@@ -179,10 +227,16 @@ class PluginManager:
     # ------------------------------------------------------------------
 
     def wire_mcp(self, mcp_registry: MCPServerRegistry) -> int:
-        """Load plugin .mcp.json files into *mcp_registry*.  Returns count wired."""
+        """Load plugin .mcp.json files into *mcp_registry*.  Returns count wired.
+
+        A workspace plugin is refused (and logged) unless the workspace is trusted.
+        """
         count = 0
-        for plugin in self._active_plugins():
+        for plugin in self._enabled_plugins():
             if not plugin.has_mcp:
+                continue
+            if not self._is_authorized(plugin):
+                self._refuse(plugin, "register MCP servers")
                 continue
             mcp_file = plugin.manifest.mcp_file
             if not mcp_file.exists():
@@ -236,5 +290,10 @@ class PluginManager:
     # Internal
     # ------------------------------------------------------------------
 
-    def _active_plugins(self) -> list[DiscoveredPlugin]:
+    def _enabled_plugins(self) -> list[DiscoveredPlugin]:
+        """Enabled plugins, whatever their origin (callers must check authorization)."""
         return [p for p in self._plugins.values() if p.enabled and p.name not in self._disabled]
+
+    def _active_plugins(self) -> list[DiscoveredPlugin]:
+        """Enabled plugins this session is allowed to use."""
+        return [p for p in self._enabled_plugins() if self._is_authorized(p)]

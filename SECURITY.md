@@ -128,7 +128,7 @@ toward that goal; they reduce risk and do not eliminate it.
 | Managed command runner (no shell, allowlist, environment scrubbing, resource limits) | Enabled | `velune/execution/sandbox.py` |
 | OS-level isolation through a Docker container | **Optional, off by default** | `velune/execution/docker_sandbox.py` |
 | Outbound URL validation for web fetch and MCP | Enabled | `velune/tools/web/validator.py`, `velune/mcp/security.py` |
-| Workspace trust for project-level MCP servers, hooks and `base_url` overrides | Enabled | `velune/core/trust.py` |
+| Workspace trust for project-level MCP servers, hooks, plugins, slash commands and `base_url` overrides | Enabled | `velune/core/trust.py` |
 | Encrypted credential store | Enabled | `velune/providers/crypto.py` |
 | Log, traceback and tool-output redaction of known key formats and of connector credentials loaded at runtime | Enabled | `velune/core/redaction.py` |
 | Integration permission scopes, resource ownership and compose-file inspection | Enabled | `velune/permissions/`, `velune/resources/` |
@@ -367,6 +367,26 @@ is no loader for arbitrary plugin Python code; an earlier experimental
 code-plugin loader was disabled by default, unreachable from any shipped command,
 and has been removed. Treat plugin hook scripts as arbitrary code that you choose
 to run.
+
+**Workspace plugins need a trusted workspace.** A plugin under
+`<workspace>/.velune/plugins/` is project configuration written by whoever wrote the
+repository, and its hooks and MCP servers run local commands. It is therefore handled like
+a project `.mcp.json` or `.velune/hooks.json`: its commands, hooks and MCP servers are
+loaded, registered and connected only for a directory you have trusted
+(`velune trust add`, or answer yes to the trust prompt, which also appears when a
+repository ships only a plugin). Declining leaves workspace plugins completely inactive:
+they are not read, not registered and their MCP servers are never started. Plugins under
+`~/.velune/plugins` belong to you and load whatever the workspace trust. The decision is
+taken once, before any plugin is loaded, and the plugin manager refuses a workspace plugin
+again when it wires hooks or registers MCP servers. Trust is recorded per directory, not
+per plugin or per version of its contents; a trusted workspace's plugins can change with
+the repository, as its hooks do.
+
+Not yet covered, and tracked as follow-up work: `/plugin disable` does not unwire hooks or
+MCP servers that are already registered; a plugin command can replace a built-in slash
+command of the same name; a workspace plugin can shadow a user plugin of the same name in a
+trusted workspace; manifest paths are not confined to the plugin folder; and hook and MCP
+subprocesses inherit the parent environment.
 
 ---
 
@@ -615,8 +635,9 @@ read-only tools unless `VELUNE_MCP_ALLOW_MUTATIONS=1` is set. See
 Separately from URL-level checks, `velune trust add|list|forget`
 (`velune/core/trust.py`) records which directories you trust. Project-level
 `.mcp.json` servers (which can start local processes), project hooks
-(`.velune/hooks.json`) and `base_url` overrides in a project `velune.toml` (which
-can redirect authenticated API traffic) are honored only for trusted directories.
+(`.velune/hooks.json`), workspace plugins (`.velune/plugins/`) and `base_url` overrides in a
+project `velune.toml` (which can redirect authenticated API traffic) are honored only for
+trusted directories.
 For an untrusted directory they are skipped and user-level configuration applies.
 The rest of a project `velune.toml` is still read. Setting `VELUNE_TRUST_ALL=1`
 disables this gate; it is intended for CI and containers whose workspace is
