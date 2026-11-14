@@ -707,6 +707,24 @@ class FileVersionTracker:
 # ── Diffs and results ──────────────────────────────────────────────────────────
 
 
+def count_changed_lines(diff_lines: list[str]) -> tuple[int, int]:
+    """``(added, removed)`` for the lines of one ``difflib.unified_diff`` (``lineterm=""``).
+
+    The structure of the diff, not the look of a line, tells a header from content: a
+    non-empty diff starts with exactly two file-header lines (``---`` and ``+++``), every
+    hunk starts with an ``@@`` line, and in between a line is context (leading space),
+    added (``+``) or removed (``-``). So a removed YAML ``---`` or SQL ``-- note`` appears
+    as ``----`` / ``--- note`` and an added ``++x`` as ``+++x``, and all of them count.
+    """
+    added = removed = 0
+    for line in diff_lines[2:]:
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return added, removed
+
+
 def unified_diff(old: str, new: str, label: str) -> tuple[str, int, int]:
     """``(diff text, lines added, lines removed)``; the text is capped at :data:`DIFF_MAX_CHARS`."""
     old_lines = old.replace("\r\n", "\n").splitlines()
@@ -714,8 +732,7 @@ def unified_diff(old: str, new: str, label: str) -> tuple[str, int, int]:
     lines = list(
         difflib.unified_diff(old_lines, new_lines, f"a/{label}", f"b/{label}", lineterm="", n=2)
     )
-    added = sum(1 for ln in lines if ln.startswith("+") and not ln.startswith("+++"))
-    removed = sum(1 for ln in lines if ln.startswith("-") and not ln.startswith("---"))
+    added, removed = count_changed_lines(lines)
     text = "\n".join(lines)
     if len(text) > DIFF_MAX_CHARS:
         text = text[:DIFF_MAX_CHARS] + f"\n… [diff truncated: {len(text)} characters in total]"

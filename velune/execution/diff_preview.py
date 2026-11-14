@@ -98,17 +98,15 @@ def diff_stats(diff: FileDiff) -> tuple[int, int]:
         return (len(diff.proposed.splitlines()), 0)
     if diff.is_deletion:
         return (0, len(diff.original.splitlines()))
-    added = removed = 0
-    for line in difflib.unified_diff(
-        diff.original.splitlines(), diff.proposed.splitlines(), lineterm=""
-    ):
-        if line.startswith("+++") or line.startswith("---"):
-            continue
-        if line.startswith("+"):
-            added += 1
-        elif line.startswith("-"):
-            removed += 1
-    return (added, removed)
+    from velune.tools.filesystem.mutation import count_changed_lines
+
+    return count_changed_lines(
+        list(
+            difflib.unified_diff(
+                diff.original.splitlines(), diff.proposed.splitlines(), lineterm=""
+            )
+        )
+    )
 
 
 def format_stat_bar(added: int, removed: int, *, width: int = 24, label: str = "") -> str:
