@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -227,6 +228,122 @@ async def test_overwrite_without_the_flag_and_folder_rules_are_unchanged(tmp_pat
     with pytest.raises(ValueError, match="the same"):
         await move.execute(source="a.txt", destination="a.txt")
     assert (tmp_path / "b.txt").read_text() == "b\n" and journal.entries == []
+
+
+@pytest.mark.parametrize("overwrite", [False, True], ids=["new-destination", "overwrite"])
+@pytest.mark.parametrize("tracked", [True, False], ids=["tracked", "untracked"])
+async def test_a_source_changed_after_the_first_check_is_not_moved(
+    tmp_path, journal, monkeypatch, overwrite, tracked
+):
+    """The source is checked once more right before the swap: a change made after the first
+    check (while the destination's before-image is read and checked) is refused, and neither
+    path is touched."""
+    import velune.tools.filesystem.dirs as dirs_mod
+
+    _, read, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_bytes(b"what was checked\n")
+    if overwrite:
+        (tmp_path / "dst.txt").write_bytes(b"destination\n")
+    if tracked:
+        await read.execute(file_path="src.txt")
+    real_ensure_parent = mut.ensure_parent
+
+    def then_source_changes(path):  # runs after the first checks, before the final ones
+        (tmp_path / "src.txt").write_bytes(b"changed in the gap\n")
+        return real_ensure_parent(path)
+
+    monkeypatch.setattr(mut, "ensure_parent", then_source_changes)
+    monkeypatch.setattr(dirs_mod.os, "replace", lambda *a: pytest.fail("the source was moved"))
+
+    with pytest.raises(mut.FileConflictError, match="src.txt"):
+        await move.execute(source="src.txt", destination="dst.txt", overwrite=overwrite)
+
+    assert (tmp_path / "src.txt").read_bytes() == b"changed in the gap\n"
+    if overwrite:
+        assert (tmp_path / "dst.txt").read_bytes() == b"destination\n"
+    else:
+        assert not (tmp_path / "dst.txt").exists()
+    assert journal.entries == [] and journal.irreversible == []
+
+
+def _across_filesystems(monkeypatch) -> None:
+    """Make the in-place rename fail as it does between two filesystems (EXDEV)."""
+    import errno
+
+    import velune.tools.filesystem.dirs as dirs_mod
+
+    def cross_device(source, target):
+        raise OSError(errno.EXDEV, "Invalid cross-device link", str(source), None, str(target))
+
+    monkeypatch.setattr(dirs_mod.os, "replace", cross_device)
+
+
+async def test_a_move_across_filesystems_copies_checks_and_then_removes(
+    tmp_path, journal, monkeypatch
+):
+    tracker, _, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_bytes(b"content\n")
+    _across_filesystems(monkeypatch)
+
+    await move.execute(source="src.txt", destination="sub/dst.txt")
+
+    assert (tmp_path / "sub" / "dst.txt").read_bytes() == b"content\n"
+    assert not (tmp_path / "src.txt").exists()
+    assert tracker.seen(tmp_path / "sub" / "dst.txt") == _sha(b"content\n")
+    (moved,) = [entry for entry in journal.entries if isinstance(entry, mut.Moved)]
+    assert moved.destination == tmp_path / "sub" / "dst.txt"  # "sub/" is journaled too
+    journal.rewind()
+    assert (tmp_path / "src.txt").read_bytes() == b"content\n"
+    assert not (tmp_path / "sub").exists()
+
+
+async def test_a_source_changed_during_a_cross_filesystem_copy_is_kept(
+    tmp_path, journal, monkeypatch
+):
+    """Not atomic across filesystems, but a source that changed while it was copied is
+    never deleted: the copy is removed instead and the move refused."""
+    import velune.tools.filesystem.dirs as dirs_mod
+
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_bytes(b"content\n")
+    _across_filesystems(monkeypatch)
+    real_copy = dirs_mod.shutil.copyfileobj
+
+    def then_source_changes(reader, writer, *args):
+        real_copy(reader, writer, *args)
+        (tmp_path / "src.txt").write_bytes(b"written during the copy\n")
+
+    monkeypatch.setattr(dirs_mod.shutil, "copyfileobj", then_source_changes)
+    with pytest.raises(mut.FileConflictError, match="src.txt"):
+        await move.execute(source="src.txt", destination="dst.txt")
+
+    assert (tmp_path / "src.txt").read_bytes() == b"written during the copy\n"
+    assert not (tmp_path / "dst.txt").exists()
+    assert journal.entries == []
+
+
+async def test_a_cross_filesystem_copy_never_replaces_a_file_that_appeared(
+    tmp_path, journal, monkeypatch
+):
+    import velune.tools.filesystem.dirs as dirs_mod
+
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_bytes(b"content\n")
+    _across_filesystems(monkeypatch)
+    real_open = open
+
+    def someone_creates_it_first(file, mode="r", *args, **kwargs):
+        if "x" in mode:
+            Path(file).write_bytes(b"someone else's file\n")
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(dirs_mod, "open", someone_creates_it_first, raising=False)
+    with pytest.raises(FileExistsError):
+        await move.execute(source="src.txt", destination="dst.txt")
+
+    assert (tmp_path / "dst.txt").read_bytes() == b"someone else's file\n"
+    assert (tmp_path / "src.txt").read_bytes() == b"content\n"
+    assert journal.entries == []
 
 
 # ── #37: case-only renames, and rewinding them ───────────────────────────────
@@ -530,6 +647,114 @@ async def test_a_replaced_destination_is_journaled_even_if_verification_then_fai
     (entry,) = journal.entries
     assert isinstance(entry, mut.Moved)
     assert entry.overwritten == b"the destination it replaced\n"
+
+
+def _folder_with_content(path: Path) -> Path:
+    path.mkdir()
+    (path / "inside.txt").write_bytes(b"the folder's content\n")
+    return path
+
+
+def test_an_empty_folder_appearing_at_the_last_moment_is_not_replaced(tmp_path, monkeypatch):
+    """Another program creates an empty folder at the target just before the rename. POSIX
+    rename would replace an empty folder silently; the rename must refuse instead, keep
+    that folder, and leave the source where it was."""
+    source = _folder_with_content(tmp_path / "source")
+    target = tmp_path / "target"
+    real_exclusive = mut._rename_exclusive
+
+    def competitor_first(a, b):
+        os.mkdir(b)  # the competing empty folder, created at the last possible moment
+        return real_exclusive(a, b)
+
+    monkeypatch.setattr(mut, "_rename_exclusive", competitor_first)
+    with pytest.raises(FileExistsError):
+        mut._rename_no_replace(source, target)
+
+    assert target.is_dir() and os.listdir(target) == []  # the competitor's folder is kept
+    assert (source / "inside.txt").read_bytes() == b"the folder's content\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX: Windows rename never replaces anyway")
+def test_a_folder_rename_uses_no_placeholder_on_posix(tmp_path, monkeypatch):
+    """No mkdir placeholder and no plain rename: either could be raced into replacing an
+    empty folder that someone else created (the defect this guards against)."""
+    source = _folder_with_content(tmp_path / "source")
+    monkeypatch.setattr(mut.os, "mkdir", lambda *a, **k: pytest.fail("placeholder created"))
+    monkeypatch.setattr(mut.os, "rename", lambda *a, **k: pytest.fail("plain rename used"))
+    try:
+        mut._rename_no_replace(source, tmp_path / "target")
+    except mut.NoReplaceUnsupportedError:
+        assert source.is_dir()  # fails closed where there is no atomic primitive
+        return
+    assert (tmp_path / "target" / "inside.txt").read_bytes() == b"the folder's content\n"
+
+
+@pytest.mark.skipif(
+    not (sys.platform.startswith("linux") or sys.platform == "darwin"),
+    reason="Linux renameat2 / macOS renamex_np",
+)
+def test_the_kernel_no_replace_rename_is_available_on_linux_and_macos(tmp_path):
+    """The Linux and macOS CI jobs exercise the atomic kernel call, not the fallback."""
+    assert mut._native_rename() is not None
+    source = _folder_with_content(tmp_path / "source")
+    (tmp_path / "taken").mkdir()
+    with pytest.raises(FileExistsError):
+        mut._rename_exclusive(source, tmp_path / "taken")
+    mut._rename_exclusive(source, tmp_path / "free")
+    assert (tmp_path / "free" / "inside.txt").exists() and not source.exists()
+
+
+def test_a_folder_fails_closed_without_an_atomic_rename(tmp_path, monkeypatch):
+    source = _folder_with_content(tmp_path / "source")
+
+    def unsupported(a, b):
+        raise mut.NoReplaceUnsupportedError(38, "not supported here", str(a))
+
+    monkeypatch.setattr(mut, "_rename_exclusive", unsupported)
+    with pytest.raises(mut.NoReplaceUnsupportedError):
+        mut._rename_no_replace(source, tmp_path / "target")
+    assert (source / "inside.txt").exists() and not (tmp_path / "target").exists()
+
+
+def test_a_file_without_an_atomic_rename_falls_back_to_a_hard_link(tmp_path, monkeypatch):
+    (tmp_path / "source").write_bytes(b"data\n")
+    (tmp_path / "taken").write_bytes(b"someone else's\n")
+
+    def unsupported(a, b):
+        raise mut.NoReplaceUnsupportedError(38, "not supported here", str(a))
+
+    monkeypatch.setattr(mut, "_rename_exclusive", unsupported)
+    with pytest.raises(FileExistsError):
+        mut._rename_no_replace(tmp_path / "source", tmp_path / "taken")
+    assert (tmp_path / "taken").read_bytes() == b"someone else's\n"
+    mut._rename_no_replace(tmp_path / "source", tmp_path / "free")
+    assert (tmp_path / "free").read_bytes() == b"data\n" and not (tmp_path / "source").exists()
+
+
+async def test_a_case_only_folder_rename_keeps_a_competing_folder(
+    insensitive, journal, monkeypatch
+):
+    """End to end on a real case-insensitive filesystem: an empty folder created under the
+    new spelling between the two rename steps is kept, and the original is not lost."""
+    _, _, move, _ = _tools(insensitive)
+    _folder_with_content(insensitive / "docs")
+    real_exclusive = mut._rename_exclusive
+
+    def competitor_after_first_step(a, b):
+        real_exclusive(a, b)
+        if Path(b).name.startswith(mut._TMP_PREFIX):
+            os.mkdir(insensitive / "Docs")
+
+    monkeypatch.setattr(mut, "_rename_exclusive", competitor_after_first_step)
+    with pytest.raises(mut.MutationVerificationError, match="nothing was replaced") as caught:
+        await move.execute(source="docs", destination="Docs")
+
+    assert os.listdir(insensitive / "Docs") == []  # the competitor's empty folder
+    (parked,) = [n for n in os.listdir(insensitive) if n.startswith(mut._TMP_PREFIX)]
+    assert parked in str(caught.value)
+    assert (insensitive / parked / "inside.txt").read_bytes() == b"the folder's content\n"
+    assert journal.entries == []
 
 
 # ── #38: a ranged read records the version it returned ───────────────────────

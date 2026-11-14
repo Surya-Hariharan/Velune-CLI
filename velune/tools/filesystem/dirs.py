@@ -257,20 +257,25 @@ class MovePath(_FsTool):
             overwritten_mode = mut.file_mode(dst)
 
         mut.ensure_parent(dst)
-        if is_file:
+        if is_file and sha_before is not None:
             if dst_sha is not None:
                 # As atomic_write does: compare the destination again right before the swap,
                 # so a change made after the checks above is not overwritten either.
                 current = mut.file_sha256(dst)
                 if current != dst_sha:
                     raise mut.FileConflictError(mut.conflict_message(dst, dst_sha, current))
+            # And the source, last of all: the before-image read and the destination check
+            # above take time, and a change made meanwhile must not be moved unseen.
+            current = mut.file_sha256(src)
+            if current != sha_before:
+                raise mut.FileConflictError(mut.conflict_message(src, sha_before, current))
             try:
                 # Atomic on one filesystem, including replacing an existing destination file.
                 os.replace(src, dst)
             except OSError:
                 if dst.exists():
                     raise
-                shutil.move(str(src), str(dst))  # across filesystems: copy, then delete
+                _copy_across_filesystems(src, dst, sha_before)
         else:
             shutil.move(str(src), str(dst))
 
@@ -311,6 +316,33 @@ class MovePath(_FsTool):
             if sha_before is not None:
                 self.tracker.record(renamed, sha_before)
         return f"Renamed {src} → {renamed} (case only, verified)"
+
+
+def _copy_across_filesystems(src: Path, dst: Path, sha: str) -> None:
+    """Move a file to another filesystem: copy, check both sides, then remove the source.
+
+    ``os.replace`` cannot cross filesystems, so this is not atomic: for a moment both copies
+    exist. The copy is created exclusively (a file that appeared at *dst* is never
+    replaced), and the source is removed only if both the copy and the source still hash to
+    the version that was checked. A source changed during the copy is left in place and the
+    copy is removed, so nothing the agent did not see is ever deleted. A change in the short
+    gap between that last check and the removal is not caught: no filesystem API offers
+    "delete only if unchanged".
+    """
+    with open(src, "rb") as reader, open(dst, "xb") as writer:
+        shutil.copyfileobj(reader, writer)
+    try:
+        shutil.copystat(src, dst)
+    except OSError:
+        pass  # timestamps and permissions are best effort; the content is what matters
+    copied, current = mut.file_sha256(dst), mut.file_sha256(src)
+    if current != sha:
+        os.unlink(dst)
+        raise mut.FileConflictError(mut.conflict_message(src, sha, current))
+    if copied != sha:
+        os.unlink(dst)
+        raise mut.MutationVerificationError(f"The copy of {src} at {dst} does not match it")
+    os.unlink(src)
 
 
 def _case_only_rename(

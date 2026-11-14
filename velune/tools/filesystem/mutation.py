@@ -35,16 +35,19 @@ from __future__ import annotations
 import codecs
 import contextvars
 import difflib
+import errno
 import hashlib
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import time
 import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 #: Largest file ``edit_file`` / ``write_file`` will load to modify in place.
 MAX_MUTATION_BYTES = 20 * 1024 * 1024
@@ -956,30 +959,98 @@ def is_respelling(current: Path, wanted: Path) -> bool:
     return current.name in names and wanted.name not in names
 
 
-def _rename_no_replace(source: Path, target: Path) -> None:
-    """Rename *source* to *target*, failing rather than replacing anything already there.
+class NoReplaceUnsupportedError(OSError):
+    """This platform or filesystem has no atomic rename that refuses an existing target."""
 
-    POSIX ``rename`` silently replaces an existing file (or empty folder), and Python has no
-    ``RENAME_NOREPLACE``, so the name is claimed with an operation that fails atomically if
-    it is taken: a hard link for a file, ``mkdir`` for a folder (the folder is then renamed
-    onto that empty placeholder, which ``rename`` refuses if anything was put in it or it
-    was swapped for a file). On Windows ``rename`` never replaces. A filesystem without hard
-    links fails closed: the error is raised and nothing is renamed.
+
+#: Linux ``renameat2`` flag and ``AT_FDCWD``; macOS ``renamex_np`` flag.
+_RENAME_NOREPLACE = 0x1
+_AT_FDCWD = -100
+_RENAME_EXCL = 0x4
+#: errno values meaning "this kernel or filesystem does not do a no-replace rename".
+_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EINVAL, errno.ENOSYS, getattr(errno, "ENOTSUP", errno.EINVAL), errno.EOPNOTSUPP}
+)
+_native_rename_cache: list[Any] = []
+
+
+def _native_rename() -> Any:
+    """The C rename-without-replacing for this platform (a ctypes function), or None."""
+    if _native_rename_cache:
+        return _native_rename_cache[0]
+    function: Any = None
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        if sys.platform == "darwin":
+            function = libc.renamex_np  # macOS 10.12+
+            function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        elif sys.platform.startswith("linux"):
+            function = libc.renameat2  # glibc 2.28+
+            function.argtypes = [
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            ]
+        if function is not None:
+            function.restype = ctypes.c_int
+    except (OSError, AttributeError, ImportError):
+        function = None
+    _native_rename_cache.append(function)
+    return function
+
+
+def _rename_exclusive(source: Path, target: Path) -> None:
+    """One atomic rename that fails with :class:`FileExistsError` if *target* exists.
+
+    Windows ``rename`` (``MoveFileEx`` without ``MOVEFILE_REPLACE_EXISTING``) never replaces.
+    On Linux this is ``renameat2(RENAME_NOREPLACE)`` and on macOS ``renamex_np(RENAME_EXCL)``:
+    the kernel checks for the target and renames in one step, so nothing can appear there
+    in between. Raises :class:`NoReplaceUnsupportedError` where no such call exists or the
+    filesystem refuses the flag.
     """
     if os.name == "nt":
         os.rename(source, target)
         return
-    if os.path.isdir(source) and not os.path.islink(source):
-        os.mkdir(target)
-        try:
-            os.rename(source, target)
-        except OSError:
-            try:
-                os.rmdir(target)  # only succeeds while it is still our empty placeholder
-            except OSError:
-                pass
-            raise
+    import ctypes
+
+    function = _native_rename()
+    if function is None:
+        raise NoReplaceUnsupportedError(
+            errno.ENOSYS, "no atomic no-replace rename on this platform", str(source)
+        )
+    old, new = os.fsencode(source), os.fsencode(target)
+    if sys.platform == "darwin":
+        result = function(old, new, _RENAME_EXCL)
+    else:
+        result = function(_AT_FDCWD, old, _AT_FDCWD, new, _RENAME_NOREPLACE)
+    if result == 0:
         return
+    code = ctypes.get_errno()
+    if code in _UNSUPPORTED_ERRNOS:
+        raise NoReplaceUnsupportedError(code, os.strerror(code), str(source), None, str(target))
+    raise OSError(code, os.strerror(code), str(source), None, str(target))
+
+
+def _rename_no_replace(source: Path, target: Path) -> None:
+    """Rename *source* to *target*, failing rather than replacing anything already there.
+
+    Uses :func:`_rename_exclusive`, an atomic kernel rename that refuses an existing target
+    (Windows, Linux, macOS). Where that is unavailable, a file is moved by a hard link,
+    which also fails atomically if the name is taken, and then the old name is removed. A
+    folder cannot be hard-linked, and every other way to rename one could replace an empty
+    folder that appeared at the last moment, so it fails closed: the error is raised and
+    nothing is renamed.
+    """
+    try:
+        _rename_exclusive(source, target)
+        return
+    except NoReplaceUnsupportedError:
+        if os.path.isdir(source) and not os.path.islink(source):
+            raise
     if os.link in os.supports_follow_symlinks:
         os.link(source, target, follow_symlinks=False)
     else:
