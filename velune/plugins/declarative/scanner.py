@@ -22,6 +22,7 @@ from pathlib import Path
 
 from velune.plugins.declarative.command import PluginCommand, load_plugin_commands
 from velune.plugins.declarative.manifest import DeclarativePluginManifest
+from velune.plugins.declarative.paths import PluginPathError
 from velune.plugins.declarative.skill import PluginSkill, load_plugin_skills
 
 logger = logging.getLogger("velune.plugins.declarative.scanner")
@@ -253,10 +254,21 @@ class PluginScanner:
             logger.debug("Plugin '%s' is disabled; skipping.", manifest.name)
             return None
 
-        commands = load_plugin_commands(manifest.commands_dir, manifest.name)
-        skills = load_plugin_skills(manifest.skills_dir, manifest.name)
-        has_hooks = manifest.hooks_file.exists()
-        has_mcp = manifest.mcp_file.exists()
+        # One broken plugin must not cost the others: a failure while reading *this* plugin
+        # (a path that escapes it, an unreadable file) skips it and says why. The catch is
+        # narrow on purpose; anything else is a bug and should surface.
+        try:
+            commands = load_plugin_commands(
+                manifest.commands_dir, manifest.name, plugin_root=manifest.root
+            )
+            skills = load_plugin_skills(
+                manifest.skills_dir, manifest.name, plugin_root=manifest.root
+            )
+            has_hooks = manifest.hooks_file.exists()
+            has_mcp = manifest.mcp_file.exists()
+        except (PluginPathError, OSError, ValueError, TypeError) as exc:
+            logger.warning("Plugin '%s' at %s was skipped: %s", manifest.name, directory, exc)
+            return None
 
         return DiscoveredPlugin(
             manifest=manifest,

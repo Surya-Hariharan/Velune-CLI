@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from velune.plugins.declarative.command import _FRONTMATTER_RE, _parse_simple_yaml
+from velune.plugins.declarative.paths import is_within
 
 logger = logging.getLogger("velune.plugins.declarative.skill")
 
@@ -129,7 +130,7 @@ def parse_skill_file(skill_dir: Path, plugin_name: str) -> PluginSkill | None:
 
     try:
         raw = skill_md.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning("Cannot read skill file %s: %s", skill_md, exc)
         return None
 
@@ -160,14 +161,29 @@ def parse_skill_file(skill_dir: Path, plugin_name: str) -> PluginSkill | None:
     )
 
 
-def load_plugin_skills(skills_dir: Path, plugin_name: str) -> list[PluginSkill]:
-    """Scan *skills_dir* for ``*/SKILL.md`` files and return all valid skills."""
+def load_plugin_skills(
+    skills_dir: Path, plugin_name: str, plugin_root: Path | None = None
+) -> list[PluginSkill]:
+    """Scan *skills_dir* for ``*/SKILL.md`` files and return all valid skills.
+
+    With *plugin_root*, a skill folder or ``SKILL.md`` that resolves outside the plugin is
+    skipped (skill text is injected into the model's context).
+    """
     if not skills_dir.exists() or not skills_dir.is_dir():
         return []
 
     skills: list[PluginSkill] = []
     for sub in sorted(skills_dir.iterdir()):
         if not sub.is_dir():
+            continue
+        if plugin_root is not None and not (
+            is_within(sub, plugin_root) and is_within(sub / "SKILL.md", plugin_root)
+        ):
+            logger.warning(
+                "Plugin '%s': skill %s resolves outside the plugin; skipped.",
+                plugin_name,
+                sub.name,
+            )
             continue
         skill = parse_skill_file(sub, plugin_name)
         if skill is not None:

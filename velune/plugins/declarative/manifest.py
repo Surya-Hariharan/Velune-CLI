@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from velune.plugins.declarative.paths import check_declared, resolve_within
+
 logger = logging.getLogger("velune.plugins.declarative.manifest")
 
 # Sentinel for an unknown version
+#: A plugin's name is its identity: it namespaces its MCP servers (``name:server``) and labels
+#: its commands, so it must not contain the separator or anything that could pass for another
+#: plugin's name.
+PLUGIN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
 _UNKNOWN = "0.0.0"
 
 
@@ -64,6 +72,11 @@ class DeclarativePluginManifest:
         name = str(data.get("name", "")).strip()
         if not name:
             raise ValueError(f"Plugin manifest at {root} is missing a 'name' field.")
+        if not PLUGIN_NAME_RE.fullmatch(name):
+            raise ValueError(
+                f"Plugin manifest at {root} has an invalid name {name!r}: use letters, digits, "
+                "'.', '_' and '-' (at most 64, starting with a letter or digit)."
+            )
 
         known = {
             "name",
@@ -122,6 +135,7 @@ class DeclarativePluginManifest:
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))
                     manifest = cls.from_dict(data, plugin_root)
+                    manifest.validate_paths()
                     logger.debug("Loaded plugin manifest '%s' from %s", manifest.name, path)
                     return manifest
                 except Exception as exc:
@@ -129,21 +143,31 @@ class DeclarativePluginManifest:
                     return None
         return None
 
+    def validate_paths(self) -> None:
+        """Raise :class:`~velune.plugins.declarative.paths.PluginPathError` unless every path
+        the manifest declares is confined to the plugin (see ``paths.py``)."""
+        for declared in (self.commands_path, self.skills_path, self.hooks_path, self.mcp_path):
+            check_declared(declared)
+        _ = (self.commands_dir, self.skills_dir, self.hooks_file, self.mcp_file)
+
+    # Each property resolves and confines the path every time it is read, so a link swapped in
+    # after the plugin was loaded is caught where the file is actually used.
+
     @property
     def commands_dir(self) -> Path:
-        return self.root / self.commands_path
+        return resolve_within(self.root, self.commands_path)
 
     @property
     def skills_dir(self) -> Path:
-        return self.root / self.skills_path
+        return resolve_within(self.root, self.skills_path)
 
     @property
     def hooks_file(self) -> Path:
-        return self.root / self.hooks_path
+        return resolve_within(self.root, self.hooks_path)
 
     @property
     def mcp_file(self) -> Path:
-        return self.root / self.mcp_path
+        return resolve_within(self.root, self.mcp_path)
 
     def __repr__(self) -> str:
         return f"<Plugin {self.name!r} v{self.version} at {self.root}>"

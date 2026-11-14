@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from velune.plugins.declarative.command import PluginCommand
+from velune.plugins.declarative.paths import PluginPathError
 from velune.plugins.declarative.scanner import (
     ORIGIN_EXTRA,
     ORIGIN_USER,
@@ -211,8 +212,12 @@ class PluginManager:
             if not self._is_authorized(plugin):
                 self._refuse(plugin, "wire hooks")
                 continue
-            hooks_file = plugin.manifest.hooks_file
-            if not hooks_file.exists():
+            try:
+                hooks_file = plugin.manifest.hooks_file  # confined again where it is used
+                if not hooks_file.exists():
+                    continue
+            except PluginPathError as exc:
+                logger.warning("Refusing hooks from plugin '%s': %s", plugin.name, exc)
                 continue
             try:
                 import json
@@ -252,8 +257,12 @@ class PluginManager:
             if not self._is_authorized(plugin):
                 self._refuse(plugin, "register MCP servers")
                 continue
-            mcp_file = plugin.manifest.mcp_file
-            if not mcp_file.exists():
+            try:
+                mcp_file = plugin.manifest.mcp_file  # confined again where it is used
+                if not mcp_file.exists():
+                    continue
+            except PluginPathError as exc:
+                logger.warning("Refusing MCP servers from plugin '%s': %s", plugin.name, exc)
                 continue
             try:
                 import json

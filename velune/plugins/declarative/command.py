@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from velune.plugins.declarative.paths import is_within
+
 logger = logging.getLogger("velune.plugins.declarative.command")
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -81,7 +83,7 @@ def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning("Cannot read command file %s: %s", path, exc)
         return None
 
@@ -119,13 +121,26 @@ def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
     )
 
 
-def load_plugin_commands(commands_dir: Path, plugin_name: str) -> list[PluginCommand]:
-    """Scan *commands_dir* and return all valid ``PluginCommand`` objects."""
+def load_plugin_commands(
+    commands_dir: Path, plugin_name: str, plugin_root: Path | None = None
+) -> list[PluginCommand]:
+    """Scan *commands_dir* and return all valid ``PluginCommand`` objects.
+
+    With *plugin_root*, a file that resolves outside the plugin (a symlink) is skipped: a
+    command's text is sent to the model, so a link to a secret file must never be read.
+    """
     if not commands_dir.exists() or not commands_dir.is_dir():
         return []
 
     commands: list[PluginCommand] = []
     for md_file in sorted(commands_dir.glob("*.md")):
+        if plugin_root is not None and not is_within(md_file, plugin_root):
+            logger.warning(
+                "Plugin '%s': command file %s resolves outside the plugin; skipped.",
+                plugin_name,
+                md_file.name,
+            )
+            continue
         cmd = parse_command_file(md_file, plugin_name)
         if cmd is not None:
             commands.append(cmd)
