@@ -47,6 +47,7 @@ class HookDefinition:
         timeout:   Seconds before the subprocess is killed (default 10).
         condition: Optional ``if`` guard — hook runs only when the guard matches.
         env:       Extra environment variables injected into the subprocess.
+        scrub_env: Give the subprocess only a minimal environment (plugin hooks).
     """
 
     type: str
@@ -54,6 +55,10 @@ class HookDefinition:
     timeout: int = 10
     condition: HookCondition | None = None
     env: dict[str, str] = field(default_factory=dict)
+    # True for a hook that came from a plugin: its process gets the minimal environment
+    # from velune.core.child_env (plus ``env``), not Velune's whole one. The user's own
+    # hooks keep the full environment.
+    scrub_env: bool = False
 
 
 @dataclass

@@ -386,11 +386,63 @@ skipped rather than scanned. A plugin with any other origin is never trusted. Tr
 recorded per directory, not per plugin or per version of its contents; a trusted
 workspace's plugins can change with the repository, as its hooks do.
 
-Not yet covered, and tracked as follow-up work: `/plugin disable` does not unwire hooks or
-MCP servers that are already registered; a plugin command can replace a built-in slash
-command of the same name; a workspace plugin can shadow a user plugin of the same name in a
-trusted workspace; manifest paths are not confined to the plugin folder; and hook and MCP
-subprocesses inherit the parent environment.
+**Revocation.** Everything a plugin registers (hooks, MCP servers, slash commands) is
+owned by that plugin in the registry that holds it. `/plugin disable`, `/plugin reload`
+and losing workspace trust remove exactly what that plugin registered and nothing else:
+its hooks stop firing, its MCP servers and their tools stop being offered or callable at
+once (the server processes are closed in the background), and its commands are removed. A
+plugin command also checks that its plugin is still active when it runs, so a stale
+reference cannot outlive the plugin. Wiring is idempotent (reloading repeatedly never
+duplicates hooks, servers or commands) and all-or-nothing per plugin: one bad server entry
+leaves none of its siblings registered, and a plugin whose files became invalid loses what
+it had registered rather than keeping it.
+
+**Built-in commands cannot be shadowed.** The slash-command registry seals every built-in
+name and alias once they are registered. A plugin command or a command file cannot take a
+sealed key, a reserved name (`trust`, which is the `velune trust` command, not a slash
+command), or a key another plugin already holds (the first registration wins). Keys are
+normalized the way the REPL parses input, so case, padding and a leading `/` do not
+matter. A refused name refuses the whole command; a refused alias drops only the alias.
+
+**Plugin identity and precedence.** A plugin's name is its identity (it namespaces its MCP
+servers), so it must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; anything else is rejected.
+When a user plugin and a workspace plugin share a name, the user's is used and the
+workspace's is skipped with a warning, whatever order the folders are searched in (then an
+extra path's over a workspace's). A project that wants its own version must name it
+differently.
+
+**Manifest paths are confined to the plugin.** The folders and files a manifest declares
+(`commands`, `skills`, `hooks`, `mcpServers`) must be plain relative paths: absolute,
+drive, UNC, rooted and `..` paths are rejected on every platform, and the resolved path
+must stay inside the plugin after symlinks are followed (components are compared, never
+string prefixes). A command or skill file that is a symlink out of the plugin is skipped,
+because a command's text is sent to the model. An invalid declared path rejects the whole
+plugin (no partial registration), and one plugin that fails to load never costs the others.
+The check is repeated where a file is read, which narrows but cannot close a window in
+which a link is swapped after the check.
+
+**Plugin child processes get a minimal environment.** A plugin's hooks and stdio MCP
+servers no longer inherit Velune's environment (provider keys, cloud credentials, tokens).
+They receive a short allowlist (`PATH`, home and temp folders, locale, terminal, and on
+Windows the system folders), `VELUNE_WORKSPACE` for hooks, and whatever the plugin declares
+in its own `env`. There is deliberately no `${VAR}` forwarding: a plugin that needs a
+credential has to be given it by value in a config you can read, and a plugin that relied
+on an inherited variable (`PYTHONPATH`, a proxy setting, a token) must now declare it. This
+applies to plugins of every origin; your own `~/.velune/hooks.json` and `~/.mcp.json`
+entries are written by you and keep the full environment.
+
+Remaining limitations, stated plainly:
+
+- A plugin's hook and MCP `command` text is not parsed or sandboxed; once a plugin is
+  trusted it can run anything its commands say, as a program you chose to run. Trust is
+  per directory, not bound to the plugin's contents, so a trusted workspace's plugins can
+  change with the repository.
+- Trust is read at startup. Revoking it with `velune trust forget` in another process does
+  not reach a running session.
+- The model-run command sandbox and your own hooks and servers still receive the full
+  environment (only denylisting a few loader variables in the former).
+- Path confinement is checked at load and again at use; a symlink swapped in between can
+  still win a race.
 
 ---
 

@@ -370,7 +370,11 @@ class PluginManager:
         hooks_section = data.get("hooks", data)
         if not isinstance(hooks_section, dict):
             raise ValueError("'hooks' must be a JSON object")
-        return _parse_bindings(hooks_section)
+        bindings = _parse_bindings(hooks_section)
+        for binding in bindings:
+            for definition in binding.hooks:
+                definition.scrub_env = True  # a plugin's hook never gets Velune's environment
+        return bindings
 
     # ------------------------------------------------------------------
     # MCP wiring
@@ -436,6 +440,7 @@ class PluginManager:
                 continue
             # Namespace server name: plugin-name:server-name
             cfg = ServerConfig.from_dict(f"{plugin.name}:{server_name}", entry)
+            cfg.scrub_env = True  # a plugin's server never gets Velune's environment
             # Resolve ${VELUNE_PLUGIN_ROOT} in command/url/args
             for token in ("${VELUNE_PLUGIN_ROOT}", "${CLAUDE_PLUGIN_ROOT}"):
                 cfg.command = cfg.command.replace(token, root_str)

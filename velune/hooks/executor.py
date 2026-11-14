@@ -54,11 +54,17 @@ async def run_hook(
     timeout = min(defn.timeout, MAX_TIMEOUT_SECONDS)
     stdin_data = json.dumps(payload).encode("utf-8")
 
-    # Build subprocess environment
-    proc_env = os.environ.copy()
-    if workspace:
-        proc_env["VELUNE_WORKSPACE"] = str(workspace)
-    proc_env.update(defn.env)
+    # Build subprocess environment. A plugin's hook gets only the minimal environment plus what
+    # the plugin declared; the user's own hooks keep the full one (they wrote them).
+    if defn.scrub_env:
+        from velune.core.child_env import plugin_child_env
+
+        proc_env = plugin_child_env(defn.env, workspace=workspace)
+    else:
+        proc_env = os.environ.copy()
+        if workspace:
+            proc_env["VELUNE_WORKSPACE"] = str(workspace)
+        proc_env.update(defn.env)
     if env_overrides:
         proc_env.update(env_overrides)
 
