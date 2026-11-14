@@ -33,6 +33,10 @@ ORIGIN_USER = "user"
 #: A path the embedding code added explicitly (``PluginManager(extra_search_paths=...)``).
 ORIGIN_EXTRA = "extra"
 
+#: The only origins there are. Anything else is rejected where a path is registered, and
+#: ``PluginManager`` never authorizes a plugin whose origin is not one of these.
+ORIGINS = frozenset({ORIGIN_USER, ORIGIN_WORKSPACE, ORIGIN_EXTRA})
+
 #: When one directory is registered under several origins (``workspace == HOME`` makes
 #: ``<workspace>/.velune/plugins`` and ``~/.velune/plugins`` the same folder) the highest
 #: rank wins, whatever the order of registration:
@@ -156,14 +160,23 @@ class PluginScanner:
     def add_path(self, path: Path, origin: str = ORIGIN_EXTRA) -> None:
         """Add a search path. A directory already present keeps its position in the search
         order; its origin becomes the higher-ranked of the two (``user`` > ``workspace`` >
-        ``extra``), so the result does not depend on the order paths were added in."""
+        ``extra``), so the result does not depend on the order paths were added in.
+
+        *origin* must be one of :data:`ORIGINS`. An unrecognized value raises ``ValueError``
+        rather than being given a default, so no path can end up with an origin nobody
+        decided on.
+        """
+        if origin not in ORIGINS:
+            raise ValueError(
+                f"Unknown plugin origin {origin!r}; expected one of {sorted(ORIGINS)}."
+            )
         key = _path_key(path)
         known = self._origins.get(key)
         if known is None:
             self._search_paths.append(path)
             self._keys.append(key)
             self._origins[key] = origin
-        elif _ORIGIN_PRECEDENCE.get(origin, -1) > _ORIGIN_PRECEDENCE.get(known, -1):
+        elif _ORIGIN_PRECEDENCE[origin] > _ORIGIN_PRECEDENCE[known]:
             self._origins[key] = origin
 
     def scan(self, *, workspace_trusted: bool = False) -> list[DiscoveredPlugin]:
@@ -192,7 +205,9 @@ class PluginScanner:
                 continue
             origin = self._origins[key]
             if origin == ORIGIN_WORKSPACE and not workspace_trusted:
-                if has_workspace_plugins(search_path.parents[1]):
+                # The origin is explicit, so nothing is inferred from how deep the path is
+                # or where its workspace would be; this only words an informational line.
+                if search_path.is_dir():
                     logger.info(
                         "Workspace plugins in %s were not loaded: the workspace is not "
                         "trusted (run 'velune trust add' to allow them).",

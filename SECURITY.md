@@ -379,9 +379,12 @@ they are not read, not registered and their MCP servers are never started. Plugi
 `~/.velune/plugins` belong to you and load whatever the workspace trust, including when
 the workspace is your home directory and the two folders are the same. The decision is
 taken once, before any plugin is loaded, and the plugin manager refuses a workspace plugin
-again when it wires hooks or registers MCP servers. Trust is recorded per directory, not
-per plugin or per version of its contents; a trusted workspace's plugins can change with
-the repository, as its hooks do.
+again when it wires hooks or registers MCP servers. Every plugin folder carries an origin
+(`user`, `workspace` or `extra`); a folder is identified by the physical directory, not by how
+its path is spelled, and a path that no longer names the directory it was registered for is
+skipped rather than scanned. A plugin with any other origin is never trusted. Trust is
+recorded per directory, not per plugin or per version of its contents; a trusted
+workspace's plugins can change with the repository, as its hooks do.
 
 Not yet covered, and tracked as follow-up work: `/plugin disable` does not unwire hooks or
 MCP servers that are already registered; a plugin command can replace a built-in slash

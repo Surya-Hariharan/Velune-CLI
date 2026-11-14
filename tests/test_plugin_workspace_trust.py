@@ -31,6 +31,7 @@ from velune.plugins.declarative.scanner import (
     ORIGIN_EXTRA,
     ORIGIN_USER,
     ORIGIN_WORKSPACE,
+    ORIGINS,
     DiscoveredPlugin,
     PluginScanner,
     has_workspace_plugins,
@@ -570,6 +571,150 @@ def test_distinct_directories_keep_their_own_origins(workspace, home):
         "theirs": ORIGIN_WORKSPACE,
     }
     assert [p.name for p in scanner.scan(workspace_trusted=False)] == ["mine"]
+
+
+# ── shallow and unusual search paths ──────────────────────────────────────────────────────────
+
+
+def _scanner_with_a_workspace_path_and_a_user_plugin(path: Path, home: Path) -> PluginScanner:
+    make_plugin(user_plugins(home), "mine")
+    scanner = PluginScanner.default_paths(home / "somewhere-else")
+    scanner.add_path(path, origin=ORIGIN_WORKSPACE)  # registered directly, not via default_paths
+    return scanner
+
+
+@pytest.mark.parametrize("shape", ["one-level-relative", "two-level-relative", "absolute"])
+def test_a_workspace_path_of_any_depth_is_skipped_without_trust_and_does_not_stop_discovery(
+    home, tmp_path, monkeypatch, caplog, shape
+):
+    monkeypatch.chdir(tmp_path)
+    path = {
+        "one-level-relative": Path("plugins"),
+        "two-level-relative": Path("project") / "plugins",
+        "absolute": tmp_path / "plugins",
+    }[shape]
+    make_plugin(tmp_path / path, "theirs")
+    scanner = _scanner_with_a_workspace_path_and_a_user_plugin(path, home)
+
+    with caplog.at_level(logging.INFO, logger="velune.plugins.declarative.scanner"):
+        found = scanner.scan(workspace_trusted=False)  # used to raise IndexError for a shallow path
+
+    assert [(p.name, p.origin) for p in found] == [
+        ("mine", ORIGIN_USER)
+    ]  # later paths still scanned
+    assert "were not loaded: the workspace is not trusted" in caplog.text
+
+
+@pytest.mark.parametrize("shape", ["one-level-relative", "absolute"])
+def test_a_shallow_workspace_path_still_loads_when_the_workspace_is_trusted(
+    home, tmp_path, monkeypatch, shape
+):
+    monkeypatch.chdir(tmp_path)
+    path = Path("plugins") if shape == "one-level-relative" else tmp_path / "plugins"
+    make_plugin(tmp_path / "plugins", "theirs")
+    scanner = _scanner_with_a_workspace_path_and_a_user_plugin(path, home)
+
+    origins = {p.name: p.origin for p in scanner.scan(workspace_trusted=True)}
+
+    assert origins == {"mine": ORIGIN_USER, "theirs": ORIGIN_WORKSPACE}
+
+
+def test_a_filesystem_root_registered_as_a_workspace_path_is_skipped_without_trust(home, tmp_path):
+    root = Path(tmp_path.anchor)
+    scanner = _scanner_with_a_workspace_path_and_a_user_plugin(root, home)
+    assert [p.name for p in scanner.scan(workspace_trusted=False)] == ["mine"]
+
+
+def test_a_workspace_path_that_does_not_exist_is_skipped_without_trust(home, tmp_path):
+    scanner = _scanner_with_a_workspace_path_and_a_user_plugin(tmp_path / "absent", home)
+    assert [p.name for p in scanner.scan(workspace_trusted=False)] == ["mine"]
+
+
+def test_the_standard_workspace_layout_is_unchanged(workspace, home):
+    make_plugin(workspace_plugins(workspace), "theirs")
+    make_plugin(user_plugins(home), "mine")
+    scanner = PluginScanner.default_paths(workspace)
+    assert [p.name for p in scanner.scan(workspace_trusted=False)] == ["mine"]
+    assert sorted(p.name for p in scanner.scan(workspace_trusted=True)) == ["mine", "theirs"]
+
+
+# ── origin validation ─────────────────────────────────────────────────────────────────────────
+
+
+def test_the_known_origins_are_exactly_user_workspace_and_extra():
+    assert ORIGINS == {ORIGIN_USER, ORIGIN_WORKSPACE, ORIGIN_EXTRA}
+
+
+@pytest.mark.parametrize("origin", sorted(ORIGINS))
+def test_each_known_origin_can_be_registered(tmp_path, origin):
+    scanner = PluginScanner()
+    scanner.add_path(tmp_path / "plugins", origin=origin)
+    assert len(scanner._search_paths) == 1
+
+
+@pytest.mark.parametrize("origin", ["", "Workspace", "USER", "trusted", "system", " user", None])
+def test_an_unknown_origin_is_rejected_when_a_path_is_registered(tmp_path, origin):
+    scanner = PluginScanner()
+    with pytest.raises(ValueError, match="Unknown plugin origin"):
+        scanner.add_path(tmp_path / "plugins", origin=origin)
+    assert scanner._search_paths == [] and scanner._origins == {}  # nothing was registered
+
+
+def test_a_rejected_origin_does_not_disturb_the_paths_already_registered(tmp_path):
+    make_plugin(tmp_path / "ok", "p")
+    scanner = PluginScanner()
+    scanner.add_path(tmp_path / "ok", origin=ORIGIN_USER)
+    with pytest.raises(ValueError):
+        scanner.add_path(tmp_path / "ok", origin="nonsense")  # same directory, bad origin
+    assert [(p.name, p.origin) for p in scanner.scan()] == [("p", ORIGIN_USER)]
+
+
+def _hand_built_plugin(workspace: Path, origin: str) -> DiscoveredPlugin:
+    """A plugin object with a hooks file and an MCP file that really exist and parse, so a
+    refusal can only come from the origin check."""
+    root = make_plugin(workspace_plugins(workspace), f"odd-{abs(hash(origin))}")
+    manifest = DeclarativePluginManifest.load(root)
+    return DiscoveredPlugin(
+        manifest=manifest, has_hooks=True, has_mcp=True, origin=origin, commands=[]
+    )
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+@pytest.mark.parametrize("origin", ["", "Workspace", "typo", "system"])
+def test_the_manager_never_authorizes_an_unknown_origin(workspace, home, caplog, trusted, origin):
+    plugin = _hand_built_plugin(workspace, origin)
+    manager = PluginManager(workspace=workspace, workspace_trusted=trusted)
+    manager._plugins[plugin.name] = plugin
+    dispatcher = HookDispatcher(workspace=workspace, trusted=trusted)
+    registry = MCPServerRegistry(workspace=workspace)
+
+    with caplog.at_level(logging.WARNING, logger="velune.plugins.manager"):
+        assert manager.wire_hooks(dispatcher) == 0
+        assert manager.wire_mcp(registry) == 0
+
+    assert hook_commands(dispatcher) == [] and registry._entries == {}
+    assert manager._active_plugins() == []
+    assert caplog.text.count("unrecognized origin") == 2  # the refusal is observable
+
+
+@pytest.mark.parametrize("origin", [ORIGIN_USER, ORIGIN_EXTRA])
+@pytest.mark.parametrize("trusted", [False, True])
+def test_user_and_extra_plugins_are_authorized_whatever_the_workspace_trust(
+    workspace, home, trusted, origin
+):
+    plugin = _hand_built_plugin(workspace, origin)
+    manager = PluginManager(workspace=workspace, workspace_trusted=trusted)
+    manager._plugins[plugin.name] = plugin
+    assert manager.wire_hooks(HookDispatcher(workspace=workspace)) == 1
+    assert manager.wire_mcp(MCPServerRegistry(workspace=workspace)) == 1
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_a_workspace_plugin_is_authorized_only_for_a_trusted_workspace(workspace, home, trusted):
+    plugin = _hand_built_plugin(workspace, ORIGIN_WORKSPACE)
+    manager = PluginManager(workspace=workspace, workspace_trusted=trusted)
+    manager._plugins[plugin.name] = plugin
+    assert (manager.wire_hooks(HookDispatcher(workspace=workspace)) == 1) is trusted
 
 
 # ── the trust prompt ──────────────────────────────────────────────────────────────────────────

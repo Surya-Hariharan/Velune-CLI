@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any
 
 from velune.plugins.declarative.command import PluginCommand
 from velune.plugins.declarative.scanner import (
+    ORIGIN_EXTRA,
+    ORIGIN_USER,
     ORIGIN_WORKSPACE,
     DiscoveredPlugin,
     PluginScanner,
@@ -85,20 +87,32 @@ class PluginManager:
         self._workspace_trusted = bool(trusted)
 
     def _is_authorized(self, plugin: DiscoveredPlugin) -> bool:
-        """A workspace plugin needs a trusted workspace; every other origin is allowed.
+        """A workspace plugin needs a trusted workspace; user and extra plugins are allowed.
 
+        An allowlist, not "anything but workspace": a plugin whose origin is not one of the
+        known ones (it can only get one by being built by hand) is never authorized.
         Evaluated live rather than cached, so it also covers a plugin that reached the
         manager through some path other than :meth:`load`.
         """
-        return plugin.origin != ORIGIN_WORKSPACE or self._workspace_trusted
+        if plugin.origin == ORIGIN_WORKSPACE:
+            return self._workspace_trusted
+        return plugin.origin in (ORIGIN_USER, ORIGIN_EXTRA)
 
     def _refuse(self, plugin: DiscoveredPlugin, what: str) -> None:
-        logger.warning(
-            "Refusing to %s from workspace plugin '%s': the workspace is not trusted "
-            "(run 'velune trust add' to allow it).",
-            what,
-            plugin.name,
-        )
+        if plugin.origin == ORIGIN_WORKSPACE:
+            logger.warning(
+                "Refusing to %s from workspace plugin '%s': the workspace is not trusted "
+                "(run 'velune trust add' to allow it).",
+                what,
+                plugin.name,
+            )
+        else:
+            logger.warning(
+                "Refusing to %s from plugin '%s': unrecognized origin %r.",
+                what,
+                plugin.name,
+                plugin.origin,
+            )
 
     # ------------------------------------------------------------------
     # Discovery
