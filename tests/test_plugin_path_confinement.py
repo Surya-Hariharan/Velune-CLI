@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -75,9 +77,17 @@ def make_plugin(
 
 
 def symlink(target: Path, link: Path) -> Path:
+    """Link *link* to *target*. Without symlink privilege on Windows, a directory junction
+    (which needs none and resolves the same way) stands in for a directory symlink."""
     try:
         link.symlink_to(target, target_is_directory=target.is_dir())
     except (OSError, NotImplementedError):
+        if sys.platform == "win32" and target.is_dir():
+            done = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True
+            )
+            if done.returncode == 0 and link.exists():
+                return link
         pytest.skip("symlinks are not available here")
     return link
 
@@ -242,6 +252,27 @@ def test_a_command_file_linked_to_a_secret_is_never_read(workspace, home, tmp_pa
     assert names == ["real"]
     assert "TOP-SECRET-CONTENT" not in "".join(c.body for c in manager.all_commands())
     assert "resolves outside the plugin" in caplog.text
+
+
+def test_command_files_outside_the_plugin_root_are_skipped_whatever_put_them_there(
+    tmp_path, caplog
+):
+    """The per-file guard on its own, so it is exercised even where symlinks cannot be made."""
+    from velune.plugins.declarative.command import load_plugin_commands
+
+    plugin_root = tmp_path / "plugin"
+    elsewhere = tmp_path / "elsewhere"
+    plugin_root.mkdir()
+    elsewhere.mkdir()
+    (elsewhere / "stolen.md").write_text("TOP-SECRET-CONTENT")
+
+    with caplog.at_level(logging.WARNING, logger="velune.plugins.declarative.command"):
+        confined = load_plugin_commands(elsewhere, "p", plugin_root=plugin_root)
+    unconfined = load_plugin_commands(elsewhere, "p")  # no root given: nothing to confine to
+
+    assert confined == []
+    assert "resolves outside the plugin" in caplog.text
+    assert [c.name for c in unconfined] == ["stolen"]  # proves the file was readable
 
 
 def test_a_commands_folder_linked_outside_skips_that_plugin_only(workspace, home, tmp_path):

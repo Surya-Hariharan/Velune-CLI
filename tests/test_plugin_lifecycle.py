@@ -334,6 +334,58 @@ async def test_a_plugin_that_becomes_invalid_on_reload_loses_what_it_had(workspa
     assert session.mcp._entries == {}
 
 
+async def test_reload_removes_registrations_the_plugin_no_longer_declares(workspace, home):
+    """The point of revoking first: what a plugin dropped must not linger after a reload."""
+    root = make_plugin(
+        ws_plugins(workspace),
+        "p1",
+        hook="echo H",
+        servers={"keep": {"command": "echo"}, "gone": {"command": "echo"}},
+        commands={"keep-cmd": "K", "gone-cmd": "G"},
+    )
+    session = Session(workspace).start()
+    gone = connect_fake(session.mcp, "p1:gone")
+    assert sorted(session.mcp._entries) == ["p1:gone", "p1:keep"]
+
+    # The author removes a server, a command and the hooks, then the user reloads.
+    (root / ".mcp.json").write_text(json.dumps({"keep": {"command": "echo"}}))
+    (root / "commands" / "gone-cmd.md").unlink()
+    (root / "hooks" / "hooks.json").unlink()
+    session.manager.reload("p1")
+    await session.manager.flush()
+
+    assert sorted(session.mcp._entries) == ["p1:keep"]
+    assert gone.closed is True  # the dropped server's process was closed
+    assert session.commands.get("gone-cmd") is None
+    assert session.commands.get("keep-cmd") is not None
+    assert session.hook_commands() == []
+
+
+async def test_reload_of_a_plugin_whose_folder_was_deleted_removes_everything_it_had(
+    workspace, home
+):
+    import shutil
+
+    root = make_plugin(
+        ws_plugins(workspace),
+        "p1",
+        hook="echo H",
+        servers={"s": {"command": "echo"}},
+        commands={"cmd": "C"},
+    )
+    session = Session(workspace).start()
+    connection = connect_fake(session.mcp, "p1:s")
+
+    shutil.rmtree(root)
+    assert session.manager.reload("p1") == []
+    await session.manager.flush()
+
+    assert session.hook_commands() == []
+    assert session.mcp._entries == {} and connection.closed is True
+    assert session.commands.get("cmd") is None
+    assert session.manager.get_plugin("p1") is None
+
+
 # ── partial failure ───────────────────────────────────────────────────────────────────────────
 
 
