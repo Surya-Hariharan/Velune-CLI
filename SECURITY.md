@@ -241,6 +241,14 @@ isolation is available only through the optional Docker sandbox described below.
   rejected, so an agent cannot run arbitrary program text without first writing a
   file. In Manual mode an agent-authored file passes the diff-preview approval
   before it can be run.
+- **Read-only commands are judged by their arguments too.** A command is treated as a read
+  (no prompt in Manual mode, allowed in Plan mode) only if it starts with a known read-only
+  command *and* uses no option that writes, deletes or runs a program: `find` with
+  `-delete`/`-exec`/`-fprint`, `git` with `--output`/`--upload-pack`/`--receive-pack`, `git fetch`,
+  and the non-listing forms of `git branch`/`tag`/`remote`/`stash`, `rg --pre` and `fd -x` all
+  ask for approval first. A read that names a credentials file (`cat .env`) asks too, as
+  `read_file` does; a recursive search that happens to read one (`grep -r KEY .`) is not
+  detected.
 - **Environment scrubbing.** `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `PYTHONPATH`,
   `PYTHONSTARTUP`, `BASH_ENV` and similar injection vectors are removed from the
   child environment.
