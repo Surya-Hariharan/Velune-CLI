@@ -27,11 +27,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
+import sys
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from velune.core.types.inference import InferenceRequest, InferenceResponse, ToolCall
@@ -350,6 +353,8 @@ class ToolLoopRunner:
         # they were re-requested.
         failed_calls: dict[tuple[str, str], str | None] = {}
         repeated = 0
+        # Where the tools anchor relative paths; the same anchor keys the failure record.
+        workspace = self._base_ctx.workspace if self._base_ctx else None
 
         for turn in range(1, self._max_turns + 1):
             req = request.model_copy(
@@ -403,12 +408,12 @@ class ToolLoopRunner:
                     else:
                         invocation = await self._execute_call(call)
                         if invocation.error:
-                            failed_calls[key] = _call_target(call)
+                            failed_calls[key] = _call_target(call, workspace)
                         else:
                             # A successful call on a path (typically a re-read after a
                             # conflict) means its state has been looked at again: an
                             # identical call that failed on that path may now succeed.
-                            target = _call_target(call)
+                            target = _call_target(call, workspace)
                             if target is not None:
                                 for stale in [k for k, t in failed_calls.items() if t == target]:
                                     del failed_calls[stale]
@@ -688,13 +693,47 @@ class ToolLoopRunner:
 _MAX_REPEATED_FAILURES = 3
 
 
-def _call_target(call: ToolCall) -> str | None:
-    """The file or folder a call acts on, when it names one."""
+def _target_key(raw: str, workspace: Path | None) -> str:
+    """One key for the file or folder *raw* names, however the model spelled it.
+
+    The location is resolved the way the filesystem tools resolve a path argument: relative
+    paths are anchored to the workspace (not the process CWD), ``~`` is expanded, ``.``/``..``
+    and doubled or foreign separators collapse, and symbolic links are followed, so a link and
+    its target are one file. Nothing is checked or refused here: a location outside the
+    workspace simply gets its own key, and the tool's own boundary check still decides whether
+    it may be used. Case is folded only where the filesystem is case-insensitive by default,
+    and Unicode normalization only where the filesystem normalizes names (macOS), so two
+    distinct files are never merged.
+    """
+    base = workspace if workspace is not None else Path.cwd()
+    try:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path(base) / candidate
+        resolved = str(candidate.resolve())
+    except (OSError, RuntimeError, ValueError):
+        # Not resolvable (an embedded NUL, a symlink loop, an unreadable parent): fall back to
+        # the lexical location so the same spelling still maps to the same key.
+        try:
+            resolved = os.path.abspath(os.path.join(str(base), os.path.expanduser(raw)))
+        except (OSError, RuntimeError, ValueError):
+            resolved = raw
+    if sys.platform == "win32":
+        return os.path.normcase(resolved)
+    if sys.platform == "darwin":
+        from velune.tools.filesystem.mutation import fold_name
+
+        return fold_name(resolved)
+    return resolved
+
+
+def _call_target(call: ToolCall, workspace: Path | None = None) -> str | None:
+    """The file or folder a call acts on, when it names one (see :func:`_target_key`)."""
     args = call.arguments if isinstance(call.arguments, dict) else {}
     for key in ("file_path", "path", "source", "directory_path"):
         value = args.get(key)
         if isinstance(value, str) and value:
-            return value.replace("\\", "/").strip("/") or "."
+            return _target_key(value, workspace)
     return None
 
 
