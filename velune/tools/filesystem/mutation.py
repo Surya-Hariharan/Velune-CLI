@@ -35,15 +35,19 @@ from __future__ import annotations
 import codecs
 import contextvars
 import difflib
+import errno
 import hashlib
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 #: Largest file ``edit_file`` / ``write_file`` will load to modify in place.
 MAX_MUTATION_BYTES = 20 * 1024 * 1024
@@ -896,6 +900,201 @@ def read_before_image(path: Path) -> tuple[bytes | None, bool]:
         return None, False
 
 
+# ── Case-only renames ──────────────────────────────────────────────────────────
+#
+# On a case-insensitive filesystem (macOS by default, Windows) "Readme.md" and "README.md"
+# name the same entry, so "does the old name still exist?" is true after renaming it and
+# "is the destination taken?" is true before. Only the folder listing tells the two
+# spellings apart, so that is what these helpers consult (#37).
+
+
+def fold_name(name: str) -> str:
+    """*name* as a case- and normalization-insensitive filesystem compares it."""
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def _same_entry(a: Path, b: Path) -> bool:
+    try:
+        return os.path.samestat(os.lstat(a), os.lstat(b))  # a link is compared, not followed
+    except OSError:
+        return False
+
+
+def on_disk_spelling(path: Path) -> Path:
+    """*path* with its last component spelled as the folder listing stores it.
+
+    A path typed as "readme.md" for the file "Readme.md" opens it on a case-insensitive
+    filesystem; this returns ".../Readme.md". Anything not found exactly once is returned
+    unchanged.
+    """
+    try:
+        names = os.listdir(path.parent)
+    except OSError:
+        return path
+    if path.name in names:
+        return path
+    matches = [name for name in names if fold_name(name) == fold_name(path.name)]
+    if len(matches) == 1 and _same_entry(path.parent / matches[0], path):
+        return path.parent / matches[0]
+    return path
+
+
+def is_respelling(current: Path, wanted: Path) -> bool:
+    """True when *wanted* is the entry at *current* under another spelling of its name.
+
+    That is: the same folder, names equal apart from case or Unicode normalization, the same
+    file or folder on disk, and only *current*'s spelling present in the listing. On a
+    case-sensitive filesystem *wanted* is a different (usually absent) entry, so this is
+    False and a rename there behaves as it always has. Two hard links whose names differ
+    only in case are also two listing entries, so they are not mistaken for one.
+    """
+    if current.name == wanted.name or fold_name(current.name) != fold_name(wanted.name):
+        return False
+    if not _same_entry(current.parent, wanted.parent) or not _same_entry(current, wanted):
+        return False
+    try:
+        names = os.listdir(current.parent)
+    except OSError:
+        return False
+    return current.name in names and wanted.name not in names
+
+
+class NoReplaceUnsupportedError(OSError):
+    """This platform or filesystem has no atomic rename that refuses an existing target."""
+
+
+#: Linux ``renameat2`` flag and ``AT_FDCWD``; macOS ``renamex_np`` flag.
+_RENAME_NOREPLACE = 0x1
+_AT_FDCWD = -100
+_RENAME_EXCL = 0x4
+#: errno values meaning "this kernel or filesystem does not do a no-replace rename".
+_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EINVAL, errno.ENOSYS, getattr(errno, "ENOTSUP", errno.EINVAL), errno.EOPNOTSUPP}
+)
+_native_rename_cache: list[Any] = []
+
+
+def _native_rename() -> Any:
+    """The C rename-without-replacing for this platform (a ctypes function), or None."""
+    if _native_rename_cache:
+        return _native_rename_cache[0]
+    function: Any = None
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        if sys.platform == "darwin":
+            function = libc.renamex_np  # macOS 10.12+
+            function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        elif sys.platform.startswith("linux"):
+            function = libc.renameat2  # glibc 2.28+
+            function.argtypes = [
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            ]
+        if function is not None:
+            function.restype = ctypes.c_int
+    except (OSError, AttributeError, ImportError):
+        function = None
+    _native_rename_cache.append(function)
+    return function
+
+
+def _rename_exclusive(source: Path, target: Path) -> None:
+    """One atomic rename that fails with :class:`FileExistsError` if *target* exists.
+
+    Windows ``rename`` (``MoveFileEx`` without ``MOVEFILE_REPLACE_EXISTING``) never replaces.
+    On Linux this is ``renameat2(RENAME_NOREPLACE)`` and on macOS ``renamex_np(RENAME_EXCL)``:
+    the kernel checks for the target and renames in one step, so nothing can appear there
+    in between. Raises :class:`NoReplaceUnsupportedError` where no such call exists or the
+    filesystem refuses the flag.
+    """
+    if os.name == "nt":
+        os.rename(source, target)
+        return
+    import ctypes
+
+    function = _native_rename()
+    if function is None:
+        raise NoReplaceUnsupportedError(
+            errno.ENOSYS, "no atomic no-replace rename on this platform", str(source)
+        )
+    old, new = os.fsencode(source), os.fsencode(target)
+    if sys.platform == "darwin":
+        result = function(old, new, _RENAME_EXCL)
+    else:
+        result = function(_AT_FDCWD, old, _AT_FDCWD, new, _RENAME_NOREPLACE)
+    if result == 0:
+        return
+    code = ctypes.get_errno()
+    if code in _UNSUPPORTED_ERRNOS:
+        raise NoReplaceUnsupportedError(code, os.strerror(code), str(source), None, str(target))
+    raise OSError(code, os.strerror(code), str(source), None, str(target))
+
+
+def _rename_no_replace(source: Path, target: Path) -> None:
+    """Rename *source* to *target*, failing rather than replacing anything already there.
+
+    Uses :func:`_rename_exclusive`, an atomic kernel rename that refuses an existing target
+    (Windows, Linux, macOS). Where that is unavailable, a file is moved by a hard link,
+    which also fails atomically if the name is taken, and then the old name is removed. A
+    folder cannot be hard-linked, and every other way to rename one could replace an empty
+    folder that appeared at the last moment, so it fails closed: the error is raised and
+    nothing is renamed.
+    """
+    try:
+        _rename_exclusive(source, target)
+        return
+    except NoReplaceUnsupportedError:
+        if os.path.isdir(source) and not os.path.islink(source):
+            raise
+    if os.link in os.supports_follow_symlinks:
+        os.link(source, target, follow_symlinks=False)
+    else:
+        os.link(source, target)
+    try:
+        os.unlink(source)
+    except OSError:
+        os.unlink(target)  # undo the second name, so the entry is where it was
+        raise
+
+
+def respell(current: Path, wanted: Path) -> Path:
+    """Rename the entry at *current* to *wanted*'s spelling; return its new path.
+
+    Goes through a uniquely named temporary sibling, so the change of spelling is applied
+    even by a filesystem that would treat a direct rename to the "same" name as a no-op.
+    No step ever renames onto an existing name (:func:`_rename_no_replace`), so a file
+    another program creates under either spelling meanwhile is never replaced. If the
+    second step fails the entry is put back under its old name; if even that is not
+    possible, the error says where it is.
+    """
+    target = current.parent / wanted.name
+    for _ in range(100):
+        temporary = current.parent / f"{_TMP_PREFIX}{uuid.uuid4().hex[:12]}.rename"
+        if not os.path.lexists(temporary):
+            break
+    else:
+        raise FileExistsError(f"could not choose a unique temporary name in {current.parent}")
+    _rename_no_replace(current, temporary)
+    try:
+        _rename_no_replace(temporary, target)
+    except OSError as exc:
+        try:
+            _rename_no_replace(temporary, current)
+        except OSError:
+            raise MutationVerificationError(
+                f"Renaming {current.name} to {wanted.name} failed ({exc}) and it could not be "
+                f"put back under its old name, so nothing was replaced; it is now at "
+                f"{temporary}"
+            ) from exc
+        raise
+    return target
+
+
 class TurnJournal:
     """The file changes made during one agent turn, in order, for ``/rewind``."""
 
@@ -940,7 +1139,9 @@ class TurnJournal:
         for entry in reversed(self.entries):
             try:
                 self._undo(entry, report)
-            except OSError as exc:
+            except (OSError, MutationVerificationError) as exc:
+                # A respelling that could not finish says where the entry was left; report it
+                # and carry on with the rest of the turn rather than abandoning the rewind.
                 report.skipped.append(f"{_entry_path(entry)}: {exc}")
         for description in self.irreversible:
             report.skipped.append(f"{description}: too large to keep, cannot be rewound")
@@ -978,6 +1179,20 @@ class TurnJournal:
         else:
             dst, src = entry.destination, entry.source
             unchanged = entry.after_sha is None or file_sha256(dst) == entry.after_sha
+            if is_respelling(dst, src):
+                # A case-only rename: the old spelling "exists" because it is the same entry.
+                # Rename it back, unless its content changed since this turn.
+                if not unchanged:
+                    report.skipped.append(f"{dst}: changed since this turn, left as it is")
+                    return
+                respell(dst, src)
+                note = (
+                    " (folder renamed back as a whole; its contents are not compared)"
+                    if entry.after_sha is None and src.is_dir()
+                    else ""
+                )
+                report.restored.append(f"{dst} → {src}{note}")
+                return
             if not dst.exists() or src.exists() or not unchanged:
                 report.skipped.append(f"{dst}: changed since this turn, left as it is")
                 return
