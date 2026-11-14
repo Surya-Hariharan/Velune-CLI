@@ -27,11 +27,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from velune.core.types.inference import InferenceRequest, InferenceResponse, ToolCall
@@ -350,6 +352,8 @@ class ToolLoopRunner:
         # they were re-requested.
         failed_calls: dict[tuple[str, str], str | None] = {}
         repeated = 0
+        # Where the tools anchor relative paths; the same anchor keys the failure record.
+        workspace = self._base_ctx.workspace if self._base_ctx else None
 
         for turn in range(1, self._max_turns + 1):
             req = request.model_copy(
@@ -403,14 +407,16 @@ class ToolLoopRunner:
                     else:
                         invocation = await self._execute_call(call)
                         if invocation.error:
-                            failed_calls[key] = _call_target(call)
+                            failed_calls[key] = _call_target(call, workspace)
                         else:
                             # A successful call on a path (typically a re-read after a
                             # conflict) means its state has been looked at again: an
                             # identical call that failed on that path may now succeed.
-                            target = _call_target(call)
+                            target = _call_target(call, workspace)
                             if target is not None:
-                                for stale in [k for k, t in failed_calls.items() if t == target]:
+                                for stale in [
+                                    k for k, t in failed_calls.items() if _same_target(t, target)
+                                ]:
                                     del failed_calls[stale]
                     invocations.append(invocation)
                     messages.append(
@@ -688,13 +694,58 @@ class ToolLoopRunner:
 _MAX_REPEATED_FAILURES = 3
 
 
-def _call_target(call: ToolCall) -> str | None:
-    """The file or folder a call acts on, when it names one."""
+def _target_key(raw: str, workspace: Path | None) -> str:
+    """The resolved location the file or folder *raw* names, however the model spelled it.
+
+    The location is resolved the way the filesystem tools resolve a path argument: relative
+    paths are anchored to the workspace (not the process CWD), ``~`` is expanded, ``.``/``..``
+    and doubled or foreign separators collapse, and symbolic links are followed, so a link and
+    its target are one location. Nothing is checked or refused here: a location outside the
+    workspace simply gets its own key, and the tool's own boundary check still decides whether
+    it may be used. Case and Unicode normalization are deliberately left alone: whether two
+    spellings are one file is the filesystem's call, so :func:`_same_target` asks it.
+    """
+    base = workspace if workspace is not None else Path.cwd()
+    try:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path(base) / candidate
+        return str(candidate.resolve())
+    except (OSError, RuntimeError, ValueError):
+        # Not resolvable (an embedded NUL, a symlink loop, an unreadable parent): fall back to
+        # the lexical location so the same spelling still maps to the same key.
+        try:
+            return os.path.abspath(os.path.join(str(base), os.path.expanduser(raw)))
+        except (OSError, RuntimeError, ValueError):
+            return raw
+
+
+def _same_target(a: str | None, b: str | None) -> bool:
+    """True when two keys from :func:`_target_key` are the same file or folder.
+
+    Equal keys are the same location. Different keys are the same entry only if both exist
+    and the filesystem says they are one object, which is how a case-insensitive or
+    normalizing volume (Windows, default macOS) is recognized without guessing from the
+    platform: on a case-sensitive volume ``A.py`` and ``a.py`` are different objects, or only
+    one exists, and stay distinct.
+    """
+    if a is None or b is None:
+        return False
+    if a == b:
+        return True
+    try:
+        return os.path.samestat(os.stat(a), os.stat(b))
+    except (OSError, ValueError):
+        return False
+
+
+def _call_target(call: ToolCall, workspace: Path | None = None) -> str | None:
+    """The file or folder a call acts on, when it names one (see :func:`_target_key`)."""
     args = call.arguments if isinstance(call.arguments, dict) else {}
     for key in ("file_path", "path", "source", "directory_path"):
         value = args.get(key)
         if isinstance(value, str) and value:
-            return value.replace("\\", "/").strip("/") or "."
+            return _target_key(value, workspace)
     return None
 
 
