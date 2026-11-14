@@ -105,7 +105,17 @@ def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
 
     m = _FRONTMATTER_RE.match(raw)
     if m:
-        fm = _parse_simple_yaml(m.group(1))
+        try:
+            fm = _parse_simple_yaml(m.group(1))
+        except ValueError as exc:
+            # Malformed frontmatter is the author's data: skip this command, keep the rest.
+            logger.warning(
+                "Plugin '%s': command file %s has invalid frontmatter (%s); skipped.",
+                plugin_name,
+                path.name,
+                exc,
+            )
+            return None
         body = raw[m.end() :]
 
     # Command name from filename (strip .md)
@@ -165,6 +175,28 @@ def load_plugin_commands(
 # ---------------------------------------------------------------------------
 
 
+def _load_yaml_mapping(text: str) -> dict[str, Any] | None:
+    """Parse *text* with PyYAML as a mapping; ``None`` when PyYAML is not installed.
+
+    Raises ``ValueError`` for anything that is not a usable mapping: invalid YAML, an unsafe
+    tag, a list or a bare scalar. Frontmatter is whatever a plugin's author wrote, so none of
+    those may escape as another exception type, and only the *kind* of failure is reported.
+    """
+    try:
+        import yaml  # type: ignore[import]
+    except ImportError:
+        return None
+    try:
+        loaded = yaml.safe_load(text)
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise ValueError(f"invalid YAML ({type(exc).__name__})") from exc
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"frontmatter must be a mapping, not {type(loaded).__name__}")
+    return loaded
+
+
 def _parse_simple_yaml(text: str) -> dict[str, Any]:
     """Parse the tiny YAML subset used in plugin frontmatter.
 
@@ -178,12 +210,9 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
           - item2
     - Booleans: ``true`` / ``false``
     """
-    try:
-        import yaml  # type: ignore[import]
-
-        return yaml.safe_load(text) or {}
-    except ImportError:
-        pass
+    loaded = _load_yaml_mapping(text)
+    if loaded is not None:
+        return loaded
 
     # Pure-stdlib fallback for the common subset
     result: dict[str, Any] = {}

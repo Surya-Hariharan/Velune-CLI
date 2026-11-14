@@ -139,7 +139,17 @@ def parse_skill_file(skill_dir: Path, plugin_name: str) -> PluginSkill | None:
 
     m = _FRONTMATTER_RE.match(raw)
     if m:
-        fm = _parse_simple_yaml(m.group(1))
+        try:
+            fm = _parse_simple_yaml(m.group(1))
+        except ValueError as exc:
+            # Malformed frontmatter is the author's data: skip this skill, keep the rest.
+            logger.warning(
+                "Plugin '%s': skill %s has invalid frontmatter (%s); skipped.",
+                plugin_name,
+                skill_dir.name,
+                exc,
+            )
+            return None
         body = raw[m.end() :]
 
     slug = skill_dir.name.lower()

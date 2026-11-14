@@ -57,6 +57,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger("velune.plugins.manager")
 
 
+def _validate_mcp_entry(server_name: str, entry: dict[str, Any]) -> None:
+    """Raise ``ValueError`` unless an ``.mcp.json`` entry has the field types it must have.
+
+    The file is the plugin author's data. ``{"command": null}`` or ``"args": [1]`` would
+    otherwise fail deep inside token substitution, or (``"args": "abc"``) be silently read as
+    the list ``["a", "b", "c"]``. A plugin with an invalid server registers none of its servers.
+    """
+    for key in ("command", "url", "type"):
+        if key in entry and not isinstance(entry[key], str):
+            raise ValueError(f"server '{server_name}': '{key}' must be text")
+    if "args" in entry and not (
+        isinstance(entry["args"], list) and all(isinstance(a, str) for a in entry["args"])
+    ):
+        raise ValueError(f"server '{server_name}': 'args' must be a list of text")
+    for key in ("env", "headers"):
+        if key in entry and not isinstance(entry[key], dict):
+            raise ValueError(f"server '{server_name}': '{key}' must be a mapping")
+    if "headers" in entry and not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in entry["headers"].items()
+    ):
+        raise ValueError(f"server '{server_name}': 'headers' must map text to text")
+
+
 class PluginManager:
     """Coordinates plugin discovery, registration, and runtime management.
 
@@ -99,6 +122,9 @@ class PluginManager:
         self._wire_commands: Callable[[list[DiscoveredPlugin]], None] | None = None
         # MCP servers taken out of a registry whose connection is still to be closed.
         self._detached: list[tuple[MCPServerRegistry, ServerEntry]] = []
+        # Serialises flushes, so a second flush() waits for cleanup that is already running
+        # instead of seeing an empty list and returning while a close is still in progress.
+        self._flush_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Workspace trust
@@ -257,9 +283,10 @@ class PluginManager:
 
     async def flush(self) -> None:
         """Close the connections of MCP servers that were revoked. Safe to call repeatedly."""
-        pending, self._detached = self._detached, []
-        for mcp_registry, entry in pending:
-            await mcp_registry.close_entry(entry)
+        async with self._flush_lock:
+            pending, self._detached = self._detached, []
+            for mcp_registry, entry in pending:
+                await mcp_registry.close_entry(entry)
 
     def _schedule_flush(self) -> None:
         try:
@@ -351,8 +378,13 @@ class PluginManager:
             logger.warning("Refusing hooks from plugin '%s': %s", plugin.name, exc)
             dispatcher.remove_plugin_bindings(plugin.name)
             return 0
-        except (OSError, ValueError, TypeError) as exc:
-            logger.warning("Failed to wire hooks from plugin '%s': %s", plugin.name, exc)
+        except Exception as exc:  # the hook file is untrusted data of any shape: contain it
+            logger.warning(
+                "Failed to wire hooks from plugin '%s': %s: %s",
+                plugin.name,
+                type(exc).__name__,
+                exc,
+            )
             dispatcher.remove_plugin_bindings(plugin.name)
             return 0
         dispatcher.add_plugin_bindings(plugin.name, bindings)
@@ -412,8 +444,13 @@ class PluginManager:
             logger.warning("Refusing MCP servers from plugin '%s': %s", plugin.name, exc)
             self._detach(mcp_registry, plugin.name)
             return 0
-        except (OSError, ValueError, TypeError) as exc:
-            logger.warning("Failed to wire MCP from plugin '%s': %s", plugin.name, exc)
+        except Exception as exc:  # the .mcp.json is untrusted data of any shape: contain it
+            logger.warning(
+                "Failed to wire MCP from plugin '%s': %s: %s",
+                plugin.name,
+                type(exc).__name__,
+                exc,
+            )
             self._detach(mcp_registry, plugin.name)
             return 0
 
@@ -438,6 +475,7 @@ class PluginManager:
         for server_name, entry in data.items():
             if not isinstance(entry, dict):
                 continue
+            _validate_mcp_entry(server_name, entry)
             # Namespace server name: plugin-name:server-name
             cfg = ServerConfig.from_dict(f"{plugin.name}:{server_name}", entry)
             cfg.scrub_env = True  # a plugin's server never gets Velune's environment

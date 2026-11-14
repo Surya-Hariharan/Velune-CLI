@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
@@ -214,6 +214,25 @@ async def _connect_owned(repl: VeluneREPL, owner: str) -> None:
             await registry.connect(name)
 
 
+def _run_independently(steps: list[tuple[str, Any]]) -> list[str]:
+    """Run each setup step on its own; a failure in one never stops the next.
+
+    The steps (commands, hooks, MCP servers) cover every plugin, so one failing must not keep
+    another plugin's hooks from being wired. Returns a description of each failure, logged at
+    WARNING by the caller's visible message.
+    """
+    failed: list[str] = []
+    for label, step in steps:
+        try:
+            step()
+        except Exception as exc:  # untrusted plugin data: contain it to this step
+            _log.warning(
+                "Plugin %s setup failed (non-fatal): %s: %s", label, type(exc).__name__, exc
+            )
+            failed.append(f"{label} ({type(exc).__name__})")
+    return failed
+
+
 async def load_and_register_plugins(repl: VeluneREPL, *, workspace_trusted: bool = False) -> None:
     """Load plugins and wire their commands/hooks/MCP servers into the REPL.
 
@@ -235,11 +254,21 @@ async def load_and_register_plugins(repl: VeluneREPL, *, workspace_trusted: bool
         )
         new_plugins = repl._plugin_manager.load()
         if new_plugins:
-            # Three independent steps: a failure in one must not stop the others, or one
-            # plugin's bad data could keep another plugin's hooks from being wired.
-            register_plugin_commands(repl, new_plugins)
-            repl._plugin_manager.wire_hooks(repl._hook_dispatcher)
-            repl._plugin_manager.wire_mcp(repl._mcp_registry)
+            failed = _run_independently(
+                [
+                    ("commands", lambda: register_plugin_commands(repl, new_plugins)),
+                    ("hooks", lambda: repl._plugin_manager.wire_hooks(repl._hook_dispatcher)),
+                    ("MCP servers", lambda: repl._plugin_manager.wire_mcp(repl._mcp_registry)),
+                ]
+            )
+            if failed:
+                from velune.cli import design
+
+                repl.console.print(
+                    f"[{design.WARN}]Some plugin setup failed:[/{design.WARN}] "
+                    f"{'; '.join(failed)}  "
+                    f"[{design.MUTED}](the other plugin features were set up)[/{design.MUTED}]"
+                )
     except Exception as exc:
         from velune.cli import design
 

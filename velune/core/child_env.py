@@ -59,8 +59,25 @@ _WINDOWS_ALLOW = frozenset(
     }
 )
 
-#: ``LC_ALL``, ``LC_CTYPE`` and the other locale categories.
-_PREFIX_ALLOW = ("LC_",)
+#: The standard locale categories, listed rather than matched by prefix: nothing is forwarded
+#: by name pattern, so an unrelated variable that merely starts with ``LC_`` stays out.
+_LOCALE_ALLOW = frozenset(
+    {
+        "LC_ADDRESS",
+        "LC_ALL",
+        "LC_COLLATE",
+        "LC_CTYPE",
+        "LC_IDENTIFICATION",
+        "LC_MEASUREMENT",
+        "LC_MESSAGES",
+        "LC_MONETARY",
+        "LC_NAME",
+        "LC_NUMERIC",
+        "LC_PAPER",
+        "LC_TELEPHONE",
+        "LC_TIME",
+    }
+)
 
 
 def plugin_child_env(
@@ -82,7 +99,7 @@ def plugin_child_env(
     env: dict[str, str] = {}
     for key, value in source.items():
         name = key.upper() if on_windows else key
-        if name not in allowed and not name.startswith(_PREFIX_ALLOW):
+        if name not in allowed and name not in _LOCALE_ALLOW:
             continue
         if value.startswith("()"):  # an exported shell function, a known injection vector
             continue

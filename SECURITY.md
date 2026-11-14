@@ -421,10 +421,21 @@ plugin (no partial registration), and one plugin that fails to load never costs 
 The check is repeated where a file is read, which narrows but cannot close a window in
 which a link is swapped after the check.
 
+**Malformed plugin data is contained to the plugin that holds it.** Everything a plugin
+ships (command and skill frontmatter, `plugin.json`, `hooks.json`, `.mcp.json`) is written
+by its author and can have any shape: a list where a mapping belongs, invalid YAML, `null`
+or numbers where text belongs, a name containing `=`. Each of these is rejected as a
+handled failure that skips that file or that plugin with a warning naming the kind of
+failure (never the data); the plugin then registers nothing, and no other plugin is
+affected, including your own, whose hooks keep loading. Command and skill frontmatter must
+be a YAML mapping and MCP entries must have text `command`, `url` and `args`. The setup
+steps for commands, hooks and MCP servers also run independently, so one failing never
+stops the next.
+
 **Plugin child processes get a minimal environment.** A plugin's hooks and stdio MCP
 servers no longer inherit Velune's environment (provider keys, cloud credentials, tokens).
-They receive a short allowlist (`PATH`, home and temp folders, locale, terminal, and on
-Windows the system folders), `VELUNE_WORKSPACE` for hooks, and whatever the plugin declares
+They receive a short allowlist (`PATH`, home and temp folders, the standard `LANG`/`LC_*`
+locale variables by name, terminal, and on Windows the system folders), `VELUNE_WORKSPACE` for hooks, and whatever the plugin declares
 in its own `env`. There is deliberately no `${VAR}` forwarding: a plugin that needs a
 credential has to be given it by value in a config you can read, and a plugin that relied
 on an inherited variable (`PYTHONPATH`, a proxy setting, a token) must now declare it. This

@@ -225,6 +225,12 @@ class MCPServerRegistry:
         conn = make_connection(entry.config, allowed_hosts=self._allowed_hosts)
         try:
             await asyncio.wait_for(conn.connect(), timeout=15.0)
+            if self._entries.get(name) is not entry:
+                # The server was detached (its plugin disabled or reloaded) while the
+                # handshake was running. Nothing owns this connection any more, so close it
+                # rather than attach it to an entry that is no longer in the registry.
+                await self._abandon_connection(conn, name)
+                return False
             entry.connection = conn
             entry.state = ServerState.CONNECTED
             # Discover tools and resources
