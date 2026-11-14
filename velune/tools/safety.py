@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import enum
 import re
-import shlex
 from dataclasses import dataclass
+
+from velune.core.argv import split_command
 
 
 class ApprovalMode(enum.Enum):
@@ -200,10 +201,17 @@ _SAFE_PREFIXES: tuple[str, ...] = (
 _FIND_ACTIONS = frozenset(
     {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 )
-_FD_EXEC = frozenset({"-x", "--exec", "-X", "--exec-batch"})
 # Options of git that write a file or run a program. Git accepts any unambiguous abbreviation
 # of a long option, so a shortened spelling (``--outp=f``) is treated like the full one.
-_GIT_DANGEROUS_OPTIONS = ("--output", "--upload-pack", "--receive-pack", "--exec", "--exec-path")
+_GIT_DANGEROUS_OPTIONS = (
+    "--output",
+    "--upload-pack",
+    "--receive-pack",
+    "--exec",
+    "--exec-path",
+    "--ext-diff",  # runs the external diff helper the repository configures
+    "--textconv",  # runs the text-conversion helper the repository configures
+)
 # The only forms of ``git branch`` / ``tag`` / ``remote`` that merely list.
 _GIT_BRANCH_LISTING = frozenset(
     {"-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--list", "--show-current"}
@@ -240,19 +248,25 @@ def _git_is_read_only(args: list[str]) -> bool:
 def _arguments_are_read_only(command: str) -> bool:
     """False when *command* uses an option that makes an otherwise read-only program write."""
     try:
-        tokens = shlex.split(command, posix=False)
+        tokens = split_command(command)  # the arguments the executor will pass, not a lookalike
     except ValueError:
         return False
     if not tokens:
         return True
-    program = tokens[0].strip("\"'").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    program = tokens[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
     if program.endswith(".exe"):
         program = program[:-4]
-    args = [t.strip("\"'").lower() for t in tokens[1:]]
+    raw_args = tokens[1:]
+    args = [t.lower() for t in raw_args]
     if program == "find":
         return not any(a in _FIND_ACTIONS for a in args)
     if program == "fd":
-        return not any(a in _FD_EXEC or a.startswith("--exec") for a in args)
+        # -x/-X take their command attached (-xtouch) or inside a cluster of short flags (-Hx).
+        return not any(
+            a.startswith("--exec")
+            or (a.startswith("-") and not a.startswith("--") and "x" in a.lower())
+            for a in raw_args
+        )
     if program == "rg":  # --pre and --hostname-bin run a program on every file
         return not any(a.startswith(("--pre", "--hostname-bin")) for a in args)
     if program == "git":

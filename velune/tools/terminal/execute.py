@@ -67,7 +67,8 @@ class ExecuteCommand(BaseTool):
 
             # read_file asks before showing a credentials file; a "read-only" command that
             # names one (cat .env) must not be a way around that.
-            secret = bool(command_paths_secret(command, boundary))
+            run_in = boundary.resolve(directory) if directory else None
+            secret = bool(command_paths_secret(command, boundary, run_in))
             return [Action(ActionType.READ, command, why, outside_workspace=outside, secret=secret)]
         return [
             Action(

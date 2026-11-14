@@ -368,29 +368,36 @@ def command_paths_outside(command: str, boundary: Boundary) -> list[Path]:
     return outside
 
 
-def command_paths_secret(command: str, boundary: Boundary) -> list[Path]:
+def command_paths_secret(command: str, boundary: Boundary, cwd: Path | None = None) -> list[Path]:
     """Credential/secret files (``.env``, keys, ``~/.ssh``) that a command line names.
 
-    The first token (the executable) is skipped and ``--opt=value`` is checked by its value.
-    Relative names are resolved against the workspace. Best effort, like
+    The command line is split the way the executor splits it, the first token (the
+    executable) is skipped and ``--opt=value`` is checked by its value. Relative names are
+    resolved against *cwd* (the folder the command will run in; the workspace by default), so
+    a link in that folder that leads to a secret file is seen. Best effort, like
     :func:`command_paths_outside`: it catches what a command *names* (``cat .env``), not a
     recursive search that happens to read one (``grep -r KEY .``).
     """
+    from velune.core.argv import split_command
+
     try:
-        tokens = shlex.split(command, posix=os.name != "nt")
+        tokens = split_command(command)
     except ValueError:
         tokens = command.split()
+    base = cwd if cwd is not None else boundary.workspace_root
     found: list[Path] = []
-    for raw in tokens[1:]:
-        token = raw.strip("\"'")
+    for token in tokens[1:]:
         if token.startswith("-"):
             if "=" not in token:
                 continue
-            token = token.split("=", 1)[1].strip("\"'")
+            token = token.split("=", 1)[1]
         if not token or "://" in token:
             continue
         try:
-            resolved = boundary.resolve(token)
+            candidate = Path(token).expanduser()
+            if not candidate.is_absolute():
+                candidate = base / candidate
+            resolved = candidate.resolve()
         except (OSError, ValueError, RuntimeError):
             continue
         if is_secret_path(resolved) or is_secret_path(Path(token)):
