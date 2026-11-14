@@ -22,6 +22,8 @@ import enum
 import re
 from dataclasses import dataclass
 
+from velune.core.argv import split_command
+
 
 class ApprovalMode(enum.Enum):
     """Tool/command approval tier."""
@@ -185,6 +187,106 @@ _SAFE_PREFIXES: tuple[str, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Read-only means the *arguments* are read-only too, not just the first words
+# ---------------------------------------------------------------------------
+#
+# A SAFE command is never shown to the user in MANUAL mode and is allowed even in PLAN mode, so
+# a prefix such as "find " or "git log" is only a safe start of a command line, not a
+# guarantee: ``find . -delete`` deletes, ``git log --output=f`` overwrites f, and
+# ``git fetch --upload-pack=CMD`` runs CMD. These tables name the options that turn an
+# otherwise read-only program into one that writes, deletes or runs something; a command
+# that uses one is classified ASK (it still runs, after the user approves it).
+
+_FIND_ACTIONS = frozenset(
+    {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+)
+# Options of git that write a file or run a program. Git accepts any unambiguous abbreviation
+# of a long option, so a shortened spelling (``--outp=f``) is treated like the full one.
+_GIT_DANGEROUS_OPTIONS = (
+    "--output",
+    "--upload-pack",
+    "--receive-pack",
+    "--exec",
+    "--exec-path",
+    "--ext-diff",  # runs the external diff helper the repository configures
+    "--textconv",  # runs the text-conversion helper the repository configures
+)
+# The only forms of ``git branch`` / ``tag`` / ``remote`` that merely list.
+_GIT_BRANCH_LISTING = frozenset(
+    {"-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--list", "--show-current"}
+)
+_GIT_REMOTE_LISTING = ([], ["-v"], ["--verbose"])
+
+
+def _is_dangerous_git_option(arg: str) -> bool:
+    if not arg.startswith("--"):
+        return False
+    name = arg.split("=", 1)[0]
+    return len(name) > 2 and any(opt.startswith(name) for opt in _GIT_DANGEROUS_OPTIONS)
+
+
+# The git subcommands that may be SAFE, matched *exactly*. The prefix table above is only a
+# first filter: "git diff" is also the start of ``git difftool`` (``-x CMD`` runs CMD, ``git
+# difftool -y -x cp`` overwrote a modified file), "git show" of ``git show-branch`` and "git
+# branch" of anything else that begins with it. A subcommand that is not listed here is ASK,
+# whatever it is spelled like, so a new or look-alike subcommand never inherits SAFE.
+_GIT_READ_SUBCOMMANDS = frozenset(
+    {"status", "log", "diff", "show", "branch", "remote", "stash", "tag", "rev-parse", "shortlog"}
+)
+
+
+def _git_is_read_only(args: list[str]) -> bool:
+    sub, rest = (args[0], args[1:]) if args else ("", [])
+    # No subcommand (``git`` alone, or a global option such as ``-c`` first) or one that is not
+    # exactly a known read-only subcommand: fetch (network, refs, --upload-pack), difftool and
+    # mergetool (run a program), diff-tree/show-ref/... (read-only, but not part of the SAFE set).
+    if sub not in _GIT_READ_SUBCOMMANDS:
+        return False
+    if any(_is_dangerous_git_option(a) for a in args):
+        return False
+    if sub == "branch":
+        return all(a in _GIT_BRANCH_LISTING for a in rest)
+    if sub == "tag":
+        return not rest or (
+            rest[0] in ("-l", "--list") and not any(a.startswith("-") for a in rest[1:])
+        )
+    if sub == "remote":
+        return rest in _GIT_REMOTE_LISTING or (len(rest) == 2 and rest[0] == "get-url")
+    if sub == "stash":
+        return rest[:1] == ["list"]
+    return True
+
+
+def _arguments_are_read_only(command: str) -> bool:
+    """False when *command* uses an option that makes an otherwise read-only program write."""
+    try:
+        tokens = split_command(command)  # the arguments the executor will pass, not a lookalike
+    except ValueError:
+        return False
+    if not tokens:
+        return True
+    program = tokens[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if program.endswith(".exe"):
+        program = program[:-4]
+    raw_args = tokens[1:]
+    args = [t.lower() for t in raw_args]
+    if program == "find":
+        return not any(a in _FIND_ACTIONS for a in args)
+    if program == "fd":
+        # -x/-X take their command attached (-xtouch) or inside a cluster of short flags (-Hx).
+        return not any(
+            a.startswith("--exec")
+            or (a.startswith("-") and not a.startswith("--") and "x" in a.lower())
+            for a in raw_args
+        )
+    if program == "rg":  # --pre and --hostname-bin run a program on every file
+        return not any(a.startswith(("--pre", "--hostname-bin")) for a in args)
+    if program == "git":
+        return _git_is_read_only(args)
+    return True
+
+
 def _normalize(command: str) -> str:
     """Strip `.exe` from the leading word so Windows paths match cross-platform prefixes.
 
@@ -203,7 +305,7 @@ def classify_command(command: str) -> SafetyVerdict:
 
     Priority order:
       1. Dangerous pattern match → BLOCK
-      2. Known-safe prefix       → SAFE
+      2. Known-safe prefix, and no argument that writes or runs a program → SAFE
       3. Everything else         → ASK
     """
     stripped = command.strip()
@@ -220,6 +322,11 @@ def classify_command(command: str) -> SafetyVerdict:
 
     for prefix in _SAFE_PREFIXES:
         if lower == prefix.rstrip() or lower.startswith(prefix):
+            if not _arguments_are_read_only(normalized):
+                return SafetyVerdict(
+                    mode=ApprovalMode.ASK,
+                    reason="Uses an option that writes, deletes or runs a program — approval required",
+                )
             return SafetyVerdict(mode=ApprovalMode.SAFE, reason="Known read-only command")
 
     return SafetyVerdict(

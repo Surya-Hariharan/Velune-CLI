@@ -63,7 +63,13 @@ class ExecuteCommand(BaseTool):
             outside = bool(command_paths_outside(command, boundary))
         klass, why = classify(command)
         if klass is CommandClass.READ_ONLY:
-            return [Action(ActionType.READ, command, why, outside_workspace=outside)]
+            from velune.permissions.boundary import command_paths_secret
+
+            # read_file asks before showing a credentials file; a "read-only" command that
+            # names one (cat .env) must not be a way around that.
+            run_in = boundary.resolve(directory) if directory else None
+            secret = bool(command_paths_secret(command, boundary, run_in))
+            return [Action(ActionType.READ, command, why, outside_workspace=outside, secret=secret)]
         return [
             Action(
                 ActionType.RUN_COMMAND,
