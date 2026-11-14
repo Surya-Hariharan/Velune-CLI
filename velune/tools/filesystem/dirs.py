@@ -258,17 +258,19 @@ class MovePath(_FsTool):
 
         mut.ensure_parent(dst)
         if is_file and sha_before is not None:
-            if dst_sha is not None:
-                # As atomic_write does: compare the destination again right before the swap,
-                # so a change made after the checks above is not overwritten either.
-                current = mut.file_sha256(dst)
-                if current != dst_sha:
-                    raise mut.FileConflictError(mut.conflict_message(dst, dst_sha, current))
-            # And the source, last of all: the before-image read and the destination check
-            # above take time, and a change made meanwhile must not be moved unseen.
+            # Both are checked again right before the swap: the before-image read above takes
+            # time, and a change made meanwhile must not be moved or overwritten unseen. The
+            # source first: a source change slipping in during the destination check is still
+            # moved intact and fails the content check after the move. The destination last,
+            # nearest the swap, as atomic_write does: an edit there that slipped through would
+            # be overwritten, and that cannot be undone.
             current = mut.file_sha256(src)
             if current != sha_before:
                 raise mut.FileConflictError(mut.conflict_message(src, sha_before, current))
+            if dst_sha is not None:
+                current = mut.file_sha256(dst)
+                if current != dst_sha:
+                    raise mut.FileConflictError(mut.conflict_message(dst, dst_sha, current))
             try:
                 # Atomic on one filesystem, including replacing an existing destination file.
                 os.replace(src, dst)
@@ -328,13 +330,30 @@ def _copy_across_filesystems(src: Path, dst: Path, sha: str) -> None:
     copy is removed, so nothing the agent did not see is ever deleted. A change in the short
     gap between that last check and the removal is not caught: no filesystem API offers
     "delete only if unchanged".
+
+    The copy is created owner-only (0600) and given the source's permissions only once its
+    content is complete, so a private file is never readable by others, not even while it
+    is being copied. If the copy fails, the partial file (ours: it was created exclusively)
+    is removed.
     """
-    with open(src, "rb") as reader, open(dst, "xb") as writer:
-        shutil.copyfileobj(reader, writer)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
+    writer = os.fdopen(os.open(dst, flags, 0o600), "wb")  # owns the descriptor from here
     try:
-        shutil.copystat(src, dst)
+        with writer, open(src, "rb") as reader:
+            shutil.copyfileobj(reader, writer)
+            writer.flush()
+            os.fsync(writer.fileno())
+    except BaseException:
+        try:
+            os.unlink(dst)
+        except OSError:
+            pass
+        raise
+    try:
+        shutil.copystat(src, dst)  # the source's permissions and times, now the content is in
     except OSError:
-        pass  # timestamps and permissions are best effort; the content is what matters
+        pass  # best effort; the content is what matters, and the copy stays owner-only
     copied, current = mut.file_sha256(dst), mut.file_sha256(src)
     if current != sha:
         os.unlink(dst)

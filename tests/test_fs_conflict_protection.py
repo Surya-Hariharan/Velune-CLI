@@ -330,20 +330,101 @@ async def test_a_cross_filesystem_copy_never_replaces_a_file_that_appeared(
     _, _, move, _ = _tools(tmp_path)
     (tmp_path / "src.txt").write_bytes(b"content\n")
     _across_filesystems(monkeypatch)
-    real_open = open
+    real_os_open = os.open
 
-    def someone_creates_it_first(file, mode="r", *args, **kwargs):
-        if "x" in mode:
+    def someone_creates_it_first(file, flags, *args, **kwargs):
+        if flags & os.O_EXCL:  # the copy's exclusive create: someone got there first
             Path(file).write_bytes(b"someone else's file\n")
-        return real_open(file, mode, *args, **kwargs)
+        return real_os_open(file, flags, *args, **kwargs)
 
-    monkeypatch.setattr(dirs_mod, "open", someone_creates_it_first, raising=False)
+    monkeypatch.setattr(dirs_mod.os, "open", someone_creates_it_first)
     with pytest.raises(FileExistsError):
         await move.execute(source="src.txt", destination="dst.txt")
 
     assert (tmp_path / "dst.txt").read_bytes() == b"someone else's file\n"
     assert (tmp_path / "src.txt").read_bytes() == b"content\n"
     assert journal.entries == []
+
+
+async def test_a_destination_edited_during_the_final_source_check_is_not_overwritten(
+    tmp_path, journal, monkeypatch
+):
+    """The destination is checked last, nearest the swap: an edit made while the source is
+    being hashed for its final check is caught, not overwritten."""
+    _, read, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_bytes(b"source\n")
+    (tmp_path / "dst.txt").write_bytes(b"destination\n")
+    await read.execute(file_path="dst.txt")
+    real_hash = mut.file_sha256
+    source_hashes = []
+
+    def hash_then_user_edits(path):
+        result = real_hash(path)
+        if Path(path).name == "src.txt":
+            source_hashes.append(path)
+            if len(source_hashes) == 2:  # the final source check
+                (tmp_path / "dst.txt").write_bytes(b"edited during that check\n")
+        return result
+
+    monkeypatch.setattr(mut, "file_sha256", hash_then_user_edits)
+    with pytest.raises(mut.FileConflictError, match="dst.txt"):
+        await move.execute(source="src.txt", destination="dst.txt", overwrite=True)
+
+    assert len(source_hashes) == 2
+    assert (tmp_path / "dst.txt").read_bytes() == b"edited during that check\n"
+    assert (tmp_path / "src.txt").read_bytes() == b"source\n"
+    assert journal.entries == []
+
+
+async def test_a_failed_cross_filesystem_copy_leaves_no_partial_file(
+    tmp_path, journal, monkeypatch
+):
+    import velune.tools.filesystem.dirs as dirs_mod
+
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "src.txt").write_bytes(b"content\n" * 1000)
+    _across_filesystems(monkeypatch)
+
+    def disk_full(reader, writer, *args):
+        writer.write(reader.read(100))
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(dirs_mod.shutil, "copyfileobj", disk_full)
+    with pytest.raises(OSError, match="No space"):
+        await move.execute(source="src.txt", destination="dst.txt")
+
+    assert not (tmp_path / "dst.txt").exists()
+    assert (tmp_path / "src.txt").read_bytes() == b"content\n" * 1000
+    assert journal.entries == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+async def test_a_cross_filesystem_copy_is_private_until_complete(tmp_path, journal, monkeypatch):
+    """A 0600 source is never copied into a file others can read, even mid-copy."""
+    import stat
+
+    import velune.tools.filesystem.dirs as dirs_mod
+
+    _, _, move, _ = _tools(tmp_path)
+    (tmp_path / "secret.txt").write_bytes(b"private\n")
+    os.chmod(tmp_path / "secret.txt", 0o600)
+    _across_filesystems(monkeypatch)
+    real_copy = dirs_mod.shutil.copyfileobj
+    modes_while_copying = []
+
+    def watching(reader, writer, *args):
+        modes_while_copying.append(stat.S_IMODE(os.fstat(writer.fileno()).st_mode))
+        real_copy(reader, writer, *args)
+
+    monkeypatch.setattr(dirs_mod.shutil, "copyfileobj", watching)
+    old_umask = os.umask(0o022)
+    try:
+        await move.execute(source="secret.txt", destination="moved.txt")
+    finally:
+        os.umask(old_umask)
+
+    assert modes_while_copying == [0o600]
+    assert stat.S_IMODE(os.stat(tmp_path / "moved.txt").st_mode) == 0o600
 
 
 # ── #37: case-only renames, and rewinding them ───────────────────────────────
