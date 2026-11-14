@@ -172,11 +172,23 @@ def _build_slash_command(defn: FileCommandDef, console: Any) -> SlashCommand:
 # ---------------------------------------------------------------------------
 
 
-class FileCommandLoader:
-    """Discovers and loads TOML command files from user and workspace directories."""
+def has_workspace_commands(workspace: Path) -> bool:
+    """True when *workspace* ships any ``.velune/commands/*.toml`` file."""
+    try:
+        return any((workspace / _WORKSPACE_SUBDIR).glob("*.toml"))
+    except OSError:
+        return False
 
-    def __init__(self, workspace: Path | None = None) -> None:
+
+class FileCommandLoader:
+    """Discovers and loads TOML command files from user and (trusted) workspace directories."""
+
+    def __init__(self, workspace: Path | None = None, *, trusted: bool = False) -> None:
         self._workspace = workspace
+        # A workspace command is a shell command chosen by whoever wrote the repository, so
+        # it is only loaded once the user has trusted that directory (see velune.core.trust),
+        # exactly like project hooks and project MCP servers. Fail closed by default.
+        self._trusted = trusted
 
     def load(self, console: Any, existing_names: set[str]) -> list[SlashCommand]:
         """Return SlashCommands loaded from TOML files.
@@ -193,12 +205,18 @@ class FileCommandLoader:
 
         # Workspace-level commands (override user)
         workspace_defs: dict[str, FileCommandDef] = {}
-        if self._workspace:
+        if self._workspace and self._trusted:
             ws_dir = self._workspace / _WORKSPACE_SUBDIR
             for path in sorted(ws_dir.glob("*.toml")):
                 defn = _parse_toml_file(path, source="workspace")
                 if defn:
                     workspace_defs[defn.name] = defn
+        elif self._workspace and has_workspace_commands(self._workspace):
+            _log.info(
+                "Workspace %s is not trusted; its .velune/commands files were not loaded "
+                "(run /trust to allow them)",
+                self._workspace,
+            )
 
         # Merge: workspace overrides user
         merged: dict[str, FileCommandDef] = {**user_defs, **workspace_defs}

@@ -200,10 +200,13 @@ class VeluneREPL:
         if trust.is_trusted(workspace):
             return True
 
+        from velune.cli.commands.file_commands import has_workspace_commands
+
         has_project_config = (
             (workspace / ".mcp.json").exists()
             or (workspace / "velune.toml").exists()
             or (workspace / ".velune" / "hooks.json").exists()
+            or has_workspace_commands(workspace)
         )
         if not has_project_config:
             return False
@@ -212,8 +215,8 @@ class VeluneREPL:
 
         self.console.print(
             f"[yellow]This workspace ({workspace}) is not trusted.[/yellow]\n"
-            "[dim]It contains project-level hook / MCP / provider config that can "
-            "run local commands and redirect API traffic.[/dim]"
+            "[dim]It contains project-level hook / MCP / provider / slash-command config "
+            "that can run local commands and redirect API traffic.[/dim]"
         )
         try:
             decision = Confirm.ask("  Trust this directory?", default=False)
@@ -809,6 +812,12 @@ class VeluneREPL:
         # the first thing that could run them, not after it.
         trusted = self._ensure_workspace_trust()
         self._hook_dispatcher.set_trusted(trusted)
+        if trusted:
+            # The registry was built before this decision; add the workspace's own
+            # slash commands now that the user has trusted it.
+            from velune.cli.slash_dispatcher import _load_file_commands
+
+            _load_file_commands(self, self._registry, trusted=True)
 
         model_id = self.active_model.model_id if self.active_model else ""
         _hook_start = await self._hook_dispatcher.dispatch_session_start(
