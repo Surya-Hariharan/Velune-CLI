@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from velune.plugins.declarative.paths import is_within
+
 logger = logging.getLogger("velune.plugins.declarative.command")
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -74,6 +76,19 @@ class PluginCommand:
         return text.strip()
 
 
+def _string_list(value: Any) -> list[str]:
+    """A frontmatter value as a list of strings. Anything that is not text is dropped.
+
+    Frontmatter is whatever the plugin's author wrote (``aliases: [1, null]``,
+    ``aliases: 5``), so it is never trusted to be a list of strings.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
 def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
     """Parse a command ``.md`` file and return a ``PluginCommand``.
 
@@ -81,7 +96,7 @@ def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning("Cannot read command file %s: %s", path, exc)
         return None
 
@@ -90,17 +105,25 @@ def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
 
     m = _FRONTMATTER_RE.match(raw)
     if m:
-        fm = _parse_simple_yaml(m.group(1))
+        try:
+            fm = _parse_simple_yaml(m.group(1))
+        except ValueError as exc:
+            # Malformed frontmatter is the author's data: skip this command, keep the rest.
+            logger.warning(
+                "Plugin '%s': command file %s has invalid frontmatter (%s); skipped.",
+                plugin_name,
+                path.name,
+                exc,
+            )
+            return None
         body = raw[m.end() :]
 
     # Command name from filename (strip .md)
     name = path.stem.lower().replace(" ", "-")
 
     description = str(fm.get("description", fm.get("desc", "")))
-    aliases_raw = fm.get("aliases", fm.get("alias", []))
-    aliases = [aliases_raw] if isinstance(aliases_raw, str) else list(aliases_raw)
-    args_raw = fm.get("args", fm.get("argument-hint", []))
-    args = [args_raw] if isinstance(args_raw, str) else list(args_raw)
+    aliases = _string_list(fm.get("aliases", fm.get("alias", [])))
+    args = _string_list(fm.get("args", fm.get("argument-hint", [])))
 
     # Build usage string
     usage = f"/{name}"
@@ -119,13 +142,26 @@ def parse_command_file(path: Path, plugin_name: str) -> PluginCommand | None:
     )
 
 
-def load_plugin_commands(commands_dir: Path, plugin_name: str) -> list[PluginCommand]:
-    """Scan *commands_dir* and return all valid ``PluginCommand`` objects."""
+def load_plugin_commands(
+    commands_dir: Path, plugin_name: str, plugin_root: Path | None = None
+) -> list[PluginCommand]:
+    """Scan *commands_dir* and return all valid ``PluginCommand`` objects.
+
+    With *plugin_root*, a file that resolves outside the plugin (a symlink) is skipped: a
+    command's text is sent to the model, so a link to a secret file must never be read.
+    """
     if not commands_dir.exists() or not commands_dir.is_dir():
         return []
 
     commands: list[PluginCommand] = []
     for md_file in sorted(commands_dir.glob("*.md")):
+        if plugin_root is not None and not is_within(md_file, plugin_root):
+            logger.warning(
+                "Plugin '%s': command file %s resolves outside the plugin; skipped.",
+                plugin_name,
+                md_file.name,
+            )
+            continue
         cmd = parse_command_file(md_file, plugin_name)
         if cmd is not None:
             commands.append(cmd)
@@ -137,6 +173,28 @@ def load_plugin_commands(commands_dir: Path, plugin_name: str) -> list[PluginCom
 # ---------------------------------------------------------------------------
 # Minimal YAML-subset parser (no external dependency)
 # ---------------------------------------------------------------------------
+
+
+def _load_yaml_mapping(text: str) -> dict[str, Any] | None:
+    """Parse *text* with PyYAML as a mapping; ``None`` when PyYAML is not installed.
+
+    Raises ``ValueError`` for anything that is not a usable mapping: invalid YAML, an unsafe
+    tag, a list or a bare scalar. Frontmatter is whatever a plugin's author wrote, so none of
+    those may escape as another exception type, and only the *kind* of failure is reported.
+    """
+    try:
+        import yaml  # type: ignore[import]
+    except ImportError:
+        return None
+    try:
+        loaded = yaml.safe_load(text)
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise ValueError(f"invalid YAML ({type(exc).__name__})") from exc
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"frontmatter must be a mapping, not {type(loaded).__name__}")
+    return loaded
 
 
 def _parse_simple_yaml(text: str) -> dict[str, Any]:
@@ -152,12 +210,9 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
           - item2
     - Booleans: ``true`` / ``false``
     """
-    try:
-        import yaml  # type: ignore[import]
-
-        return yaml.safe_load(text) or {}
-    except ImportError:
-        pass
+    loaded = _load_yaml_mapping(text)
+    if loaded is not None:
+        return loaded
 
     # Pure-stdlib fallback for the common subset
     result: dict[str, Any] = {}

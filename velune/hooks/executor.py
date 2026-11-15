@@ -54,11 +54,17 @@ async def run_hook(
     timeout = min(defn.timeout, MAX_TIMEOUT_SECONDS)
     stdin_data = json.dumps(payload).encode("utf-8")
 
-    # Build subprocess environment
-    proc_env = os.environ.copy()
-    if workspace:
-        proc_env["VELUNE_WORKSPACE"] = str(workspace)
-    proc_env.update(defn.env)
+    # Build subprocess environment. A plugin's hook gets only the minimal environment plus what
+    # the plugin declared; the user's own hooks keep the full one (they wrote them).
+    if defn.scrub_env:
+        from velune.core.child_env import plugin_child_env
+
+        proc_env = plugin_child_env(defn.env, workspace=workspace)
+    else:
+        proc_env = os.environ.copy()
+        if workspace:
+            proc_env["VELUNE_WORKSPACE"] = str(workspace)
+        proc_env.update(defn.env)
     if env_overrides:
         proc_env.update(env_overrides)
 
@@ -90,7 +96,10 @@ async def run_hook(
     except FileNotFoundError:
         logger.warning("Hook command not found: %s", cmd)
         return HookResult()
-    except OSError as exc:
+    except (OSError, ValueError, TypeError) as exc:
+        # ValueError/TypeError: the OS refused the environment or arguments (a NUL, a name with
+        # "="). A hook that cannot start is a no-op like any other failure; it must never raise
+        # into the tool call that fired it. Only the reason is logged, never the environment.
         logger.warning("Hook command failed to start (%s): %s", cmd, exc)
         return HookResult()
 

@@ -201,12 +201,14 @@ class VeluneREPL:
             return True
 
         from velune.cli.commands.file_commands import has_workspace_commands
+        from velune.plugins.declarative.scanner import has_workspace_plugins
 
         has_project_config = (
             (workspace / ".mcp.json").exists()
             or (workspace / "velune.toml").exists()
             or (workspace / ".velune" / "hooks.json").exists()
             or has_workspace_commands(workspace)
+            or has_workspace_plugins(workspace)
         )
         if not has_project_config:
             return False
@@ -215,7 +217,7 @@ class VeluneREPL:
 
         self.console.print(
             f"[yellow]This workspace ({workspace}) is not trusted.[/yellow]\n"
-            "[dim]It contains project-level hook / MCP / provider / slash-command config "
+            "[dim]It contains project-level hook / MCP / provider / slash-command / plugin config "
             "that can run local commands and redirect API traffic.[/dim]"
         )
         try:
@@ -226,13 +228,13 @@ class VeluneREPL:
         if decision:
             trust.trust(workspace)
             self.console.print(
-                "[dim]Workspace trusted. Use [bold]/trust forget[/bold] to revoke.[/dim]"
+                "[dim]Workspace trusted. Run [bold]velune trust forget[/bold] to revoke.[/dim]"
             )
             return True
 
         self.console.print(
-            "[dim]Continuing untrusted — project MCP servers and base_url "
-            "overrides are disabled.[/dim]"
+            "[dim]Continuing untrusted — project MCP servers, hooks, plugins and "
+            "base_url overrides are disabled.[/dim]"
         )
         return False
 
@@ -831,9 +833,12 @@ class VeluneREPL:
         # MCP servers into the registry, and the hot-reload watcher computes its
         # "added" delta from config files only — so a plugin server registered after
         # the connect pass would never connect for the life of the session.
+        # They also load AFTER the trust decision above and receive it: a workspace
+        # plugin's hooks and MCP servers run local commands, so an untrusted workspace's
+        # plugins are never loaded, registered or connected.
         from velune.cli.handlers.plugins import load_and_register_plugins
 
-        await load_and_register_plugins(self)
+        await load_and_register_plugins(self, workspace_trusted=trusted)
 
         try:
             self._mcp_registry.load_config(trusted=trusted)

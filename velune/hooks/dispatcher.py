@@ -74,7 +74,11 @@ class HookDispatcher:
         self.workspace = workspace
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self._trusted = trusted
-        self._bindings: list[HookBinding] | None = None  # lazy-loaded
+        self._bindings: list[HookBinding] | None = None  # lazy-loaded from config files
+        # Hooks a plugin contributes, kept apart from the file-loaded ones and keyed by the
+        # plugin that owns them: invalidating the cache must not drop them, and disabling
+        # or reloading a plugin must be able to remove exactly its own.
+        self._plugin_bindings: dict[str, list[HookBinding]] = {}
 
     @property
     def trusted(self) -> bool:
@@ -97,6 +101,7 @@ class HookDispatcher:
     # ------------------------------------------------------------------
 
     def _ensure_loaded(self) -> list[HookBinding]:
+        """Every active binding: the ones from config files, then each plugin's own."""
         if self._bindings is None:
             self._bindings = load_hooks(self.workspace, trusted=self._trusted)
             logger.debug(
@@ -104,7 +109,22 @@ class HookDispatcher:
                 len(self._bindings),
                 self.workspace,
             )
-        return self._bindings
+        if not self._plugin_bindings:
+            return self._bindings
+        plugin_bindings = [b for owned in self._plugin_bindings.values() for b in owned]
+        return [*self._bindings, *plugin_bindings]
+
+    def add_plugin_bindings(self, owner: str, bindings: list[HookBinding]) -> None:
+        """Give *owner*'s hooks to the dispatcher, replacing any it had before.
+
+        Replacing (not appending) makes wiring a plugin twice harmless: it can never end up
+        with duplicate hooks.
+        """
+        self._plugin_bindings[owner] = list(bindings)
+
+    def remove_plugin_bindings(self, owner: str) -> bool:
+        """Remove every hook *owner* contributed. Returns whether it had any. Idempotent."""
+        return self._plugin_bindings.pop(owner, None) is not None
 
     def invalidate_cache(self) -> None:
         """Force-reload hooks from disk on the next dispatch call."""

@@ -41,6 +41,10 @@ class ServerConfig:
     # Common
     env: dict[str, str] = field(default_factory=dict)
     timeout: int = 30
+    # True for a server a plugin registered: a stdio process gets the minimal environment from
+    # velune.core.child_env (plus ``env``), not Velune's whole one. Servers from the user's
+    # own config keep the full environment. Never read from a config file.
+    scrub_env: bool = False
 
     @classmethod
     def from_dict(cls, name: str, d: dict[str, Any]) -> ServerConfig:

@@ -128,7 +128,7 @@ toward that goal; they reduce risk and do not eliminate it.
 | Managed command runner (no shell, allowlist, environment scrubbing, resource limits) | Enabled | `velune/execution/sandbox.py` |
 | OS-level isolation through a Docker container | **Optional, off by default** | `velune/execution/docker_sandbox.py` |
 | Outbound URL validation for web fetch and MCP | Enabled | `velune/tools/web/validator.py`, `velune/mcp/security.py` |
-| Workspace trust for project-level MCP servers, hooks and `base_url` overrides | Enabled | `velune/core/trust.py` |
+| Workspace trust for project-level MCP servers, hooks, plugins, slash commands and `base_url` overrides | Enabled | `velune/core/trust.py` |
 | Encrypted credential store | Enabled | `velune/providers/crypto.py` |
 | Log, traceback and tool-output redaction of known key formats and of connector credentials loaded at runtime | Enabled | `velune/core/redaction.py` |
 | Integration permission scopes, resource ownership and compose-file inspection | Enabled | `velune/permissions/`, `velune/resources/` |
@@ -367,6 +367,93 @@ is no loader for arbitrary plugin Python code; an earlier experimental
 code-plugin loader was disabled by default, unreachable from any shipped command,
 and has been removed. Treat plugin hook scripts as arbitrary code that you choose
 to run.
+
+**Workspace plugins need a trusted workspace.** A plugin under
+`<workspace>/.velune/plugins/` is project configuration written by whoever wrote the
+repository, and its hooks and MCP servers run local commands. It is therefore handled like
+a project `.mcp.json` or `.velune/hooks.json`: its commands, hooks and MCP servers are
+loaded, registered and connected only for a directory you have trusted
+(`velune trust add`, or answer yes to the trust prompt, which also appears when a
+repository ships only a plugin). Declining leaves workspace plugins completely inactive:
+they are not read, not registered and their MCP servers are never started. Plugins under
+`~/.velune/plugins` belong to you and load whatever the workspace trust, including when
+the workspace is your home directory and the two folders are the same. The decision is
+taken once, before any plugin is loaded, and the plugin manager refuses a workspace plugin
+again when it wires hooks or registers MCP servers. Every plugin folder carries an origin
+(`user`, `workspace` or `extra`); a folder is identified by the physical directory, not by how
+its path is spelled, and a path that no longer names the directory it was registered for is
+skipped rather than scanned. A plugin with any other origin is never trusted. Trust is
+recorded per directory, not per plugin or per version of its contents; a trusted
+workspace's plugins can change with the repository, as its hooks do.
+
+**Revocation.** Everything a plugin registers (hooks, MCP servers, slash commands) is
+owned by that plugin in the registry that holds it. `/plugin disable`, `/plugin reload`
+and losing workspace trust remove exactly what that plugin registered and nothing else:
+its hooks stop firing, its MCP servers and their tools stop being offered or callable at
+once (the server processes are closed in the background), and its commands are removed. A
+plugin command also checks that its plugin is still active when it runs, so a stale
+reference cannot outlive the plugin. Wiring is idempotent (reloading repeatedly never
+duplicates hooks, servers or commands) and all-or-nothing per plugin: one bad server entry
+leaves none of its siblings registered, and a plugin whose files became invalid loses what
+it had registered rather than keeping it.
+
+**Built-in commands cannot be shadowed.** The slash-command registry seals every built-in
+name and alias once they are registered. A plugin command or a command file cannot take a
+sealed key, a reserved name (`trust`, which is the `velune trust` command, not a slash
+command), or a key another plugin already holds (the first registration wins). Keys are
+normalized the way the REPL parses input, so case, padding and a leading `/` do not
+matter. A refused name refuses the whole command; a refused alias drops only the alias.
+
+**Plugin identity and precedence.** A plugin's name is its identity (it namespaces its MCP
+servers), so it must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; anything else is rejected.
+When a user plugin and a workspace plugin share a name, the user's is used and the
+workspace's is skipped with a warning, whatever order the folders are searched in (then an
+extra path's over a workspace's). A project that wants its own version must name it
+differently.
+
+**Manifest paths are confined to the plugin.** The folders and files a manifest declares
+(`commands`, `skills`, `hooks`, `mcpServers`) must be plain relative paths: absolute,
+drive, UNC, rooted and `..` paths are rejected on every platform, and the resolved path
+must stay inside the plugin after symlinks are followed (components are compared, never
+string prefixes). A command or skill file that is a symlink out of the plugin is skipped,
+because a command's text is sent to the model. An invalid declared path rejects the whole
+plugin (no partial registration), and one plugin that fails to load never costs the others.
+The check is repeated where a file is read, which narrows but cannot close a window in
+which a link is swapped after the check.
+
+**Malformed plugin data is contained to the plugin that holds it.** Everything a plugin
+ships (command and skill frontmatter, `plugin.json`, `hooks.json`, `.mcp.json`) is written
+by its author and can have any shape: a list where a mapping belongs, invalid YAML, `null`
+or numbers where text belongs, a name containing `=`. Each of these is rejected as a
+handled failure that skips that file or that plugin with a warning naming the kind of
+failure (never the data); the plugin then registers nothing, and no other plugin is
+affected, including your own, whose hooks keep loading. Command and skill frontmatter must
+be a YAML mapping and MCP entries must have text `command`, `url` and `args`. The setup
+steps for commands, hooks and MCP servers also run independently, so one failing never
+stops the next.
+
+**Plugin child processes get a minimal environment.** A plugin's hooks and stdio MCP
+servers no longer inherit Velune's environment (provider keys, cloud credentials, tokens).
+They receive a short allowlist (`PATH`, home and temp folders, the standard `LANG`/`LC_*`
+locale variables by name, terminal, and on Windows the system folders), `VELUNE_WORKSPACE` for hooks, and whatever the plugin declares
+in its own `env`. There is deliberately no `${VAR}` forwarding: a plugin that needs a
+credential has to be given it by value in a config you can read, and a plugin that relied
+on an inherited variable (`PYTHONPATH`, a proxy setting, a token) must now declare it. This
+applies to plugins of every origin; your own `~/.velune/hooks.json` and `~/.mcp.json`
+entries are written by you and keep the full environment.
+
+Remaining limitations, stated plainly:
+
+- A plugin's hook and MCP `command` text is not parsed or sandboxed; once a plugin is
+  trusted it can run anything its commands say, as a program you chose to run. Trust is
+  per directory, not bound to the plugin's contents, so a trusted workspace's plugins can
+  change with the repository.
+- Trust is read at startup. Revoking it with `velune trust forget` in another process does
+  not reach a running session.
+- The model-run command sandbox and your own hooks and servers still receive the full
+  environment (only denylisting a few loader variables in the former).
+- Path confinement is checked at load and again at use; a symlink swapped in between can
+  still win a race.
 
 ---
 
@@ -615,8 +702,9 @@ read-only tools unless `VELUNE_MCP_ALLOW_MUTATIONS=1` is set. See
 Separately from URL-level checks, `velune trust add|list|forget`
 (`velune/core/trust.py`) records which directories you trust. Project-level
 `.mcp.json` servers (which can start local processes), project hooks
-(`.velune/hooks.json`) and `base_url` overrides in a project `velune.toml` (which
-can redirect authenticated API traffic) are honored only for trusted directories.
+(`.velune/hooks.json`), workspace plugins (`.velune/plugins/`) and `base_url` overrides in a
+project `velune.toml` (which can redirect authenticated API traffic) are honored only for
+trusted directories.
 For an untrusted directory they are skipped and user-level configuration applies.
 The rest of a project `velune.toml` is still read. Setting `VELUNE_TRUST_ALL=1`
 disables this gate; it is intended for CI and containers whose workspace is

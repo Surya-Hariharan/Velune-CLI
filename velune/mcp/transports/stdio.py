@@ -53,8 +53,14 @@ class StdioConnection(MCPConnection):
                 f"stdio server '{self.config.name}' has no 'command' configured."
             )
 
-        proc_env = {**os.environ}
-        proc_env.update(self.config.env)
+        if self.config.scrub_env:
+            # A plugin's server: only the minimal environment plus what the plugin declared.
+            from velune.core.child_env import plugin_child_env
+
+            proc_env = plugin_child_env(self.config.env)
+        else:
+            proc_env = {**os.environ}
+            proc_env.update(self.config.env)
 
         params = StdioServerParameters(
             command=self.config.command,
