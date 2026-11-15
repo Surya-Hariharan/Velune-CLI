@@ -255,7 +255,20 @@ isolation is available only through the optional Docker sandbox described below.
   one (`grep -r KEY .`, `git log -p`) is not detected.
 - **Environment scrubbing.** `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `PYTHONPATH`,
   `PYTHONSTARTUP`, `BASH_ENV` and similar injection vectors are removed from the
-  child environment.
+  child environment. This removes ways to inject code into the command; it is not
+  secret filtering. Every other variable is inherited, including API keys and tokens
+  exported in the shell that started Velune, so a program the agent runs can read them.
+- **Git settings that run a program ask first.** `git -c core.fsmonitor=…`,
+  `-c core.sshCommand=…`, `git config core.hooksPath …`, a credential helper, an alias,
+  a remote URL rewrite and similar settings make git itself start a program that need not
+  be on the allowlist. Setting one, for a single command or in the repository's config, is
+  high-risk and is confirmed in every mode, as is any `git config --global`/`--system`
+  write. `git grep --no-index`/`--untracked` asks too, because it reads ignored files.
+- **Commits that would add a credentials file ask first.** The `git_commit` tool stages
+  every change by default; if that includes a file `read_file` treats as a secret (`.env`,
+  a private key, `.npmrc`, `.git-credentials` …) the commit is confirmed in every mode and
+  the prompt names the files. `git add`/`git commit -a` through `execute_command` are
+  judged the same way.
 - **Resource and lifetime limits.** A wall-clock timeout and a memory ceiling are
   enforced by killing the entire process tree (`psutil`), so descendants do not
   outlive a timeout or limit breach.

@@ -92,6 +92,38 @@ _GIT_GLOBAL_WITH_VALUE = frozenset(
 # Subcommands that send commits, refs or objects to another repository or service.
 _GIT_REMOTE_MUTATIONS = frozenset({"push", "send-pack", "svn", "lfs", "cvsexportcommit", "p4"})
 
+# git settings whose value is a program git runs, or that redirect where git reads code or
+# sends data. Setting one (``git -c key=value ...`` or ``git config key value``) is a way to run
+# a program that is not on the executable allowlist, so it is never an ordinary command.
+_GIT_EXEC_CONFIG = re.compile(
+    r"^(?:"
+    r"alias\..+"
+    r"|core\.(?:fsmonitor|sshcommand|pager|editor|hookspath|gitproxy|askpass|attributesfile|worktree)"
+    r"|credential\.(?:.+\.)?helper"
+    r"|diff\.external|diff\..+\.(?:command|textconv)"
+    r"|difftool\..+\.cmd|mergetool\..+\.cmd"
+    r"|merge\..+\.driver"
+    r"|filter\..+\.(?:clean|smudge|process)"
+    r"|pager\..+"
+    r"|sequence\.editor"
+    r"|gpg\.program|gpg\..+\.program"
+    r"|uploadpack\.packobjectshook"
+    r"|protocol\.(?:.+\.)?allow"
+    r"|remote\..+\.(?:url|pushurl|uploadpack|receivepack|proxy|vcs)"
+    r"|url\..+\.(?:insteadof|pushinsteadof)"
+    r"|submodule\..+\.update"
+    r"|include\.path|includeif\..+\.path"
+    r"|init\.templatedir"
+    r"|http\.(?:.+\.)?proxy|http\.(?:.+\.)?sslverify"
+    r")$",
+    re.IGNORECASE,
+)
+_GIT_CONFIG_VERBS = frozenset({"get", "set", "unset", "list", "rename-section", "remove-section", "edit"})  # fmt: skip
+_GIT_CONFIG_READ_OPTIONS = frozenset({"-l", "--list", "--show-origin", "--show-scope", "--name-only"})  # fmt: skip
+_GIT_CONFIG_WRITE_OPTIONS = frozenset(
+    {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section"}
+)
+
 _DOCKER_PROGRAMS = frozenset({"docker", "podman", "docker-compose", "podman-compose", "nerdctl"})
 _DOCKER_READ_VERBS = frozenset(
     {
@@ -156,10 +188,72 @@ def _git_command(tokens: list[str]) -> tuple[str, list[str], list[str]]:
     return "", [], global_opts
 
 
+def _exec_config_key(text: str) -> bool:
+    """True when *text* (``key`` or ``key=value``) names a git setting that runs a program."""
+    return bool(_GIT_EXEC_CONFIG.match(text.split("=", 1)[0].strip()))
+
+
+def _analyse_git_config(rest: list[str]) -> _Finding | None:
+    """``git config ...``: writing a program-running setting, or any setting outside the project."""
+    options = [a.lower() for a in rest if a.startswith("-")]
+    positional = [a for a in rest if not a.startswith("-")]
+    if positional[:1] and positional[0].lower() in _GIT_CONFIG_VERBS:
+        verb, positional = positional[0].lower(), positional[1:]
+    else:
+        verb = ""
+    reads = verb in ("get", "list") or any(
+        o in _GIT_CONFIG_READ_OPTIONS or o.startswith("--get") for o in options
+    )
+    writes = not reads and (
+        verb in ("set", "unset", "rename-section", "remove-section", "edit")
+        or any(o in _GIT_CONFIG_WRITE_OPTIONS or o in ("--edit", "-e") for o in options)
+        or len(positional) >= 2
+    )
+    if not writes:
+        return None
+    if any(o in ("--global", "--system") or o.startswith("--file") or o == "-f" for o in options):
+        return CommandClass.HIGH_RISK, "changes git configuration outside this repository"
+    if "--edit" in options or "-e" in options or verb == "edit":
+        return CommandClass.HIGH_RISK, "opens git configuration in an editor"
+    if any(_exec_config_key(a) for a in positional[:1]):
+        return (
+            CommandClass.HIGH_RISK,
+            "sets a git option that makes git run a program (hooks, helpers, remotes)",
+        )
+    return None
+
+
 def _analyse_git(tokens: list[str]) -> _Finding | None:
     sub, rest, global_opts = _git_command(tokens)
     if any(o.lower().startswith("alias.") for o in global_opts):
         return CommandClass.HIGH_RISK, "defines a git alias for this command"
+    # ``git -c core.fsmonitor=CMD status`` / ``-c core.sshCommand=CMD fetch`` make git itself
+    # run CMD, which need not be on the executable allowlist: confirmed in every mode.
+    for index, option in enumerate(global_opts):
+        value = ""
+        if option == "-c" and index + 1 < len(global_opts):
+            value = global_opts[index + 1]
+        elif option.startswith("--config-env"):
+            value = option.split("=", 1)[1] if "=" in option else ""
+            if not value and index + 1 < len(global_opts):
+                value = global_opts[index + 1]
+        if value and _exec_config_key(value):
+            return (
+                CommandClass.HIGH_RISK,
+                "sets a git option that makes git run a program for this command",
+            )
+    if sub == "config":
+        found = _analyse_git_config(rest)
+        if found is not None:
+            return found
+    if sub == "grep" and any(
+        a.startswith("--no-i") or a.startswith("--unt") or a == "--no-exclude-standard"
+        for a in rest
+    ):
+        return (
+            CommandClass.HIGH_RISK,
+            "searches files git does not track, which includes ignored credential files",
+        )
     if sub in _GIT_REMOTE_MUTATIONS:
         return CommandClass.HIGH_RISK, "publishes to a remote repository"
     if sub == "remote" and rest[:1] and rest[0].lower() in ("add", "set-url", "remove", "rm"):

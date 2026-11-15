@@ -142,6 +142,18 @@ DEFAULT_IGNORE_RULES: tuple[tuple[str, str], ...] = (
     ("secrets.json", _SECRET),
     ("credentials.json", _SECRET),
     (".secrets/", _SECRET),
+    # Everything read_file asks about (velune.permissions.boundary) is hidden from search too:
+    # a search result prints file content, so it must not be a way around that question.
+    ("id_rsa*", _SECRET),
+    ("id_ed25519*", _SECRET),
+    ("id_ecdsa*", _SECRET),
+    (".netrc", _SECRET),
+    (".pypirc", _SECRET),
+    (".npmrc", _SECRET),
+    (".git-credentials", _SECRET),
+    (".ssh/", _SECRET),
+    (".gnupg/", _SECRET),
+    (".aws/", _SECRET),
     (".DS_Store", _NOISE),
     ("Thumbs.db", _NOISE),
     (".idea/", _NOISE),

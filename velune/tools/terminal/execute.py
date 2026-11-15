@@ -71,6 +71,14 @@ class ExecuteCommand(BaseTool):
         # and asks in MANUAL and AUTO, with no session-wide grant. Only what the command writes
         # counts; naming the file as an input (``pytest --env-file .env``) does not.
         writes_secret = bool(secret_among(command_write_targets(command), boundary, run_in))
+        if not writes_secret and klass is not CommandClass.READ_ONLY and "git" in command.lower():
+            # ``git add .`` / ``git commit -a`` put whatever is in the folder into history,
+            # credential files included: the same question the git_commit tool asks.
+            from velune.tools.git.operations import command_stages_secrets
+
+            stage_dir = run_in or boundary.workspace_root
+            if boundary.inside(stage_dir):
+                writes_secret = bool(command_stages_secrets(command, stage_dir))
         if klass is CommandClass.READ_ONLY:
             # read_file asks before showing a credentials file; a "read-only" command that
             # names one (cat .env) must not be a way around that.

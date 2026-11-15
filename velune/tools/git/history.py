@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from velune.execution.path_guard import PathGuard
+from velune.execution.path_guard import PathGuard, resolve_in_workspace
 from velune.tools.base.tool import BaseTool, ToolPermission
 
 
@@ -65,8 +65,7 @@ class GitLog(BaseTool):
         directory: str = ".",
         limit: int = 10,
     ) -> list[dict]:
-        guard = PathGuard(self.workspace)
-        safe_root = guard.validate(directory)
+        safe_root = resolve_in_workspace(directory, self.workspace, label=self.get_name())
         _ensure_git_repo(safe_root)
 
         def _fetch() -> list[dict]:
@@ -127,7 +126,7 @@ class GitDiff(BaseTool):
         file_path: str | None = None,
     ) -> str:
         guard = PathGuard(self.workspace)
-        safe_root = guard.validate(directory)
+        safe_root = resolve_in_workspace(directory, self.workspace, label=self.get_name())
         _ensure_git_repo(safe_root)
 
         def _fetch() -> str:
@@ -176,7 +175,7 @@ class GitBlame(BaseTool):
         directory: str = ".",
     ) -> list[dict]:
         guard = PathGuard(self.workspace)
-        safe_root = guard.validate(directory)
+        safe_root = resolve_in_workspace(directory, self.workspace, label=self.get_name())
         _ensure_git_repo(safe_root)
 
         raw = Path(file_path)

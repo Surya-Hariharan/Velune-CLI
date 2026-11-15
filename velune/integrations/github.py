@@ -189,7 +189,11 @@ class GitHubProvider(BaseGitProvider):
             )
         if resp.status_code == 403:
             # Could be auth or rate-limit
-            msg = resp.json().get("message", "Forbidden")
+            # A proxy or WAF may answer 403 with HTML: do not assume a JSON body.
+            try:
+                msg = str(resp.json().get("message", "Forbidden"))
+            except (ValueError, AttributeError):
+                msg = "Forbidden"
             if "rate limit" in msg.lower():
                 raise RateLimitError(f"GitHub rate limit: {msg}", status_code=403)
             raise AuthenticationError(f"GitHub forbidden: {msg}", status_code=403)

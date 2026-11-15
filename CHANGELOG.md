@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-11-15
+
 ### Added
 
 - **Database integrations on the integration runtime** (PostgreSQL, MySQL / MariaDB, Supabase;
@@ -155,6 +157,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **Git tools act on the opened workspace.** `git_status`, `git_diff`, `git_log`, `git_blame`, `git_branch`,
+  `git_commit` and `git_checkout` resolved their `directory` against the process working directory instead of the
+  workspace, so `velune --workspace <path>` started from another folder made every one of them fail, and a start
+  from a subfolder returned empty blame and diff results. Relative paths are now anchored to the workspace, as
+  the file tools already did; a directory outside the workspace is still refused.
+- **`git_status` reports the right file names.** The first character of the first path was cut off when the first
+  change was unstaged (`app.py` was reported as `pp.py`), a rename was reported as `old -> new`, and a git failure
+  was reported as a clean tree. Paths are now exact, a rename is listed under its new name, and a failure is an
+  error.
+- **GitHub provider:** a `403` answered with a non-JSON body (a proxy or WAF page) is reported as an
+  authentication error instead of crashing with a JSON decode error.
+
 - **DNS rebinding in `web_fetch`.** The URL was validated against one DNS answer and then fetched with a second,
   independent lookup, so a hostile DNS server could answer with a public address first and an internal one
   second. The name is now resolved once, the answer validated, and the connection made to exactly those
@@ -182,6 +196,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   preview no longer labels a new empty file as a deletion.
 
 ### Security
+
+- **Commits no longer pick up credential files unasked.** `git_commit` stages every change by default; if that
+  includes a file Velune treats as a secret (`.env`, a private key, `.npmrc`, `.git-credentials`, ...) that no
+  ignore rule excludes, the commit now needs your confirmation in every mode, the prompt names the files, and an
+  "always allow" grant does not cover it. `git add` / `git commit -a` run through `execute_command` are judged
+  the same way.
+- **Git settings that run a program need approval in every mode.** `git -c core.fsmonitor=...`,
+  `-c core.sshCommand=...`, `git config core.hooksPath ...`, a credential helper, an alias, a remote URL rewrite and
+  similar settings make git start a program that is not on the executable allowlist; in Auto mode they ran without
+  a prompt. They are now high-risk, as is any `git config --global` / `--system` / `--file` write. Reading a
+  setting and ordinary settings (`user.name`, `core.autocrlf`) are unaffected.
+- **Search no longer prints credential files that `read_file` asks about.** `grep_files` and `find_files` hid
+  `.env`, `*.key`, `*.pem` and `secrets.json` but not SSH private keys (`id_rsa*`, `id_ed25519*`, `id_ecdsa*`),
+  `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials` or the `.ssh/`, `.aws/` and `.gnupg/` folders. They are hidden
+  now, a test keeps the two lists in step, and `.git-credentials` is a secret file for `read_file` and writes too.
+- **`git grep --no-index` / `--untracked` asks first**, because it reads files git ignores, credential files
+  included.
+- `/push` refuses a remote name that begins with `-`, so it cannot be read by git as an option.
+- **Documentation:** SECURITY.md now states that the command runner removes code-injection variables only, not
+  secrets: API keys exported in the shell that started Velune are visible to a program the agent runs.
 
 - **HTTP requests cannot reach cloud-metadata or link-local addresses, and a public hostname cannot be used
   to reach loopback or a private network** (resolved addresses are validated and connected to as IP
@@ -222,7 +256,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   connector are registered with the redaction layer, so they are scrubbed from resource results,
   errors and approval previews, and from any tool output that echoes them.
 
-## [0.9.9] - 2026-11-07
 
 ### Added
 

@@ -206,6 +206,9 @@ class GitPushTool(BaseTool):
 
             if target_branch.startswith("-"):
                 raise ValueError(f"Invalid branch name: {target_branch!r}")
+            # Same rule for the remote: "--receive-pack=CMD" must never reach git as an option.
+            if not remote or remote.startswith("-"):
+                raise ValueError(f"Invalid remote name: {remote!r}")
 
             push_args = [remote, f"{target_branch}:{target_branch}"]
             if set_upstream:

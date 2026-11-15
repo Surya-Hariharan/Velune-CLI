@@ -32,6 +32,7 @@ _SECRET_NAME_PATTERNS = (
     ".netrc",
     ".pypirc",
     ".npmrc",
+    ".git-credentials",
 )
 # Directories whose contents are private by nature.
 _SECRET_DIR_NAMES = frozenset({".ssh", ".gnupg", ".aws", ".secrets"})
