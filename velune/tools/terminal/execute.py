@@ -62,13 +62,19 @@ class ExecuteCommand(BaseTool):
 
             outside = bool(command_paths_outside(command, boundary))
         klass, why = classify(command)
-        if klass is CommandClass.READ_ONLY:
-            from velune.permissions.boundary import command_paths_secret
+        from velune.permissions.boundary import command_paths_secret, secret_among
+        from velune.permissions.commands import command_write_targets
 
+        run_in = boundary.resolve(directory) if directory else None
+        # Changing a credentials file (``> .env``, ``Set-Content .env``, ``cp x .env``) is
+        # sensitive whatever the command is classified as: the policy then denies it in PLAN
+        # and asks in MANUAL and AUTO, with no session-wide grant. Only what the command writes
+        # counts; naming the file as an input (``pytest --env-file .env``) does not.
+        writes_secret = bool(secret_among(command_write_targets(command), boundary, run_in))
+        if klass is CommandClass.READ_ONLY:
             # read_file asks before showing a credentials file; a "read-only" command that
             # names one (cat .env) must not be a way around that.
-            run_in = boundary.resolve(directory) if directory else None
-            secret = bool(command_paths_secret(command, boundary, run_in))
+            secret = writes_secret or bool(command_paths_secret(command, boundary, run_in))
             return [Action(ActionType.READ, command, why, outside_workspace=outside, secret=secret)]
         return [
             Action(
@@ -80,6 +86,7 @@ class ExecuteCommand(BaseTool):
                     CommandClass.BLOCKED: Risk.HIGH,
                 }.get(klass, Risk.MEDIUM),
                 outside_workspace=outside,
+                secret=writes_secret,
                 blocked=klass is CommandClass.BLOCKED,
                 detail=str(directory) if directory else "",
             )
