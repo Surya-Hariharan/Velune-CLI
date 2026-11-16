@@ -137,8 +137,8 @@ rag = [
 # Per-Python lines track the first release with a wheel for that Python.
 parsing = [
     "tree-sitter>=0.23.0,<1; python_version < '3.13'",
-    "tree-sitter>=0.23.1,<1; python_version == '3.13'",
-    "tree-sitter>=0.25.1,<1; python_version >= '3.14'",
+    "tree-sitter>=0.26.0,<1; python_version == '3.13'",
+    "tree-sitter>=0.26.0,<1; python_version >= '3.14'",
     "tree-sitter-python>=0.23.0",
     "tree-sitter-typescript>=0.23.0",
     "tree-sitter-rust>=0.23.0",
