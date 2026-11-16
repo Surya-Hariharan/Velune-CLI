@@ -185,7 +185,7 @@ dev = [
     "build>=1.0.0",
     # 7.0+ reads Metadata-Version 2.5, which current Hatchling emits.
     "twine>=7.0.0",
-    "pytest>=8.0.0",
+    "pytest>=9.2.0",
     "pytest-asyncio>=0.23.0",
     # Real-terminal (PTY) audit harness, tests/tui: ConPTY on Windows,
     # ptyprocess elsewhere, and pyte to read the emulated screen back.
