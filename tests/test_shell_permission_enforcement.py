@@ -16,6 +16,7 @@ Regressions for two findings of the v0.9 acceptance audit:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,18 @@ from velune.permissions.commands import CommandClass, classify
 from velune.permissions.policy import PolicyState, Verdict, authorize
 from velune.tools.safety import ApprovalMode, classify_command, has_shell_syntax, split_segments
 from velune.tools.terminal.execute import ExecuteCommand
+
+
+def _auto_gate_verdicts(command: str) -> tuple[Verdict, ...]:
+    """What AUTO may answer for a command that must never run unasked.
+
+    ``cmd /c ...`` is Windows syntax. On POSIX ``/c`` is a path at the filesystem root, so the
+    command also names a location outside the workspace and AUTO refuses it outright (DENY)
+    instead of asking. Both keep it from running without a person; only ALLOW would be a bug.
+    """
+    if os.name != "nt" and command.lower().startswith("cmd /"):
+        return (Verdict.ASK, Verdict.DENY)
+    return (Verdict.ASK,)
 
 
 def _verdict(command: str, mode: ExecutionMode, tmp_path: Path) -> Verdict:
@@ -288,7 +301,7 @@ def test_integration_mutations_are_high_risk(command: str) -> None:
 def test_integration_mutations_ask_in_auto_and_manual_and_deny_in_plan(
     command: str, tmp_path: Path
 ) -> None:
-    assert _verdict(command, ExecutionMode.AUTO, tmp_path) is Verdict.ASK, command
+    assert _verdict(command, ExecutionMode.AUTO, tmp_path) in _auto_gate_verdicts(command), command
     assert _verdict(command, ExecutionMode.MANUAL, tmp_path) is Verdict.ASK, command
     assert _verdict(command, ExecutionMode.PLAN, tmp_path) is Verdict.DENY, command
 
@@ -307,7 +320,12 @@ READ_ONLY = [
     "ls",
     "ls -la",
     "dir",
-    "dir /b",
+    pytest.param(
+        "dir /b",
+        marks=pytest.mark.skipif(
+            os.name != "nt", reason="Windows command syntax: on POSIX the argument is a path"
+        ),
+    ),
     "echo hello",
     "echo",
     "cat README.md",
@@ -438,7 +456,12 @@ def test_wrapper_recursion_is_bounded() -> None:
         "echo hi 2>../x.txt",
         "echo hi &>../x.txt",
         "cat <../x.txt",
-        "echo hi >C:/Windows/x.txt",
+        pytest.param(
+            "echo hi >C:/Windows/x.txt",
+            marks=pytest.mark.skipif(
+                os.name != "nt", reason="Windows command syntax: on POSIX the argument is a path"
+            ),
+        ),
     ],
 )
 def test_a_redirect_target_outside_the_workspace_is_never_allowed_in_auto(

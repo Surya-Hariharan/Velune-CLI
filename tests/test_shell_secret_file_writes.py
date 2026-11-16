@@ -13,6 +13,7 @@ Secret files are whatever ``velune.permissions.boundary.is_secret_path`` recogni
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,18 @@ from velune.permissions.boundary import Boundary, secret_among
 from velune.permissions.commands import command_write_targets
 from velune.permissions.policy import PolicyState, Verdict, authorize
 from velune.tools.terminal.execute import ExecuteCommand
+
+
+def _auto_gate_verdicts(command: str) -> tuple[Verdict, ...]:
+    """What AUTO may answer for a command that must never run unasked.
+
+    ``cmd /c ...`` is Windows syntax. On POSIX ``/c`` is a path at the filesystem root, so the
+    command also names a location outside the workspace and AUTO refuses it outright (DENY)
+    instead of asking. Both keep it from running without a person; only ALLOW would be a bug.
+    """
+    if os.name != "nt" and command.lower().startswith("cmd /"):
+        return (Verdict.ASK, Verdict.DENY)
+    return (Verdict.ASK,)
 
 
 def _actions(command: str, workspace: Path, directory: str | None = None):
@@ -149,7 +162,7 @@ def test_a_secret_file_write_is_denied_in_plan_and_asks_in_manual_and_auto(
 ) -> None:
     assert _verdict(command, ExecutionMode.PLAN, tmp_path) is Verdict.DENY, command
     assert _verdict(command, ExecutionMode.MANUAL, tmp_path) is Verdict.ASK, command
-    assert _verdict(command, ExecutionMode.AUTO, tmp_path) is Verdict.ASK, command
+    assert _verdict(command, ExecutionMode.AUTO, tmp_path) in _auto_gate_verdicts(command), command
 
 
 def test_auto_asks_for_a_secret_write_that_is_otherwise_ordinary(tmp_path: Path) -> None:
