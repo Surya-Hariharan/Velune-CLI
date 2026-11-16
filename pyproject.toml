@@ -69,7 +69,7 @@ dependencies = [
     "typer>=0.16.0",
     "rich>=13.9.0",
     "platformdirs>=4.2.0",
-    "keyring>=24.0.0",
+    "keyring>=25.7.0",
     "prompt-toolkit>=3.0.48,<4",
     "pathspec>=0.12.0",
     # `velune doctor` evaluates our own requirement markers/specifiers with it;
