@@ -25,7 +25,7 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   # The wheel is pure Python, but only these three operating systems are
-  # covered by CI (see the README's "Platform support" table).
+  # covered by CI (see the "Platform support" table in docs/reference.md).
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
   "Operating System :: POSIX :: Linux",

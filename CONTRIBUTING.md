@@ -291,7 +291,7 @@ def test_nebula_cost_table_entry():
 
 ### Step 8 — Update the README
 
-Add `Nebula` to the Providers table in [README.md](README.md).
+Add `Nebula` to the Providers table in [docs/reference.md](docs/reference.md).
 
 ---
 

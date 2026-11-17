@@ -4,7 +4,7 @@
 56 commands across 12 categories.*
 
 For commands run in the terminal *before* the REPL starts (`velune run`,
-`velune doctor`, …), see the [README command table](../README.md#commands)
+`velune doctor`, …), see the [command table in the reference](reference.md#commands)
 or run `velune --help`.
 
 ---
@@ -397,4 +397,4 @@ they get tab-completion, palette search, and `/help` listing for free.
 
 ---
 
-Back to [README.md § Commands](../README.md#commands).
+Back to [reference.md § Commands](reference.md#commands).

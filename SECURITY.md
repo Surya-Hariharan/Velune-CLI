@@ -739,7 +739,7 @@ already known to be safe and should not be set otherwise.
 - The former `llamacpp` extra was permanently removed: `llama-cpp-python` pulls
   in `diskcache` 5.6.3 or earlier, which deserializes cache entries with `pickle`
   (code execution if an attacker can write to the cache directory), and no fixed
-  release exists. See [Optional extras](README.md#optional-extras) in the README.
+  release exists. See [Optional extras](docs/reference.md#optional-extras) in the technical reference.
 - `uv.lock` pins the resolved dependency graph, including versions and hashes.
   The CI step `Verify lockfile reproducibility` (`uv lock --check`) fails if the
   lock falls out of sync with `pyproject.toml`, and `pip-audit` checks the

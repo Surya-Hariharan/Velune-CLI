@@ -5,7 +5,7 @@
 This guide explains how to work with Velune: what to do first on a new project, how to
 choose a model and a level of autonomy, how to review changes, and what to check when
 something looks wrong. It assumes Velune is already installed (see the
-[README](../README.md#installation)). For the exact syntax of every REPL command, see
+[reference](reference.md#installation)). For the exact syntax of every REPL command, see
 [Slash Commands](slash-commands.md); for how the codebase is put together, see the
 [Development Guide](development.md).
 
@@ -122,7 +122,7 @@ code, small edits). Reserve your largest or most expensive model for `FULL` tier
 paying full-council cost for a one-line question.
 
 Remember that a cloud model receives your prompt and the repository context Velune attaches
-to it. The [README](../README.md#local-and-cloud-providers) explains which providers keep
+to it. The [reference](reference.md#local-and-cloud-providers) explains which providers keep
 your data on your machine.
 
 ---

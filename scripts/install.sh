@@ -11,7 +11,7 @@
 #
 # Before downloading anything the installer checks the operating system and
 # CPU architecture, and stops with an explanation on a platform Velune does not
-# support (see "Platform support" in the README).
+# support (see "Platform support" in docs/reference.md).
 #
 # Environment overrides:
 #   VELUNE_PACKAGE         what to install (default: velune-cli; may be a version
@@ -23,7 +23,7 @@ set -eu
 
 PACKAGE="${VELUNE_PACKAGE:-velune-cli}"
 PYTHON_VERSION="${VELUNE_PYTHON:-3.12}"
-SUPPORT_URL="https://github.com/Surya-Hariharan/Velune-CLI#platform-support"
+SUPPORT_URL="https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/reference.md#platform-support"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'velune-install: error: %s\n' "$*" >&2; exit 1; }
