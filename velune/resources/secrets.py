@@ -61,7 +61,9 @@ def load_resource_secret(resource_type: str, name: str) -> dict[str, Any] | None
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
-        logger.warning("Stored config for %s:%s is corrupt; ignoring", resource_type, name)
+        # The connection name is deliberately not logged: it can be a credential reference, and
+        # nothing about a corrupt blob needs it (``/resource status`` shows which one is unusable).
+        logger.warning("A stored %s connection config is corrupt; ignoring it", resource_type)
         return None
     if not isinstance(data, dict):
         return None

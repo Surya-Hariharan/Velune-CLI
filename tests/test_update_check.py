@@ -381,7 +381,8 @@ def test_update_available_exit_10_with_next_step():
     result, calls = run(releases=rel("0.9.9", "0.9.10"))
     assert result.exit_code is ExitCode.UPDATE_AVAILABLE and result.exit_code == 10
     assert result.ok and calls["fetch"] == 1
-    assert "0.9.9 -> 0.9.10" in result.message and "pypi.org" in result.message
+    assert "0.9.9 -> 0.9.10" in result.message
+    assert re.search(r"(?<![\w.])pypi\.org(?![\w])", result.message)
     assert result.manual_command == "uv tool upgrade velune-cli"
     assert result.result == {
         "installed_version": "0.9.9",
