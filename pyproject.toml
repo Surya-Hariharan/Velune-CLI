@@ -181,7 +181,7 @@ dev = [
     "pyright>=1.1.350",
     "pre-commit>=3.6.0",
     "pip-audit>=2.6.0",
-    "bandit[toml]>=1.7.0",
+    "bandit[toml]>=1.9.4",
     "build>=1.0.0",
     # 7.0+ reads Metadata-Version 2.5, which current Hatchling emits.
     "twine>=7.0.0",
