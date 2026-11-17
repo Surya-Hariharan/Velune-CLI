@@ -733,15 +733,34 @@ def test_ignore_files_above_the_workspace_are_not_read(tmp_path):
     assert not matcher(ws).is_ignored(ws / "a.py")
 
 
-def test_a_very_deep_path_is_matched_without_recursion_or_slowness(tmp_path):
+def test_a_very_deep_path_is_matched_without_recursion_or_slowness(tmp_path, monkeypatch):
+    # Measured in work done, not wall-clock time: a seconds threshold flakes on a loaded or
+    # slow-disk machine. A linear number of ignore-file lookups is the property that matters
+    # (a quadratic or recursive walk would blow past the bound or raise RecursionError).
     build(tmp_path, {".gitignore": "*.tmp\n!/keep.tmp\n"})
-    deep = "/".join(f"d{i}" for i in range(500))
+    depth = 500
+    deep = "/".join(f"d{i}" for i in range(depth))
     spec = matcher(tmp_path)
 
-    started = time.perf_counter()
+    lookups = 0
+    real_lstat = os.lstat
+
+    def counting_lstat(path, *args, **kwargs):
+        nonlocal lookups
+        if os.path.basename(os.fspath(path)) in ignore_mod.IGNORE_FILENAMES:
+            lookups += 1
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", counting_lstat)
+
     assert spec.is_ignored(tmp_path / deep / "x.tmp", is_dir=False)
+    assert lookups > 0, "the counter saw no ignore-file lookups, so the bound below proves nothing"
+    assert lookups <= len(ignore_mod.IGNORE_FILENAMES) * (depth + 2)
+
+    settled = lookups  # every directory's rules are now cached: more paths cost no new lookups
     assert not spec.is_ignored(tmp_path / deep / "x.py", is_dir=False)
-    assert time.perf_counter() - started < 1.0
+    assert spec.is_ignored(tmp_path / deep / "y.tmp", is_dir=False)
+    assert lookups == settled
 
 
 def test_the_workspace_root_itself_is_never_ignored(tmp_path):
