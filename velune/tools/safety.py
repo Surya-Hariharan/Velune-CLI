@@ -284,6 +284,97 @@ def _arguments_are_read_only(command: str) -> bool:
         return not any(a.startswith(("--pre", "--hostname-bin")) for a in args)
     if program == "git":
         return _git_is_read_only(args)
+    if program in (
+        "env",
+        "set",
+    ):  # ``env CMD ...`` runs CMD, ``set X=1`` assigns: bare listing only
+        return not raw_args
+    if program == "hostname":  # ``hostname NAME`` renames the machine
+        return all(a.startswith("-") for a in raw_args)
+    if program == "date":  # ``date -s`` and ``date MMDDhhmm`` set the clock
+        return all(a.startswith(("+", "-")) for a in raw_args) and not any(
+            a == "-s" or a.startswith(("--set", "-s")) for a in args
+        )
+    return True
+
+
+def has_shell_syntax(command: str) -> bool:
+    """True when *command* contains unquoted chaining, piping, redirection or substitution.
+
+    The executor never runs a shell, so these characters reach a program as literal arguments
+    today; but the verdict must not depend on that. A line such as ``echo x > f`` or ``git status;
+    git push`` is not "a read-only command" in any shell, and the allow-list (or a future
+    executor) can change. Quotes follow :func:`velune.core.argv.split_command`: backslashes are
+    not escapes, so a quote is closed only by the same quote character.
+    """
+    quote = ""
+    for i, ch in enumerate(command):
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            continue
+        if ch == "`":
+            return True
+        if ch == "$" and command[i + 1 : i + 2] in ("(", "{"):
+            return True
+        if quote == '"':
+            if ch == '"':
+                quote = ""
+            continue
+        if ch in "'\"":
+            quote = ch
+        elif ch in ";|&<>\n\r":
+            return True
+    return False
+
+
+def split_segments(command: str) -> list[str]:
+    """Split *command* at unquoted ``;``, ``|``, ``&`` and newlines into its simple commands."""
+    segments: list[str] = []
+    current: list[str] = []
+    quote = ""
+    for ch in command:
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+            current.append(ch)
+        elif ch in ";|&\n\r":
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    segments.append("".join(current))
+    return [seg.strip() for seg in segments if seg.strip()]
+
+
+def program_name(token: str) -> str:
+    """Lower-cased program of *token* with ``.exe`` removed; a path keeps its separators."""
+    name = token.lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def _matches_safe_prefix(tokens: list[str], prefix: str) -> bool:
+    """Word-aligned prefix match: ``set`` must not match ``Set-Content`` nor ``id`` ``idle``.
+
+    The first word has to be the bare program name (a ``./cat`` planted in the workspace is not
+    ``cat``). A prefix word of ``-`` or ``/`` means "any option".
+    """
+    words = prefix.split()
+    if not words or len(tokens) < len(words):
+        return False
+    first = program_name(tokens[0])
+    if "/" in first or "\\" in first:
+        return False
+    for index, word in enumerate(words):
+        token = first if index == 0 else tokens[index].lower()
+        if token == word:
+            continue
+        if index == len(words) - 1 and word in ("-", "/") and token.startswith(word):
+            continue
+        return False
     return True
 
 
@@ -311,7 +402,6 @@ def classify_command(command: str) -> SafetyVerdict:
     stripped = command.strip()
     # Keep the original for pattern matching; normalize only for prefix matching.
     normalized = _normalize(stripped)
-    lower = normalized.lower()
 
     for pattern in _DANGEROUS_PATTERNS:
         if pattern.search(stripped):
@@ -320,8 +410,18 @@ def classify_command(command: str) -> SafetyVerdict:
                 reason=f"Matches dangerous pattern: {pattern.pattern!r}",
             )
 
+    if has_shell_syntax(stripped):
+        return SafetyVerdict(
+            mode=ApprovalMode.ASK,
+            reason="Contains shell chaining, piping or redirection — approval required",
+        )
+    try:
+        tokens = split_command(stripped)
+    except ValueError:
+        return SafetyVerdict(mode=ApprovalMode.ASK, reason="Malformed command — approval required")
+
     for prefix in _SAFE_PREFIXES:
-        if lower == prefix.rstrip() or lower.startswith(prefix):
+        if _matches_safe_prefix(tokens, prefix):
             if not _arguments_are_read_only(normalized):
                 return SafetyVerdict(
                     mode=ApprovalMode.ASK,

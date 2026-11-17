@@ -32,6 +32,7 @@ _SECRET_NAME_PATTERNS = (
     ".netrc",
     ".pypirc",
     ".npmrc",
+    ".git-credentials",
 )
 # Directories whose contents are private by nature.
 _SECRET_DIR_NAMES = frozenset({".ssh", ".gnupg", ".aws", ".secrets"})
@@ -341,6 +342,9 @@ def _path_like(token: str) -> bool:
     return False
 
 
+_REDIRECTION_PREFIX = re.compile(r"^(?:\d+|&)?(?:>>|>\||>&|>|<)")
+
+
 def command_paths_outside(command: str, boundary: Boundary) -> list[Path]:
     """Paths named in a command line that lie outside the boundary.
 
@@ -357,6 +361,8 @@ def command_paths_outside(command: str, boundary: Boundary) -> list[Path]:
         token = raw.strip("\"'")
         if token.startswith("-") and "=" in token:
             token = token.split("=", 1)[1].strip("\"'")
+        # ``>../x``, ``>>x``, ``2>x``, ``&>x``, ``<x``: the target is glued to the operator.
+        token = _REDIRECTION_PREFIX.sub("", token, count=1) or token
         if not token or not _path_like(token):
             continue
         try:
@@ -389,6 +395,31 @@ def _git_object_path(token: str) -> str | None:
         return rest or None
     path = token.split(":", 1)[1]
     return path or None
+
+
+def secret_among(targets: list[str], boundary: Boundary, cwd: Path | None = None) -> list[Path]:
+    """The credential/secret files among *targets*, path operands a command writes or removes.
+
+    Names are resolved the way :func:`command_paths_secret` resolves them (relative to *cwd*,
+    through links), so a link in the folder that leads to a secret file is seen. Unlike
+    :func:`command_paths_secret` this looks only at the targets it is given, not at everything
+    a command line mentions.
+    """
+    base = cwd if cwd is not None else boundary.workspace_root
+    found: list[Path] = []
+    for token in targets:
+        if not token or "://" in token:
+            continue
+        try:
+            candidate = Path(token).expanduser()
+            if not candidate.is_absolute():
+                candidate = base / candidate
+            resolved = candidate.resolve()
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if is_secret_path(resolved) or is_secret_path(Path(token)):
+            found.append(resolved)
+    return found
 
 
 def command_paths_secret(command: str, boundary: Boundary, cwd: Path | None = None) -> list[Path]:

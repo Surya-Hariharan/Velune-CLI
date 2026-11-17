@@ -11,11 +11,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from velune.execution.path_guard import PathGuard
+from velune.execution.path_guard import resolve_in_workspace
 from velune.tools.base.tool import BaseTool, ToolPermission
 
 
-def _git_run(cwd: Path, *args: str) -> str:
+def _git_run(cwd: Path, *args: str, strip: bool = True) -> str:
     import subprocess
 
     res = subprocess.run(
@@ -29,7 +29,7 @@ def _git_run(cwd: Path, *args: str) -> str:
     )
     if res.returncode != 0:
         raise RuntimeError(f"Git error: {res.stderr.strip() or res.stdout.strip()}")
-    return res.stdout.strip()
+    return res.stdout.strip() if strip else res.stdout
 
 
 def _ensure_git_repo(path: Path) -> Path:
@@ -56,8 +56,7 @@ class GitStatus(BaseTool):
         return "View git repository status"
 
     async def execute(self, directory: str = ".") -> dict:
-        guard = PathGuard(self.workspace)
-        safe_root = guard.validate(directory)
+        safe_root = resolve_in_workspace(directory, self.workspace, label=self.get_name())
         _ensure_git_repo(safe_root)
 
         def _fetch() -> dict:
@@ -67,25 +66,27 @@ class GitStatus(BaseTool):
                 "deleted": [],
                 "untracked": [],
             }
-            try:
-                out = _git_run(safe_root, "status", "--porcelain")
-                for line in out.splitlines():
-                    if len(line) < 4:
-                        continue
-                    xy = line[0:2]
-                    path = line[3:].strip()
-                    if path.startswith('"') and path.endswith('"'):
-                        path = path[1:-1]
-                    if xy == "??":
-                        status["untracked"].append(path)
-                    elif "A" in xy:
-                        status["added"].append(path)
-                    elif "D" in xy:
-                        status["deleted"].append(path)
-                    elif "M" in xy or "R" in xy or "C" in xy or "U" in xy:
-                        status["modified"].append(path)
-            except Exception:
-                pass
+            # Not stripped: the first column of a porcelain line is significant (" M file" is an
+            # unstaged change), and stripping the output used to cut the first character off
+            # the first path. A git failure is raised, never reported as a clean tree.
+            out = _git_run(safe_root, "status", "--porcelain", strip=False)
+            for line in out.splitlines():
+                if len(line) < 4:
+                    continue
+                xy = line[0:2]
+                path = line[3:].strip()
+                if " -> " in path and ("R" in xy or "C" in xy):
+                    path = path.split(" -> ", 1)[1]
+                if path.startswith('"') and path.endswith('"'):
+                    path = path[1:-1]
+                if xy == "??":
+                    status["untracked"].append(path)
+                elif "A" in xy:
+                    status["added"].append(path)
+                elif "D" in xy:
+                    status["deleted"].append(path)
+                elif "M" in xy or "R" in xy or "C" in xy or "U" in xy:
+                    status["modified"].append(path)
             return status
 
         return await asyncio.to_thread(_fetch)
@@ -115,8 +116,7 @@ class GitBranch(BaseTool):
         return "View git branches"
 
     async def execute(self, directory: str = ".") -> dict:
-        guard = PathGuard(self.workspace)
-        safe_root = guard.validate(directory)
+        safe_root = resolve_in_workspace(directory, self.workspace, label=self.get_name())
         _ensure_git_repo(safe_root)
 
         def _fetch() -> dict:
