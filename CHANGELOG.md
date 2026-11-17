@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-## [0.9.9] - 2026-11-15
+## [0.9.9] - Unreleased
 
 ### Added
 
@@ -1740,7 +1740,12 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Security sandbox: workspace write guards, network hygiene, secret scrubbing
 - Full pytest suite: unit, integration, async, and benchmark tests
 
-[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.8...HEAD
+[0.9.9]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.8...HEAD
+[0.9.8]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.7...v0.9.8
+[0.9.7]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.6...v0.9.7
+[0.9.6]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.5...v0.9.6
+[0.9.5]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.3.5...v0.9.4
 [0.9.3-beta.1]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.2...v0.9.3-beta.1
 [0.9.2]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.1...v0.9.2
