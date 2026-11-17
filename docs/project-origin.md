@@ -21,31 +21,36 @@ rewritten or backdated; the commits and tags are the primary record.
 
 ## Release history
 
-Tag dates are Git tag creation dates. CHANGELOG headings carry their own
-dates, which differ from the tag dates for a few early versions; both are
-listed where they differ.
+The **Git tag** and **PyPI** columns state what exists today, checked on 2026-11-17 against `git tag` and the PyPI
+JSON API (commands under [How to verify](#how-to-verify)). A dash means there is none. CHANGELOG headings carry their
+own dates, which differ from the tag dates for a few early versions; both are listed where they differ. A version can
+appear in the CHANGELOG, or in `velune/__init__.py`, without ever having been tagged or published.
 
-| Version | Tag date | Notes |
-| --- | --- | --- |
-| 0.1.0 | no tag | CHANGELOG entry dated 2026-06-05, described as the initial public release |
-| 0.5.0-beta | 2026-06-10 (CHANGELOG: 06-07) | More providers, `/optimus`/`/godly` modes, project-type detection |
-| 0.6.0 | 2026-06-12 | Provider health monitoring, health-aware routing, CI/CD pipeline |
-| 0.9.0-beta | 2026-06-12 | Public beta |
-| 0.9.0 | 2026-06-13 (CHANGELOG: 06-12) | Consolidated AST parsing and council orchestrators |
-| 0.9.1 | 2026-06-21 (CHANGELOG: 06-14) | Stabilization and trust-recovery release |
-| 0.9.2 | 2026-06-23 | Lean default install with opt-in extras |
-| 0.9.3-beta.1 | 2026-06-23 | Instant startup, explicit on-demand cognition |
-| 0.9.3 | 2026-06-24 | `/index` command rework |
-| 0.9.3.1 to 0.9.3.5 | 2026-06-25 to 2026-06-27 | Patch releases |
-| 0.9.4 | 2026-06-28 | Go launcher, Rust native module foundation, Repository Knowledge Graph |
-| 0.9.5 | 2026-07-08 | Resource Connector Framework |
-| 0.9.6 | 2026-07-18 | API-key lifecycle management, incremental repository cognition |
-| 0.9.7 | 2026-07-31 | Terminal zoom-lock investigation, REPL and packaging fixes |
-| 0.9.8 | 2026-10-05 | Install reliability: tested dependency floors, one-line installers, `velune doctor` rework |
-| 0.9.9 | 2026-11-07 | Opt-in native orchestration engine (`velune native`, experimental), local-model recovery, execution modes |
+| Version | Git tag | PyPI | Notes |
+| --- | --- | --- | --- |
+| 0.1.0 | - | - | CHANGELOG entry dated 2026-06-05, described as the initial public release; never tagged or published as this version |
+| 0.5.0-beta | 2026-06-10 (CHANGELOG: 06-07) | - | More providers, `/optimus`/`/godly` modes, project-type detection |
+| 0.6.0 | - | - | CHANGELOG entry (2026-06-12): provider health monitoring, health-aware routing, CI/CD pipeline; never tagged or published |
+| 0.9.0-beta | - | - | CHANGELOG entry (2026-06-12): public beta; never tagged or published as this version |
+| 0.9.0 | 2026-06-13 (CHANGELOG: 06-12) | 2026-06-12 | Consolidated AST parsing and council orchestrators |
+| 0.9.1 | 2026-06-21 (CHANGELOG: 06-14) | 2026-06-21 | Stabilization and trust-recovery release |
+| 0.9.2 | 2026-06-23 | 2026-06-23 | Lean default install with opt-in extras |
+| 0.9.3-beta.1 | 2026-06-23 | 2026-06-23 (as `0.9.3b1`) | Instant startup, explicit on-demand cognition |
+| 0.9.3 | - | - | CHANGELOG entry (2026-06-24): `/index` command rework; version bumped in code (`ae2422f`), never tagged or published |
+| 0.9.3.1 | 2026-06-25 | 2026-06-25 | Patch release |
+| 0.9.3.2 | - | - | Version bumped in code (`7b8a53e`) only; never tagged or published |
+| 0.9.3.3 | 2026-06-26 | 2026-06-26 | Patch release |
+| 0.9.3.4 | 2026-06-26 | 2026-06-26 | Patch release |
+| 0.9.3.5 | - | 2026-06-27 | Published to PyPI and listed in the CHANGELOG, but never tagged in Git |
+| 0.9.4 | 2026-06-28 | 2026-06-27 | Go launcher, Rust native module foundation, Repository Knowledge Graph |
+| 0.9.5 | 2026-07-08 (lightweight tag) | 2026-07-08 | Resource Connector Framework |
+| 0.9.6 | 2026-07-18 | 2026-07-18 | API-key lifecycle management, incremental repository cognition |
+| 0.9.7 | 2026-07-31 | 2026-07-31 | Terminal zoom-lock investigation, REPL and packaging fixes |
+| 0.9.8 | 2026-10-05 | 2026-10-05 | Install reliability: tested dependency floors, one-line installers, `velune doctor` rework |
+| 0.9.9 | - | - | **Not released.** Version bumped in code on 2026-11-07 (`3aa489e`); the CHANGELOG section is marked unreleased and keeps growing with the features merged since |
 
-Commits after `v0.9.9` on `main` are unreleased (see the `[Unreleased]`
-section of the CHANGELOG).
+`v0.9.8` is the latest tag, GitHub Release and PyPI version. Every commit after it on `main`, including the 0.9.9
+version bump, is unreleased (see the `[Unreleased]` and `[0.9.9]` sections of the CHANGELOG).
 
 ## Architecture and feature milestones
 
@@ -82,7 +87,7 @@ relevant code.
   surface; `/fork`, `/retry`, `/trace` and `/theme` commands; provenance files
   (AUTHORS, NOTICE, GOVERNANCE); and a documentation overhaul with tests that
   keep the command reference in sync with the code.
-- **0.9.9:** the opt-in, experimental native orchestration engine (`velune native`, with an optional
+- **0.9.9 (unreleased):** the opt-in, experimental native orchestration engine (`velune native`, with an optional
   `--plan-review` mode; see `docs/native-engine.md`), local-model recovery, and the Manual/Plan/Auto
   execution modes.
 
@@ -105,6 +110,7 @@ Vulnerability reporting is described in [SECURITY.md](../SECURITY.md).
 ```bash
 git log --reverse --format='%h %ad %an %s' --date=short   # full history
 git tag --sort=creatordate --format='%(refname:short) %(creatordate:short)'
+curl -s https://pypi.org/pypi/velune-cli/json | python -c "import sys,json; d=json.load(sys.stdin)['releases']; [print(v, min(f['upload_time'][:10] for f in fs)) for v,fs in d.items() if fs]"
 ```
 
 Releases are produced by the tag-triggered workflow in
