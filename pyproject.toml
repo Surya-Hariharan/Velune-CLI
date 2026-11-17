@@ -61,16 +61,16 @@ classifiers = [
 dependencies = [
     # Core CLI + config
     "pydantic>=2.11.0,<3; python_version < '3.14'",
-    "pydantic>=2.12.0,<3; python_version >= '3.14'",
-    "pydantic-settings>=2.14.2",
+    "pydantic>=2.14.3,<3; python_version >= '3.14'",
+    "pydantic-settings>=2.15.0",
     "toml>=0.10.2",
     # stdlib `tomllib` only exists on 3.11+; backport for 3.10.
     "tomli>=2.0.1; python_version < '3.11'",
-    "typer>=0.16.0",
+    "typer>=0.29.0",
     "rich>=13.9.0",
-    "platformdirs>=4.2.0",
+    "platformdirs>=4.12.4",
     "keyring>=24.0.0",
-    "prompt-toolkit>=3.0.48,<4",
+    "prompt-toolkit>=3.0.53,<4",
     "pathspec>=0.12.0",
     # `velune doctor` evaluates our own requirement markers/specifiers with it;
     # without it the check could not tell a stale dependency from a good one.
@@ -104,8 +104,8 @@ dependencies = [
 
     # Utilities
     "tiktoken>=0.8.0; python_version < '3.14'",
-    "tiktoken>=0.12.0; python_version >= '3.14'",
-    "cryptography>=43.0.1",
+    "tiktoken>=0.14.0; python_version >= '3.14'",
+    "cryptography>=50.0.2",
 ]
 
 [project.optional-dependencies]
@@ -120,9 +120,9 @@ dependencies = [
 rag = [
     # 1.10 added QdrantClient.query_points (velune/retrieval/vector.py); with
     # 1.7–1.9 every vector search failed at runtime.
-    "qdrant-client>=1.10.0",
+    "qdrant-client>=1.20.0",
     "lancedb>=0.14.0; python_version < '3.13'",
-    "lancedb>=0.16.0; python_version >= '3.13'",
+    "lancedb>=0.41.0; python_version >= '3.13'",
     "pyarrow>=14.0.0; python_version < '3.13'",
     "pyarrow>=18.0.0; python_version == '3.13'",
     "pyarrow>=22.0.0; python_version >= '3.14'",
@@ -137,8 +137,8 @@ rag = [
 # Per-Python lines track the first release with a wheel for that Python.
 parsing = [
     "tree-sitter>=0.23.0,<1; python_version < '3.13'",
-    "tree-sitter>=0.23.1,<1; python_version == '3.13'",
-    "tree-sitter>=0.25.1,<1; python_version >= '3.14'",
+    "tree-sitter>=0.26.1,<1; python_version == '3.13'",
+    "tree-sitter>=0.26.1,<1; python_version >= '3.14'",
     "tree-sitter-python>=0.23.0",
     "tree-sitter-typescript>=0.23.0",
     "tree-sitter-rust>=0.23.0",
@@ -177,19 +177,19 @@ api = ["pyyaml>=6.0.1"]
 # re-enabled until a safe replacement for diskcache is available.
 all = ["velune-cli[rag,parsing,telemetry,git,gguf,docker,api]"]
 dev = [
-    "ruff>=0.1.0",
-    "pyright>=1.1.350",
-    "pre-commit>=3.6.0",
+    "ruff>=0.17.4",
+    "pyright>=1.1.414",
+    "pre-commit>=4.6.2",
     "pip-audit>=2.6.0",
     "bandit[toml]>=1.7.0",
-    "build>=1.0.0",
+    "build>=1.6.1",
     # 7.0+ reads Metadata-Version 2.5, which current Hatchling emits.
     "twine>=7.0.0",
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
     # Real-terminal (PTY) audit harness, tests/tui: ConPTY on Windows,
     # ptyprocess elsewhere, and pyte to read the emulated screen back.
-    "pywinpty>=3.0.0; sys_platform == 'win32'",
+    "pywinpty>=3.1.2; sys_platform == 'win32'",
     "ptyprocess>=0.7.0; sys_platform != 'win32'",
     "pyte>=0.8.2",
 ]
