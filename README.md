@@ -8,6 +8,8 @@
 
 <p>An open-source, local-first AI engineer for your terminal.</p>
 
+<h2>🌐 <a href="https://velune-cli.vercel.app/">velune-cli.vercel.app</a></h2>
+
 <p>
 <a href="https://pypi.org/project/velune-cli/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/velune-cli"></a>
 <a href="https://pypi.org/project/velune-cli/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/velune-cli"></a>
@@ -17,6 +19,7 @@
 </p>
 
 <p>
+<a href="https://velune-cli.vercel.app/"><img alt="Website: velune-cli.vercel.app" src="https://img.shields.io/badge/website-velune--cli.vercel.app-black"></a>
 <img alt="Status: beta" src="https://img.shields.io/badge/status-beta-orange">
 <img alt="Local-first" src="https://img.shields.io/badge/local--first-yes-brightgreen">
 <img alt="No analytics" src="https://img.shields.io/badge/analytics-none-brightgreen">
