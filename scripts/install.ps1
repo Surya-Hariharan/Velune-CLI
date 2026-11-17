@@ -15,7 +15,7 @@
 
 # Before downloading anything the installer checks the CPU architecture and
 # stops with an explanation on a platform Velune does not support (see
-# "Platform support" in the README).
+# "Platform support" in docs/reference.md).
 
 # Returns why the platform is unsupported, or $null when it is supported.
 # Architecture is a .NET RuntimeInformation name (X64, Arm64, X86, ...) or a
@@ -58,7 +58,7 @@ function Install-Velune {
     $reason = Get-VeluneUnsupportedPlatformReason -Architecture (Get-VeluneHostArchitecture) -IsWindowsOs $onWindows
     if ($reason) {
         throw ("$reason.`nSupported platforms and manual install options: " +
-            "https://github.com/Surya-Hariharan/Velune-CLI#platform-support`n" +
+            "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/reference.md#platform-support`n" +
             'Nothing was downloaded or installed.')
     }
 

@@ -20,7 +20,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = ROOT / "scripts" / "install.sh"
 INSTALL_PS1 = ROOT / "scripts" / "install.ps1"
-SUPPORT_URL = "https://github.com/Surya-Hariharan/Velune-CLI#platform-support"
+SUPPORT_URL = "https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/reference.md#platform-support"
 
 _SOURCE_ONLY = {**os.environ, "VELUNE_INSTALLER_SOURCE_ONLY": "1"}
 
@@ -218,13 +218,13 @@ def test_ps_host_architecture_matches_this_machine():
 def test_installers_document_the_support_page():
     assert SUPPORT_URL in INSTALL_SH.read_text(encoding="utf-8")
     assert SUPPORT_URL in INSTALL_PS1.read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "docs" / "reference.md").read_text(encoding="utf-8")
     assert "#### Platform support" in readme  # the anchor the installers point to
 
 
 # ── Intel macOS classification (F2) ─────────────────────────────────────────
 
-README = ROOT / "README.md"
+README = ROOT / "docs" / "reference.md"  # the technical reference holds the support table
 
 
 def _readme_row(prefix: str) -> str:

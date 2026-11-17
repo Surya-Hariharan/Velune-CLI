@@ -7,7 +7,7 @@ clients — and an MCP **client** — pulling tools in from external MCP
 servers. Both directions live under [`velune/mcp/`](../velune/mcp/). For the
 security-policy framing of the trust boundary described in [§4](#4-trust-gating-for-outbound-connections),
 see [SECURITY.md § MCP trust gating](../SECURITY.md#mcp-trust-gating). See
-also [README.md](../README.md) for the rest of the project.
+also [README.md](../README.md) and the [technical reference](reference.md) for the rest of the project.
 
 ```mermaid
 flowchart LR
