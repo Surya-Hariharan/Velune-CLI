@@ -3399,7 +3399,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.6.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.48,<4" },
     { name = "psutil", specifier = ">=6.0.0" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.3.8" },
     { name = "ptyprocess", marker = "sys_platform != 'win32' and extra == 'dev'", specifier = ">=0.7.0" },
     { name = "pyarrow", marker = "python_full_version == '3.13.*' and extra == 'all'", specifier = ">=18.0.0" },
     { name = "pyarrow", marker = "python_full_version == '3.13.*' and extra == 'rag'", specifier = ">=18.0.0" },

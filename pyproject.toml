@@ -162,7 +162,7 @@ gguf = ["gguf>=0.6.0"]
 docker = ["docker>=7.0.0", "pyyaml>=6.0.1"]
 # Database integrations. Drivers are imported lazily; a missing one degrades to a
 # "driver not installed" result. Not part of ``all``: they ship platform wheels.
-postgres = ["psycopg[binary]>=3.1"]
+postgres = ["psycopg[binary]>=3.3.8"]
 mysql = ["pymysql>=1.1"]
 # YAML OpenAPI specifications for the HTTP integration (JSON specifications and every
 # other HTTP feature work without it). Parsed with yaml.safe_load only.
