@@ -48,8 +48,9 @@ appear in the CHANGELOG, or in `velune/__init__.py`, without ever having been ta
 | 0.9.7 | 2026-07-31 | 2026-07-31 | Terminal zoom-lock investigation, REPL and packaging fixes |
 | 0.9.8 | 2026-10-05 | 2026-10-05 | Install reliability: tested dependency floors, one-line installers, `velune doctor` rework |
 | 0.9.9 | 2026-11-17 | 2026-11-17 | Database integrations, native orchestration engine (opt-in), Manual/Plan/Auto execution modes, local-model recovery, install lifecycle commands |
+| 0.9.10 | 2026-11-18 | 2026-11-18 | Ask-first automatic updates, no more broken installs when updating a running Velune, `/council` freeze and background-load fixes |
 
-`v0.9.9` is the latest tag, GitHub Release and PyPI version (see the `[0.9.9]` section of the CHANGELOG).
+`v0.9.10` is the latest tag, GitHub Release and PyPI version (see the `[0.9.10]` section of the CHANGELOG).
 
 ## Architecture and feature milestones
 
@@ -89,6 +90,8 @@ relevant code.
 - **0.9.9:** the opt-in, experimental native orchestration engine (`velune native`, with an optional
   `--plan-review` mode; see `docs/native-engine.md`), local-model recovery, and the Manual/Plan/Auto
   execution modes.
+- **0.9.10:** ask-first automatic updates (`[update] auto`), installers and updates that never replace a
+  running Velune, and the `/council` freeze and background-load fixes.
 
 ## Security milestones
 

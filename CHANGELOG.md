@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-11-18
+
 ### Added
 
 - **Ask-first automatic updates.** Once a day an interactive session checks PyPI for a newer
@@ -1783,7 +1785,8 @@ changes — `pip install --upgrade velune-cli` is a safe, drop-in update.
 - Security sandbox: workspace write guards, network hygiene, secret scrubbing
 - Full pytest suite: unit, integration, async, and benchmark tests
 
-[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.9...HEAD
+[Unreleased]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.10...HEAD
+[0.9.10]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/Surya-Hariharan/Velune-CLI/compare/v0.9.6...v0.9.7
