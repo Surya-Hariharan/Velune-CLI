@@ -92,6 +92,9 @@ velune --version
 velune doctor
 ```
 
+If your shell says `velune` is not recognized, use `python -m velune --version` and `python -m velune doctor` instead;
+they run the same code without needing the Scripts folder on `PATH` (see the troubleshooting entry above).
+
 `velune doctor` shows the Velune version, Python interpreter, operating system, and where Velune is installed and keeps
 its data. It ends with "✓ Core installation is healthy." or a list of problems. Optional integrations (provider keys, a
 local Ollama, extras such as `[rag]`) are reported but never counted as installation failures, and the exit code is

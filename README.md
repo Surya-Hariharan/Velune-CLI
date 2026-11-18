@@ -105,6 +105,10 @@ irm https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/scripts/in
 
 Or `pipx install velune-cli` / `uv tool install velune-cli`. The installer needs no existing Python.
 
+Installed with plain `pip` and `velune` says "not recognized" (or "command not found")? The install worked; Python's
+Scripts folder just isn't on your `PATH`. Run `python -m velune doctor`, which works without it and prints the exact
+fix, or install with `pipx` (then `pipx ensurepath`).
+
 Then pick your lane:
 
 ```bash
@@ -116,7 +120,7 @@ cd your-project && velune init && velune
 cd your-project && velune init --provider groq && velune setup && velune
 ```
 
-Something off? Run `velune doctor`.
+Something off? Run `velune doctor` (or `python -m velune doctor` if `velune` isn't found).
 
 ## Join in
 
