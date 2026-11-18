@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from velune.knowledge.graph import KnowledgeGraph
     from velune.repository.cognition import RepositoryCognitionService
 
+from velune.core.polling import backoff_delay
 from velune.intelligence.events import (
     make_engine_started,
     make_engine_stopped,
@@ -67,6 +68,13 @@ _DEFAULT_GIT_POLL = 10.0
 _COOLDOWN_AFTER_CHANGE = 8.0
 # Maximum pending downstream tasks before we start dropping the lowest priority
 _DOWNSTREAM_QUEUE_MAXSIZE = 32
+# Idle backoff. A working tree that is merely *dirty* (uncommitted edits, the normal state while
+# developing) defeats the git fast path, so every change tick walks the whole tree. When nothing
+# has changed for _IDLE_TICKS_BEFORE_BACKOFF consecutive ticks the polls stretch geometrically up
+# to these ceilings, and snap back to the base rate on the first change. Freshness for the model
+# is unaffected: each prompt re-probes for changes itself (RepositoryCognitionService.probe_for_changes).
+_IDLE_CHANGE_POLL_CEILING = 30.0
+_IDLE_GIT_POLL_CEILING = 60.0
 
 
 @dataclass
@@ -208,15 +216,20 @@ class RepositoryIntelligenceEngine:
     async def _change_detection_loop(self) -> None:
         """Poll for file-system changes; emit events and queue downstream work."""
         inc = IncrementalIndexer(self._workspace, self._state_path)
+        idle_ticks = 0
 
         while self._running:
             try:
-                await asyncio.sleep(self._change_poll)
+                await asyncio.sleep(
+                    backoff_delay(self._change_poll, idle_ticks, _IDLE_CHANGE_POLL_CEILING)
+                )
 
                 delta = await inc.compute_delta()
                 if delta.is_empty:
+                    idle_ticks += 1
                     continue
 
+                idle_ticks = 0
                 self._last_change_at = time.monotonic()
                 logger.debug(
                     "RIE change detected: +%d ~%d -%d files",
@@ -254,12 +267,16 @@ class RepositoryIntelligenceEngine:
 
     async def _git_state_loop(self) -> None:
         """Detect branch switches and HEAD SHA changes; emit git_state_changed."""
+        idle_ticks = 0
         while self._running:
             try:
-                await asyncio.sleep(self._git_poll)
+                await asyncio.sleep(
+                    backoff_delay(self._git_poll, idle_ticks, _IDLE_GIT_POLL_CEILING)
+                )
 
                 new_state = await asyncio.to_thread(self._read_git_state)
                 changed = self._diff_git_state(new_state)
+                idle_ticks = 0 if changed else idle_ticks + 1
 
                 if changed:
                     self._git_state = new_state

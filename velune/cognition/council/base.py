@@ -18,6 +18,9 @@ from velune.providers.base import ModelProvider
 
 logger = TracedLogger("velune.cognition.council.base")
 
+# Minimum seconds between rebuilds of the streaming panel (matches the chat renderer's 80 ms).
+_PANEL_UPDATE_INTERVAL_S = 0.08
+
 import asyncio
 
 # Text a non-strict ``deliberate`` returns in place of a real answer when the
@@ -236,18 +239,33 @@ class BaseCouncilAgent(ABC):
                                 with Live(
                                     panel, console=console, refresh_per_second=10, transient=False
                                 ) as live:
+                                    # Re-joining the text and re-parsing it as Markdown per
+                                    # token is O(n^2) over the response. Rebuild the panel at
+                                    # most every _PANEL_UPDATE_INTERVAL_S, plus once at the end.
+                                    last_paint = 0.0
+                                    painted_chunks = 0
+
+                                    def paint(text: str) -> None:
+                                        live.update(
+                                            Panel(
+                                                CustomMarkdown(text, streaming=True),
+                                                title=panel_title,
+                                                border_style=color,
+                                                padding=(1, 2),
+                                                subtitle=f"[dim]Streaming: {len(text)} chars[/dim]",
+                                                subtitle_align="right",
+                                            )
+                                        )
+
                                     async for chunk in self.provider.stream(request):
                                         full_content.append(chunk.content)
-                                        current_text = "".join(full_content)
-                                        panel = Panel(
-                                            CustomMarkdown(current_text, streaming=True),
-                                            title=panel_title,
-                                            border_style=color,
-                                            padding=(1, 2),
-                                            subtitle=f"[dim]Streaming: {len(current_text)} chars[/dim]",
-                                            subtitle_align="right",
-                                        )
-                                        live.update(panel)
+                                        now = time.monotonic()
+                                        if now - last_paint >= _PANEL_UPDATE_INTERVAL_S:
+                                            last_paint = now
+                                            painted_chunks = len(full_content)
+                                            paint("".join(full_content))
+                                    if len(full_content) != painted_chunks:
+                                        paint("".join(full_content))
                             else:
                                 async for chunk in self.provider.stream(request):
                                     full_content.append(chunk.content)

@@ -37,6 +37,7 @@ import importlib.metadata as importlib_metadata
 import json
 import os
 import re
+import site
 import subprocess
 import sys
 from collections.abc import Callable
@@ -71,7 +72,9 @@ class OwnershipKind(str, Enum):
     """What kind of installation this is. Only ``UV_TOOL`` permits mutation."""
 
     UV_TOOL = "uv_tool"  # confirmed uv-managed tool environment
-    NOT_UV = "not_uv"  # positively installed by something else (pip, ...)
+    NOT_UV = "not_uv"  # positively installed by something else (system pip, conda, ...)
+    PIP_USER = "pip_user"  # pip --user install (metadata in the interpreter's user site)
+    PIP_VENV = "pip_venv"  # pip install inside a virtual environment
     EDITABLE = "editable"  # development install (PEP 610 editable marker)
     AMBIGUOUS = "ambiguous"  # some uv signals, but they do not agree
     INDETERMINATE = "indeterminate"  # metadata missing, malformed or unverifiable
@@ -110,6 +113,9 @@ class OwnershipEvidence:
     receipt_state: str  # missing | ok | malformed
     receipt: ReceiptInfo | None
     receipt_problem: str | None
+    # Defaults keep existing callers/tests that build evidence by hand working.
+    dist_in_user_site: bool | None = False  # metadata lives in the interpreter's user site
+    in_venv: bool = False  # the running interpreter is a virtual environment
 
 
 @dataclass(frozen=True)
@@ -132,8 +138,18 @@ class OwnershipReport:
         return self.kind is OwnershipKind.UV_TOOL
 
     @property
+    def manager(self) -> str | None:
+        """Which package manager owns the install: ``uv``, ``pip`` or ``None`` (unknown)."""
+        if self.kind is OwnershipKind.UV_TOOL:
+            return "uv"
+        if self.kind in (OwnershipKind.PIP_USER, OwnershipKind.PIP_VENV):
+            return self.kind.value.split("_", 1)[0]  # pip_user / pip_venv -> the manager name
+        return None
+
+    @property
     def installation(self) -> dict[str, Any]:
         """The ``installation`` block of a lifecycle JSON result."""
+        # Schema is frozen (tests/consumers); the manager is exposed via ``.manager`` only.
         return {"kind": self.kind.value, "owned": self.mutation_allowed, "path": self.prefix}
 
 
@@ -277,6 +293,7 @@ def collect_evidence(
 
     version = installer = None
     in_prefix: bool | None = None
+    in_user_site = False
     direct_url = "none"
     if dist is not None:
         version = dist.version
@@ -286,6 +303,7 @@ def collect_evidence(
         try:
             location = Path(str(dist.locate_file("")))
             in_prefix = _norm(location).startswith(_norm(env) + os.sep)
+            in_user_site = _in_user_site(location)
         except (OSError, ValueError):
             in_prefix = None
 
@@ -318,7 +336,22 @@ def collect_evidence(
         receipt_state=receipt_state,
         receipt=receipt,
         receipt_problem=receipt_problem,
+        dist_in_user_site=in_user_site,
+        in_venv=(env / "pyvenv.cfg").is_file(),
     )
+
+
+def _in_user_site(location: Path) -> bool:
+    """Is *location* the interpreter's user site-packages directory (``pip --user``)?"""
+    if not site.ENABLE_USER_SITE:
+        return False
+    try:
+        user_site = site.getusersitepackages()
+    except Exception:  # noqa: BLE001 - site can fail in odd embedded interpreters
+        return False
+    if not user_site:
+        return False
+    return _norm(location) == _norm(Path(user_site))
 
 
 # --------------------------------------------------------------------------
@@ -368,6 +401,19 @@ def evaluate_ownership(ev: OwnershipEvidence) -> OwnershipReport:
             OwnershipKind.INDETERMINATE,
             f"{RECEIPT_NAME} is present but unusable: {ev.receipt_problem}",
         )
+    if (
+        ev.dist_in_prefix is False
+        and ev.dist_in_user_site
+        and not ev.in_venv
+        and ev.installer == "pip"
+        and ev.receipt_state == "missing"
+    ):
+        # `pip install --user`: the metadata lives in the user site, outside sys.prefix. Every
+        # signal agrees on pip and none on uv, so this is positively a pip install.
+        return report(
+            OwnershipKind.PIP_USER,
+            "installed by pip into the user site-packages (pip install --user)",
+        )
     if ev.dist_in_prefix is False:
         return report(
             OwnershipKind.AMBIGUOUS,
@@ -391,6 +437,8 @@ def evaluate_ownership(ev: OwnershipEvidence) -> OwnershipReport:
     uv_signals = [has_receipt, in_tool_dir, installer_is_uv]
 
     if installer_other and not has_receipt and not in_tool_dir:
+        if ev.installer == "pip" and ev.in_venv:
+            return report(OwnershipKind.PIP_VENV, "installed by pip into a virtual environment")
         return report(OwnershipKind.NOT_UV, f"installed by '{ev.installer}', not by uv")
     if installer_other:
         return report(
@@ -452,6 +500,17 @@ _REFUSAL: dict[OwnershipKind, tuple[str, str]] = {
         "This Velune was not installed as a uv tool, so it will not be changed automatically.",
         "Manage it with the tool that installed it, or reinstall with the official installer "
         "(see the Install section of the README). Nothing was changed.",
+    ),
+    OwnershipKind.PIP_USER: (
+        "This Velune was installed with pip, so Velune will not change it itself.",
+        "Update it with pip (run 'velune update --check' for the exact command). "
+        "Nothing was changed.",
+    ),
+    OwnershipKind.PIP_VENV: (
+        "This Velune was installed with pip in a virtual environment, so Velune will not "
+        "change it itself.",
+        "Update it with pip inside that environment (run 'velune update --check' for the "
+        "exact command). Nothing was changed.",
     ),
     OwnershipKind.EDITABLE: (
         "This is a development (editable) install, so it will not be changed automatically.",

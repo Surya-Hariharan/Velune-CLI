@@ -51,8 +51,13 @@ Python 3.10 or newer. Common problems:
   `pipx`, `uv tool`, or a virtualenv.
 - **Conflicts with other tools' dependencies:** pip keeps one copy of each package per environment. An isolated install
   avoids this. If Velune detects an incompatible dependency at startup, it names the package and the fix command.
-- **`velune: command not found`:** your Python scripts directory is not on `PATH`. Use `python -m velune`, or reinstall
-  with `pipx` or the installer.
+- **`velune: command not found` / `'velune' is not recognized` (Windows):** the install worked, but your Python
+  scripts directory is not on `PATH` (for `pip install --user` on Windows it is
+  `%APPDATA%\Python\PythonXY\Scripts`). Run `velune doctor` (or `python -m velune doctor`): it names the directory and
+  prints the fix. You can always use `python -m velune`, or reinstall with `pipx` or the installer. Velune never edits
+  your `PATH` itself; open a new terminal after you change it.
+- **Updating a pip install:** `velune update --check` shows the exact `python -m pip install --upgrade velune-cli`
+  command for your interpreter. Velune does not update pip installs itself.
 
 On the platforms marked **Tested** below, the core dependencies install from prebuilt wheels for CPython 3.10 to 3.14,
 so no compiler is needed. CI checks this, including at the lowest allowed version of each dependency.
@@ -432,6 +437,25 @@ default_provider = "groq"
 [execution]
 mode = "manual"   # "manual", "plan" or "auto"
 ```
+
+### Performance and background work
+
+Velune keeps its own background work light, and has a few switches for slow machines or rate-limited providers.
+
+- **Idle polling backs off.** The repository watcher starts at 3 s (git state at 10 s) and stretches to 30 s (60 s) after
+  a quiet spell, returning to the base rate on the first change. The Ollama liveness probe does the same (5 s to 30 s).
+  Each prompt re-checks for changes itself, so answers are not stale. `[workspace] watch_files = false` turns the
+  watcher off entirely.
+- **Animations pace themselves.** The spinner and streamed-text refresh slow down when the terminal is slow to repaint
+  (long transcripts). `VELUNE_REDUCED_MOTION=1` (or `[display] reduced_motion = true`) stops the spinner animating.
+- **Lighter council runs.** `[execution] low_resource_mode = true` or `VELUNE_LOW_RESOURCE=1` caps the council tier,
+  uses a single coder sample, and skips the debate round.
+- **Time limits.** `VELUNE_COUNCIL_MAX_SECONDS` (default 600) bounds a whole council run;
+  `VELUNE_COUNCIL_CONTEXT_SECONDS` (default 30) bounds the repository-context step before it starts.
+- **Rate limits.** A provider's `Retry-After` is honoured up to 20 s; a longer wait fails fast with the provider's error
+  instead of stalling the run. At most 4 requests per provider are in flight, and at most 4 startup model probes.
+- **Optional vector memory.** Vector stores need the `rag` extra. `VELUNE_SKIP_LANCEDB=1` and `VELUNE_SKIP_QDRANT=1`
+  force them into a no-op mode.
 
 ### Commands
 

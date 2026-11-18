@@ -253,6 +253,8 @@ def test_pre_flag_is_refused_before_any_work(world):
     "kind",
     [
         OwnershipKind.NOT_UV,
+        OwnershipKind.PIP_USER,
+        OwnershipKind.PIP_VENV,
         OwnershipKind.EDITABLE,
         OwnershipKind.AMBIGUOUS,
         OwnershipKind.INDETERMINATE,

@@ -6,7 +6,6 @@ each one independently, producing a merged output file.
 
 from __future__ import annotations
 
-import asyncio
 import difflib
 from dataclasses import dataclass, field
 from enum import Enum
@@ -117,15 +116,15 @@ class HunkReviewer:
         return self._reconstruct(diff, hunk_groups, results)
 
     async def _prompt_hunk_decision(self) -> HunkDecision:
-        from rich.prompt import Prompt
+        from velune.execution.approval import ask_choice
 
-        action = await asyncio.to_thread(
-            Prompt.ask,
-            "\n  [dim][a]ccept / [r]eject[/dim]",
-            choices=["a", "r", "accept", "reject"],
-            default="a",
+        action = await ask_choice(
+            "Apply this hunk?",
+            [("accept", "Accept hunk"), ("reject", "Reject hunk")],
+            default="accept",
+            reject="reject",
         )
-        return HunkDecision.ACCEPT if action.lower() in ("a", "accept") else HunkDecision.REJECT
+        return HunkDecision.ACCEPT if action == "accept" else HunkDecision.REJECT
 
     def _reconstruct(
         self,

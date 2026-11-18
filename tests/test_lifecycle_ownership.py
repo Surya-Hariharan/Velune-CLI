@@ -186,12 +186,91 @@ def test_receipt_and_installer_but_unverifiable_tool_dir_is_indeterminate(tmp_pa
     assert "uv was not found" in report.reasons[0]
 
 
-@pytest.mark.parametrize("installer", ["pip\n", "poetry", "conda"])
+@pytest.mark.parametrize("installer", ["poetry", "conda"])
 def test_non_uv_installer_without_uv_signals(tmp_path, detect, installer):
     prefix = build_env(tmp_path, tool_name="venv", receipt=None, installer=installer)
     report = detect(prefix, tmp_path / "elsewhere")
     assert report.kind is OwnershipKind.NOT_UV
     assert not report.mutation_allowed
+
+
+def test_pip_in_a_virtualenv_is_pip_venv_not_uv(tmp_path, detect):
+    prefix = build_env(tmp_path, tool_name="venv", receipt=None, installer="pip\n")
+    report = detect(prefix, tmp_path / "elsewhere")
+    assert report.kind is OwnershipKind.PIP_VENV
+    assert report.manager == "pip"
+    assert not report.mutation_allowed
+
+
+def test_pip_venv_without_uv_installed_still_classifies(tmp_path, detect):
+    prefix = build_env(tmp_path, tool_name="venv", receipt=None, installer="pip\n")
+    report = detect(prefix, None, "uv was not found")
+    assert report.kind is OwnershipKind.PIP_VENV
+
+
+def _user_site_install(tmp_path, monkeypatch, *, installer="pip\n", receipt_in_base=False):
+    """A base interpreter (no pyvenv.cfg) with velune-cli in a separate user site."""
+    base = tmp_path / "Python315"
+    base.mkdir()
+    user_site = tmp_path / "AppData" / "Roaming" / "Python" / "Python315" / "site-packages"
+    info = user_site / "velune_cli-0.9.9.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: velune-cli\nVersion: 0.9.9\n")
+    if installer is not None:
+        (info / "INSTALLER").write_text(installer)
+    if receipt_in_base:
+        (base / "uv-receipt.toml").write_text(RECEIPT, encoding="utf-8")
+    monkeypatch.setattr(own.site, "ENABLE_USER_SITE", True)
+    monkeypatch.setattr(own.site, "getusersitepackages", lambda: str(user_site))
+    monkeypatch.setattr(
+        own.importlib_metadata, "distribution", lambda name: md.Distribution.at(info)
+    )
+    return base
+
+
+def test_pip_user_install_is_recognised(tmp_path, monkeypatch):
+    base = _user_site_install(tmp_path, monkeypatch)
+    report = own.detect_ownership(prefix=base, resolve_tool_dir=lambda: (None, "uv not found"))
+    assert report.kind is OwnershipKind.PIP_USER
+    assert report.manager == "pip"
+    assert not report.mutation_allowed
+    assert report.uv_problem is None
+
+
+def test_pip_user_install_is_never_mistaken_for_uv(tmp_path, monkeypatch):
+    base = _user_site_install(tmp_path, monkeypatch)
+    report = own.detect_ownership(prefix=base, resolve_tool_dir=lambda: (tmp_path / "tools", None))
+    assert report.kind is OwnershipKind.PIP_USER
+    with pytest.raises(LifecycleError) as exc:
+        own.require_uv_tool(report)
+    assert exc.value.code is ExitCode.REFUSED
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"installer": "uv\n"}, {"installer": None}, {"receipt_in_base": True}],
+)
+def test_user_site_with_conflicting_or_missing_evidence_stays_refused(
+    tmp_path, monkeypatch, kwargs
+):
+    base = _user_site_install(tmp_path, monkeypatch, **kwargs)
+    report = own.detect_ownership(prefix=base, resolve_tool_dir=lambda: (tmp_path / "t", None))
+    assert report.kind not in (OwnershipKind.PIP_USER, OwnershipKind.UV_TOOL)
+    assert not report.mutation_allowed
+
+
+def test_metadata_outside_prefix_and_outside_user_site_is_ambiguous(tmp_path, monkeypatch):
+    base = _user_site_install(tmp_path, monkeypatch)
+    monkeypatch.setattr(own.site, "getusersitepackages", lambda: str(tmp_path / "other"))
+    report = own.detect_ownership(prefix=base, resolve_tool_dir=lambda: (None, "x"))
+    assert report.kind is OwnershipKind.AMBIGUOUS
+
+
+def test_user_site_disabled_means_not_pip_user(tmp_path, monkeypatch):
+    base = _user_site_install(tmp_path, monkeypatch)
+    monkeypatch.setattr(own.site, "ENABLE_USER_SITE", False)
+    report = own.detect_ownership(prefix=base, resolve_tool_dir=lambda: (None, "x"))
+    assert report.kind is OwnershipKind.AMBIGUOUS
 
 
 def test_non_uv_installer_inside_a_uv_looking_env_is_ambiguous(tmp_path, detect):

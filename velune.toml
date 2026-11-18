@@ -77,6 +77,9 @@ default_provider = "groq"
 # Commit the files a council edit session changed. Off by default because a
 # commit is a durable change to your history.
 #council_auto_commit = false
+# Lighter council runs for slow machines or rate-limited providers: caps the council
+# tier at STANDARD, uses one coder sample instead of several, and skips the debate round.
+# Also settable as VELUNE_LOW_RESOURCE=1 (env) or VELUNE_EXECUTION__LOW_RESOURCE_MODE=true.
 #low_resource_mode = false
 # Run agent commands inside a per-session Docker container instead of directly
 # on the host. Needs the `docker` extra and a running Docker daemon.
@@ -95,7 +98,11 @@ default_provider = "groq"
 # ── Workspace, context, memory and retrieval ────────────────────────────────
 
 #[workspace]
+# Index the repository when a session starts.
 #index_on_init = true
+# Poll the working tree and git state in the background to keep the code index fresh.
+# Polling slows down by itself while nothing changes (3 s -> 30 s, git 10 s -> 60 s) and
+# every prompt re-checks for changes anyway, so turning this off mainly saves idle CPU.
 #watch_files = true
 #git_aware = true
 

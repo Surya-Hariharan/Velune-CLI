@@ -415,7 +415,9 @@ class RepositoryCognitionService:
         staleness is the intended trade for never blocking a prompt on a full
         rescan. Staleness is surfaced via ``summary["cognition_freshness"]``.
         """
-        file_snapshot = self.get_snapshot()
+        # get_snapshot() parses the whole file index JSON and builds an object per file and
+        # symbol: seconds of CPU on a big repo. Off the event loop so the UI stays responsive.
+        file_snapshot = await asyncio.to_thread(self.get_snapshot)
         cache = await asyncio.to_thread(self._load_pipeline_cache)
 
         if file_snapshot is None or cache is None:

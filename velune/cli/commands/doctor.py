@@ -498,6 +498,27 @@ def _check_scripts_on_path() -> dict:
                 "message": f"{Path(launcher).parent} is on PATH",
             }
 
+    from velune.lifecycle import scripts_path
+
+    report = scripts_path.diagnose()
+    if report.launcher_present and report.on_path:
+        return {
+            "name": "Scripts on PATH",
+            "status": "ok",
+            "message": f"{report.scripts_dir} is on PATH",
+        }
+    if report.launcher_present:
+        # The install worked: the launcher exists. It just is not discoverable yet.
+        return {
+            "name": "Scripts on PATH",
+            "status": "warn",
+            "message": (
+                f"Velune is installed ('velune' exists in {report.scripts_dir}), but that "
+                f"directory is not on PATH, so a new terminal will say 'velune' is not "
+                f"recognized. {report.advice}"
+            ),
+        }
+
     base = Path(sys.executable).parent
     scripts_dir = base / "Scripts" if sys.platform == "win32" else base
     if not scripts_dir.exists():

@@ -91,6 +91,22 @@ _MARKDOWN_STREAM_THROTTLE_S = 0.08
 _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _THINKING_TICK_S = 0.1
 _THINKING_WORD_EVERY = 8  # ticks between verb changes (~0.8s)
+# Self-driven redraws (spinner, streamed markdown) never run faster than this multiple of the
+# measured frame cost, so the app spends at most ~1/_PACING_FACTOR of a core animating.
+_PACING_FACTOR = 3.0
+_PACING_CEILING_S = 1.0
+
+
+def adaptive_interval(base: float, render_cost_s: float) -> float:
+    """Seconds between self-driven redraws: *base* when frames are cheap, longer when not.
+
+    ``render_cost_s`` is the measured (smoothed) cost of one frame. The result is never below
+    *base* and never above ``_PACING_CEILING_S`` (or *base* itself if that is larger), so a
+    slow terminal degrades the spinner's smoothness but never freezes it.
+    """
+    if render_cost_s <= 0:
+        return base
+    return min(max(base, render_cost_s * _PACING_FACTOR), max(base, _PACING_CEILING_S))
 
 
 @dataclass
@@ -418,6 +434,11 @@ class _ScrollableConversationWindow(Window):
 
 class FullscreenREPLUI:
     """Owns the alternate-screen UI, prompt buffer, status line, and transcript."""
+
+    # Smoothed seconds per rendered frame (see `_animation_interval`); class-level defaults so a
+    # UI built without an Application (tests, headless) still paces at the base rate.
+    _render_cost_s: float = 0.0
+    _render_started: float = 0.0
 
     def _build_style(self) -> dict[str, str]:
         """The complete style sheet, interpolated from the *current* theme.
@@ -879,6 +900,30 @@ class FullscreenREPLUI:
             input=input,
             output=output,
         )
+        # Measure what a frame really costs so animation can back off when it is expensive.
+        self._app.before_render += self._on_before_render
+        self._app.after_render += self._on_after_render
+
+    # ── Adaptive animation pacing ────────────────────────────────────
+    #
+    # prompt_toolkit lays out the whole conversation control on every render, and with
+    # `wrap_lines=True` that cost grows with transcript length (measured: ~0.3-0.7 s per frame
+    # at 1000-4000 lines). A fixed 10 Hz spinner then keeps a core pinned for nothing. Only the
+    # self-driven redraws (spinner, streamed-markdown refresh) are paced by the measured cost;
+    # keystrokes and explicit events still redraw immediately.
+
+    def _on_before_render(self, _app: Any = None) -> None:
+        self._render_started = time.perf_counter()
+
+    def _on_after_render(self, _app: Any = None) -> None:
+        if self._render_started:
+            cost = time.perf_counter() - self._render_started
+            # Smoothed so a single slow frame doesn't whipsaw the pacing.
+            self._render_cost_s = 0.7 * self._render_cost_s + 0.3 * cost
+            self._render_started = 0.0
+
+    def _animation_interval(self, base: float) -> float:
+        return adaptive_interval(base, self._render_cost_s)
 
     async def run(self) -> None:
         if self._app is None:
@@ -988,7 +1033,7 @@ class FullscreenREPLUI:
         async def _thinking_anim():
             tick = 0
             while True:
-                await asyncio.sleep(_THINKING_TICK_S)
+                await asyncio.sleep(self._animation_interval(_THINKING_TICK_S))
                 tick += 1
                 if cycle and tick % _THINKING_WORD_EVERY == 0:
                     self._thinking_idx = (self._thinking_idx + 1) % len(self._thinking_words)
@@ -1025,7 +1070,8 @@ class FullscreenREPLUI:
         # work (not a flat string split), so doing it on every raw chunk
         # would be wasteful. `final` always renders immediately.
         now = time.perf_counter()
-        if not final and (now - self._last_stream_render) < _MARKDOWN_STREAM_THROTTLE_S:
+        throttle = self._animation_interval(_MARKDOWN_STREAM_THROTTLE_S)
+        if not final and (now - self._last_stream_render) < throttle:
             return
         self._last_stream_render = now
         self._render_stream_markdown(final=final)
@@ -1111,7 +1157,7 @@ class FullscreenREPLUI:
         async def _spin() -> None:
             tick = 0
             while True:
-                await asyncio.sleep(_THINKING_TICK_S)
+                await asyncio.sleep(self._animation_interval(_THINKING_TICK_S))
                 tick += 1
                 handle.tick(
                     _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)],

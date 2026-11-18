@@ -669,14 +669,20 @@ class VeluneREPL:
         in a render callback (it stalls typing on machines with no Ollama). This
         low-frequency task owns it instead; the render path only reads the flag.
         """
+        from velune.core.polling import backoff_delay
         from velune.providers.keystore import is_ollama_live
 
+        stable_ticks = 0
         while True:
+            previous = self._ollama_live
             try:
                 self._ollama_live = await asyncio.to_thread(is_ollama_live, 0.25)
             except Exception:
                 self._ollama_live = False
-            await asyncio.sleep(5.0)
+            # A machine either runs Ollama or it doesn't; once the answer has held for a while,
+            # probe less often (5 s -> 30 s) and go back to 5 s the moment it changes.
+            stable_ticks = stable_ticks + 1 if self._ollama_live == previous else 0
+            await asyncio.sleep(backoff_delay(5.0, stable_ticks, 30.0))
 
     # ------------------------------------------------------------------
     # Home surface (empty-transcript header + runtime summary)

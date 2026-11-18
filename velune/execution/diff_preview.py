@@ -221,23 +221,17 @@ class DiffPreview:
         if auto_accept or _auto_accept:
             return DiffDecision.ACCEPT
 
-        from rich.prompt import Prompt
+        from velune.execution.approval import ask_choice
 
-        # No default on purpose: a file mutation must never be accepted by an
-        # accidental bare Enter — the user has to type a, r, or s explicitly.
-        action = Prompt.ask(
-            "\n  [dim][a]ccept / [r]eject / [s]kip all[/dim]",
-            choices=["a", "r", "s", "accept", "reject", "skip"],
+        # The highlighted row is "Reject" on purpose: a file mutation must never be accepted
+        # by an accidental bare Enter; the user has to move to Accept explicitly.
+        action = await ask_choice(
+            f"Apply changes to {diff.path.name}?",
+            [("reject", "Reject"), ("accept", "Accept"), ("skip", "Skip all")],
+            default="reject",
+            reject="reject",
         )
-        mapping = {
-            "a": DiffDecision.ACCEPT,
-            "accept": DiffDecision.ACCEPT,
-            "r": DiffDecision.REJECT,
-            "reject": DiffDecision.REJECT,
-            "s": DiffDecision.REJECT,
-            "skip": DiffDecision.REJECT,
-        }
-        return mapping.get(action.lower(), DiffDecision.REJECT)
+        return DiffDecision.ACCEPT if action == "accept" else DiffDecision.REJECT
 
     async def preview_and_confirm(
         self,

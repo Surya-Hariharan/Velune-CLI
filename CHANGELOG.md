@@ -8,6 +8,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`/council` could freeze the terminal at the file-approval prompt.** The accept/reject prompt
+  was a blocking `input()` inside the running full-screen app (frozen loop, two readers on one
+  terminal, no timeout), and its `[a]`/`[r]` labels were eaten as Rich markup. It now uses the
+  REPL's own widgets, never blocks, and rejects on timeout, cancel or no terminal.
+- **Council runs can no longer hang before they start or after they fail.** Repository-context
+  gathering has its own 30 s limit (`VELUNE_COUNCIL_CONTEXT_SECONDS`), the stream's end signal is
+  sent on every exit path, and the context steps run off the event loop (git and config lookups
+  concurrently).
+- **Rate limits (HTTP 429) are bounded.** A provider's `Retry-After` is honoured up to 20 s and a
+  longer wait fails fast; a call backing off no longer holds one of the provider's request slots.
+- **Less CPU while working.** The council's streaming panel redraws at most every 80 ms instead of
+  per token; the spinner and streamed-text refresh slow down when the terminal is slow to repaint;
+  repository and Ollama polling back off while idle; startup model probes run at most 4 at a time.
+  New "Performance and background work" section in `docs/reference.md`.
+- **`pip install --user` installs are now recognised.** `velune update --check` no longer says
+  "Ownership could not be confirmed" for a pip user install: ownership detection now identifies
+  `pip --user` (`pip_user`) and pip-in-a-venv (`pip_venv`) installs and shows the exact
+  `python -m pip install --upgrade [--user] velune-cli` for the running interpreter. Velune still
+  never changes a pip install itself, and `update` refuses anything it cannot prove it owns.
+- **`velune doctor` explains a missing Scripts directory.** When the `velune` launcher was
+  generated but its directory (for example `%APPDATA%\Python\PythonXY\Scripts`) is not on PATH,
+  doctor says the install succeeded, names the directory (from `sysconfig`, not a hardcoded
+  version) and prints a copy-paste fix. It never edits PATH.
+
 ## [0.9.9] - 2026-11-17
 
 ### Added

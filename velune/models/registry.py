@@ -23,6 +23,9 @@ from velune.providers.discovery.scanner import ModelDiscoveryScanner, ScanReport
 
 logger = logging.getLogger("velune.models.registry")
 
+# Most live startup probes in flight at once (see ModelCapabilityRegistry._probe).
+_MAX_CONCURRENT_PROBES = 4
+
 # A previous model is dropped by a refresh, kept unchanged, or kept but marked
 # unavailable with a (kind, reason).
 _DROP = None
@@ -420,6 +423,11 @@ class ModelCapabilityRegistry:
         from velune.models.probes import FastProbe
 
         fast_probe = FastProbe()
+        gate = asyncio.Semaphore(_MAX_CONCURRENT_PROBES)
+
+        async def _bounded_ping(ping):
+            async with gate:
+                return await ping
 
         probing_tasks = []
         models_to_probe = []
@@ -449,9 +457,11 @@ class ModelCapabilityRegistry:
 
             if provider:
                 models_to_probe.append(model)
-                probing_tasks.append(fast_probe.ping(provider, model.model_id))
+                probing_tasks.append(_bounded_ping(fast_probe.ping(provider, model.model_id)))
 
-        # Execute fast probes concurrently
+        # Execute fast probes concurrently, but never more than _MAX_CONCURRENT_PROBES at once:
+        # one live request per discovered model at the same instant is a burst that trips
+        # per-key rate limits (Groq, OpenAI) and spikes CPU/network on startup.
         if probing_tasks:
             results = await asyncio.gather(*probing_tasks, return_exceptions=True)
             for model, responsive in zip(models_to_probe, results, strict=False):

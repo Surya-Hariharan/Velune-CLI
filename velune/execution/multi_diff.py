@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from velune.execution.approval import ask_choice
 from velune.execution.diff_preview import DiffDecision, DiffPreview
 
 
@@ -41,17 +42,20 @@ class MultiDiffPreview:
                 self.console.print("[dim]Auto-accepted.[/dim]")
                 continue
 
-            from rich.prompt import Prompt
-
-            action = Prompt.ask(
-                "  [dim][a]ccept / [r]eject / [A]ccept all remaining[/dim]",
-                choices=["a", "r", "A"],
-                default="a",
+            action = await ask_choice(
+                f"Change {i} of {len(file_writes)}: {path.name}",
+                [
+                    ("accept", "Accept this change"),
+                    ("reject", "Reject this change"),
+                    ("all", "Accept all remaining changes"),
+                ],
+                default="accept",
+                reject="reject",
             )
-            if action == "A":
+            if action == "all":
                 auto_accept_all = True
                 decisions[path] = DiffDecision.ACCEPT
-            elif action == "a":
+            elif action == "accept":
                 decisions[path] = DiffDecision.ACCEPT
             else:
                 decisions[path] = DiffDecision.REJECT

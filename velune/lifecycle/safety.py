@@ -89,6 +89,22 @@ def manual_command(operation: str, report: OwnershipReport) -> str:
     raise ValueError(f"unknown lifecycle operation: {operation!r}")
 
 
+def pip_update_command(report: OwnershipReport, *, executable: str | None = None) -> str:
+    """The pip command a user can run to update a pip-installed Velune. Never run by Velune.
+
+    It names the running interpreter (``sys.executable``) so pip targets the same environment
+    Velune runs from, and adds ``--user`` for a user-site install. No Python version or
+    install path is hardcoded.
+    """
+    from velune.lifecycle.ownership import OwnershipKind
+
+    python = executable or sys.executable or "python"
+    if any(c.isspace() for c in python) or any(c in python for c in "&()^"):
+        python = f'"{python}"'
+    user = " --user" if report.kind is OwnershipKind.PIP_USER else ""
+    return f"{python} -m pip install --upgrade{user} {DISTRIBUTION}"
+
+
 def pinned_install_command(report: OwnershipReport, version: str | None) -> str:
     """Forced reinstall at exactly *version*, keeping the installed extras.
 

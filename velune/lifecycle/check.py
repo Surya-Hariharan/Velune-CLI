@@ -33,7 +33,7 @@ from velune.lifecycle.ownership import (
     OwnershipReport,
     detect_ownership,
 )
-from velune.lifecycle.safety import manual_command, pinned_install_command
+from velune.lifecycle.safety import manual_command, pinned_install_command, pip_update_command
 from velune.lifecycle.versions import (
     VersionTools,
     compare,
@@ -47,6 +47,8 @@ COMMAND = "update"
 
 
 _NOT_UV_GUIDANCE = {
+    OwnershipKind.PIP_USER: "Update it with pip.",  # replaced by a command in _next_action
+    OwnershipKind.PIP_VENV: "Update it with pip.",
     OwnershipKind.NOT_UV: (
         "This Velune was not installed as a uv tool. Update it with the tool that "
         "installed it (for example pip or pipx), or reinstall with the official "
@@ -78,6 +80,11 @@ def _next_action(report: OwnershipReport, latest: Any, platform: str) -> tuple[s
         return None, (
             f"Velune could not verify its uv installation ({report.uv_problem}), so no "
             "update command is suggested. Fix the problem above and run the check again."
+        )
+    if report.kind in (OwnershipKind.PIP_USER, OwnershipKind.PIP_VENV):
+        return pip_update_command(report), (
+            "Velune was installed with pip and does not update pip installs itself. "
+            "Close Velune, then run the command below in your terminal."
         )
     if report.kind is not OwnershipKind.UV_TOOL:
         return None, _NOT_UV_GUIDANCE[report.kind]

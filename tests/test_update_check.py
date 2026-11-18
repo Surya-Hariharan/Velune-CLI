@@ -300,6 +300,34 @@ def test_confirmed_uv_tool_still_gets_the_exact_command():
     assert not any("could not be confirmed" in w for w in result.warnings)
 
 
+PIP_KINDS = [OwnershipKind.PIP_USER, OwnershipKind.PIP_VENV]
+
+
+@pytest.mark.parametrize("kind", PIP_KINDS)
+@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+def test_pip_installs_get_a_pip_command_for_the_running_interpreter(kind, platform):
+    needs_packaging()
+    result, _ = run(uv_report(kind=kind), rel("0.9.9", "0.9.10"), platform=platform)
+    assert result.exit_code is ExitCode.UPDATE_AVAILABLE
+    cmd = result.manual_command
+    assert cmd is not None
+    assert "-m pip install --upgrade" in cmd and cmd.endswith("velune-cli")
+    assert sys.executable in cmd  # same interpreter, no hardcoded version path
+    assert ("--user" in cmd) is (kind is OwnershipKind.PIP_USER)
+    assert "uv " not in cmd
+    # ownership is established: no "could not be confirmed" warning
+    assert not any("could not be confirmed" in w for w in result.warnings)
+    assert result.installation["owned"] is False
+
+
+@pytest.mark.parametrize("kind", PIP_KINDS)
+def test_pip_installs_are_up_to_date_cleanly(kind):
+    needs_packaging()
+    result, _ = run(uv_report(kind=kind), rel("0.9.9"))
+    assert result.exit_code is ExitCode.OK
+    assert not any("could not be confirmed" in w for w in result.warnings)
+
+
 @pytest.mark.parametrize("kind", NON_UV_KINDS)
 def test_uv_only_notes_are_not_shown_for_other_installs(kind):
     needs_packaging()

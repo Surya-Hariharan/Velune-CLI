@@ -80,6 +80,9 @@ class RetryingProvider(ModelProvider):
             max_attempts=max_attempts,
             base_delay_s=1.0,
             max_delay_s=20.0,
+            # Honour a provider's Retry-After only up to the same ceiling as our own backoff;
+            # a longer ask (e.g. an exhausted Groq quota) fails fast instead of stalling a run.
+            max_retry_after_s=20.0,
             jitter=True,
             retryable_exceptions=RETRYABLE_EXCEPTIONS,
         )
@@ -95,12 +98,17 @@ class RetryingProvider(ModelProvider):
         return self._inner.provider_id
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
-        async with self._concurrency_gate:
-            return await retry_async(
-                self._policy,
-                lambda: self._inner.infer(request),
-                source=f"provider.{self._inner.provider_id}",
-            )
+        async def attempt() -> InferenceResponse:
+            # The slot is held per attempt, not across the whole retry loop, so a call that is
+            # only waiting out a backoff does not block other callers from using the provider.
+            async with self._concurrency_gate:
+                return await self._inner.infer(request)
+
+        return await retry_async(
+            self._policy,
+            attempt,
+            source=f"provider.{self._inner.provider_id}",
+        )
 
     async def stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
         """Retries only a stream that fails before its first chunk arrives.
@@ -116,9 +124,12 @@ class RetryingProvider(ModelProvider):
         the async generator forever, with no exception to retry or surface.
         """
         attempt = 0
-        async with self._concurrency_gate:
-            while True:
-                attempt += 1
+        while True:
+            attempt += 1
+            retry_delay: float
+            # The slot is held for the attempt (including while streaming), and released
+            # before any backoff sleep so a waiting call does not block other callers.
+            async with self._concurrency_gate:
                 agen = self._inner.stream(request)
                 try:
                     first_chunk = await asyncio.wait_for(
@@ -134,44 +145,42 @@ class RetryingProvider(ModelProvider):
                             f"{self._inner.provider_id} sent no response within "
                             f"{self._first_chunk_timeout_s:.0f}s."
                         ) from exc
-                    delay = self._policy._delay(attempt)
+                    retry_delay = self._policy._delay(attempt)
                     logger.warning(
                         "Retrying %s.stream() attempt %d/%d after %.1fs (no response within %.0fs)",
                         self._inner.provider_id,
                         attempt,
                         self._policy.max_attempts,
-                        delay,
+                        retry_delay,
                         self._first_chunk_timeout_s,
                     )
-                    await asyncio.sleep(delay)
-                    continue
                 except RETRYABLE_EXCEPTIONS as exc:
                     if attempt >= self._policy.max_attempts:
                         raise
-                    delay = getattr(exc, "retry_after", None)
-                    if delay is None:
-                        delay = self._policy._delay(attempt)
+                    delay = self._policy.delay_for(exc, attempt)
+                    if delay is None:  # provider wants a longer wait than we will sit through
+                        raise
+                    retry_delay = delay
                     logger.warning(
                         "Retrying %s.stream() attempt %d/%d after %.1fs (%s: %s)",
                         self._inner.provider_id,
                         attempt,
                         self._policy.max_attempts,
-                        delay,
+                        retry_delay,
                         type(exc).__name__,
                         exc,
                     )
-                    await asyncio.sleep(delay)
-                    continue
-
-                # A chunk has reached the caller: no path from here retries
-                # from scratch again — a mid-stream failure propagates as-is,
-                # exactly as it did before this wrapper existed, since
-                # restarting would duplicate or silently drop what was
-                # already delivered.
-                yield first_chunk
-                async for chunk in agen:
-                    yield chunk
-                return
+                else:
+                    # A chunk has reached the caller: no path from here retries
+                    # from scratch again — a mid-stream failure propagates as-is,
+                    # exactly as it did before this wrapper existed, since
+                    # restarting would duplicate or silently drop what was
+                    # already delivered.
+                    yield first_chunk
+                    async for chunk in agen:
+                        yield chunk
+                    return
+            await asyncio.sleep(retry_delay)
 
     async def list_models(self) -> list[ModelDescriptor]:
         return await self._inner.list_models()

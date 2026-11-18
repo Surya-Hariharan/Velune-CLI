@@ -28,6 +28,26 @@ class RetryPolicy:
     )
     loop_detector: ErrorLoopDetector | None = None
     on_retry: Callable[[int, BaseException, float], Awaitable[None]] | None = None
+    # Longest provider-supplied wait (``Retry-After``) we will sit through. Beyond this the
+    # failure is surfaced immediately: a 429 that says "come back in 10 minutes" (an exhausted
+    # quota, not a blip) cannot be waited out inside a request, and sleeping on it only holds
+    # a slot and outlasts the caller's own timeout.
+    max_retry_after_s: float = 30.0
+
+    def delay_for(self, exc: BaseException, attempt: int) -> float | None:
+        """Seconds to wait before retrying after *exc*, or ``None`` to give up now.
+
+        A provider-supplied ``retry_after`` knows better than blind exponential backoff how
+        long to wait, but is only honoured up to :attr:`max_retry_after_s`.
+        """
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is None:
+            return self._delay(attempt)
+        try:
+            wait = max(0.0, float(retry_after))
+        except (TypeError, ValueError):
+            return self._delay(attempt)
+        return wait if wait <= self.max_retry_after_s else None
 
     def _delay(self, attempt: int) -> float:
         """Exponential backoff with optional jitter for attempt N (1-based)."""
@@ -91,8 +111,14 @@ async def retry_async(
             # A RateLimitError (or any exception carrying a provider-supplied
             # `retry_after`, e.g. parsed from an HTTP Retry-After header)
             # knows better than blind exponential backoff how long to wait.
-            retry_after = getattr(exc, "retry_after", None)
-            delay = retry_after if retry_after is not None else policy._delay(attempt)
+            delay = policy.delay_for(exc, attempt)
+            if delay is None:
+                _log.warning(
+                    "Not retrying: provider asked for a wait of %ss (limit %ss)",
+                    getattr(exc, "retry_after", None),
+                    policy.max_retry_after_s,
+                )
+                break
 
             if bus is not None:
                 await _emit(

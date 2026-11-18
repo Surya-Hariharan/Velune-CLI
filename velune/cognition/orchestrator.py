@@ -33,6 +33,11 @@ from velune.telemetry.cognition import CognitivePerformanceAnalytics
 
 logger = TracedLogger("velune.cognition.orchestrator")
 
+# Upper bound for gathering repository context before a council run starts. That step runs
+# before the wall-clock budget, so it needs its own limit; on timeout the run continues
+# without repository context rather than hanging.
+_CONTEXT_TIMEOUT_S = float(os.environ.get("VELUNE_COUNCIL_CONTEXT_SECONDS", "30"))
+
 
 class CouncilOrchestrator:
     """Manages model mappings and runs the multi-agent Reasoning Council debate graph."""
@@ -342,7 +347,12 @@ class CouncilOrchestrator:
                 # user created/deleted since the last prompt are already reflected in
                 # the snapshot.  The git-SHA fast path makes this effectively free
                 # when nothing has changed.
-                await repository_cognition.probe_for_changes()
+                # Bounded: this runs before the wall-clock budget starts, so a stuck scan
+                # would otherwise hang the run with no way out. On timeout the existing
+                # handler below falls back to "Repository context unavailable."
+                await asyncio.wait_for(
+                    repository_cognition.probe_for_changes(), timeout=_CONTEXT_TIMEOUT_S
+                )
 
                 # get_snapshot_fresh() reads the pipeline cache (grapher edges,
                 # API map, architecture/tech summary, git metrics) instead of
@@ -351,7 +361,9 @@ class CouncilOrchestrator:
                 # kept current by RepositoryIntelligenceEngine's background
                 # worker; this only falls back to the full synchronous index()
                 # pipeline on true cold start (no cache yet).
-                snapshot = await repository_cognition.get_snapshot_fresh()
+                snapshot = await asyncio.wait_for(
+                    repository_cognition.get_snapshot_fresh(), timeout=_CONTEXT_TIMEOUT_S
+                )
                 if snapshot:
                     from velune.repository.context_builder import WorkspaceContextBuilder
 
@@ -359,14 +371,19 @@ class CouncilOrchestrator:
                     # Take the delta and clear it in one step, so the next run
                     # doesn't re-announce the same changes.
                     delta = repository_cognition.consume_delta()
-                    snapshot_text, drift_text = builder.build(
+                    # Both steps are pure CPU over the whole snapshot text, so they run in a
+                    # worker thread instead of stalling the event loop (and the UI with it).
+                    snapshot_text, drift_text = await asyncio.to_thread(
+                        builder.build,
                         snapshot,
                         delta=delta,
                         api_map=snapshot.api_map,
                     )
 
                     # Firewall: scan for prompt injection in workspace-derived content.
-                    scan_res = self.firewall.scan_file_for_injection("repo_context", snapshot_text)
+                    scan_res = await asyncio.to_thread(
+                        self.firewall.scan_file_for_injection, "repo_context", snapshot_text
+                    )
                     if scan_res.get("quarantined"):
                         snapshot_text = scan_res.get("neutralized_content", "")
                         logger.warning(
@@ -388,39 +405,61 @@ class CouncilOrchestrator:
 
         # Inject git state as a separate firewall-bounded context block so the
         # council agents know the current branch, staged diff, and recent commits.
+        # The git state and the project-config lookups are independent, blocking (subprocesses,
+        # directory walks, file reads) and each non-fatal, so run them in worker threads at
+        # the same time rather than one after another on the event loop.
         try:
+            _c = self._runtime_container()
+            _ws = Path(_c.get("runtime.workspace") if _c.has("runtime.workspace") else ".")
+        except Exception as _we:
+            logger.debug("Workspace lookup failed (non-fatal): %s", _we)
+            _ws = Path(".")
+
+        def _git_block_sync() -> str:
             from velune.repository.git_context import GitContextProvider
 
-            _c = self._runtime_container()
-            _ws = _c.get("runtime.workspace") if _c.has("runtime.workspace") else "."
-            _git_provider = GitContextProvider(Path(_ws))
-            _git_snap = await asyncio.to_thread(_git_provider.gather)
-            _git_block = _git_provider.build_context_block(_git_snap)
-            if _git_block:
-                repo_context += "\n\n" + self.firewall.wrap_workspace_content(
-                    "git_context", _git_block
-                )
-        except Exception as _ge:
-            logger.debug("Git context gathering failed (non-fatal): %s", _ge)
+            provider = GitContextProvider(_ws)
+            return provider.build_context_block(provider.gather()) or ""
 
-        # Inject config file intelligence so the council knows project commands and deps.
-        try:
+        def _config_block_sync() -> str:
             from velune.repository.config_intelligence import ConfigIntelligenceExtractor
             from velune.repository.project_type import ProjectTypeDetector
 
-            _c2 = self._runtime_container()
-            _ws2 = _c2.get("runtime.workspace") if _c2.has("runtime.workspace") else "."
-            _profile = ProjectTypeDetector().detect(Path(_ws2))
-            _intel = ConfigIntelligenceExtractor().extract(Path(_ws2), _profile.config_files)
-            _config_block = ConfigIntelligenceExtractor().render_context_block(_intel)
-            if _config_block:
-                repo_context += "\n\n" + self.firewall.wrap_workspace_content(
-                    "project_config", _config_block
-                )
-        except Exception as _ce:
-            logger.debug("Config intelligence extraction failed (non-fatal): %s", _ce)
+            profile = ProjectTypeDetector().detect(_ws)
+            extractor = ConfigIntelligenceExtractor()
+            return (
+                extractor.render_context_block(extractor.extract(_ws, profile.config_files)) or ""
+            )
+
+        _git_block, _config_block = await asyncio.gather(
+            asyncio.wait_for(asyncio.to_thread(_git_block_sync), timeout=_CONTEXT_TIMEOUT_S),
+            asyncio.wait_for(asyncio.to_thread(_config_block_sync), timeout=_CONTEXT_TIMEOUT_S),
+            return_exceptions=True,
+        )
+        # Inject git state as a firewall-bounded block so the agents know the branch, staged
+        # diff and recent commits; and config intelligence so they know project commands/deps.
+        for _label, _block, _kind in (
+            ("Git context", _git_block, "git_context"),
+            ("Config intelligence", _config_block, "project_config"),
+        ):
+            if isinstance(_block, BaseException):
+                logger.debug("%s gathering failed (non-fatal): %s", _label, _block)
+            elif _block:
+                try:
+                    repo_context += "\n\n" + self.firewall.wrap_workspace_content(_kind, _block)
+                except Exception as _we2:
+                    logger.debug("%s could not be wrapped (non-fatal): %s", _label, _we2)
 
         async def run_execution():
+            # The consumer loop below waits on the queue until it sees the None sentinel, so
+            # the sentinel must be sent on *every* exit path, including an error while
+            # building the final state, or the stream would wait forever.
+            try:
+                await _run_execution_body()
+            finally:
+                queue.put_nowait(None)
+
+        async def _run_execution_body():
             coder_proposal: str | None = None
             degradation_reasons: list[str] = []
             try:
@@ -476,7 +515,6 @@ class CouncilOrchestrator:
                     task_plan=task_plan,
                 )
                 self._states[run_id] = state
-                queue.put_nowait(None)
                 raise
             except Exception as e:
                 logger.error("Reasoning Council execution failed: %s", e)
@@ -497,7 +535,6 @@ class CouncilOrchestrator:
                 validation_issues=degradation_reasons,
             )
             self._states[run_id] = state
-            queue.put_nowait(None)  # Sentinel
 
         execution_task = asyncio.create_task(run_execution())
 

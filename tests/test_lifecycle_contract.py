@@ -279,6 +279,9 @@ def test_uv_is_never_resolved_with_shutil_which():
 def test_no_pip_is_ever_invoked_by_lifecycle_code():
     for source in LIFECYCLE.glob("*.py"):
         text = source.read_text(encoding="utf-8")
+        # Reading the INSTALLER metadata to *recognise* a pip install is allowed; using "pip"
+        # as anything else (an argv element, a command name) is not.
+        text = text.replace('== "pip"', "").replace('!= "pip"', "")
         assert '"pip"' not in text and "'pip'" not in text, source.name
         assert "-m pip" not in text.replace("pip install ", ""), source.name
 
