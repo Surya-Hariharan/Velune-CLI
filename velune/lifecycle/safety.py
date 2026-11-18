@@ -14,7 +14,15 @@ processes would therefore miss the one that always matters. The rule is:
 on Windows, never mutate the installation that contains the running
 interpreter; print the manual command instead.
 
-No detached helper, no background updater, no self-replacement.
+No self-replacement. The one exception to "manual only" is the post-exit updater
+(:mod:`velune.lifecycle.post_exit_updater`, started by :mod:`velune.lifecycle.autoupdate`
+after the user agrees): it runs from the *base* interpreter outside the installation and
+starts only once the installation's executables are no longer locked, i.e. **no Velune
+is running from them**, so it never replaces files that are in use. If that doesn't
+happen within its wait limit, it changes nothing.
+
+The same rule applies outside Velune: ``scripts/install.ps1`` / ``install.sh`` refuse to
+reinstall over a running Velune.
 
 Other platforms: the spike did not test macOS or Linux, and POSIX file
 semantics differ (an open file can be unlinked). No equivalent check is

@@ -95,6 +95,12 @@ velune doctor
 If your shell says `velune` is not recognized, use `python -m velune --version` and `python -m velune doctor` instead;
 they run the same code without needing the Scripts folder on `PATH` (see the troubleshooting entry above).
 
+Updating: Velune checks PyPI at most once a day, asks once per new version, and installs an accepted update after you
+quit (see `docs/lifecycle.md`). Set `[update] auto = "notify"` to only be told, or `"off"` (or
+`VELUNE_NO_UPDATE_CHECK=1`) to make no request at all. Always close Velune before re-running the installer or
+`pip install --upgrade`: replacing a running installation on Windows can delete its files part-way, and `velune
+doctor` reports such a damaged install ("Installation Intact") with the command that repairs it.
+
 `velune doctor` shows the Velune version, Python interpreter, operating system, and where Velune is installed and keeps
 its data. It ends with "✓ Core installation is healthy." or a list of problems. Optional integrations (provider keys, a
 local Ollama, extras such as `[rag]`) are reported but never counted as installation failures, and the exit code is

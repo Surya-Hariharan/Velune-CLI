@@ -254,9 +254,12 @@ def test_only_known_modules_start_processes_or_delete_files():
         if "os.unlink" in text or "os.rmdir" in text:
             deletes.add(source.name)
     # uv launches: apply.py (shared runner) and the read-only 'uv tool dir' in ownership.py.
-    assert starts <= {"apply.py", "ownership.py"}, starts
-    # deletion: the journal's own file, and the purge command's validated plan.
-    assert deletes <= {"journal.py", "purge.py"}, deletes
+    # post_exit_updater.py runs the accepted update only after every Velune process has exited
+    # (autoupdate.py starts it through an injected Popen).
+    assert starts <= {"apply.py", "ownership.py", "post_exit_updater.py"}, starts
+    # deletion: the journal's own file, the purge command's validated plan, and the post-exit
+    # updater's own one-shot spec file and lock file.
+    assert deletes <= {"journal.py", "purge.py", "post_exit_updater.py"}, deletes
 
 
 def test_uv_is_never_resolved_with_shutil_which():
@@ -271,13 +274,19 @@ def test_uv_is_never_resolved_with_shutil_which():
                     offenders.append((source.name, node.lineno))
             # also a bare reference used as a default (e.g. `which=shutil.which`)
             if isinstance(node, ast.Attribute) and ast.unparse(node) == "shutil.which":
-                if source.name != "uninstall.py":  # only used there to *locate* the launcher
+                # only used there to *locate* the velune launcher, never uv
+                if source.name not in ("uninstall.py", "autoupdate.py"):
                     offenders.append((source.name, node.lineno))
     assert offenders == []
 
 
 def test_no_pip_is_ever_invoked_by_lifecycle_code():
+    # autoupdate.py is the one exception: after the user accepts an update, a pip --user / venv
+    # install is updated with pip by the post-exit helper (tests/test_autoupdate.py pins the
+    # exact argv and that only those two ownership kinds get it).
     for source in LIFECYCLE.glob("*.py"):
+        if source.name == "autoupdate.py":
+            continue
         text = source.read_text(encoding="utf-8")
         # Reading the INSTALLER metadata to *recognise* a pip install is allowed; using "pip"
         # as anything else (an argv element, a command name) is not.

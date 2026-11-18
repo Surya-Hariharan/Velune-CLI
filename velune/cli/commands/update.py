@@ -1,4 +1,4 @@
-"""``velune update --check`` — is a newer release available? (read-only)
+"""``velune update`` — check for, apply, or (on Windows) schedule a newer release.
 
 Thin CLI surface. ``--check`` is :mod:`velune.lifecycle.check` (read-only, any
 installation). Without it, :mod:`velune.lifecycle.apply` updates a confirmed
@@ -8,6 +8,7 @@ uv-managed tool and refuses everything else before changing anything.
 from __future__ import annotations
 
 import json
+import sys
 
 import typer
 
@@ -36,7 +37,9 @@ def update_cmd(
     """Check for, or apply, a newer Velune release.
 
     With --check nothing is changed. Without it, a uv-managed installation is
-    updated with 'uv tool upgrade' (never on Windows: update manually there).
+    updated with 'uv tool upgrade'. On Windows (and for pip --user / venv installs
+    there) the update is scheduled instead: it runs as soon as this command and
+    every other Velune window have exited, and the next start reports the result.
 
     Exit codes: 0 up to date / updated, 10 update available (--check), 3 refused before any
     change (not a confirmed uv tool, pinned, Windows, unfinished journal, uv missing), 4 the
@@ -55,6 +58,14 @@ def update_cmd(
                 ),
                 json_output,
             )
+            return
+        if sys.platform == "win32":
+            # Windows cannot replace a running installation (safety.py, P2.0), and this
+            # command *is* a running Velune. Hand the update to the post-exit helper, which
+            # starts as soon as this process and every other Velune window have exited.
+            from velune.lifecycle.autoupdate import run_scheduled_update
+
+            _emit(run_scheduled_update(), json_output)
             return
         from velune.lifecycle.apply import run_update
 

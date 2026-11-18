@@ -8,7 +8,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Ask-first automatic updates.** Once a day an interactive session checks PyPI for a newer
+  release and asks once per version whether to install it. An accepted update runs after you
+  quit, from a detached helper that waits until every Velune process has exited, then updates
+  (uv tool, or pip `--user` / venv), verifies `velune --version`, and repairs a uv tool once if
+  needed. The next start reports the result. `[update] auto = "ask" | "notify" | "off"`,
+  `VELUNE_NO_UPDATE_CHECK=1`. On Windows, `velune update` now schedules the same post-exit
+  update instead of refusing.
+
 ### Fixed
+
+- **Velune could vanish or break after re-installing or upgrading it.** Replacing a running
+  installation on Windows fails part-way (Windows keeps its files locked), leaving a
+  half-deleted environment. `install.ps1` / `install.sh` now refuse while Velune is running
+  from the installation (`VELUNE_STOP_RUNNING=1` stops it instead), and repair once if the new
+  install does not start. `velune doctor` detects a damaged installation (files not matching
+  the package RECORD, or pip's leftover `~elune*` folders) and prints the repair command.
 
 - **`/council` could freeze the terminal at the file-approval prompt.** The accept/reject prompt
   was a blocking `input()` inside the running full-screen app (frozen loop, two readers on one

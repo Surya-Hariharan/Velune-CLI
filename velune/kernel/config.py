@@ -255,6 +255,18 @@ class TelemetryConfig(BaseModel):
     crash_reports_enabled: bool = False
 
 
+class UpdateConfig(BaseModel):
+    """Automatic update checks (see velune/lifecycle/autoupdate.py).
+
+    ``auto``: ``"ask"`` checks PyPI at most once per ``check_interval_hours`` and, when a
+    newer release exists, asks once per version whether to install it after Velune exits;
+    ``"notify"`` only prints a one-line notice; ``"off"`` makes no request at all.
+    """
+
+    auto: Literal["ask", "notify", "off"] = "ask"
+    check_interval_hours: float = Field(default=24.0, ge=1.0, le=24.0 * 30)
+
+
 class MCPConfig(BaseModel):
     """MCP configuration settings."""
 
@@ -504,6 +516,7 @@ class VeluneConfig(BaseSettings):
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
+    update: UpdateConfig = Field(default_factory=UpdateConfig)
 
     # ---------------------------------------------------------------------------
     # Startup validation

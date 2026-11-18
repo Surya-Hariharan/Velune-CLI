@@ -650,8 +650,30 @@ def test_without_check_the_apply_path_runs_and_the_check_does_not(monkeypatch):
         "run_update",
         lambda **k: LifecycleResult("update", exit_code=ExitCode.REFUSED, message="refused"),
     )
+    monkeypatch.setattr("velune.cli.commands.update.sys.platform", "linux")
     res = CliRunner().invoke(_cli(), [])
     assert res.exit_code == 3 and "refused" in res.output
+
+
+def test_on_windows_the_update_is_scheduled_for_after_exit(monkeypatch):
+    """Windows cannot replace the running Velune, so `velune update` hands off to the
+    post-exit updater instead of running uv in-process."""
+    from velune.lifecycle import apply as apply_mod
+    from velune.lifecycle import autoupdate
+    from velune.lifecycle.errors import LifecycleResult
+
+    def forbidden(**k):
+        raise AssertionError("must not update in-process on Windows")
+
+    monkeypatch.setattr(apply_mod, "run_update", forbidden)
+    monkeypatch.setattr(
+        autoupdate,
+        "run_scheduled_update",
+        lambda: LifecycleResult("update", message="Updating Velune 1 -> 2 as soon as"),
+    )
+    monkeypatch.setattr("velune.cli.commands.update.sys.platform", "win32")
+    res = CliRunner().invoke(_cli(), [])
+    assert res.exit_code == 0 and "as soon as" in res.output
 
 
 def test_pre_without_check_is_a_usage_error_and_runs_nothing(monkeypatch):

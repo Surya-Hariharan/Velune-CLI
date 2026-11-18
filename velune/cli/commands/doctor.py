@@ -154,6 +154,7 @@ def _all_checks() -> list:
         _check_python_version,
         _check_console_launcher,
         _check_scripts_on_path,
+        _check_installation_integrity,
         _check_pip,
         _check_core_dependencies,
         _check_internet_connectivity,
@@ -537,6 +538,59 @@ def _check_scripts_on_path() -> dict:
         "message": (
             f"{scripts_dir} is not on PATH — bare 'velune' may not be found. "
             f"Add it to PATH, or always use 'python -m velune'."
+        ),
+    }
+
+
+def _check_installation_integrity() -> dict:
+    """Installed files match the package RECORD, and no pip upgrade was left half-done.
+
+    Both are what updating a still-running Velune leaves behind (Windows keeps its files
+    locked); pip's half-done upgrades leave ``~elune...`` rollback folders in site-packages.
+    """
+    import os
+    import site
+    import sysconfig
+
+    from velune.lifecycle.hints import is_uv_tool_environment, uv_reinstall_advice
+    from velune.lifecycle.integrity import DAMAGED, verify_record
+
+    name = "Installation Intact"
+    integrity = verify_record()
+    roots = {*sysconfig.get_paths().values(), site.getusersitepackages()}
+    leftovers = sorted(
+        e.name
+        for root in roots
+        if os.path.isdir(root)
+        for e in os.scandir(root)
+        if e.name.lower().startswith("~elune")
+    )
+    if integrity.record != DAMAGED and not leftovers:
+        if integrity.intact:
+            message = f"{integrity.checked} installed files match the package record"
+            return {"name": name, "status": "ok", "message": message}
+        message = "could not verify installed files: " + "; ".join(integrity.problems)
+        return {"name": name, "status": "warn", "message": message}
+
+    problems = list(integrity.problems) if integrity.record == DAMAGED else []
+    if leftovers:
+        problems.append("an interrupted pip upgrade left " + ", ".join(leftovers[:3]))
+    import velune
+
+    user = (
+        " --user" if os.path.abspath(velune.__file__).startswith(site.getusersitepackages()) else ""
+    )
+    fix = (
+        uv_reinstall_advice()
+        if is_uv_tool_environment()
+        else f'Close Velune, then run: "{sys.executable}" -m pip install --force-reinstall{user} velune-cli'
+    )
+    return {
+        "name": name,
+        "status": "fail",
+        "message": (
+            f"Velune's installation is damaged ({'; '.join(problems)}), usually from updating "
+            f"it while it was running. {fix}"
         ),
     }
 

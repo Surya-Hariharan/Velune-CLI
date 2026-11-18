@@ -5,13 +5,17 @@
 # Installs Velune into its own isolated environment with uv
 # (https://docs.astral.sh/uv/), so it never fights the packages of any other
 # tool and works even with no Python installed — uv downloads a private one.
-# Re-run the same command to upgrade.
+# Re-run the same command to upgrade. Close Velune first: replacing a running
+# installation on Windows can destroy it, so the installer refuses while any
+# Velune process is still running from it.
 #
 # Environment overrides:
 #   VELUNE_PACKAGE         what to install (default: velune-cli; may be a version
 #                          spec like "velune-cli==0.9.9" or a local wheel path)
 #   VELUNE_PYTHON          Python version for the environment (default: 3.12)
 #   VELUNE_NO_MODIFY_PATH  set to 1 to leave the user PATH untouched
+#   VELUNE_STOP_RUNNING    set to 1 to stop running Velune processes instead of
+#                          refusing (unsaved work in them is lost)
 
 # Before downloading anything the installer checks the CPU architecture and
 # stops with an explanation on a platform Velune does not support (see
@@ -46,6 +50,34 @@ function Get-VeluneHostArchitecture {
     } catch { }
     if ($env:PROCESSOR_ARCHITEW6432) { return $env:PROCESSOR_ARCHITEW6432 }
     return $env:PROCESSOR_ARCHITECTURE
+}
+
+# Processes that hold an existing Velune installation open: anything running from
+# the uv tool environment, or the `velune.exe` launcher in uv's bin directory.
+# Windows locks these files, and uv fails part-way through replacing them, which
+# leaves a broken or half-deleted installation ("Velune disappeared").
+# $Processes is injectable for tests; each item needs .Id and .Path.
+function Get-VeluneRunningProcesses {
+    param(
+        [string]$ToolDir,
+        [string]$BinDir,
+        $Processes = $null
+    )
+    if ($null -eq $Processes) {
+        $Processes = Get-Process -ErrorAction SilentlyContinue
+    }
+    $envDir = if ($ToolDir) { (Join-Path $ToolDir 'velune-cli').TrimEnd('\') + '\' } else { $null }
+    $launcher = if ($BinDir) { Join-Path $BinDir 'velune.exe' } else { $null }
+    $found = @()
+    foreach ($p in $Processes) {
+        $path = $p.Path
+        if (-not $path) { continue }
+        if (($envDir -and $path.StartsWith($envDir, [System.StringComparison]::OrdinalIgnoreCase)) -or
+            ($launcher -and [string]::Equals($path, $launcher, [System.StringComparison]::OrdinalIgnoreCase))) {
+            $found += $p
+        }
+    }
+    return ,$found
 }
 
 # Everything runs inside a function: under `irm | iex` a top-level `exit`
@@ -87,13 +119,36 @@ function Install-Velune {
         }
     }
 
-    Write-Host "==> Installing $package (isolated environment, Python $pythonVersion)..."
-    & $uv tool install --force --upgrade --python $pythonVersion $package
-    if ($LASTEXITCODE -ne 0) { throw "installing $package failed (output above)" }
-
+    # Never replace a running installation (see Get-VeluneRunningProcesses).
     $binDir = (& $uv tool dir --bin).Trim()
-    & (Join-Path $binDir 'velune.exe') --version
-    if ($LASTEXITCODE -ne 0) { throw 'velune was installed but does not start' }
+    $running = Get-VeluneRunningProcesses -ToolDir (& $uv tool dir).Trim() -BinDir $binDir
+    if ($running.Count -gt 0) {
+        $ids = ($running | ForEach-Object { $_.Id }) -join ', '
+        if ($env:VELUNE_STOP_RUNNING -ne '1') {
+            throw ("Velune is still running (PID $ids). Updating a running Velune on Windows " +
+                "can delete its files part-way. Close every Velune window, then run the " +
+                "installer again (or set VELUNE_STOP_RUNNING=1 to stop them for you).`n" +
+                'Nothing was changed.')
+        }
+        Write-Host "==> Stopping running Velune (PID $ids)..."
+        $running | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+
+    # One extra forced install repairs a half-written environment (e.g. a file
+    # locked by antivirus); a second failure is reported.
+    $velune = Join-Path $binDir 'velune.exe'
+    foreach ($attempt in 1, 2) {
+        Write-Host "==> Installing $package (isolated environment, Python $pythonVersion)..."
+        & $uv tool install --force --upgrade --python $pythonVersion $package
+        if ($LASTEXITCODE -ne 0) { throw "installing $package failed (output above)" }
+        & $velune --version
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($attempt -eq 2) {
+            throw "velune was installed but does not start. Close every Velune window and run: uv tool install --force $package"
+        }
+        Write-Host '==> velune did not start; reinstalling once to repair it...'
+    }
 
     if ($env:VELUNE_NO_MODIFY_PATH -ne '1') {
         & $uv tool update-shell *> $null

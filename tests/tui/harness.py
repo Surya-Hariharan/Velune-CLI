@@ -171,6 +171,8 @@ class TermSession:
                 "VELUNE_TUI_SANDBOX": str(sandbox),
                 "VELUNE_DATA_HOME": str(sandbox / "data"),
                 "VELUNE_MASTER_PASSPHRASE": "tui-test-passphrase",
+                # The background release check would add a PyPI request to every journey.
+                "VELUNE_NO_UPDATE_CHECK": "1",
                 "TERM": "xterm-256color",
                 "PYTHONIOENCODING": "utf-8",
                 "PYTHONUTF8": "1",

@@ -173,7 +173,10 @@ Velune CLI contains no analytics, usage reporting or remote crash reporting, and
 it sends no data to the maintainers. Token, cost and latency tracking is local.
 Network traffic is limited to what you direct it to: the model providers you
 configure, MCP servers, git hosts, web pages you ask it to fetch, and a request
-to the PyPI index when you run `velune update`.
+to the PyPI index when you run `velune update` or, at most once a day in an
+interactive session, to check for a newer release (`[update] auto = "off"` or
+`VELUNE_NO_UPDATE_CHECK=1` turns that off). That request carries no identifier
+or usage data; an update is only installed after you agree to it.
 
 An opt-in, off-by-default local crash reporter (`telemetry.crash_reports_enabled`,
 or `/crashreports on`) writes a redacted JSON snapshot of an unhandled crash

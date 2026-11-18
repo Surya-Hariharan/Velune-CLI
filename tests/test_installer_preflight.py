@@ -336,3 +336,59 @@ def test_readme_does_not_claim_intel_mac_wheels_the_lock_lacks():
         )
     # If the lock ever gains these wheels the 'Unverified' wording may be relaxed
     # deliberately; this test then stops constraining it.
+
+
+# ── Running-Velune guard (replacing a running install destroys it) ───────────
+
+
+def _ps_running(processes: str, tool_dir: str, bin_dir: str) -> str:
+    script = (
+        f"$s = Get-Content -Raw -LiteralPath '{INSTALL_PS1}'; Invoke-Expression $s; "
+        f"$procs = @({processes}); "
+        f"$r = Get-VeluneRunningProcesses -ToolDir '{tool_dir}' -BinDir '{bin_dir}' "
+        "-Processes $procs; Write-Output (($r | ForEach-Object { $_.Id }) -join ',')"
+    )
+    result = subprocess.run(
+        [_powershell(), "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, env=_SOURCE_ONLY, timeout=120, check=False,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def _proc(pid: int, path: str) -> str:
+    return f"[pscustomobject]@{{Id={pid}; Path='{path}'}}"
+
+
+def test_ps_finds_velune_running_from_the_tool_env_or_launcher():
+    procs = ", ".join(
+        [
+            _proc(1, r"C:\uv\tools\velune-cli\Scripts\python.exe"),
+            _proc(2, r"C:\bin\VELUNE.EXE"),  # case-insensitive
+            _proc(3, r"C:\uv\tools\velune-cli-other\python.exe"),  # lookalike prefix
+            _proc(4, r"C:\Windows\explorer.exe"),
+            "[pscustomobject]@{Id=5; Path=$null}",  # protected process
+        ]
+    )
+    assert _ps_running(procs, r"C:\uv\tools", r"C:\bin") == "1,2"
+
+
+def test_ps_finds_nothing_when_velune_is_closed():
+    assert _ps_running(_proc(4, r"C:\Windows\explorer.exe"), r"C:\uv\tools", r"C:\bin") == ""
+
+
+def test_installers_refuse_or_stop_before_installing_over_a_running_velune():
+    ps = INSTALL_PS1.read_text(encoding="utf-8")
+    sh = INSTALL_SH.read_text(encoding="utf-8")
+    for text in (ps, sh):
+        assert "VELUNE_STOP_RUNNING" in text
+        assert text.index("Velune is still running") < text.index("tool install --force --upgrade")
+        assert "Nothing was changed." in text
+
+
+def test_sh_running_pids_ignores_an_empty_tool_dir():
+    result = subprocess.run(
+        [_sh(), "-c", '. "$1"; running_velune_pids ""', "sh", INSTALL_SH.as_posix()],
+        capture_output=True, text=True, env=_SOURCE_ONLY, timeout=60, check=False,
+    )  # fmt: skip
+    assert result.returncode == 0 and result.stdout == ""

@@ -52,6 +52,8 @@ def pytest_configure(config):
         "XDG_CONFIG_HOME": str(home / ".config"),
         "XDG_CACHE_HOME": str(home / ".cache"),
         "VELUNE_DATA_HOME": str(root / "data"),
+        # Never ask PyPI for a newer release from a test session.
+        "VELUNE_NO_UPDATE_CHECK": "1",
     }
     os.environ.update({k: v for k, v in env.items() if v})
     _SANDBOX = root

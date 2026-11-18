@@ -68,13 +68,52 @@ memory, sessions, skills, project files, the uv cache or other uv tools. `uninst
 contains no deletion code of its own: uv does the removal and Velune only observes
 the result. Data is removed solely by `purge-data`, never implicitly.
 
-## Windows: manual only
+## Windows: never in place
 
 Windows locks the files of the running installation (observed in the P2.0 spike:
-half-replaced or destroyed environments). So on Windows `update`, `repair` and
-`uninstall` **refuse to change the installation Velune is running from** and print the
-exact command to run after closing Velune, in a fresh terminal. There is no detached
-helper, no self-deletion workaround, and no guard bypass (`--yes` does not bypass it).
+half-replaced or destroyed environments). So on Windows `repair` and `uninstall`
+**refuse to change the installation Velune is running from** and print the exact command
+to run after closing Velune, in a fresh terminal. There is no self-deletion workaround
+and no guard bypass (`--yes` does not bypass it).
+
+`update` on Windows does not run uv in-process either. It hands the update to the
+**post-exit updater** (below), which starts once this command and every other Velune
+window have exited.
+
+The installers follow the same rule: `install.ps1` / `install.sh` refuse to reinstall
+while any Velune process runs from the installation (`VELUNE_STOP_RUNNING=1` stops those
+processes instead), and if the freshly installed `velune --version` fails they run one
+more forced install to repair it.
+
+## Automatic updates (ask first)
+
+`[update] auto` controls this (`"ask"` by default, `"notify"`, or `"off"`;
+`check_interval_hours`, default 24). `VELUNE_NO_UPDATE_CHECK=1` and `CI` disable the
+check, and so does running without a terminal.
+
+1. At most once per interval, an interactive session asks PyPI's Simple API for the
+   latest release. This is the same single metadata request as `velune update --check`,
+   and nothing is downloaded.
+2. If a newer release exists, Velune asks between prompts: *update when I exit*, *skip
+   this version* (remembered), or *ask me next time*. Installations that cannot be
+   updated automatically get a notice with the manual command instead.
+3. On exit, Velune starts `post_exit_updater.py` detached, under the base interpreter
+   (`-I`), so it holds none of the installation's files open. It waits until the `velune`
+   launcher and, for a uv tool, the environment's `python.exe` can be opened for
+   writing. Windows refuses that while any Velune runs from them, which is exactly the
+   condition that breaks an update. On POSIX it waits for the exiting process. If Velune
+   is still running after 10 minutes, it changes nothing and tries again at the next
+   exit.
+4. It then runs `uv tool upgrade velune-cli` for an unpinned uv tool, or `<python> -m pip
+   install --upgrade [--user] velune-cli` for a pip `--user` / venv install. It verifies
+   the result with `python -m velune --version`. If a uv tool fails verification, it runs
+   one `uv tool install --force velune-cli[extras]==<new>` and verifies again.
+5. The next session prints the outcome once, with the manual command if it failed.
+
+State lives in `<app data>/lifecycle/update_state.json`, the log (exit codes only, never
+uv/pip output) in `update.log`, and a lock file stops two helpers running at once. Pinned,
+local-file, editable, system-pip and ambiguous installations are never updated
+automatically.
 
 ## POSIX
 

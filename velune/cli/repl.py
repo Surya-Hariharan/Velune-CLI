@@ -70,6 +70,8 @@ class VeluneREPL:
         self._history_file = Path.home() / ".velune" / "repl_history"
         self._history_file.parent.mkdir(parents=True, exist_ok=True)
         self._conversation: list[dict] = []
+        # A newer release found by the background update check, asked about between prompts.
+        self._update_offer: Any = None
         try:
             _config = self.container.get_optional("runtime.config")
             self._hunk_review_mode: bool = bool(
@@ -869,6 +871,11 @@ class VeluneREPL:
 
         track(asyncio.create_task(self._reverify_stale_keys(), name="velune.reverify_keys"))
 
+        from velune.cli.handlers import updates as _updates
+
+        _updates.report_last_result(self)
+        track(asyncio.create_task(_updates.background_check(self), name="velune.update_check"))
+
         self._ollama_probe_task = track(
             asyncio.create_task(self._ollama_probe_loop(), name="velune.ollama_probe")
         )
@@ -884,6 +891,9 @@ class VeluneREPL:
         try:
             while not self._exit_requested:
                 try:
+                    # Asked here, between prompts, so the question never draws over the
+                    # input line. No-op unless the background check found a new release.
+                    await _updates.maybe_ask(self)
                     seed = self._pending_prompt_text
                     self._pending_prompt_text = ""
                     if plain:
@@ -949,6 +959,9 @@ class VeluneREPL:
                         await ui_task
                     except Exception:
                         pass
+                # Last: the helper waits for this process (and every other Velune) to exit
+                # before it touches the installation.
+                _updates.on_exit()
 
     def _print_interrupted_frame(self) -> None:
         self.console.print("[dim]╭─[/dim] [yellow]Generation interrupted[/yellow]")

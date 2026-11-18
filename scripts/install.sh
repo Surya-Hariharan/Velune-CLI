@@ -7,7 +7,8 @@
 # (https://docs.astral.sh/uv/), so it never fights the packages of any other
 # tool and works even when the system Python is missing, too old, or
 # "externally managed" (PEP 668 — Debian/Ubuntu/Homebrew). uv downloads a
-# private Python if needed. Re-run the same command to upgrade.
+# private Python if needed. Re-run the same command to upgrade (close Velune
+# first: the installer refuses while Velune is running from the installation).
 #
 # Before downloading anything the installer checks the operating system and
 # CPU architecture, and stops with an explanation on a platform Velune does not
@@ -18,6 +19,8 @@
 #                          spec like "velune-cli==0.9.9" or a local wheel path)
 #   VELUNE_PYTHON          Python version for the environment (default: 3.12)
 #   VELUNE_NO_MODIFY_PATH  set to 1 to leave shell profiles untouched
+#   VELUNE_STOP_RUNNING    set to 1 to stop running Velune processes instead of
+#                          refusing (unsaved work in them is lost)
 
 set -eu
 
@@ -71,6 +74,16 @@ platform_notes() {
     fi
 }
 
+# running_velune_pids TOOL_DIR
+#   PIDs of processes running from the Velune tool environment, one per line.
+#   Replacing an installation while it runs can leave it half-deleted.
+running_velune_pids() {
+    _dir="$1"
+    [ -n "$_dir" ] || return 0
+    command -v pgrep >/dev/null 2>&1 || return 0
+    pgrep -f -- "$_dir/velune-cli/" 2>/dev/null | grep -v "^$$\$" || true
+}
+
 find_uv() {
     if command -v uv >/dev/null 2>&1; then command -v uv; return; fi
     for candidate in "${XDG_BIN_HOME:-$HOME/.local/bin}/uv" "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do
@@ -107,12 +120,27 @@ Nothing was downloaded or installed."
         [ -n "$UV" ] || die "uv installation failed; see https://docs.astral.sh/uv/getting-started/installation/"
     fi
 
-    say "==> Installing $PACKAGE (isolated environment, Python $PYTHON_VERSION)..."
-    "$UV" tool install --force --upgrade --python "$PYTHON_VERSION" "$PACKAGE" \
-        || die "installing $PACKAGE failed (output above)"
+    PIDS="$(running_velune_pids "$("$UV" tool dir 2>/dev/null || true)" | tr '\n' ' ')"
+    PIDS="${PIDS% }"
+    if [ -n "$PIDS" ]; then
+        [ "${VELUNE_STOP_RUNNING:-0}" = "1" ] || die "Velune is still running (PID $PIDS). Close every Velune session, then run the installer again (or set VELUNE_STOP_RUNNING=1 to stop them for you).
+Nothing was changed."
+        say "==> Stopping running Velune (PID $PIDS)..."
+        # shellcheck disable=SC2086
+        kill $PIDS 2>/dev/null || true
+        sleep 2
+    fi
 
-    BIN_DIR="$("$UV" tool dir --bin)"
-    "$BIN_DIR/velune" --version || die "velune was installed but does not start"
+    # One extra forced install repairs a half-written environment; a second failure is reported.
+    for ATTEMPT in 1 2; do
+        say "==> Installing $PACKAGE (isolated environment, Python $PYTHON_VERSION)..."
+        "$UV" tool install --force --upgrade --python "$PYTHON_VERSION" "$PACKAGE" \
+            || die "installing $PACKAGE failed (output above)"
+        BIN_DIR="$("$UV" tool dir --bin)"
+        "$BIN_DIR/velune" --version && break
+        [ "$ATTEMPT" = 2 ] && die "velune was installed but does not start. Close every Velune session and run: uv tool install --force $PACKAGE"
+        say "==> velune did not start; reinstalling once to repair it..."
+    done
 
     if [ "${VELUNE_NO_MODIFY_PATH:-0}" != "1" ]; then
         "$UV" tool update-shell >/dev/null 2>&1 || true
