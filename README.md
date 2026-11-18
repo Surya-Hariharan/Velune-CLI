@@ -110,8 +110,9 @@ To update by hand, **close every Velune window first**, then re-run the installe
 running Velune can delete its files part-way, so the installer refuses while Velune is open.
 
 Installed with plain `pip` and `velune` says "not recognized" (or "command not found")? The install worked; Python's
-Scripts folder just isn't on your `PATH`. Run `python -m velune doctor`, which works without it and prints the exact
-fix, or install with `pipx` (then `pipx ensurepath`).
+Scripts folder just isn't on your `PATH` (pip prints "WARNING: The scripts velune.exe ... are installed in ... which is
+not on PATH"). Run `python -m velune doctor --fix`, which works without it and adds the folder to your user `PATH`;
+then open a new terminal. Or install with `pipx` (then `pipx ensurepath`).
 
 Then pick your lane:
 

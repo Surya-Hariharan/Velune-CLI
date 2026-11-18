@@ -121,3 +121,35 @@ def test_direct_executable_invocation_reports_version():
     exe = launcher / sp.launcher_name()
     out = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0 and out.stdout.startswith("velune v")
+
+
+def test_add_to_user_path_non_windows_only_advises(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    changed, msg = sp.add_to_user_path("/home/me/.local/bin")
+    assert changed is False
+    assert "/home/me/.local/bin" in msg
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows registry only")
+def test_add_to_user_path_windows_appends_once(monkeypatch):
+    import winreg
+
+    store = {"Path": (r"C:\Existing", winreg.REG_EXPAND_SZ)}
+
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(winreg, "OpenKey", lambda *a, **k: _Key())
+    monkeypatch.setattr(winreg, "QueryValueEx", lambda key, name: store[name])
+    monkeypatch.setattr(
+        winreg, "SetValueEx", lambda key, name, _r, kind, val: store.__setitem__(name, (val, kind))
+    )
+    changed, _ = sp.add_to_user_path(USER_SCRIPTS_WIN)
+    assert changed and store["Path"][0] == rf"C:\Existing;{USER_SCRIPTS_WIN}"
+    assert store["Path"][1] == winreg.REG_EXPAND_SZ
+    changed, _ = sp.add_to_user_path(USER_SCRIPTS_WIN)
+    assert changed is False

@@ -8,6 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- **pip installs: "velune is not recognized" after the "Scripts ... not on PATH" warning.**
+  `python -m velune doctor --fix` now adds the Scripts directory to the Windows *user* PATH
+  (never the machine PATH) instead of only printing a PowerShell command. Open a new terminal
+  afterwards. On other platforms it prints the shell-profile line.
+
 ## [0.9.10] - 2026-11-18
 
 ### Added

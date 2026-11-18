@@ -82,7 +82,8 @@ def path_fix_advice(directory: Path | str, platform: str | None = None) -> str:
     if plat == "win32":
         quoted = str(directory).replace("'", "''")
         return (
-            "To add it for your user account, run this in PowerShell, then open a NEW "
+            "Easiest: run 'python -m velune doctor --fix', then open a NEW terminal. Or, "
+            "to add it for your user account, run this in PowerShell, then open a NEW "
             "terminal: [Environment]::SetEnvironmentVariable('Path', "
             "[Environment]::GetEnvironmentVariable('Path','User') + ';" + quoted + "', 'User')"
             " -- or run 'python -m velune' without changing PATH."
@@ -91,6 +92,41 @@ def path_fix_advice(directory: Path | str, platform: str | None = None) -> str:
         f'To add it, put this in your shell profile: export PATH="{directory}:$PATH" -- '
         "or run 'python -m velune' without changing PATH."
     )
+
+
+def add_to_user_path(directory: Path | str) -> tuple[bool, str]:
+    """Append *directory* to the Windows *user* PATH. Only called on explicit request (``doctor --fix``).
+
+    Returns ``(changed, message)``. Never touches the machine-wide PATH. Elsewhere it changes nothing
+    and returns the shell-profile advice, since there is no single file to edit safely.
+    """
+    if sys.platform != "win32":
+        return False, path_fix_advice(directory)
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE
+        ) as key:
+            try:
+                current, kind = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                current, kind = "", winreg.REG_EXPAND_SZ
+            if dir_on_path(directory, {"PATH": current}, "win32"):
+                return False, f"{directory} is already on your user PATH."
+            new = f"{current.rstrip(';')};{directory}" if current else str(directory)
+            winreg.SetValueEx(key, "Path", 0, kind, new)
+    except OSError as exc:
+        return False, f"Could not update PATH ({exc}). {path_fix_advice(directory)}"
+    try:  # tell running programs (Explorer) to reload the environment; best effort
+        import ctypes
+
+        ctypes.windll.user32.SendMessageTimeoutW(
+            0xFFFF, 0x001A, 0, "Environment", 0x0002, 5000, None
+        )
+    except Exception:
+        pass
+    return True, f"Added {directory} to your user PATH. Open a NEW terminal for it to take effect."
 
 
 @dataclass(frozen=True)

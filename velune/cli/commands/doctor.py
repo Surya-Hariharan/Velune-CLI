@@ -299,6 +299,17 @@ def _render_verdict(verdict: dict, out: Console | None = None, *, fix_hint: bool
 def _apply_fixes() -> None:
     console.print("[yellow]Attempting automatic fixes...[/yellow]")
 
+    # Fix 0: put the pip-generated launcher's directory on the user PATH
+    try:
+        from velune.lifecycle import scripts_path
+
+        report = scripts_path.diagnose()
+        if report.launcher_present and not report.on_path and report.scripts_dir:
+            _, msg = scripts_path.add_to_user_path(report.scripts_dir)
+            console.print(f"[green]{msg}[/green]")
+    except Exception as e:
+        console.print(f"[red]Failed to fix PATH: {e}[/red]")
+
     # Fix 1: Create .velune/ directory
     velune_dir = Path.cwd() / ".velune"
     if not velune_dir.exists():
