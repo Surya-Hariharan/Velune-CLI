@@ -66,12 +66,13 @@ function Get-VeluneRunningProcesses {
     if ($null -eq $Processes) {
         $Processes = Get-Process -ErrorAction SilentlyContinue
     }
-    $envDir = if ($ToolDir) { (Join-Path $ToolDir 'velune-cli').TrimEnd('\') + '\' } else { $null }
-    $launcher = if ($BinDir) { Join-Path $BinDir 'velune.exe' } else { $null }
+    # Compare with '\' separators whatever the host builds, so the match is the same everywhere.
+    $envDir = if ($ToolDir) { $ToolDir.Replace('/', '\').TrimEnd('\') + '\velune-cli\' } else { $null }
+    $launcher = if ($BinDir) { $BinDir.Replace('/', '\').TrimEnd('\') + '\velune.exe' } else { $null }
     $found = @()
     foreach ($p in $Processes) {
-        $path = $p.Path
-        if (-not $path) { continue }
+        if (-not $p.Path) { continue }
+        $path = $p.Path.Replace('/', '\')
         if (($envDir -and $path.StartsWith($envDir, [System.StringComparison]::OrdinalIgnoreCase)) -or
             ($launcher -and [string]::Equals($path, $launcher, [System.StringComparison]::OrdinalIgnoreCase))) {
             $found += $p

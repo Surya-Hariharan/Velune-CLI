@@ -63,18 +63,23 @@ def test_a_fresh_ui_paces_at_the_base_rate():
     assert ui._animation_interval(0.1) == 0.1
 
 
-def test_render_hooks_measure_a_frame_and_smooth_it():
+def test_render_hooks_measure_a_frame_and_smooth_it(monkeypatch):
+    # A fake clock: real sleeps stretch on a loaded CI runner and made this flaky.
+    now = [100.0]
+    monkeypatch.setattr(fullscreen.time, "perf_counter", lambda: now[0])
+
+    def frame(seconds: float) -> None:
+        ui._on_before_render()
+        now[0] += seconds
+        ui._on_after_render()
+
     ui = _make_ui()
-    ui._on_before_render()
-    time.sleep(0.05)
-    ui._on_after_render()
-    assert 0.01 < ui._render_cost_s < 0.05  # EMA: 0.3 x ~50 ms from a zero start
+    frame(0.05)
+    assert ui._render_cost_s == pytest.approx(0.015)  # EMA: 0.3 x 50 ms from a zero start
     first = ui._render_cost_s
     for _ in range(10):
-        ui._on_before_render()
-        time.sleep(0.05)
-        ui._on_after_render()
-    assert ui._render_cost_s > first  # converges toward the real cost
+        frame(0.05)
+    assert first < ui._render_cost_s < 0.05  # converges toward the real cost, from below
 
 
 def test_the_application_is_actually_subscribed_to_the_render_events():
