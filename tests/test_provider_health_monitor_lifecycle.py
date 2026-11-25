@@ -2,7 +2,7 @@
 
 Previously ``ProviderHealthMonitor`` was constructed by
 ``providers/subsystems.py`` but never had ``.start()`` called anywhere in the
-codebase — /doctor's health table and ProviderRouter's health-based
+codebase — /doctor's health table and health-based
 filtering always read an empty manifest map. It's now registered with a
 ``lifecycle_key`` so ``LifecycleCoordinator`` drives it via the standard
 ``initialize()``/``shutdown()`` hooks, at a 5-minute interval (not the
@@ -12,7 +12,6 @@ network continuously).
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock
 
 from velune.providers.health_monitor import ProviderHealthMonitor

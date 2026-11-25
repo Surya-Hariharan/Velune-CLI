@@ -8,6 +8,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Removed
+
+- Code that nothing ran: the prompt-intelligence package, the unused agent classes, the task-plan
+  executor with its rollback and validation steps, the provider router, the graph memory tier,
+  the unwired MCP HTTP listener, the unused `comment_issue` tool and unused telemetry helpers.
+- Settings that had no effect: `[memory]` (all keys), `[context] compression_threshold` and
+  `priority_tiers`, `[execution] sandbox_enabled`, `auto_snapshot`, `require_confirmation` and
+  `dry_run_default`, and `[telemetry] export_otlp`. Config files that still contain them load as
+  before.
+- The "Git snapshot and rollback for plan-driven changes" entry in `SECURITY.md`. That code was
+  never reached. `/rewind` is unaffected.
+
+### Changed
+
+- `/graph` shows a summary of the repository knowledge graph. It previously read a store that
+  nothing wrote to, so it was always empty.
+
 ### Fixed
 
 - **pip installs: "velune is not recognized" after the "Scripts ... not on PATH" warning.**

@@ -210,7 +210,7 @@ class SQLiteConnectionPool:
         return self._write_conn is not None
 
     def health_check(self) -> dict:
-        """Return a health detail dict suitable for SubsystemHealthMonitor hooks."""
+        """Return a health detail dict for health reporting."""
         return {
             "healthy": self.is_healthy,
             "db_path": str(self._db_path),

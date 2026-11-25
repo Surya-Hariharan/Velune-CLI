@@ -95,7 +95,7 @@ default_provider = "groq"
 #"find", "grep",
 #]
 
-# ── Workspace, context, memory and retrieval ────────────────────────────────
+# ── Workspace, context and retrieval ────────────────────────────────
 
 #[workspace]
 # Index the repository when a session starts.
@@ -109,11 +109,6 @@ default_provider = "groq"
 #[context]
 #max_tokens = 128000
 
-#[memory]
-#working_memory_ttl = 3600        # seconds
-#episodic_retention_days = 30
-#semantic_threshold = 0.85
-#graph_enabled = true
 
 # Relative weights for hybrid retrieval.
 #[retrieval]
@@ -169,7 +164,6 @@ default_provider = "groq"
 # Local token, cost and latency tracking. Nothing is sent to Velune or any
 # analytics service.
 #enabled = true
-#export_otlp = false
 #log_level = "INFO"
 # Write a redacted crash snapshot to ~/.velune/crash_reports/ (local only).
 #crash_reports_enabled = false

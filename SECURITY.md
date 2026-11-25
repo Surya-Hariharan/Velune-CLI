@@ -136,7 +136,6 @@ toward that goal; they reduce risk and do not eliminate it.
 | Docker Engine integration: SDK client, no unauthenticated network sockets, proven resource ownership, ownership-aware approvals | Enabled; `resources.docker.enabled` turns it off | `velune/resources/docker/` |
 | HTTP integration network policy, connection pinning (DNS-rebinding guard) and origin-bound credentials | Enabled; `resources.http.enabled` turns it off | `velune/resources/http/` |
 | Opt-in local crash reports | **Off by default** | `velune/cli/crash_reporter.py` |
-| Git snapshot and rollback for plan-driven changes | Enabled | `velune/execution/rollback.py` |
 
 ### Execution modes
 

@@ -92,21 +92,6 @@ async def test_cancellation_mid_stop_still_completes_the_stop(tmp_path):
     assert sandbox.stopped == 1
 
 
-def test_a_failed_construction_does_not_leak_the_sandbox(tmp_path, monkeypatch):
-    import velune.execution.executor as mod
-
-    sandbox = FakeSandbox()
-    monkeypatch.setattr(mod, "_build_sandbox", lambda *a, **k: sandbox)
-
-    def boom(*a, **k):
-        raise RuntimeError("validator failed")
-
-    monkeypatch.setattr(mod, "PostExecutionValidator", boom)
-    with pytest.raises(RuntimeError, match="validator failed"):
-        ExecutionExecutor(tmp_path)
-    assert sandbox.stopped == 1
-
-
 async def test_sandbox_init_failure_falls_back_and_exits_cleanly(tmp_path, monkeypatch):
     """Docker requested but unavailable: the executor falls back; exit is a no-op."""
     import velune.execution.docker_sandbox as docker_mod

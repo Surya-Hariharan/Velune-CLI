@@ -31,13 +31,3 @@ class MemoryRecord(BaseModel):
     created_at: datetime
     expires_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class MemoryQuery(BaseModel):
-    """Query for memory retrieval."""
-
-    query_text: str
-    memory_types: list[MemoryType] = Field(default_factory=list)
-    limit: int = Field(default=10, ge=1, le=100)
-    min_importance: float = Field(default=0.0, ge=0.0, le=1.0)
-    metadata_filter: dict[str, Any] = Field(default_factory=dict)

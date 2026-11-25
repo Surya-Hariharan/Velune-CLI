@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
@@ -59,36 +58,3 @@ class ModelProvider(Protocol):
     async def shutdown(self) -> None:
         """Gracefully release provider connection resource pools."""
         ...
-
-
-class InferenceEngine(ABC):
-    """Abstract inference engine for unified task executions."""
-
-    @abstractmethod
-    async def infer(self, request: InferenceRequest) -> InferenceResponse:
-        """Perform non-streaming inference."""
-        pass
-
-    @abstractmethod
-    async def infer_stream(self, request: InferenceRequest) -> AsyncIterator[StreamChunk]:
-        """Perform streaming inference."""
-        pass
-
-
-class EmbeddingProvider(ABC):
-    """Abstract embedding provider interface."""
-
-    @abstractmethod
-    async def embed(self, text: str) -> list[float]:
-        """Generate embedding for a single text."""
-        pass
-
-    @abstractmethod
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a batch of texts."""
-        pass
-
-    @abstractmethod
-    def get_dimension(self) -> int:
-        """Get the embedding dimension vector width."""
-        pass

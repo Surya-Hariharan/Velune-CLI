@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from velune._compat import StrEnum
 
@@ -24,18 +24,6 @@ class ProviderHealth(StrEnum):
     # provider isn't broken, it's simply not set up, and must not be polled or
     # warned about the way a real outage is. See ProviderHealthMonitor.
     UNCONFIGURED = "unconfigured"
-
-
-class ProviderConfig(BaseModel):
-    """Configuration for a provider."""
-
-    name: str
-    base_url: str
-    api_key: str | None = None
-    api_key_env: str | None = None
-    timeout: int = Field(default=30, ge=1)
-    max_retries: int = Field(default=3, ge=0)
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProviderCapabilities(BaseModel):

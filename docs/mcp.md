@@ -71,18 +71,6 @@ transport for editor/desktop-app integrations, where the client launches
 Velune CLI as a subprocess and talks over its stdin/stdout. This is the only
 transport `velune mcp serve` currently starts.
 
-> **Not yet wired to the CLI.** `VeluneMCPServer` also implements
-> `run_http()` — a hand-rolled `aiohttp`-based HTTP/SSE listener (not the
-> `mcp` SDK's own HTTP transport) that binds to `127.0.0.1:7777` by default,
-> refuses to bind to a non-loopback host unless `allow_remote=True` is
-> passed, and requires a bearer token (`Authorization: Bearer <token>` or
-> `X-Velune-Token`, checked with `secrets.compare_digest`) on every request
-> to its `/sse` and `/tools` routes. Nothing in `velune mcp serve` or the
-> rest of the CLI currently calls `run_http()` — it exists as a method on
-> the class, callable programmatically, but there's no `--http` /
-> `--port` / `--allow-remote` flag yet. Don't rely on it being reachable
-> from the command line.
-
 **Permissions are read-only by default.** Tools pulled from Velune CLI's own
 tool registry are exposed to external MCP clients with
 `FILESYSTEM_READ` / `GIT_READ` / `NETWORK_ACCESS` only, unless the

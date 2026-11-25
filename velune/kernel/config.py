@@ -43,18 +43,6 @@ class ContextConfig(BaseModel):
     """Context window budgeting settings."""
 
     max_tokens: int = 128000
-    compression_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    priority_tiers: list[str] = Field(default_factory=lambda: ["critical", "high", "medium", "low"])
-
-
-class MemoryConfig(BaseModel):
-    """Memory retention and thresholds."""
-
-    working_memory_ttl: int = 3600  # seconds
-    episodic_retention_days: int = 30
-    semantic_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
-    graph_enabled: bool = True
-    storage_dir: Path | None = None
 
 
 class RetrievalConfig(BaseModel):
@@ -69,10 +57,6 @@ class RetrievalConfig(BaseModel):
 class ExecutionConfig(BaseModel):
     """Safety and sandboxing options."""
 
-    sandbox_enabled: bool = True
-    auto_snapshot: bool = True
-    require_confirmation: bool = True
-    dry_run_default: bool = False
     # Per-workspace default for `/hunk` (hunk-by-hunk diff review before
     # applying edits). Persisted to this workspace's velune.toml by the
     # `/hunk` command itself, so toggling it once carries over to the next
@@ -243,7 +227,6 @@ class TelemetryConfig(BaseModel):
     """Observability options."""
 
     enabled: bool = True
-    export_otlp: bool = False
     log_level: str = "INFO"
     # Off by default — Velune is "zero telemetry" (see SECURITY.md): nothing
     # is written and nothing is ever transmitted anywhere unless a user
@@ -505,7 +488,6 @@ class VeluneConfig(BaseSettings):
     project: ProjectConfig = Field(default_factory=ProjectConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
-    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
@@ -585,28 +567,6 @@ class VeluneConfig(BaseSettings):
                     )
                 )
 
-        # Optional memory storage directory — validate writability if configured.
-        if self.memory.storage_dir is not None:
-            sd = Path(self.memory.storage_dir)
-            if not sd.exists():
-                errors.append(
-                    ConfigValidationError(
-                        field="memory.storage_dir",
-                        value=str(sd),
-                        reason=f"Storage directory '{sd}' does not exist.",
-                        severity="WARNING",
-                    )
-                )
-            elif not os.access(sd, os.W_OK):
-                errors.append(
-                    ConfigValidationError(
-                        field="memory.storage_dir",
-                        value=str(sd),
-                        reason=f"Storage directory '{sd}' exists but is not writable.",
-                        severity="CRITICAL",
-                    )
-                )
-
         return errors
 
     def save_to_project(self, workspace: Path) -> Path:
@@ -640,7 +600,6 @@ def _hardcoded_defaults() -> dict:
         project=ProjectConfig(),
         workspace=WorkspaceConfig(),
         context=ContextConfig(),
-        memory=MemoryConfig(),
         retrieval=RetrievalConfig(),
         execution=ExecutionConfig(),
         providers=ProvidersConfig(),

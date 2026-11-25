@@ -15,7 +15,7 @@ def test_default_config():
     config = get_default_config()
     assert config.project.name == "velune"
     assert config.providers.default_provider == "openai"
-    assert config.execution.sandbox_enabled is True
+    assert config.execution.native_tools is True
 
 
 def test_load_empty_config(tmp_path):
@@ -33,7 +33,7 @@ def test_load_corrupted_config(tmp_path):
     config = loader.load()
     # It should fallback to default config
     assert config.project.name == "velune"
-    assert config.execution.sandbox_enabled is True
+    assert config.execution.native_tools is True
 
 
 def test_load_partial_config(tmp_path):
@@ -43,23 +43,23 @@ def test_load_partial_config(tmp_path):
 name = "test_project"
 
 [execution]
-sandbox_enabled = false
+native_tools = false
 """)
     loader = ConfigLoader(config_file)
     config = loader.load()
     assert config.project.name == "test_project"
-    assert config.execution.sandbox_enabled is False
+    assert config.execution.native_tools is False
     # Check that others are default
     assert config.providers.default_provider == "openai"
 
 
 def test_env_overrides(monkeypatch):
     monkeypatch.setenv("VELUNE_PROJECT__NAME", "env_project")
-    monkeypatch.setenv("VELUNE_EXECUTION__SANDBOX_ENABLED", "False")
+    monkeypatch.setenv("VELUNE_EXECUTION__NATIVE_TOOLS", "False")
 
     config = get_default_config()
     assert config.project.name == "env_project"
-    assert config.execution.sandbox_enabled is False
+    assert config.execution.native_tools is False
 
 
 def test_env_overrides_with_toml(tmp_path, monkeypatch):
@@ -68,14 +68,14 @@ def test_env_overrides_with_toml(tmp_path, monkeypatch):
 [project]
 name = "toml_project"
 """)
-    monkeypatch.setenv("VELUNE_EXECUTION__SANDBOX_ENABLED", "False")
+    monkeypatch.setenv("VELUNE_EXECUTION__NATIVE_TOOLS", "False")
 
     loader = ConfigLoader(config_file)
     # The TOML load sets project name from kwargs, taking precedence over env vars
     # Environment variables fill in the rest
     config = loader.load_with_env_overrides()
     assert config.project.name == "toml_project"
-    assert config.execution.sandbox_enabled is False
+    assert config.execution.native_tools is False
 
 
 def test_validate_healthy_config():
@@ -112,7 +112,7 @@ def test_validate_workspace_root_invalid(tmp_path):
 def test_save_to_project(tmp_path):
     config = VeluneConfig()
     config.project.name = "saved_project"
-    config.execution.sandbox_enabled = False
+    config.execution.native_tools = False
 
     saved_path = config.save_to_project(tmp_path)
     assert saved_path.exists()
@@ -120,7 +120,7 @@ def test_save_to_project(tmp_path):
     # Check contents
     data = toml.load(saved_path)
     assert data["project"]["name"] == "saved_project"
-    assert data["execution"]["sandbox_enabled"] is False
+    assert data["execution"]["native_tools"] is False
     assert "memory" not in data  # Because it hasn't changed
 
 

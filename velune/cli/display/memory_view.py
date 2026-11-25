@@ -9,7 +9,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.tree import Tree
 
 
 class MemoryDisplayView:
@@ -35,13 +34,13 @@ class MemoryDisplayView:
             f"[dim]Active Workspace:[/dim] [italic cyan]{stats.get('workspace', 'current')}"
             "[/italic cyan]\n\n"
             "[bold yellow]Tier 1: Working Memory[/bold yellow]  ──► In-memory state, "
-            f"fast lookups (TTL: {stats.get('working_memory_ttl', 3600)}s)\n"
+            f"fast lookups\n"
             "[bold green]Tier 2: Episodic SQLite[/bold green] ──► Task runs, step "
-            f"histories (Retention: {stats.get('episodic_retention_days', 30)} days)\n"
-            "[bold blue]Tier 3: Semantic LanceDB[/bold blue]  ──► Vector code snippet "
-            f"indices (Similarity Threshold: {stats.get('semantic_threshold', 0.85)})\n"
-            "[bold cyan]Tier 4: Graphiti Graph[/bold cyan]   ──► Entity relationships & "
-            f"AST Dependency Graph (Graphiti Enabled: {stats.get('graph_enabled', True)})\n"
+            f"histories\n"
+            "[bold blue]Tier 3: Semantic LanceDB[/bold blue]  ──► Vector "
+            f"conversation recall\n"
+            "[bold cyan]Tier 4: Knowledge Graph[/bold cyan] ──► Repository entities and "
+            "relationships (SQLite)\n"
             "[bold red]Tier 5: Archive Storage[/bold red]  ──► Long-term zstd-compressed "
             "cold files"
         )
@@ -133,40 +132,22 @@ class MemoryDisplayView:
         self.console.print(table)
         self.console.print()
 
-    def render_knowledge_graph(
-        self, entities: list[dict[str, Any]], relations: list[dict[str, Any]]
-    ) -> None:
-        """Render a beautiful hierarchical tree of knowledge graph entities and their relational links."""
-        root = Tree("[bold cyan]Graphiti Knowledge Graph Root[/bold cyan]")
-
-        # Index entities by type for rendering
-        by_type: dict[str, list[dict[str, Any]]] = {}
-        for ent in entities:
-            etype = ent.get("type", "entity").upper()
-            if etype not in by_type:
-                by_type[etype] = []
-            by_type[etype].append(ent)
-
-        for etype, items in by_type.items():
-            type_node = root.add(f"[bold yellow]{etype}[/bold yellow]")
-            for item in items:
-                name = item.get("name", item.get("id", "Unknown"))
-                importance = item.get("importance", 1.0)
-                item_node = type_node.add(f"[cyan]{name}[/cyan] [dim](imp: {importance:.2f})[/dim]")
-
-                # Find relations where this item is the source
-                for rel in relations:
-                    if rel.get("source") == item.get("id"):
-                        item_node.add(
-                            f"──[magenta]{rel.get('relation', 'connected')}[/magenta]──► [white]{rel.get('target')}[/white]"
-                        )
-
-        self.console.print(
-            Panel(
-                root,
-                title="[bold white]Knowledge Graph Visualization[/bold white]",
-                border_style="cyan",
-                box=ROUNDED,
+    def render_knowledge_graph(self, stats: Any) -> None:
+        """Render ``KnowledgeGraphStats`` for the repository knowledge graph."""
+        if not stats.node_count:
+            self.console.print(
+                "[dim]The knowledge graph is empty. It fills as the repository is indexed "
+                "and watched.[/dim]"
             )
-        )
-        self.console.print()
+            return
+        table = Table(box=ROUNDED, title="[bold]Repository Knowledge Graph[/bold]")
+        table.add_column("Item")
+        table.add_column("Count", justify="right")
+        for label, count in (
+            ("Files", stats.file_count),
+            ("Classes and functions", stats.symbol_count),
+            ("All nodes", stats.node_count),
+            ("Relationships", stats.edge_count),
+        ):
+            table.add_row(label, f"{count:,}")
+        self.console.print(table)

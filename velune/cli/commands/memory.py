@@ -46,16 +46,7 @@ def memory_stats(ctx: typer.Context) -> None:
 
 
 async def _memory_stats_async(cli_context: CLIContext) -> None:
-    config = cli_context.config
-
-    # Policy configuration — distinct from health, which is live per-tier data.
-    stats = {
-        "workspace": str(cli_context.workspace),
-        "working_memory_ttl": config.memory.working_memory_ttl,
-        "episodic_retention_days": config.memory.episodic_retention_days,
-        "semantic_threshold": config.memory.semantic_threshold,
-        "graph_enabled": config.memory.graph_enabled,
-    }
+    stats = {"workspace": str(cli_context.workspace)}
 
     health = None
     lifecycle = cli_context.container.get("runtime.lifecycle")

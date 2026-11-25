@@ -35,7 +35,7 @@ class ProviderHealthMonitor:
         # process — a 30s interval (the original value) meant continuous
         # background API traffic against providers like Anthropic/OpenAI
         # purely for a health table nothing consumed. /doctor and
-        # ProviderRouter's health filtering don't need second-level freshness.
+        # health reporting don't need second-level freshness.
         self._poll_interval = poll_interval
         self._health_check_timeout = 2.0  # seconds
         self._running = False

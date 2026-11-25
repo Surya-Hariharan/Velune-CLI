@@ -32,24 +32,6 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("velune.memory.lifecycle")
 
 
-class MemoryArtifact:
-    """Represents a discrete memory chunk captured during run finalization."""
-
-    def __init__(
-        self,
-        id: str,
-        memory_type: str,
-        content: str,
-        importance: float,
-        metadata: dict[str, Any],
-    ) -> None:
-        self.id = id
-        self.memory_type = memory_type
-        self.content = content
-        self.importance = importance
-        self.metadata = metadata
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 2a: Multi-tier retrieval and vitality-based filtering
 # ─────────────────────────────────────────────────────────────────────────────

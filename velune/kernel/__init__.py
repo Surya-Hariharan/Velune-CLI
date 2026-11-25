@@ -7,7 +7,6 @@ from velune.kernel.config import (
     ConfigValidationError,
     ContextConfig,
     ExecutionConfig,
-    MemoryConfig,
     ProjectConfig,
     ProvidersConfig,
     RetrievalConfig,
@@ -15,7 +14,6 @@ from velune.kernel.config import (
     WorkspaceConfig,
     get_default_config,
 )
-from velune.kernel.health import SubsystemHealthMonitor
 from velune.kernel.lifecycle import LifecycleCoordinator, Subsystem
 from velune.kernel.registry import ServiceContainer, get_container, inject
 from velune.kernel.schemas import ComponentStatus, HealthReport
@@ -43,13 +41,10 @@ __all__ = [
     "ProjectConfig",
     "WorkspaceConfig",
     "ContextConfig",
-    "MemoryConfig",
     "RetrievalConfig",
     "ExecutionConfig",
     "ProvidersConfig",
     "ConfigLoader",
     "ConfigService",
     "get_default_config",
-    # Health
-    "SubsystemHealthMonitor",
 ]

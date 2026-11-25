@@ -8,10 +8,6 @@ def _create_sqlite_pool(env: RuntimeEnvironment):
     # One-time relocation of any pre-existing in-workspace (cloud-synced) data.
     migrate_legacy_storage(env.workspace)
     pool = SQLiteConnectionPool(cognitive_db_path(env.workspace))
-    # Register is_healthy as a custom health hook when the monitor is available.
-    if env.container.has("runtime.health_monitor"):
-        monitor = env.container.get("runtime.health_monitor")
-        monitor.register_health_hook("sqlite_pool", pool.health_check)
     return pool
 
 
@@ -35,13 +31,6 @@ def _create_code_vector_connection(env: RuntimeEnvironment):
     return CodeVectorConnection(path=str(qdrant_store_path(env.workspace)))
 
 
-def _create_graph_tier(env: RuntimeEnvironment):
-    from velune.memory.tiers.graph import GraphMemoryTier
-
-    pool = env.container.get("runtime.sqlite_pool")
-    return GraphMemoryTier(pool)
-
-
 def _create_lineage_tier(env: RuntimeEnvironment):
     from velune.memory.tiers.lineage import LineageMemoryTier
 
@@ -53,11 +42,7 @@ def _create_lancedb_store(env: RuntimeEnvironment):
     from velune.core.paths import lancedb_store_path
     from velune.memory.storage.lancedb_store import LanceDBStore
 
-    store = LanceDBStore(lancedb_store_path(env.workspace))
-    if env.container.has("runtime.health_monitor"):
-        monitor = env.container.get("runtime.health_monitor")
-        monitor.register_health_hook("lancedb_store", store.health_check)
-    return store
+    return LanceDBStore(lancedb_store_path(env.workspace))
 
 
 def _create_embedding_pipeline(env: RuntimeEnvironment):
@@ -121,7 +106,7 @@ def _create_memory_lifecycle(env: RuntimeEnvironment):
         else None
     )
 
-    manager = MemoryLifecycleManager(
+    return MemoryLifecycleManager(
         working_tier=working_tier,
         episodic_memory=episodic_memory,
         semantic_memory=semantic_memory,
@@ -131,36 +116,6 @@ def _create_memory_lifecycle(env: RuntimeEnvironment):
         three_brain=three_brain,
         provider_registry=provider_registry,
     )
-
-    # Register health hook if monitor is available
-    if env.container.has("runtime.health_monitor"):
-        monitor = env.container.get("runtime.health_monitor")
-
-        async def _memory_health_check() -> dict:
-            try:
-                health = await manager.health()
-                return health.to_dict()
-            except Exception as e:
-                return {"error": str(e)}
-
-        # Bridge the async health() coroutine onto the synchronous health-hook
-        # contract via submit(), which routes through the single run_async()
-        # entry point in velune.kernel.entrypoint. submit() raises RuntimeError
-        # when already inside a running event loop; in that case we return a
-        # placeholder rather than blocking the loop with a nested run.
-        def _sync_health_check() -> dict:
-            from velune.core.event_loop import submit
-
-            try:
-                return submit(_memory_health_check())
-            except RuntimeError:
-                return {"status": "async_only"}
-            except Exception as e:
-                return {"error": str(e)}
-
-        monitor.register_health_hook("memory", _sync_health_check)
-
-    return manager
 
 
 MEMORY_MODULES = [
@@ -192,13 +147,6 @@ MEMORY_MODULES = [
         name="code_vector_client",
         factory=_create_code_vector_connection,
         container_key="runtime.code_vector_client",
-    ),
-    SubsystemModule(
-        name="graph_memory",
-        factory=_create_graph_tier,
-        container_key="runtime.graph_memory",
-        lifecycle_key="graph_memory",  # tier.initialize() → _init_db()
-        dependencies=["runtime.sqlite_pool"],
     ),
     SubsystemModule(
         name="lineage_memory",

@@ -1116,25 +1116,12 @@ def _check_telemetry() -> dict:
 
         config_file = Path.cwd() / "velune.toml"
         cfg = ConfigLoader(config_file if config_file.exists() else None).load()
-        enabled = cfg.telemetry.enabled
-        export_otlp = cfg.telemetry.export_otlp
-
-        if export_otlp:
-            return {
-                "name": "Telemetry",
-                "status": "warn",
-                "message": (
-                    "telemetry.export_otlp = true — spans/logs are exported to an "
-                    "OTLP endpoint. Nothing is sent anywhere else; Velune has no "
-                    "built-in analytics or crash-reporting transmission."
-                ),
-            }
         return {
             "name": "Telemetry",
             "status": "ok",
             "message": (
-                f"telemetry.enabled = {enabled} (local observability only — spans/logs "
-                "stay on this machine; export_otlp = false, nothing is transmitted)."
+                f"telemetry.enabled = {cfg.telemetry.enabled} (local observability only; "
+                "nothing is transmitted)."
             ),
         }
     except Exception as e:

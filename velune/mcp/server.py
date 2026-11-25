@@ -40,8 +40,6 @@ logger = logging.getLogger("velune.mcp.server")
 
 COUNCIL_UNAVAILABLE = "Council not available - start the server with `velune mcp serve`"
 
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 7777
 MAX_REQUEST_BYTES = 1 * 1024 * 1024  # 1 MB per request
 
 
@@ -128,7 +126,6 @@ class VeluneMCPServer:
         calls_per_minute: int = 60,
         *,
         allow_mutations: bool = False,
-        auth_token: str | None = None,
         council_orchestrator: Any = None,
     ):
         self.tool_registry = tool_registry
@@ -147,16 +144,6 @@ class VeluneMCPServer:
         self.allow_mutations = allow_mutations or os.environ.get(
             "VELUNE_MCP_ALLOW_MUTATIONS", ""
         ).strip().lower() in {"1", "true", "yes", "on"}
-
-        # Bearer token for network transports. Generated if not supplied; stdio
-        # (local, already-trusted) does not require it.
-        import secrets
-
-        self.auth_token = (
-            auth_token
-            or os.environ.get("VELUNE_MCP_AUTH_TOKEN", "").strip()
-            or secrets.token_urlsafe(32)
-        )
 
         # Lazy-load Velune components
         self._council_orchestrator = council_orchestrator
@@ -852,100 +839,3 @@ class VeluneMCPServer:
                     capabilities={"tools": {}, "prompts": {}, "sampling": {}},
                 ),
             )
-
-    @staticmethod
-    def _host_is_loopback(host: str) -> bool:
-        import ipaddress
-
-        h = (host or "").strip("[]").lower()
-        if h == "localhost":
-            return True
-        try:
-            return ipaddress.ip_address(h).is_loopback
-        except ValueError:
-            return False
-
-    async def run_http(
-        self,
-        host: str = DEFAULT_HOST,
-        port: int = DEFAULT_PORT,
-        *,
-        allow_remote: bool = False,
-    ) -> None:
-        """Run MCP server over HTTP/SSE (for VS Code, browsers).
-
-        Binds to loopback only unless *allow_remote* is set, and requires every
-        request to present the server's bearer token via ``Authorization:
-        Bearer <token>`` (or ``X-Velune-Token``).
-        """
-        if not self._host_is_loopback(host) and not allow_remote:
-            raise ValueError(
-                f"Refusing to bind MCP server to non-loopback host {host!r} without "
-                "allow_remote=True (set --allow-remote to override)."
-            )
-
-        logger.info(f"Starting Velune MCP server (HTTP on {host}:{port})")
-        # Deliberately bypasses `logger` for the token itself: log records
-        # flow through handlers that may persist to a rotating log file
-        # (`velune/core/logging.py`), and the redacting filter there only
-        # recognizes known provider-key shapes and "bearer <token>"/"token
-        # <token>" phrasing — not "auth token: <value>" — so this would
-        # otherwise leave the live bearer credential sitting in cleartext in
-        # a log file indefinitely. A one-time `print` to the operator's own
-        # console is the same pattern Jupyter uses for its access token.
-        print(f"MCP HTTP auth token: {self.auth_token}")
-        logger.info("MCP HTTP auth token issued (see console output)")
-        try:
-            from aiohttp import web
-
-            def _authorized(request) -> bool:
-                header = request.headers.get("Authorization", "")
-                token = ""
-                if header.startswith("Bearer "):
-                    token = header[len("Bearer ") :].strip()
-                token = token or request.headers.get("X-Velune-Token", "").strip()
-                import secrets as _secrets
-
-                return bool(token) and _secrets.compare_digest(token, self.auth_token)
-
-            async def handle_sse(request):
-                """Handle SSE transport."""
-                if not _authorized(request):
-                    return web.json_response({"error": "unauthorized"}, status=401)
-                response = web.StreamResponse()
-                response.headers["Content-Type"] = "text/event-stream"
-                response.headers["Cache-Control"] = "no-cache"
-                response.headers["Connection"] = "keep-alive"
-                await response.prepare(request)
-
-                # Simplified: echo back a message
-                msg = json.dumps({"result": "Velune MCP Server ready"})
-                await response.write(f"data: {msg}\n\n".encode())
-                await response.write_eof()
-                return response
-
-            async def handle_tools(request):
-                """Handle tool listing."""
-                if not _authorized(request):
-                    return web.json_response({"error": "unauthorized"}, status=401)
-                tools = await self.server.list_tools()
-                return web.json_response(
-                    [{"name": t.name, "description": t.description} for t in tools]
-                )
-
-            app = web.Application()
-            app.router.add_get("/sse", handle_sse)
-            app.router.add_get("/tools", handle_tools)
-
-            runner = web.AppRunner(app)
-            await runner.setup()
-            site = web.TCPSite(runner, host, port)
-            await site.start()
-
-            logger.info(f"Velune MCP Server listening on http://{host}:{port}")
-            # Keep running until interrupted
-            await asyncio.sleep(3600 * 24)
-        except ImportError:
-            logger.error("aiohttp not installed for HTTP transport")
-        except Exception as e:
-            logger.error(f"HTTP server failed: {e}")

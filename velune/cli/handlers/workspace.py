@@ -175,10 +175,9 @@ async def _project_status(repl: VeluneREPL) -> None:
     except Exception:
         pass
     try:
-        graph = repl.container.get("runtime.graph_memory")
+        graph = repl.container.get("runtime.knowledge_graph")
         if graph:
-            nodes = await graph.get_all_nodes()
-            graph_nodes = len(nodes)
+            graph_nodes = (await graph.stats()).node_count
     except Exception:
         pass
 

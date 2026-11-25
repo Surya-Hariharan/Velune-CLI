@@ -1,9 +1,5 @@
 """Core agent type definitions."""
 
-from typing import Any
-
-from pydantic import BaseModel, Field
-
 from velune._compat import StrEnum
 
 
@@ -30,25 +26,3 @@ class AgentMessageType(StrEnum):
     QUERY = "query"
     RESPONSE = "response"
     CONTROL = "control"
-
-
-class AgentMessage(BaseModel):
-    """Typed message for inter-agent communication."""
-
-    message_type: AgentMessageType
-    sender: str
-    recipient: str
-    content: Any
-    timestamp: float
-    correlation_id: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class AgentResult(BaseModel):
-    """Result from agent execution."""
-
-    success: bool
-    output: Any | None = None
-    error: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    execution_time_ms: float | None = None

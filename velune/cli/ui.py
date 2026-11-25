@@ -23,21 +23,10 @@ Component catalog
     header(title, subtitle)     section/page title row
     rule(label)                 horizontal divider
     footer(hint)                single-line bottom hint
-    key_hints(*pairs)           keyboard shortcut strip
     panel(body, title, kind)    generic bordered panel
     error_panel(title, …)       cause / fix / detail error block
-    success_panel(title, body)  green success block
-    warning_panel(title, body)  amber warning block
     next_steps(title, …)        "what next" follow-up footer (Do→Suggest→Next)
-    modal(body, title)          full-weight dialog block
-    confirm_text(question, …)   yes/no prompt text (pair with prompt_toolkit)
-    empty_state(msg, hint)      empty-list placeholder
     loading(msg)                spinner label string (for console.status)
-    progress_bar(label, v, t)   inline labelled progress bar
-    search_box(query)           search input display (pair with prompt_toolkit)
-
-  Factory:
-    make_console(**kwargs)      Console pre-configured with the Velune theme
 
   Note: the interactive command palette lives in ``velune.cli.command_palette``
   (prompt_toolkit-based, with fuzzy search and favorites) — not here. Static
@@ -58,10 +47,8 @@ Usage
 
 from __future__ import annotations
 
-from typing import Any
-
 from rich import box
-from rich.console import Console, RenderableType
+from rich.console import RenderableType
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
@@ -205,31 +192,6 @@ def footer(hint: str) -> RenderableType:
     return Text(f"  {hint}", style=design.FAINT)
 
 
-def key_hints(*pairs: tuple[str, str]) -> RenderableType:
-    """Keyboard shortcut strip for interactive views.
-
-    Each pair is (key, action).  The key is rendered in accent color; the
-    action in muted; pairs are separated by the canonical · separator.
-
-    Example::
-
-        console.print(key_hints(
-            ("tab", "select"),
-            ("↑↓", "navigate"),
-            ("enter", "confirm"),
-            ("esc", "cancel"),
-        ))
-    """
-    line = Text()
-    line.append("  ")
-    for i, (key, action) in enumerate(pairs):
-        if i:
-            line.append(design.SEP, style=design.FAINT)
-        line.append(key, style=f"bold {design.ACCENT}")
-        line.append(f" {action}", style=design.MUTED)
-    return line
-
-
 # ---------------------------------------------------------------------------
 # Structural panels — bordered blocks
 # ---------------------------------------------------------------------------
@@ -313,38 +275,6 @@ def error_panel(
     )
 
 
-def success_panel(title: str, body: RenderableType) -> Panel:
-    """Success panel with accent border.
-
-    Example::
-
-        console.print(success_panel("Setup complete", Text("Velune is ready.")))
-    """
-    return Panel(
-        body,
-        title=f"[bold {design.OK}]{title}[/]",
-        border_style=design.OK,
-        box=box.ROUNDED,
-        padding=design.PADDING_DEFAULT,
-    )
-
-
-def warning_panel(title: str, body: RenderableType) -> Panel:
-    """Warning panel with amber border.
-
-    Example::
-
-        console.print(warning_panel("Low disk space", Text("Free up space to continue.")))
-    """
-    return Panel(
-        body,
-        title=f"[bold {design.WARN}]{title}[/]",
-        border_style=design.WARN,
-        box=box.ROUNDED,
-        padding=design.PADDING_DEFAULT,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Outcome footer — Do → Explain → Suggest → Next
 # ---------------------------------------------------------------------------
@@ -409,83 +339,14 @@ def next_steps(
 # ---------------------------------------------------------------------------
 
 
-def modal(
-    body: RenderableType,
-    title: str | None = None,
-    subtitle: str | None = None,
-) -> Panel:
-    """Full-weight dialog panel — used for interactive views rendered inline.
-
-    Uses relaxed padding and accent-colored title to signal interactivity.
-
-    Example::
-
-        console.print(modal(list_view.render(), title="Select Model"))
-    """
-    title_markup = f"[bold {design.ACCENT}]{title}[/]" if title else None
-    sub_markup = f"[{design.FAINT}]{subtitle}[/]" if subtitle else None
-    return Panel(
-        body,
-        title=title_markup,
-        subtitle=sub_markup,
-        border_style=design.FAINT,
-        box=box.ROUNDED,
-        padding=design.PADDING_RELAXED,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Confirmation dialog
 # ---------------------------------------------------------------------------
 
 
-def confirm_text(question: str, hint: str | None = None) -> RenderableType:
-    """Confirmation prompt display text (pair with prompt_toolkit for actual input).
-
-    Renders the question, an optional hint, and the [y] Yes / [n] No choices.
-
-    Example::
-
-        console.print(confirm_text(
-            "Delete workspace?",
-            hint="This cannot be undone.",
-        ))
-        answer = session.prompt("  › ")
-    """
-    body = Text()
-    body.append(f"  {question}", style=f"bold {design.WHITE}")
-    if hint:
-        body.append(f"  {hint}", style=design.MUTED)
-    body.append("\n\n")
-    body.append("  [y] ", style=f"bold {design.OK}")
-    body.append("Yes", style=design.WHITE)
-    body.append("   ")
-    body.append("[n] ", style=f"bold {design.DANGER}")
-    body.append("No", style=design.WHITE)
-    return body
-
-
 # ---------------------------------------------------------------------------
 # Empty state
 # ---------------------------------------------------------------------------
-
-
-def empty_state(message: str, hint: str | None = None) -> RenderableType:
-    """Placeholder shown when a list or table has no rows.
-
-    Example::
-
-        if not providers:
-            console.print(empty_state(
-                "No providers configured",
-                hint="Run /provider add to get started.",
-            ))
-    """
-    body = Text()
-    body.append(f"\n  {message}\n", style=design.MUTED)
-    if hint:
-        body.append(f"\n  {hint}\n", style=design.FAINT)
-    return body
 
 
 # ---------------------------------------------------------------------------
@@ -509,97 +370,11 @@ def loading(message: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def progress_bar(
-    label: str,
-    value: float,
-    total: float = 100.0,
-    unit: str = "",
-) -> RenderableType:
-    """Inline labelled progress bar.
-
-    Uses a 20-character Unicode bar and shows colour based on completion level
-    (accent → warn → danger as value approaches total).
-
-    Args:
-        label:  Text label shown before the bar.
-        value:  Current progress value.
-        total:  Maximum value (default 100).
-        unit:   Optional unit string appended after the count (e.g. "files").
-
-    Example::
-
-        console.print(progress_bar("Indexing", 45, 100, "files"))
-        # →   Indexing  ████████░░░░░░░░░░░░  45%  45 / 100 files
-    """
-    pct = (value / total * 100) if total else 0.0
-    filled = int(pct / 5)  # 20-char bar
-    empty = 20 - filled
-
-    color = (
-        design.OK
-        if pct < design.CTX_WARN_PCT
-        else design.WARN
-        if pct < design.CTX_DANGER_PCT
-        else design.DANGER
-    )
-
-    line = Text()
-    line.append(f"  {label}  ", style=design.MUTED)
-    line.append("█" * filled, style=color)
-    line.append("░" * empty, style=design.FAINT)
-    line.append(f"  {pct:.0f}%", style=f"bold {color}")
-    if total and unit:
-        line.append(f"  {int(value)} / {int(total)} {unit}", style=design.MUTED)
-    return line
-
-
 # ---------------------------------------------------------------------------
 # Search box (display-only — wire to prompt_toolkit for input)
 # ---------------------------------------------------------------------------
 
 
-def search_box(
-    query: str = "",
-    placeholder: str = "Type to search…",
-) -> Panel:
-    """Search input display.  Wire to prompt_toolkit for actual keystroke input.
-
-    Renders an accent-bordered box with a > prompt.  When query is non-empty
-    a block cursor is appended; when empty the placeholder is shown dim.
-
-    Example::
-
-        console.print(search_box(query=current_input))
-    """
-    body = Text()
-    if query:
-        body.append(f"  > {query}", style=design.WHITE)
-        body.append(design.ICON_CURSOR, style=design.ACCENT)
-    else:
-        body.append("  > ", style=design.FAINT)
-        body.append(placeholder, style=design.FAINT)
-    return Panel(
-        body,
-        border_style=design.ACCENT,
-        box=box.ROUNDED,
-        padding=design.PADDING_COMPACT,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Console factory
 # ---------------------------------------------------------------------------
-
-
-def make_console(**kwargs: Any) -> Console:
-    """Return a ``Console`` pre-configured with the Velune Rich theme.
-
-    Pass any ``rich.console.Console`` keyword arguments to override defaults.
-
-    Example::
-
-        console = make_console(highlight=False)
-    """
-    from velune.cli.display.themes import VeluneTheme
-
-    return Console(theme=VeluneTheme.get_theme(), **kwargs)

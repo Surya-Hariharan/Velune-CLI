@@ -59,11 +59,11 @@ def test_invalid_values_warn_with_setting_names_only(tmp_path, caplog):
     path = tmp_path / "velune.toml"
     # Wrong type for a known setting, with a secret-looking value next to it.
     path.write_text(
-        f'[execution]\nsandbox_enabled = "{SECRET}"\n[project]\nname = 5\n', encoding="utf-8"
+        f'[execution]\nnative_tools = "{SECRET}"\n[project]\nname = 5\n', encoding="utf-8"
     )
     with caplog.at_level(logging.WARNING, logger=LOGGER):
         cfg = ConfigLoader(path).load()
-    assert cfg.execution.sandbox_enabled is True  # defaults
+    assert cfg.execution.native_tools is True  # defaults
     (record,) = _warnings(caplog)
     message = record.getMessage()
     assert "invalid" in message

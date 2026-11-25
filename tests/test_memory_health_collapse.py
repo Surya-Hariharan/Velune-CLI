@@ -225,14 +225,6 @@ async def test_memory_stats_async_always_shuts_down_lifecycle_even_on_error():
     manager.health = AsyncMock(side_effect=RuntimeError("boom"))
 
     cli_context = SimpleNamespace(
-        config=SimpleNamespace(
-            memory=SimpleNamespace(
-                working_memory_ttl=3600,
-                episodic_retention_days=30,
-                semantic_threshold=0.85,
-                graph_enabled=True,
-            )
-        ),
         workspace="/ws",
         json_mode=True,
         container=SimpleNamespace(
@@ -257,14 +249,6 @@ async def test_memory_stats_async_shuts_down_on_the_happy_path():
     manager.health = AsyncMock(return_value=_health())
 
     cli_context = SimpleNamespace(
-        config=SimpleNamespace(
-            memory=SimpleNamespace(
-                working_memory_ttl=3600,
-                episodic_retention_days=30,
-                semantic_threshold=0.85,
-                graph_enabled=True,
-            )
-        ),
         workspace="/ws",
         json_mode=True,
         container=SimpleNamespace(

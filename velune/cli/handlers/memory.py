@@ -79,34 +79,15 @@ async def cmd_context(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_graph(repl: VeluneREPL, args: str) -> None:
-    """Render a hierarchical tree of knowledge graph entities."""
-    graph_memory = repl.container.get("runtime.graph_memory")
-    if not graph_memory:
-        repl.console.print("[red]Graph memory tier is not initialized.[/red]")
+    """Show a summary of the repository knowledge graph."""
+    try:
+        graph = repl.container.get("runtime.knowledge_graph")
+    except Exception:
+        graph = None
+    if not graph:
+        repl.console.print("[red]The knowledge graph is not available yet.[/red]")
         return
-
-    entities = await graph_memory.get_all_nodes()
-    relations = await graph_memory.get_all_edges()
-
-    entities_dicts = [
-        {
-            "id": n.id,
-            "type": n.node_type,
-            "importance": n.properties.get("importance", 1.0),
-            "name": n.properties.get("name", n.id),
-        }
-        for n in entities
-    ]
-    relations_dicts = [
-        {
-            "source": r.source,
-            "target": r.target,
-            "relation": r.relation_type,
-        }
-        for r in relations
-    ]
 
     from velune.cli.display.memory_view import MemoryDisplayView
 
-    view = MemoryDisplayView(repl.console)
-    view.render_knowledge_graph(entities_dicts, relations_dicts)
+    MemoryDisplayView(repl.console).render_knowledge_graph(await graph.stats())

@@ -7,25 +7,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from velune._compat import StrEnum
-
-
-class ModelCapability(StrEnum):
-    """Capability categories used by the model router and classifiers."""
-
-    CODE_GENERATION = "code_generation"
-    CODE_ANALYSIS = "code_analysis"
-    REASONING = "reasoning"
-    PLANNING = "planning"
-    TOOL_USE = "tool_use"
-    DEBUGGING = "debugging"
-    REFACTORING = "refactoring"
-    SUMMARIZATION = "summarization"
-    RETRIEVAL = "retrieval"
-    MULTILINGUAL = "multilingual"
-    EMBEDDING = "embedding"
-    LONG_CONTEXT = "long_context"
-
 
 class CapabilityLevel(IntEnum):
     """Capability proficiency levels."""
