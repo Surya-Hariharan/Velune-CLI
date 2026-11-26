@@ -185,21 +185,22 @@ async def test_one_unreachable_database_does_not_mark_the_others_unavailable(sql
 
 
 class _Answers:
-    """Scripted replies for rich's Prompt (the interactive questions are unchanged)."""
+    """Scripted replies for the configure questions (the questions are unchanged)."""
 
     def __init__(self, monkeypatch, texts):
-        from rich import prompt
+        from velune.cli import interactive
 
         self.texts = list(texts)
         self.asked: list[str] = []
-        monkeypatch.setattr(
-            prompt.Prompt, "ask", classmethod(lambda cls, q, **kw: self._text(q, kw))
-        )
 
-        def never(cls, *a, **k):
+        async def ask(q, **kw):
+            return self._text(q, kw)
+
+        async def never(*a, **k):
             raise AssertionError("configure must not ask any further question")
 
-        monkeypatch.setattr(prompt.Confirm, "ask", classmethod(never))
+        monkeypatch.setattr(interactive, "ask", ask)
+        monkeypatch.setattr(interactive, "confirm", never)
 
     def _text(self, question, kw):
         self.asked.append(question)

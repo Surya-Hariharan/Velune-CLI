@@ -40,6 +40,7 @@ __all__ = [
     "single_select",
     "multi_select",
     "text_input",
+    "ask",
     "confirm",
     "browse_directory",
     "run_with_status",
@@ -130,6 +131,7 @@ async def text_input(
             title,
             hint=hint,
             password=password,
+            default=default,
             optional=optional,
             validate=validate,
             frame_title=frame_title,
@@ -146,6 +148,25 @@ async def text_input(
         frame_title=frame_title,
     )
     return await run_standalone(widget)
+
+
+async def ask(
+    title: str,
+    *,
+    password: bool = False,
+    default: str = "",
+    optional: bool = False,
+) -> str | None:
+    """Ask for one line of text; ``None`` means the user cancelled.
+
+    The one way commands ask a question. Inside the REPL it uses the prompt box
+    itself; outside it, a small standalone field. Never a raw stdin read, which
+    would fight the full-screen app for the keyboard.
+    """
+    result = await text_input(
+        title, password=password, default=default, optional=optional, palette=True
+    )
+    return result if isinstance(result, str) else None
 
 
 async def run_with_status(coro, **kwargs):

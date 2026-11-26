@@ -11,6 +11,7 @@ plugin code ever runs here.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -721,20 +722,20 @@ def test_a_workspace_plugin_is_authorized_only_for_a_trusted_workspace(workspace
 
 
 def _ask(workspace: Path, monkeypatch, *, stored: bool = False, answer: bool = False):
-    from rich import prompt
+    from velune.cli import interactive
 
     asked: list[str] = []
     trusted: list[Path] = []
     monkeypatch.setattr(trust, "is_trusted", lambda path: stored)
     monkeypatch.setattr(trust, "trust", lambda path: trusted.append(path))
 
-    def ask(*args, **kwargs):
+    async def ask(*args, **kwargs):
         asked.append("asked")
         return answer
 
-    monkeypatch.setattr(prompt.Confirm, "ask", ask)
+    monkeypatch.setattr(interactive, "confirm", ask)
     stub = SimpleNamespace(_mcp_registry=SimpleNamespace(workspace=workspace), console=MagicMock())
-    return VeluneREPL._ensure_workspace_trust(stub), asked, trusted
+    return asyncio.run(VeluneREPL._ensure_workspace_trust(stub)), asked, trusted
 
 
 def test_a_workspace_with_only_a_plugin_prompts_for_trust(workspace, monkeypatch):
@@ -768,14 +769,14 @@ def test_trust_all_still_bypasses_the_prompt(workspace, trust_file, monkeypatch)
     make_plugin(workspace_plugins(workspace), "evil")
     monkeypatch.setenv("VELUNE_TRUST_ALL", "1")
     stub = SimpleNamespace(_mcp_registry=SimpleNamespace(workspace=workspace), console=MagicMock())
-    assert VeluneREPL._ensure_workspace_trust(stub) is True
+    assert asyncio.run(VeluneREPL._ensure_workspace_trust(stub)) is True
 
 
 def test_a_workspace_trusted_with_velune_trust_add_is_recognised(workspace, trust_file):
     trust.trust(workspace)
     assert trust.is_trusted(workspace)
     stub = SimpleNamespace(_mcp_registry=SimpleNamespace(workspace=workspace), console=MagicMock())
-    assert VeluneREPL._ensure_workspace_trust(stub) is True
+    assert asyncio.run(VeluneREPL._ensure_workspace_trust(stub)) is True
 
 
 # ── the real VeluneREPL.run() start-up order ──────────────────────────────────────────────────
@@ -847,13 +848,13 @@ def _repl_for_run(workspace: Path, events: list[str], monkeypatch) -> MagicMock:
 
 
 def _answer_prompt(monkeypatch, answer: bool, events: list[str]) -> None:
-    from rich import prompt
+    from velune.cli import interactive
 
-    def ask(*args, **kwargs):
+    async def ask(*args, **kwargs):
         events.append("trust-prompt")
         return answer
 
-    monkeypatch.setattr(prompt.Confirm, "ask", ask)
+    monkeypatch.setattr(interactive, "confirm", ask)
 
 
 async def _run(repl: MagicMock) -> None:

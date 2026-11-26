@@ -343,6 +343,9 @@ class SubprocessSandbox:
                 shell=False,  # NEVER set shell to True
                 cwd=str(spec.cwd),
                 env=run_env,
+                # Never the user's keyboard: a child waiting on stdin would steal keystrokes
+                # meant for the prompt (and hang the turn until its timeout).
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

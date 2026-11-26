@@ -80,8 +80,13 @@ async def cmd_backup(repl: VeluneREPL, args: str) -> None:
 
     passphrase = None
     if with_secrets:
-        passphrase = console.input("Passphrase to encrypt provider API keys: ", password=True)
-        confirm = console.input("Confirm passphrase: ", password=True)
+        from velune.cli.interactive import ask
+
+        passphrase = await ask("Passphrase to encrypt provider API keys", password=True)
+        confirm = await ask("Confirm passphrase", password=True) if passphrase is not None else None
+        if passphrase is None or confirm is None:
+            console.print(f"[{design.MUTED}]Cancelled.[/{design.MUTED}]")
+            return
         if passphrase != confirm:
             console.print(f"[{design.DANGER}]Passphrases did not match.[/{design.DANGER}]")
             return
@@ -144,10 +149,16 @@ async def cmd_restore(repl: VeluneREPL, args: str) -> None:
 
     passphrase = None
     if (include is None or "providers" in include) and archive_has_encrypted_secrets(src):
-        entered = console.input(
-            "Passphrase to decrypt provider API keys (blank to skip restoring them): ",
+        from velune.cli.interactive import ask
+
+        entered = await ask(
+            "Passphrase to decrypt provider API keys (blank to skip restoring them)",
             password=True,
+            optional=True,
         )
+        if entered is None:
+            console.print(f"[{design.MUTED}]Aborted.[/{design.MUTED}]")
+            return
         passphrase = entered or None
 
     try:

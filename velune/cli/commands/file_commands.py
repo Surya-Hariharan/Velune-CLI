@@ -134,6 +134,7 @@ def _build_slash_command(defn: FileCommandDef, console: Any) -> SlashCommand:
             try:
                 proc = await asyncio.create_subprocess_shell(
                     cmd,
+                    stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                 )

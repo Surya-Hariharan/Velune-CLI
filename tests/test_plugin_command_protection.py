@@ -384,7 +384,9 @@ def test_one_plugin_failing_to_register_does_not_stop_the_others(repl, caplog):
 
 
 def test_the_trust_prompt_points_at_the_real_command(tmp_path, monkeypatch):
-    from rich import prompt
+    import asyncio
+
+    from velune.cli import interactive
 
     from velune.core import trust
 
@@ -395,11 +397,15 @@ def test_the_trust_prompt_points_at_the_real_command(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(trust, "is_trusted", lambda path: False)
     monkeypatch.setattr(trust, "trust", lambda path: None)
-    monkeypatch.setattr(prompt.Confirm, "ask", lambda *a, **k: True)
+
+    async def yes(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(interactive, "confirm", yes)
     console = MagicMock()
     stub = SimpleNamespace(_mcp_registry=SimpleNamespace(workspace=workspace), console=console)
 
-    assert VeluneREPL._ensure_workspace_trust(stub) is True
+    assert asyncio.run(VeluneREPL._ensure_workspace_trust(stub)) is True
 
     printed = " ".join(str(call.args[0]) for call in console.print.call_args_list)
     assert "velune trust forget" in printed

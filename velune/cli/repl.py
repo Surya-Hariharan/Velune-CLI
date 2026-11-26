@@ -195,7 +195,7 @@ class VeluneREPL:
     # Workspace trust
     # ------------------------------------------------------------------
 
-    def _ensure_workspace_trust(self) -> bool:
+    async def _ensure_workspace_trust(self) -> bool:
         from velune.core import trust
 
         workspace = self._mcp_registry.workspace
@@ -215,7 +215,7 @@ class VeluneREPL:
         if not has_project_config:
             return False
 
-        from rich.prompt import Confirm
+        from velune.cli import interactive
 
         self.console.print(
             f"[yellow]This workspace ({workspace}) is not trusted.[/yellow]\n"
@@ -223,7 +223,7 @@ class VeluneREPL:
             "that can run local commands and redirect API traffic.[/dim]"
         )
         try:
-            decision = Confirm.ask("  Trust this directory?", default=False)
+            decision = await interactive.confirm("Trust this directory?", default=False) is True
         except Exception:
             decision = False
 
@@ -820,7 +820,7 @@ class VeluneREPL:
         # Workspace trust must be resolved BEFORE any hook dispatch: project-level
         # hooks execute arbitrary shell commands, so the gate has to close ahead of
         # the first thing that could run them, not after it.
-        trusted = self._ensure_workspace_trust()
+        trusted = await self._ensure_workspace_trust()
         self._hook_dispatcher.set_trusted(trusted)
         if trusted:
             # The registry was built before this decision; add the workspace's own

@@ -8,7 +8,6 @@ manager are gated by the same interactive approver the tool loop uses.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -139,8 +138,6 @@ async def _configure(repl: VeluneREPL, resource_id: str) -> None:
     setup. PostgreSQL/MySQL/Supabase have no other way to become reachable:
     they refuse to connect until a config exists in the encrypted keystore.
     """
-    from rich.prompt import Prompt
-
     resource_id, _, argument = resource_id.strip().partition(" ")
     if not resource_id:
         repl.console.print(
@@ -190,69 +187,42 @@ async def _configure(repl: VeluneREPL, resource_id: str) -> None:
         _log.debug("Pre-fill discovery for '%s' failed: %s", resource_id, exc)
 
     repl.console.print(f"[dim]Configuring {resource_id} — values are encrypted at rest.[/dim]")
-    try:
-        if resource_id == "supabase":
-            url = await asyncio.to_thread(
-                Prompt.ask,
-                "  Project URL",
-                default=str(suggested.get("url", "")),
-                console=repl.console,
-            )
-            if not url:
-                repl.console.print("[yellow]Cancelled — a project URL is required.[/yellow]")
-                return
-            anon_key = await asyncio.to_thread(
-                Prompt.ask, "  Anon key", password=True, console=repl.console
-            )
-            service_role_key = await asyncio.to_thread(
-                Prompt.ask,
-                "  Service-role key (optional — enables privileged actions)",
-                password=True,
-                default="",
-                console=repl.console,
-            )
-            config: dict[str, object] = {"url": url, "anon_key": anon_key}
-            if service_role_key:
-                config["service_role_key"] = service_role_key
-        else:
-            default_port = _SQL_DEFAULT_PORT[resource_id]
-            host = await asyncio.to_thread(
-                Prompt.ask,
-                "  Host",
-                default=str(suggested.get("host", "localhost")),
-                console=repl.console,
-            )
-            port_str = await asyncio.to_thread(
-                Prompt.ask,
-                "  Port",
-                default=str(suggested.get("port", default_port)),
-                console=repl.console,
-            )
-            database = await asyncio.to_thread(
-                Prompt.ask,
-                "  Database",
-                default=str(suggested.get("database", "")),
-                console=repl.console,
-            )
-            username = await asyncio.to_thread(
-                Prompt.ask,
-                "  Username",
-                default=str(suggested.get("username", "")),
-                console=repl.console,
-            )
-            password = await asyncio.to_thread(
-                Prompt.ask, "  Password", password=True, default="", console=repl.console
-            )
-            config = {
-                "host": host,
-                "port": int(port_str) if port_str.strip().isdigit() else default_port,
-                "database": database,
-                "username": username,
-                "password": password,
-            }
-    except (EOFError, KeyboardInterrupt):
-        repl.console.print("\n[yellow]Cancelled.[/yellow]")
-        return
+    from velune.cli.interactive import ask
+
+    # (key, label, secret, optional, default)
+    if resource_id == "supabase":
+        fields = [
+            ("url", "Project URL", False, False, str(suggested.get("url", ""))),
+            ("anon_key", "Anon key", True, False, ""),
+            (
+                "service_role_key",
+                "Service-role key (optional — enables privileged actions)",
+                True,
+                True,
+                "",
+            ),
+        ]
+    else:
+        default_port = _SQL_DEFAULT_PORT[resource_id]
+        fields = [
+            ("host", "Host", False, False, str(suggested.get("host", "localhost"))),
+            ("port", "Port", False, False, str(suggested.get("port", default_port))),
+            ("database", "Database", False, True, str(suggested.get("database", ""))),
+            ("username", "Username", False, True, str(suggested.get("username", ""))),
+            ("password", "Password", True, True, ""),
+        ]
+
+    config: dict[str, object] = {}
+    for key, label, secret, optional, default in fields:
+        value = await ask(label, password=secret, default=default, optional=optional)
+        if value is None:
+            repl.console.print("[yellow]Cancelled.[/yellow]")
+            return
+        if value or key != "service_role_key":
+            config[key] = value
+    if resource_id != "supabase":
+        port = str(config["port"]).strip()
+        config["port"] = int(port) if port.isdigit() else default_port
 
     _apply_connection_options(repl, resource_id, config, options)
 
@@ -355,8 +325,7 @@ async def _configure_http(repl: VeluneREPL, reference: str) -> None:
     itself goes only into the encrypted keystore. A credential is bound to one
     origin and is never sent anywhere else.
     """
-    from rich.prompt import Prompt
-
+    from velune.cli.interactive import BACK, CANCEL, Option, ask, single_select
     from velune.resources.http.auth import CredentialError, save_credential, valid_reference
 
     if not valid_reference(reference):
@@ -366,38 +335,30 @@ async def _configure_http(repl: VeluneREPL, reference: str) -> None:
         )
         return
 
-    def ask(label: str, *, secret: bool = False, default: str = "") -> object:
-        return asyncio.to_thread(
-            Prompt.ask, f"  {label}", password=secret, default=default, console=repl.console
-        )
-
     repl.console.print(
         f"[dim]Credential '{reference}' — values are encrypted at rest and bound to one origin.[/dim]"
     )
-    try:
-        kind = str(
-            await asyncio.to_thread(
-                Prompt.ask,
-                "  Type",
-                choices=list(_HTTP_FIELDS),
-                default="bearer",
-                console=repl.console,
-            )
-        )
-        document: dict[str, object] = {"type": kind}
-        if kind != "secret":
-            document["origin"] = await ask("Origin it is valid for (e.g. https://api.example.com)")
-        for key, label, secret in _HTTP_FIELDS[kind]:
-            value = await ask(
-                label,
-                secret=secret,
-                default="X-API-Key" if key == "name" and kind == "api_key_header" else "",
-            )
-            if value:
-                document[key] = value
-    except (EOFError, KeyboardInterrupt):
-        repl.console.print("\n[yellow]Cancelled.[/yellow]")
+    chosen = await single_select(
+        "Credential type", [Option(id=k, label=k) for k in _HTTP_FIELDS], palette=True
+    )
+    if chosen in (BACK, CANCEL) or not isinstance(chosen, str):
+        repl.console.print("[yellow]Cancelled.[/yellow]")
         return
+    kind = chosen
+    document: dict[str, object] = {"type": kind}
+    questions = list(_HTTP_FIELDS[kind])
+    if kind != "secret":
+        questions.insert(
+            0, ("origin", "Origin it is valid for (e.g. https://api.example.com)", False)
+        )
+    for key, label, secret in questions:
+        default = "X-API-Key" if key == "name" and kind == "api_key_header" else ""
+        value = await ask(label, password=secret, default=default, optional=key != "origin")
+        if value is None:
+            repl.console.print("[yellow]Cancelled.[/yellow]")
+            return
+        if value:
+            document[key] = value
     try:
         save_credential(reference, document)  # type: ignore[arg-type]
     except CredentialError as exc:

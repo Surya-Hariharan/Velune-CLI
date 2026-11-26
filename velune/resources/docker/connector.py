@@ -191,7 +191,11 @@ class DockerConnector(ResourceConnector):
             )
         try:
             proc = await asyncio.create_subprocess_exec(
-                docker, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                docker,
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             try:
                 out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)

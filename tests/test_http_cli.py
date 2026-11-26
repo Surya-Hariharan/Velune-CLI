@@ -27,15 +27,20 @@ def repl_with(buffer: io.StringIO) -> SimpleNamespace:
 
 
 def answers(monkeypatch, *values: str) -> list[str]:
-    """Feed Prompt.ask a fixed script; returns the prompts it was shown."""
+    """Feed the type picker and text questions a fixed script; returns what was asked."""
     queue = list(values)
     shown: list[str] = []
 
-    def ask(prompt, *args, **kwargs):
-        shown.append(str(prompt))
+    async def pick(title, *args, **kwargs):
+        shown.append(str(title))
         return queue.pop(0)
 
-    monkeypatch.setattr("rich.prompt.Prompt.ask", ask)
+    async def ask(title, *args, **kwargs):
+        shown.append(str(title))
+        return queue.pop(0)
+
+    monkeypatch.setattr("velune.cli.interactive.single_select", pick)
+    monkeypatch.setattr("velune.cli.interactive.ask", ask)
     return shown
 
 
@@ -85,10 +90,12 @@ async def test_an_invalid_credential_is_reported_not_saved(monkeypatch):
 async def test_cancelling_stores_nothing(monkeypatch):
     out = io.StringIO()
 
-    def cancel(prompt, *args, **kwargs):
-        raise KeyboardInterrupt
+    from velune.cli.interactive import CANCEL
 
-    monkeypatch.setattr("rich.prompt.Prompt.ask", cancel)
+    async def cancel(*args, **kwargs):
+        return CANCEL
+
+    monkeypatch.setattr("velune.cli.interactive.single_select", cancel)
     await _configure(repl_with(out), "http aborted")
     assert "Cancelled" in out.getvalue()
 

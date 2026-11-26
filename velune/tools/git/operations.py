@@ -25,6 +25,7 @@ def _git_run(cwd: Path, *args: str, strip: bool = True) -> str:
     res = subprocess.run(
         ["git", *args],
         cwd=str(cwd),
+        stdin=subprocess.DEVNULL,  # git must never read the REPL's keyboard
         capture_output=True,
         text=True,
         check=False,

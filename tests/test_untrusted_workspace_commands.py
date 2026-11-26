@@ -176,16 +176,22 @@ def test_a_decision_made_after_startup_adds_the_commands(workspace, user_dir, mo
 
 
 def _ask_for_trust(workspace: Path, monkeypatch, answers: list):
-    from rich import prompt
+    import asyncio
 
+    from velune.cli import interactive
     from velune.cli.repl import VeluneREPL
     from velune.core import trust
 
     monkeypatch.setattr(trust, "is_trusted", lambda path: False)
     monkeypatch.setattr(trust, "trust", lambda path: answers.append(("trusted", path)))
-    monkeypatch.setattr(prompt.Confirm, "ask", lambda *a, **k: answers.append(("asked",)) or False)
+
+    async def ask(*args, **kwargs):
+        answers.append(("asked",))
+        return False
+
+    monkeypatch.setattr(interactive, "confirm", ask)
     stub = SimpleNamespace(_mcp_registry=SimpleNamespace(workspace=workspace), console=_console())
-    return VeluneREPL._ensure_workspace_trust(stub)
+    return asyncio.run(VeluneREPL._ensure_workspace_trust(stub))
 
 
 def test_a_workspace_with_only_slash_commands_prompts_for_trust(workspace, monkeypatch):

@@ -1178,9 +1178,13 @@ class _FakeRepl:
 
 
 def _canned_prompt(monkeypatch, answers: list[str]):
-    """Feed successive canned answers to every Prompt.ask() call in order."""
+    """Feed successive canned answers to every configure question in order."""
     it = iter(answers)
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *a, **k: next(it))
+
+    async def ask(*a, **k):
+        return next(it)
+
+    monkeypatch.setattr("velune.cli.interactive.ask", ask)
 
 
 async def test_configure_postgres_saves_encrypted_config(monkeypatch, fake_keystore):
@@ -1218,7 +1222,7 @@ async def test_configure_docker_is_a_noop(monkeypatch, fake_keystore):
     def boom(*a, **k):
         raise AssertionError("docker must not prompt for configuration")
 
-    monkeypatch.setattr("rich.prompt.Prompt.ask", boom)
+    monkeypatch.setattr("velune.cli.interactive.ask", boom)
     await _configure(_FakeRepl(), "docker")
     assert load_resource_secret("docker", "docker") is None
 
@@ -1230,7 +1234,7 @@ async def test_configure_unknown_resource_does_not_save(monkeypatch, fake_keysto
     def boom(*a, **k):
         raise AssertionError("an unknown resource id must not prompt")
 
-    monkeypatch.setattr("rich.prompt.Prompt.ask", boom)
+    monkeypatch.setattr("velune.cli.interactive.ask", boom)
     await _configure(_FakeRepl(), "redis")
     assert load_resource_secret("redis", "redis") is None
 

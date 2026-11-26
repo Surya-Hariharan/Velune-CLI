@@ -1160,16 +1160,13 @@ async def cmd_delete(repl: VeluneREPL, args: str) -> None:
     if not args.strip():
         repl.console.print("[yellow]Usage: /delete <model-id>[/yellow]")
         return
-    from rich.prompt import Confirm
-
+    from velune.cli.handlers.confirm import confirm_destructive
     from velune.providers.ollama_manager import OllamaManager
 
     model_id = args.strip()
-    confirm = Confirm.ask(
-        f"  Delete [cyan]{model_id}[/cyan] from Ollama? This cannot be undone.",
-        default=False,
-    )
-    if not confirm:
+    if not await confirm_destructive(
+        repl, f"Delete {model_id} from Ollama? This cannot be undone."
+    ):
         return
     manager = OllamaManager()
     if await manager.delete_model(model_id):
