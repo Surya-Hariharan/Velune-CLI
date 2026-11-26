@@ -68,6 +68,21 @@ _NAME_SAFE = re.compile(r"[^a-zA-Z0-9_-]")
 # name, the parsed arguments, and the permissions the call would be granted.
 Approver = Callable[[str, dict[str, Any], "set[ToolPermission]"], Awaitable[bool]]
 
+
+@dataclass(frozen=True)
+class Denied:
+    """An approver's refusal that carries its reason to the model.
+
+    Falsy, so approvers may return it wherever they return ``False``; the loop
+    reports ``reason`` instead of the generic "the user denied permission".
+    """
+
+    reason: str
+
+    def __bool__(self) -> bool:
+        return False
+
+
 # Observer for loop progress ("turn", "tool_start", "tool_end", "final").
 EventHook = Callable[[str, dict[str, Any]], None]
 
@@ -571,10 +586,13 @@ class ToolLoopRunner:
             logger.warning("Approver raised for %s; denying call: %s", name, exc)
             approved = False
         if not approved:
-            self._emit("tool_denied", {"id": call.id, "name": name})
+            reason = approved.reason if isinstance(approved, Denied) else ""
+            self._emit("tool_denied", {"id": call.id, "name": name, "reason": reason})
             return ToolInvocation(
                 call=call,
-                result=f"Error: the user denied permission to run '{name}'.",
+                result=f"Error: {reason}"
+                if reason
+                else f"Error: the user denied permission to run '{name}'.",
                 error=True,
                 duration_ms=(time.perf_counter() - start) * 1000.0,
                 source=kind,
