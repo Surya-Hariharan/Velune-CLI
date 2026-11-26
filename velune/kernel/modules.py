@@ -3,8 +3,7 @@
 The synchronous startup path imports **only** the Tier-0 modules below. The
 Tier-1 (background warm-up) module lists are imported lazily by
 :func:`load_background_modules` — importing them eagerly would run the heavy
-package ``__init__`` chains (``orchestration.engine`` alone is ~1s, plus
-memory / retrieval / tools / repository) on the critical path, which is exactly
+package ``__init__`` chains (memory / retrieval / tools / repository) on the critical path, which is exactly
 what made the first prompt slow.
 """
 

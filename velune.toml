@@ -125,10 +125,6 @@ default_provider = "groq"
 # "auto" classifies each task; or pin one tier.
 #default_tier_override = "auto"
 
-# Experimental engines (`velune native` and an alternative council engine) are
-# opt-in and deliberately not listed in this file, so that a copy of it cannot
-# enable them by accident. See docs/native-engine.md.
-
 # ── Hooks ───────────────────────────────────────────────────────────────────
 
 # External commands run on lifecycle events (for example SessionStart). They run

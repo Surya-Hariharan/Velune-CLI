@@ -88,7 +88,7 @@ relevant code.
   (AUTHORS, NOTICE, GOVERNANCE); and a documentation overhaul with tests that
   keep the command reference in sync with the code.
 - **0.9.9:** the opt-in, experimental native orchestration engine (`velune native`, with an optional
-  `--plan-review` mode; see `docs/native-engine.md`), local-model recovery, and the Manual/Plan/Auto
+  `--plan-review` mode; removed again after 0.9.10), local-model recovery, and the Manual/Plan/Auto
   execution modes.
 - **0.9.10:** ask-first automatic updates (`[update] auto`), installers and updates that never replace a
   running Velune, and the `/council` freeze and background-load fixes.

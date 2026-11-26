@@ -295,28 +295,6 @@ class ResourceEntry(BaseModel):
     auto_connect: bool = False
 
 
-class OrchestrationConfig(BaseModel):
-    """Settings for the native multi-agent orchestration engine (velune.orchestration.engine)."""
-
-    # "off" is the default. "on" enables exactly one entry point, the explicit ``velune native``
-    # command (read-only, per-call approval, no fallback). Normal chat, the REPL, ``ask``, ``run``
-    # and the Council never read this flag. Set it with VELUNE_ORCHESTRATION__ENGINE=on or
-    # ``[orchestration] engine = "on"``. An unknown value falls back to "off" with a warning
-    # rather than failing config load.
-    engine: str = "off"
-
-    @field_validator("engine", mode="before")
-    @classmethod
-    def _normalize_engine(cls, value: object) -> str:
-        text = str(value).strip().lower() if value is not None else ""
-        if text in ("off", "on"):
-            return text
-        logging.getLogger("velune.kernel.config").warning(
-            "Unknown orchestration.engine %r (use 'off' or 'on'); using 'off'.", value
-        )
-        return "off"
-
-
 class DockerConfig(ResourceEntry):
     """Settings for the Docker Engine integration (``[resources.docker]``).
 
@@ -494,7 +472,6 @@ class VeluneConfig(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
-    orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)

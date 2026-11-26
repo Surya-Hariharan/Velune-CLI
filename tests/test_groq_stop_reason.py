@@ -13,27 +13,11 @@ import httpx
 import pytest
 
 from velune.core.types.inference import InferenceRequest
-from velune.orchestration.engine.ports import ActingRequest
-from velune.orchestration.engine.toolpolicy import ToolDescriptor
-from velune.orchestration.engine_adapters.provider_acting import (
-    _FAILURE,
-    ProviderActingInvoker,
-    Rejection,
-)
 from velune.providers.adapters.groq import GroqProvider
 from velune.providers.adapters.openai import OpenAIProvider
 
 MODEL = "llama-3.3-70b-versatile"
 FAKE_KEY = "gsk_test_placeholder"
-READ_FILE = ToolDescriptor(
-    name="read_file",
-    schema_={
-        "type": "object",
-        "properties": {"path": {"type": "string", "maxLength": 4096}},
-        "required": ["path"],
-    },
-    permissions=frozenset({"filesystem.read"}),
-)
 
 
 def tool_call(args: Any = '{"path": "a.txt"}', name: str = "read_file", call_id: str = "call_1"):
@@ -207,86 +191,3 @@ def test_only_the_groq_adapter_overrides_the_hook():
     assert not hasattr(openai_compat, "_response_metadata") and not hasattr(
         xai, "_response_metadata"
     )
-
-
-# ── the acting adapter reads that signal ──────────────────────────────────────
-
-
-def acting_request() -> ActingRequest:
-    return ActingRequest(
-        run_id="run-1",
-        call_id="call-1",
-        agent="reasoner",
-        routing_role="coder",
-        attempt=1,
-        messages=({"role": "system", "content": "s"}, {"role": "user", "content": "u"}),
-        timeout_s=5.0,
-        max_tokens=100,
-        offered_tools=("read_file",),
-    )
-
-
-async def propose(provider: GroqProvider):
-    invoker = ProviderActingInvoker(provider, MODEL, {"read_file": READ_FILE})
-    try:
-        return await invoker.propose(acting_request())
-    finally:
-        await provider.shutdown()
-
-
-def message_of(kind: Rejection) -> str:
-    return _FAILURE[kind][1]
-
-
-async def test_the_acting_adapter_accepts_a_complete_groq_tool_proposal(groq):
-    result = await propose(groq(body(calls=[tool_call()], finish_reason="tool_calls")))
-    assert result.ok and len(result.proposals) == 1
-    assert result.proposals[0].name == "read_file"
-    assert result.proposals[0].arguments == {"path": "a.txt"}
-    assert result.model is not None and result.model.provider_id == "groq"
-    assert result.model.model_id == MODEL
-
-
-async def test_the_acting_adapter_accepts_a_complete_groq_text_answer(groq):
-    result = await propose(groq(body("the answer", finish_reason="stop")))
-    assert result.ok and result.text == "the answer"
-
-
-async def test_the_acting_adapter_rejects_a_truncated_tool_call(groq):
-    result = await propose(groq(body(calls=[tool_call('{"path": "a')], finish_reason="length")))
-    assert not result.ok and result.error.message == message_of(Rejection.TRUNCATED)
-
-
-async def test_the_acting_adapter_rejects_a_truncated_text_answer(groq):
-    result = await propose(groq(body("half", finish_reason="length")))
-    assert not result.ok and result.error.message == message_of(Rejection.TRUNCATED)
-
-
-async def test_the_acting_adapter_rejects_a_tool_call_with_no_native_reason(groq):
-    result = await propose(groq(body(calls=[tool_call()], finish_reason=None)))
-    assert not result.ok and result.error.message == message_of(Rejection.NO_STOP_REASON)
-
-
-@pytest.mark.parametrize("native", ["stop", "content_filter", "mystery"])
-async def test_the_acting_adapter_rejects_a_call_under_a_contradicting_reason(groq, native):
-    result = await propose(groq(body(calls=[tool_call()], finish_reason=native)))
-    assert not result.ok and not result.proposals
-
-
-async def test_the_acting_adapter_rejects_malformed_arguments_even_when_complete(groq):
-    result = await propose(groq(body(calls=[tool_call('{"path": ')], finish_reason="tool_calls")))
-    assert not result.ok and result.error.message == message_of(Rejection.RAW_ARGUMENTS)
-
-
-async def test_the_acting_adapter_rejects_two_complete_calls(groq):
-    calls = [tool_call(call_id="a"), tool_call(call_id="b")]
-    result = await propose(groq(body(calls=calls, finish_reason="tool_calls")))
-    assert not result.ok and result.error.message == message_of(Rejection.MULTIPLE_CALLS)
-
-
-async def test_the_acting_adapter_still_fails_closed_without_the_metadata_key(groq):
-    """The adapter's own rule is unchanged: a response lacking the key is refused."""
-    provider = groq(body(calls=[tool_call()], finish_reason="tool_calls"))
-    provider._response_metadata = lambda choice, calls: {}  # type: ignore[method-assign]
-    result = await propose(provider)
-    assert not result.ok and result.error.message == message_of(Rejection.NO_STOP_REASON)

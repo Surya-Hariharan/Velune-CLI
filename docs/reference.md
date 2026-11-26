@@ -224,8 +224,7 @@ It also speaks MCP in both directions, so editors can call Velune's tools and Ve
 | **Controlled execution**<br>Manual, Plan and Auto modes, path guard, diff preview, git snapshots, resource-limited command runner. | **MCP both ways**<br>`velune mcp serve` for editors; connect to external servers over stdio, SSE, HTTP or WebSocket. |
 | **Recovery tools**<br>`backup`, `restore` and crash `recover`, plus `doctor`, `status` and a trace log of what actually ran. | **Extensible**<br>Declarative plugins, lifecycle hooks, custom slash commands and resource connectors (Docker, Postgres, MySQL, Supabase). |
 
-Experimental or opt-in: `velune native` (a read-only orchestration engine, off by default), the Docker sandbox, and the
-`rag` and `parsing` extras.
+Opt-in: the Docker sandbox, and the `rag` and `parsing` extras.
 
 ## Multi-agent architecture
 
@@ -502,7 +501,6 @@ slash-command reference is in
 | [Slash commands](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/slash-commands.md) | Every REPL command, alias and usage string |
 | [Filesystem tools](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/filesystem-tools.md) | How the agent edits files, the safety model, provider support |
 | [MCP guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/mcp.md) | MCP server and client, transports, trust gating |
-| [Native engine](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/native-engine.md) | The experimental `velune native` engine |
 | [Development guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/development.md) | Architecture, module boundaries, testing, CI |
 | [Security policy](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/SECURITY.md) | Threat model, limitations, reporting |
 | [Changelog](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md) | Version history |
@@ -512,10 +510,6 @@ slash-command reference is in
 
 There is no committed, dated roadmap. These are the real open areas, taken from the project's own documentation:
 
-- **Native orchestration engine.** `velune native` is experimental and read-only. Its documented next steps include
-  independent planner and reviewer models and an evaluation strategy
-  ([docs/native-engine.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/native-engine.md#5-proposed-future-work-not-implemented-not-scheduled)),
-  each needing maintainer approval before work starts.
 - **MCP server transports.** The server code can listen over HTTP, but `velune mcp serve` offers stdio only
   ([docs/mcp.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/mcp.md)).
 - **MCP SDK 2.x.** Velune pins `mcp<2.0.0` until its server code is migrated to the new API.

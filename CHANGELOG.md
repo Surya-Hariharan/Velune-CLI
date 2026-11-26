@@ -19,6 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   before.
 - The "Git snapshot and rollback for plan-driven changes" entry in `SECURITY.md`. That code was
   never reached. `/rewind` is unaffected.
+- **`velune native`** and the experimental native orchestration engine. Chat, `/council`, `/run`,
+  `ask` and `run` never used it. The setting `[orchestration] engine` is gone; config files that
+  still contain it load as before.
 
 ### Changed
 
@@ -343,7 +346,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
     retries. Ctrl-C, a time limit, an exhausted budget and a refused tool call each end the run with a
     distinct message; nothing further is requested afterwards. Errors are fixed messages with no raw
     provider text, and credentials are scrubbed from everything sent to or returned from the model.
-  - See [docs/native-engine.md](docs/native-engine.md) for usage, limits and what is and is not tested.
+  - Documented in `docs/native-engine.md` (removed together with the engine after 0.9.10).
 
 ### Added
 
