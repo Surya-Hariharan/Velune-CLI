@@ -68,6 +68,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("roles", "Assign specific models to council agent roles"),
     ("run", "Execute a task through the Reasoning Council"),
     ("council", "Force full council tier on a task"),
+    ("skills", "List the council's skills and permission profiles"),
     ("jobs", "List background jobs or cancel one"),
     ("dashboard", "Live progress dashboard: jobs, alerts, provider health"),
     ("session", "Pick, resume, save, or export sessions"),

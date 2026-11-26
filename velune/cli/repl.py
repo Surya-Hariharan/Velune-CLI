@@ -2044,6 +2044,11 @@ class VeluneREPL:
 
         await cmd_mode(self, args)
 
+    async def _cmd_skills(self, args: str) -> None:
+        from velune.cli.handlers.skills import cmd_skills
+
+        await cmd_skills(self, args)
+
     async def _cmd_councilmodel(self, args: str) -> None:
         from velune.cli.handlers.councilmodel import cmd_councilmodel
 

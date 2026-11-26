@@ -35,6 +35,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     # AI
     "run": "AI",
     "council": "AI",
+    "skills": "AI",
     "jobs": "AI",
     "dashboard": "AI",
     "fast": "AI",
@@ -480,6 +481,17 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "best quality",
             ),
             shortcut="/c",
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="skills",
+            aliases=[],
+            description="List the council's skills and permission profiles, or show one",
+            usage="/skills [show <name>]",
+            handler=repl._cmd_skills,
+            examples=("/skills", "/skills show coding", "/skills show read-only"),
+            search_terms=("skill", "skills", "permission profile", "agent team", "swarm"),
         )
     )
     registry.register(
