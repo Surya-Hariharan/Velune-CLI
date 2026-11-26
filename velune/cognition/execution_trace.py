@@ -58,7 +58,7 @@ class CallReason(StrEnum):
 
     PRIMARY = "primary"  # the seat's first, contract-sanctioned execution
     SELF_CONSISTENCY = "self_consistency"  # extra Coder sample in the diverge round
-    REVIEW = "review"  # a council seat reviewing its peers' work (R2 of the deliberative council)
+    REVIEW = "review"
     REVISION = "revision"  # re-execution driven by critic feedback (debate, council R3)
     RETRY = "retry"  # same request re-sent after a transient failure
     FALLBACK = "fallback"  # re-sent to a *different* provider after failure
@@ -78,10 +78,6 @@ class NodeType(StrEnum):
     DEBATE = "debate"
     ARBITRATION = "arbitration"
     SYNTHESIS = "synthesis"
-    # Stages of the domain-neutral council core (velune.council); R2/R4/R5 reuse the members above.
-    FRAMING = "framing"
-    PERSPECTIVES = "perspectives"
-    REVISION = "revision"
 
 
 @dataclass

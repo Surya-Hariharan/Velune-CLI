@@ -19,9 +19,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   before.
 - The "Git snapshot and rollback for plan-driven changes" entry in `SECURITY.md`. That code was
   never reached. `/rewind` is unaffected.
-- **`velune native`** and the experimental native orchestration engine. Chat, `/council`, `/run`,
-  `ask` and `run` never used it. The setting `[orchestration] engine` is gone; config files that
-  still contain it load as before.
+- **`velune native`** and the experimental native orchestration engine, together with the
+  unused second ("deliberative") council engine. Chat, `/council`, `/run`, `ask` and `run` never
+  used them. The settings `[orchestration] engine` and `[cognition] council_engine` are gone;
+  config files that still contain them load as before.
 
 ### Changed
 
