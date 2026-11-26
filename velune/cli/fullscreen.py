@@ -34,7 +34,12 @@ from rich.console import Console, ConsoleDimensions
 from velune.cli import design
 from velune.cli.clipboard import copy_to_clipboard, extract_last_code_block
 from velune.cli.home import HomeState, home_styles, render_home
-from velune.cli.rendering.markdown import CustomMarkdown, MarkdownStreamBuffer
+from velune.cli.rendering.markdown import (
+    CustomMarkdown,
+    MarkdownStreamBuffer,
+    stable_markdown_prefix,
+    strip_blank_edges,
+)
 from velune.cli.rendering.segments_to_pt import render_to_fragments
 from velune.cli.statusbar import render_status_bar
 
@@ -439,6 +444,10 @@ class FullscreenREPLUI:
     # UI built without an Application (tests, headless) still paces at the base rate.
     _render_cost_s: float = 0.0
     _render_started: float = 0.0
+    # Finished part of the reply being streamed, rendered once (see _stream_fragments).
+    _stable_text: str = ""
+    _stable_frags: list[list[tuple[str, str]]] = []  # noqa: RUF012 - replaced, never mutated
+    _stable_width: int = 0
 
     def _build_style(self) -> dict[str, str]:
         """The complete style sheet, interpolated from the *current* theme.
@@ -921,6 +930,16 @@ class FullscreenREPLUI:
             # Smoothed so a single slow frame doesn't whipsaw the pacing.
             self._render_cost_s = 0.7 * self._render_cost_s + 0.3 * cost
             self._render_started = 0.0
+        # Scrolled back down to where the last line is on screen: we are following
+        # live output again (and the hint should say so).
+        info = self._conversation_window.render_info
+        if (
+            self._scroll_anchor is not None
+            and info is not None
+            and self._lines
+            and info.last_visible_line() >= len(self._lines) - 1
+        ):
+            self._scroll_anchor = None
 
     def _animation_interval(self, base: float) -> float:
         return adaptive_interval(base, self._render_cost_s)
@@ -981,6 +1000,21 @@ class FullscreenREPLUI:
             self._lines.append(_Line(f"  {raw.rstrip()}", "class:conversation.user.text"))
         self._trim()
 
+    def _add_lines(self, lines: list[_Line]) -> None:
+        """Append lines, keeping them out of an in-flight reply.
+
+        A streaming reply owns everything from ``_stream_start`` to the end and is
+        re-rendered over that range on every update, so anything appended there
+        (a warning, a status line) was silently wiped. Such lines go just above
+        the reply instead.
+        """
+        if self._stream_start is None:
+            self._lines.extend(lines)
+        else:
+            self._lines[self._stream_start : self._stream_start] = lines
+            self._stream_start += len(lines)
+        self._trim()
+
     def append_console_line(self, line: str) -> None:
         if not line and (not self._lines or not self._lines[-1].text):
             return
@@ -990,16 +1024,15 @@ class FullscreenREPLUI:
             # call (which can run many times/sec under min_redraw_interval).
             plain = _ANSI_RE.sub("", line)
             fragments = to_formatted_text(ANSI(line))
-            self._lines.append(_Line(plain, "class:conversation.system", fragments=fragments))
+            self._add_lines([_Line(plain, "class:conversation.system", fragments=fragments)])
         else:
-            self._lines.append(_Line(line, "class:conversation.system"))
-        self._trim()
+            self._add_lines([_Line(line, "class:conversation.system")])
         self.invalidate()
 
     def append_system(self, text: str) -> None:
         self._history_started = True
-        self._append_wrapped(text, "class:conversation.system")
-        self._trim()
+        style = "class:conversation.system"
+        self._add_lines([_Line(raw.rstrip(), style) for raw in (text or "").splitlines() or [""]])
         self.invalidate()
 
     def begin_assistant(
@@ -1019,6 +1052,7 @@ class FullscreenREPLUI:
         self._history_started = True
         self._append_gap()
         self._stream_start = len(self._lines)
+        self._reset_stable()
         self._thinking_idx = 0
         self._stream_text = text or self._thinking_words[0]
         self._set_thinking_line(_SPINNER_FRAMES[0], self._stream_text)
@@ -1088,6 +1122,7 @@ class FullscreenREPLUI:
             self._last_response_text = self._stream_text
         self._stream_start = None
         self._stream_text = ""
+        self._reset_stable()
         self.set_busy_hint(False)
         self.invalidate()
 
@@ -1173,10 +1208,12 @@ class FullscreenREPLUI:
     def append_fragment_lines(self, lines: list[list[tuple[str, str]]]) -> None:
         """Append pre-built prompt_toolkit fragment lines (result rows, diffs)."""
         self._history_started = True
-        for frags in lines:
-            plain = "".join(t for _s, t in frags)
-            self._lines.append(_Line(plain, "class:conversation.system", fragments=frags))
-        self._trim()
+        self._add_lines(
+            [
+                _Line("".join(t for _s, t in frags), "class:conversation.system", fragments=frags)
+                for frags in lines
+            ]
+        )
         self.invalidate()
 
     def cancel_live_cards(self, note: str = "Interrupted") -> None:
@@ -1213,7 +1250,13 @@ class FullscreenREPLUI:
         return max(3, self._height() - 2)
 
     def scroll_up(self, n: int = 1) -> None:
-        current = self._scroll_anchor if self._scroll_anchor is not None else len(self._lines) - 1
+        # From live-follow, start at the line actually at the top of the screen.
+        # Starting from the *last* line put the anchor inside the bottom page, which
+        # the window then clamped straight back, so small scrolls did nothing.
+        if self._scroll_anchor is not None:
+            current = self._scroll_anchor
+        else:
+            current = self._conversation_window.vertical_scroll
         self._scroll_anchor = max(0, current - n)
         self._sync_conversation_scroll()
         self.invalidate()
@@ -1257,10 +1300,7 @@ class FullscreenREPLUI:
         text = self._stream_text or "..."
         style = "class:conversation.assistant" if final else "class:conversation"
         try:
-            stabilized = MarkdownStreamBuffer._stabilize(text)
-            line_fragments = render_to_fragments(
-                self.console, CustomMarkdown(stabilized, streaming=not final), self._width()
-            )
+            line_fragments = self._stream_fragments(text, final=final)
         except Exception:
             self._lines[start:] = []
             self._append_wrapped(text, style)
@@ -1275,6 +1315,43 @@ class FullscreenREPLUI:
                 plain = "".join(t for _s, t in frags)
                 self._lines.append(_Line(plain, style, fragments=frags))
         self._trim()
+
+    def _markdown_fragments(self, text: str, *, final: bool) -> list[list[tuple[str, str]]]:
+        stabilized = MarkdownStreamBuffer._stabilize(text)
+        return render_to_fragments(
+            self.console, CustomMarkdown(stabilized, streaming=not final), self._width()
+        )
+
+    def _stream_fragments(self, text: str, *, final: bool) -> list[list[tuple[str, str]]]:
+        """Render a streaming reply, re-rendering only its unfinished tail.
+
+        Complete blocks before the last safe break are rendered once and cached;
+        each update re-renders only what follows. Re-rendering the whole reply
+        on every update grew with its length (0.4 s per update at 40k chars).
+        """
+        width = self._width()
+        if width != self._stable_width or not text.startswith(self._stable_text):
+            self._reset_stable(width)
+        boundary = stable_markdown_prefix(text)
+        if boundary > len(self._stable_text):
+            chunk = text[len(self._stable_text) : boundary]
+            rendered = strip_blank_edges(self._markdown_fragments(chunk, final=True))
+            if self._stable_frags and rendered:
+                self._stable_frags.append([])  # the one blank line between two blocks
+            self._stable_frags.extend(rendered)
+            self._stable_text = text[:boundary]
+        tail = text[len(self._stable_text) :]
+        tail_frags = self._markdown_fragments(tail, final=final) if tail.strip() else []
+        if not self._stable_frags:
+            return tail_frags  # nothing cached yet: exactly the old single render
+        tail_frags = strip_blank_edges(tail_frags)
+        gap: list[list[tuple[str, str]]] = [[]] if tail_frags else []
+        return [*self._stable_frags, *gap, *tail_frags]
+
+    def _reset_stable(self, width: int = 0) -> None:
+        self._stable_text = ""
+        self._stable_frags: list[list[tuple[str, str]]] = []
+        self._stable_width = width
 
     def clear(self) -> None:
         """Reset the live view for `/clear`.
@@ -1331,6 +1408,11 @@ class FullscreenREPLUI:
         if len(self._lines) <= _MAX_TRANSCRIPT_LINES:
             return
         overflow = len(self._lines) - _MAX_TRANSCRIPT_LINES
+        if self._stream_start is not None:
+            # Never cut into the reply still being written; older turns go first.
+            overflow = min(overflow, self._stream_start)
+            if overflow <= 0:
+                return
         self._lines = self._lines[overflow:]
         if self._stream_start is not None:
             self._stream_start = max(0, self._stream_start - overflow)

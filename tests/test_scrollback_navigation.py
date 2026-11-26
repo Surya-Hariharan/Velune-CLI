@@ -160,12 +160,50 @@ def test_ctrl_end_resumes_live_follow():
 
 
 @pytest.mark.timeout(30)
+def test_one_small_wheel_step_from_the_bottom_moves_the_view():
+    """A 3-line wheel tick used to be clamped straight back to the bottom."""
+
+    async def _body(ui: FullscreenREPLUI, _inp):
+        _fill(ui, _ROWS * 3)
+        tail = f"line-{_ROWS * 3 - 1}"
+        await _wait_until(lambda: tail in _visible_text(ui))
+        top_before = ui._conversation_window.vertical_scroll
+
+        ui.scroll_up(3)  # what one mouse-wheel tick does
+        await _wait_until(lambda: tail not in _visible_text(ui))
+        return top_before, ui._conversation_window.vertical_scroll, _visible_text(ui)
+
+    top_before, top_after, visible = _run(_body)
+    assert top_after == top_before - 3
+    assert f"line-{_ROWS * 3 - 1}" not in visible
+
+
+@pytest.mark.timeout(30)
+def test_scrolling_down_to_the_last_page_resumes_follow_mode():
+    async def _body(ui: FullscreenREPLUI, _inp):
+        _fill(ui, _ROWS * 3)
+        await asyncio.sleep(_SETTLE)
+        ui.scroll_up(6)
+        await asyncio.sleep(_SETTLE)
+        ui.scroll_down(3)
+        await asyncio.sleep(_SETTLE)
+        still_scrolled = ui._scroll_anchor is not None
+        ui.scroll_down(3)  # back on the last page
+        await _wait_until(lambda: ui._scroll_anchor is None)
+        return still_scrolled, ui._scroll_anchor
+
+    still_scrolled, anchor = _run(_body)
+    assert still_scrolled
+    assert anchor is None
+
+
+@pytest.mark.timeout(30)
 def test_scroll_down_past_the_bottom_resumes_follow_mode():
     ui_anchor = None
 
     async def _body(ui: FullscreenREPLUI, _inp):
         nonlocal ui_anchor
-        _fill(ui, 10)
+        _fill(ui, _ROWS * 3)  # more than one screen, so there is something to scroll
         ui.scroll_to_top()
         await asyncio.sleep(_SETTLE)
         assert ui._scroll_anchor == 0

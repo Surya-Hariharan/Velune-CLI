@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import time
+from typing import Any
 
 from rich import box
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -180,6 +182,55 @@ class CustomMarkdown(Markdown):
         yield from super().__rich_console__(console, options)
 
 
+_LIST_ITEM_RE = re.compile(r"([-*+]|\d+[.)])\s")
+
+
+def _is_blank_line(frags: list[tuple[str, str]]) -> bool:
+    """An empty separator line: no text and no background (code-block padding has one)."""
+    return all(not text.strip() and "bg:" not in style for style, text in frags)
+
+
+def strip_blank_edges(lines: list[list[tuple[str, str]]]) -> list[list[tuple[str, str]]]:
+    start, end = 0, len(lines)
+    while start < end and _is_blank_line(lines[start]):
+        start += 1
+    while end > start and _is_blank_line(lines[end - 1]):
+        end -= 1
+    return lines[start:end]
+
+
+def stable_markdown_prefix(text: str) -> int:
+    """Length of the part of a streaming Markdown reply that can no longer change.
+
+    The cut is after a blank line that is outside any code fence or display-math
+    block, and only where the next non-blank line starts at column 0 (an indented
+    line could still belong to the block above, e.g. a list item's second
+    paragraph). Everything before the cut renders the same on its own as it does
+    as part of the whole reply.
+    """
+    best = 0
+    pos = 0
+    in_fence = in_math = False
+    pending: int | None = None  # a blank-line cut waiting to see the next line
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if pending is not None and stripped:
+            if not line.endswith("\n"):
+                break  # still arriving: "3" may yet become "3. a list item"
+            # Not before an indented line or a list item: either may continue the block above.
+            if not line[0].isspace() and not _LIST_ITEM_RE.match(line):
+                best = pending
+            pending = None
+        if stripped.startswith(("```", "~~~")):
+            in_fence = not in_fence
+        elif not in_fence and stripped.count("$$") % 2 == 1:
+            in_math = not in_math
+        pos += len(line)
+        if not stripped and line.endswith("\n") and not in_fence and not in_math:
+            pending = pos
+    return best
+
+
 class MarkdownStreamBuffer:
     """Buffer that accumulates streamed Markdown and returns flicker-free renderables.
 
@@ -235,6 +286,99 @@ class MarkdownStreamBuffer:
         if self._cached is None:
             self._cached = CustomMarkdown(self._stabilize(self._buffer), streaming=True)
         return self._cached
+
+
+class MarkdownLiveStream:
+    """Stream a Markdown reply into a normal, scrolling terminal (``--plain``).
+
+    Finished blocks are printed once, for good, into the terminal's scrollback;
+    only the unfinished tail lives in a small live area, trimmed to the screen
+    height. Redrawing the *whole* reply in a ``Live`` (the previous approach)
+    re-printed every line that had scrolled off the screen on each update, so a
+    long answer appeared many times over.
+    """
+
+    def __init__(self, console: Console, *, min_interval: float = 0.08) -> None:
+        from rich.live import Live
+
+        self._console = console
+        self._text = ""
+        self._printed = 0  # characters already written to scrollback
+        self._last_refresh = 0.0
+        self._min_interval = min_interval
+        self._live = Live("", console=console, auto_refresh=False, transient=True)
+        self._live.start()
+
+    @property
+    def text(self) -> str:
+        return self._text
+
+    def append(self, text: str) -> None:
+        self._text += text
+        now = time.perf_counter()
+        if now - self._last_refresh >= self._min_interval:
+            self._last_refresh = now
+            self._refresh()
+
+    def finish(self) -> None:
+        """Print whatever is left and close the live area."""
+        self._live.update("", refresh=True)
+        self._live.stop()
+        tail = self._text[self._printed :]
+        if tail.strip():
+            self._print_block(tail)
+        self._printed = len(self._text)
+
+    def _lines(self, markdown: str, *, streaming: bool) -> list[list[Any]]:
+        """Rendered lines without the blank lines Rich puts around a block."""
+        rendered = self._console.render_lines(
+            CustomMarkdown(markdown, streaming=streaming), self._console.options, pad=False
+        )
+
+        def blank(line: list[Any]) -> bool:
+            return all(not s.text.strip() and not (s.style and s.style.bgcolor) for s in line)
+
+        start, end = 0, len(rendered)
+        while start < end and blank(rendered[start]):
+            start += 1
+        while end > start and blank(rendered[end - 1]):
+            end -= 1
+        return rendered[start:end]
+
+    @staticmethod
+    def _segments(lines: list[list[Any]]) -> Any:
+        from rich.segment import Segment, Segments
+
+        flat: list[Segment] = []
+        for i, line in enumerate(lines):
+            if i:
+                flat.append(Segment.line())
+            flat.extend(line)
+        return Segments(flat)
+
+    def _print_block(self, markdown: str) -> None:
+        """Write finished blocks to scrollback, one blank line after the previous ones."""
+        lines = self._lines(markdown, streaming=False)
+        if not lines:
+            return
+        if self._printed:
+            self._console.print()
+        self._console.print(
+            self._segments([*lines, []])
+        )  # end on a newline, or the live area overwrites the last line
+
+    def _refresh(self) -> None:
+        cut = stable_markdown_prefix(self._text)
+        if cut > self._printed:
+            self._print_block(self._text[self._printed : cut])
+            self._printed = cut
+        tail = self._text[self._printed :]
+        if not tail.strip():
+            self._live.update("", refresh=True)
+            return
+        lines = self._lines(MarkdownStreamBuffer._stabilize(tail), streaming=True)
+        room = max(3, self._console.height - 2)
+        self._live.update(self._segments(lines[-room:]), refresh=True)
 
 
 class StreamStats:

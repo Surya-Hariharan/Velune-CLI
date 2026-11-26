@@ -851,8 +851,6 @@ class _ToolActivityUI:
         self._stream_text = ""
         self._status: Any | None = None
         self._live: Any | None = None
-        self._stream_buffer: Any | None = None
-        self._last_live_update = 0.0
         self.any_tool_ran = False
         self.last_turn_streamed = False
         # Tool-card state, keyed by the provider's tool-call id.
@@ -1086,36 +1084,22 @@ class _ToolActivityUI:
             self._fullscreen_ui.update_assistant(self._stream_text)
             return
 
-        import time as _time
-
         if self._live is None:
             self.pause_status()
             try:
-                from rich.live import Live
+                from velune.cli.rendering import MarkdownLiveStream
 
-                from velune.cli.rendering import MarkdownStreamBuffer
-
-                self._stream_buffer = MarkdownStreamBuffer()
-                self._live = Live(
-                    "",
-                    console=self._console,
-                    refresh_per_second=12,
-                    vertical_overflow="visible",
+                # Finished blocks go to scrollback once; only the tail is redrawn.
+                self._live = MarkdownLiveStream(
+                    self._console, min_interval=self._MIN_UPDATE_INTERVAL
                 )
-                self._live.start()
             except Exception:
                 self._live = None
-                self._stream_buffer = None
-        if self._stream_buffer is None or self._live is None:
-            return
-        self._stream_buffer.append(text)
-        now = _time.perf_counter()
-        if now - self._last_live_update >= self._MIN_UPDATE_INTERVAL:
-            try:
-                self._live.update(self._stream_buffer.get_renderable())
-            except Exception:
-                pass
-            self._last_live_update = now
+                return
+        try:
+            self._live.append(text)
+        except Exception:
+            pass
 
     def _finish_live(self) -> None:
         if self._fullscreen_ui is not None:
@@ -1135,13 +1119,10 @@ class _ToolActivityUI:
             return
         if self._live is not None:
             try:
-                if self._stream_buffer is not None:
-                    self._live.update(self._stream_buffer.get_renderable(final=True))
-                self._live.stop()
+                self._live.finish()
             except Exception:
                 pass
         self._live = None
-        self._stream_buffer = None
 
     # ── Spinner ──────────────────────────────────────────────────────
 

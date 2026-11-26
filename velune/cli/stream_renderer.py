@@ -98,9 +98,7 @@ class StreamRenderer:
         Returns:
             :class:`RenderResult` with the full text, token count, and interrupt flag.
         """
-        from rich.live import Live
-
-        from velune.cli.rendering import CustomMarkdown, MarkdownStreamBuffer, StreamStats
+        from velune.cli.rendering import CustomMarkdown, MarkdownLiveStream, StreamStats
         from velune.context.cache.manager import make_cache_manager
 
         result = RenderResult()
@@ -151,32 +149,26 @@ class StreamRenderer:
                     )
 
                 elif supports_stream:
-                    from rich.text import Text as _Text
-
-                    stream_buffer = MarkdownStreamBuffer()
                     stats = StreamStats()
-                    last_update = 0.0
-
-                    # Show "Thinking…" until the first token arrives so the
-                    # user always has immediate visual feedback.
-                    _thinking = _Text("Thinking…", style="dim")
-
-                    with Live(
-                        _thinking,
-                        console=self._console,
-                        refresh_per_second=12,
-                        vertical_overflow="visible",
-                    ) as live:
-                        async for chunk in provider.stream(request):
-                            if chunk.content:
-                                stream_buffer.append(chunk.content)
+                    # Finished blocks go to scrollback once; only the tail is redrawn.
+                    # "Thinking…" stays up until the first token arrives.
+                    with self._console.status("[dim]Thinking…[/dim]") as status:
+                        stream: MarkdownLiveStream | None = None
+                        try:
+                            async for chunk in provider.stream(request):
+                                if not chunk.content:
+                                    continue
+                                if stream is None:
+                                    status.stop()
+                                    stream = MarkdownLiveStream(
+                                        self._console, min_interval=self._MIN_UPDATE_INTERVAL
+                                    )
+                                stream.append(chunk.content)
                                 result.full_content.append(chunk.content)
                                 stats.record_chunk(chunk.content)
-                                now = time.perf_counter()
-                                if now - last_update >= self._MIN_UPDATE_INTERVAL:
-                                    live.update(stream_buffer.get_renderable())
-                                    last_update = now
-                        live.update(stream_buffer.get_renderable(final=True))
+                        finally:
+                            if stream is not None:
+                                stream.finish()
 
                     self._status_state.last_latency_ms = stats.time_to_first_token_ms
                     self._status_state.last_tokens_per_sec = stats.tokens_per_second
