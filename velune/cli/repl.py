@@ -26,21 +26,10 @@ from velune.cli.slash_commands import SlashCommandRegistry
 from velune.core.runtime import RuntimeContext
 from velune.core.task_registry import track
 from velune.core.types.model import ModelDescriptor
+from velune.models.registry import model_usable as _model_usable
 
 if TYPE_CHECKING:
     from velune.providers.base import ModelProvider
-
-
-def _model_usable(model: ModelDescriptor, provider_registry) -> bool:
-    """Cheap, offline check: not known-unavailable, and a cloud key exists."""
-    from velune.models.registry import is_available
-
-    if not is_available(model):
-        return False
-    if model.is_local:
-        return True
-    checker = getattr(provider_registry, "check_provider_available", None)
-    return True if checker is None else bool(checker(model.provider_id))
 
 
 class VeluneREPL:

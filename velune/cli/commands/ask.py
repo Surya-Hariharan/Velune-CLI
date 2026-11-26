@@ -1,53 +1,36 @@
-"""Interactive ask command boundary — routes natural language questions to the Council."""
+"""``velune ask`` — answer a question or review code with the agent swarm (nothing is changed)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
-
-if TYPE_CHECKING:
-    from velune.cognition.firewall import CognitiveFirewall
 from rich.console import Console
 
 from velune.cli.context import CLIContext
 
 if TYPE_CHECKING:
-    from velune.repository.schemas import RepositorySnapshot
+    from velune.swarm.run import SwarmOutcome
 
 console = Console()
 ask_cmd = typer.Typer(help="Interactive prompt entry point")
 
 
-def _validate_council_tier(value: str | None) -> str | None:
-    """Reject unknown tier names instead of silently classifying automatically."""
-    from velune.cognition.council.tiers import parse_tier
-
-    try:
-        tier = parse_tier(value)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc)) from None
-    return tier.value if tier else None
-
-
 def ask_command(
     ctx: typer.Context,
     prompt: str | None = typer.Argument(None, help="Question or task to route through Velune"),
-    council_tier: str | None = typer.Option(
-        None,
-        "--council-tier",
-        help="Override council execution tier (instant, minimal, standard, full, auto)",
-        callback=_validate_council_tier,
+    skill: str | None = typer.Option(None, "--skill", help="Skill to use (see /skills)"),
+    permission: str | None = typer.Option(
+        None, "--permission", help="Permission profile to use (see /skills)"
     ),
+    council_tier: str | None = typer.Option(None, "--council-tier", hidden=True),
     explain_trace: bool = typer.Option(
         False,
         "--explain-trace",
-        help="Print the request execution trace: every provider call made, "
-        "which seat and reason caused it, and whether the run honoured its "
-        "tier's contract.",
+        help="Print the team that ran, and how each agent finished.",
     ),
 ) -> None:
-    """Ask a question or request a code review (no code execution)."""
+    """Ask a question or request a code review (nothing is written or run)."""
 
     if ctx.invoked_subcommand is not None:
         return
@@ -56,9 +39,8 @@ def ask_command(
     if not isinstance(cli_context, CLIContext):
         raise typer.BadParameter("CLI context was not properly initialized")
 
-    # Treat whitespace-only input as empty: it would otherwise sail through the
-    # full council/provider setup and only fail much later, having spent the
-    # user's time (and possibly tokens) on a prompt with no content.
+    # Whitespace-only input is empty: it would otherwise go through the whole
+    # provider setup before failing.
     prompt = prompt.strip() if prompt else prompt
     if not prompt:
         if cli_context.json_mode:
@@ -66,251 +48,186 @@ def ask_command(
 
             print(json.dumps({"error": "Prompt argument is required in JSON mode"}))
             raise typer.Exit(code=1)
-        # Prompt user interactively if no prompt argument is given
         prompt = typer.prompt("What would you like to ask Velune?").strip()
         if not prompt:
             console.print("[yellow]Empty query. Exiting.[/yellow]")
             return
+    if council_tier and not cli_context.json_mode:
+        console.print("[dim]--council-tier no longer has an effect; use --skill instead.[/dim]")
 
     from velune.core.event_loop import submit
 
-    submit(_ask_command_async(cli_context, prompt, council_tier, explain_trace))
+    submit(_ask_command_async(cli_context, prompt, skill, permission, explain_trace))
 
 
 async def _ask_command_async(
     cli_context: CLIContext,
     prompt: str,
-    council_tier: str | None = None,
+    skill: str | None = None,
+    permission: str | None = None,
     explain_trace: bool = False,
 ) -> None:
     lifecycle = cli_context.container.get("runtime.lifecycle")
-
-    # 2. Boot subsystems
     if not cli_context.json_mode:
         console.print("[dim]Thinking…[/dim]")
     await lifecycle.startup()
     try:
-        await _ask_with_runtime(cli_context, prompt, council_tier, explain_trace)
+        await _ask_with_runtime(cli_context, prompt, skill, permission, explain_trace)
     finally:
-        # Shutdown must run on every exit path — including typer.Exit and
-        # council errors — or background tasks outlive the command.
+        # Shutdown runs on every exit path, typer.Exit included, or background
+        # tasks outlive the command.
         await lifecycle.shutdown()
 
 
 async def _ask_with_runtime(
     cli_context: CLIContext,
     prompt: str,
-    council_tier: str | None = None,
+    skill: str | None = None,
+    permission: str | None = None,
     explain_trace: bool = False,
 ) -> None:
-    container = cli_context.container
-    model_registry = container.get("runtime.model_registry")
-    model_specialization = container.get("runtime.council_orchestrator").mapper
-    repo_cognition = container.get("runtime.repository_cognition")
-    orchestrator = container.get("runtime.council_orchestrator")
-
-    await model_registry.refresh()
-
-    # Onboarding preflight gate. `ask` is a one-off question, so it works in any
-    # directory — no git repo or index required. Only a reachable model is
-    # enforced (require_workspace=False).
     from velune.cli.commands.preflight import run_preflight_check
+    from velune.cli.model_prefs import load_active_model
+    from velune.swarm.router import RouteError
 
+    container = cli_context.container
+    await container.get("runtime.model_registry").refresh()
+
+    # `ask` is a one-off question, so it works in any directory: only a
+    # reachable model is required (require_workspace=False).
     if not await run_preflight_check(
         container,
         console if not cli_context.json_mode else None,
         require_workspace=False,
     ):
+        _fail(cli_context, "No model available. Run `velune setup` to configure a provider.")
+
+    context = await _context(cli_context, prompt)
+    try:
         if cli_context.json_mode:
-            import json
-
-            print(
-                json.dumps(
-                    {"error": "No model available. Run `velune setup` to configure a provider."}
-                )
-            )
-        raise typer.Exit(code=1)
-
-    if not cli_context.json_mode:
-        from velune.cli.display.council_view import CouncilDisplayView
-
-        display = CouncilDisplayView(console)
-        display.render_header(prompt)
-
-    # 3. Map role specializations
-    roles = model_specialization.map_roles()
-    if not cli_context.json_mode:
-        display.render_role_assignments(roles)
-
-    from velune.cognition.firewall import CognitiveFirewall
-
-    firewall = CognitiveFirewall()
-
-    # 4. Ingest and Scan AST Snapshot — only when the current directory is
-    # actually a project. A one-off question asked from an empty directory
-    # should not index arbitrary files; it answers as a general question.
-    snapshot: RepositorySnapshot | None = None
-    if _looks_like_project(cli_context.workspace):
-        if not cli_context.json_mode:
-            with console.status("[bold magenta]Scanning codebase AST structure...[/bold magenta]"):
-                snapshot = repo_cognition.index()
+            outcome = await _run(container, prompt, skill, permission, context, load_active_model())
         else:
-            snapshot = repo_cognition.index()
-
-    if snapshot is not None:
-        formatted_snap = _format_snapshot_context_safe(snapshot, firewall)
-    else:
-        formatted_snap = "No repository context — answering as a general question."
-
-    # C3 memory parity: `ask` previously skipped straight from a fresh AST
-    # snapshot to the council with no memory retrieval at all, unlike the REPL
-    # (which assembles context through ContextAssembler + MemoryLifecycleManager
-    # via prompt_context.build_turn_context). This calls the exact same
-    # MemoryLifecycleManager retrieval the REPL uses — read-only, no session
-    # state mutated — so a one-off `ask` still benefits from persistent
-    # semantic/episodic/knowledge-graph memory the product advertises.
-    from velune.cli.handlers.prompt_context import retrieve_memory_context
-
-    memory_chunks = await retrieve_memory_context(container, prompt, cli_context.workspace)
-    if memory_chunks:
-        memory_text = "\n\n".join(f"[{c.source}] {c.content}" for c in memory_chunks)
-        formatted_snap = (
-            f"{formatted_snap}\n\n[RELEVANT MEMORY]\n{_wrap_memory_content(firewall, memory_text)}"
-        )
-
-    # 5. deliberating debate loop
-    council_res = None
-    if not cli_context.json_mode:
-        with console.status(
-            "[bold magenta]Deliberating Reasoning Council debate...[/bold magenta]"
-        ):
-            council_res = await orchestrator.execute_task(
-                prompt, formatted_snap, council_tier=council_tier
-            )
-    else:
-        council_res = await orchestrator.execute_task(
-            prompt, formatted_snap, council_tier=council_tier
-        )
-
-    arbitration = council_res["arbitration"]
-    final_summary = council_res["final_summary"]
-
-    if explain_trace:
-        trace_data = council_res.get("execution_trace")
-        if trace_data:
-            from velune.cognition.execution_trace import render_trace_dict
-
-            console.print("\n[bold]Execution trace[/bold]")
-            console.print(render_trace_dict(trace_data))
-        verdict = council_res.get("contract_verdict")
-        if verdict is not None:
-            if verdict["ok"]:
-                console.print(
-                    f"[green]Tier contract honoured ({verdict['total_calls']} provider calls).[/green]"
+            with console.status("[bold magenta]The council is working…[/bold magenta]"):
+                outcome = await _run(
+                    container, prompt, skill, permission, context, load_active_model()
                 )
-            else:
-                console.print(
-                    f"[red]{len(verdict['violations'])} tier contract violation(s):[/red]"
-                )
-                for v in verdict["violations"]:
-                    console.print(f"  - [{v['kind']}] {v['detail']}")
+    except (RouteError, RuntimeError) as exc:
+        _fail(cli_context, str(exc))
 
-    # Total failure (wall-time exhausted or every agent call failed) is an
-    # error, not an answer: one actionable message and a non-zero exit code
-    # instead of rendering a degraded report and returning success.
-    if council_res.get("is_timeout"):
-        _render_council_failure(cli_context, final_summary, arbitration.get("flags", []))
-        raise typer.Exit(code=1)
+    if explain_trace and not cli_context.json_mode:
+        from velune.cli.display.swarm_view import plan_table
+
+        console.print(plan_table(outcome.plan))
+        for note in outcome.plan.notes:
+            console.print(f"[dim]· {note}[/dim]")
+        for result in outcome.results:
+            detail = f": {result.error}" if result.error else ""
+            console.print(f"[dim]{result.agent_id} · {result.status}{detail}[/dim]")
 
     if cli_context.json_mode:
         import json
 
-        def _dump(report: object) -> object:
-            dump = getattr(report, "model_dump", None)
-            return dump() if callable(dump) else report
+        print(json.dumps(outcome_json(prompt, outcome)))
+        if not outcome.ok:
+            raise typer.Exit(code=1)
+        return
+    if not outcome.ok:
+        _render_council_failure(cli_context, outcome.error)
+        raise typer.Exit(code=1)
 
-        roles_dict = {role.value: model_id for role, model_id in roles.items()}
-        print(
-            json.dumps(
-                {
-                    "prompt": prompt,
-                    "roles": roles_dict,
-                    "reviewer_report": _dump(council_res["reviewer_report"]),
-                    "challenger_report": _dump(council_res["challenger_report"]),
-                    "arbitration": arbitration,
-                    "final_summary": final_summary,
-                    "degraded": council_res.get("degraded", False),
-                    "degradation_reasons": council_res.get("degradation_reasons", []),
-                },
-                default=str,
-            )
-        )
+    from velune.cli import guidance, ui
+    from velune.cli.rendering import CustomMarkdown
+
+    console.print()
+    console.print(CustomMarkdown(outcome.content))
+    short_task = prompt if len(prompt) <= 40 else prompt[:40].rstrip() + "…"
+    steps = guidance.steps_for("ask_completed", task=f'"{short_task}"')
+    if steps:
+        console.print(ui.next_steps("Council answered", "Turn this answer into action.", steps))
+
+
+async def _run(container, prompt, skill, permission, context, preferred) -> SwarmOutcome:
+    from velune.permissions import ExecutionMode
+    from velune.swarm.setup import run_headless
+
+    return await run_headless(
+        container,
+        prompt,
+        mode=ExecutionMode.PLAN,
+        skill=skill,
+        permission=permission,
+        context=context,
+        preferred=preferred,
+    )
+
+
+def outcome_json(prompt: str, outcome: SwarmOutcome) -> dict[str, Any]:
+    return {
+        "prompt": prompt,
+        "status": outcome.status,
+        "response": outcome.content,
+        "error": outcome.error,
+        "skill": outcome.plan.skill,
+        "permission": outcome.plan.permission,
+        "output": outcome.plan.output,
+        "notes": outcome.plan.notes,
+        "run_id": outcome.run_id,
+        "agents": [
+            {"id": r.agent_id, "status": r.status, "error": r.error} for r in outcome.results
+        ],
+    }
+
+
+async def _context(cli_context: CLIContext, prompt: str) -> str:
+    """Repository summary (only inside a project) plus relevant memory, both untrusted."""
+    from velune.cli.handlers.prompt_context import retrieve_memory_context
+    from velune.swarm.setup import repository_summary, wrap_untrusted
+
+    container = cli_context.container
+    parts = []
+    if _looks_like_project(cli_context.workspace):
+        parts.append(await repository_summary(container))
     else:
-        # 6. Render reports. Reviewer/Challenger are skipped entirely (not
-        # just their content) below tier 3 — CouncilOrchestrator's early
-        # return for those tiers leaves both as None by design, and showing
-        # a "deliberating..." header for a step that never ran is misleading.
-        if council_res["reviewer_report"] is not None:
-            display.render_step_header("Council Reviewer")
-            display.render_reviewer_report(council_res["reviewer_report"])
-
-        if council_res["challenger_report"] is not None:
-            display.render_step_header("Council Challenger")
-            display.render_challenger_report(council_res["challenger_report"])
-
-        display.render_step_header("Arbitration Engine")
-        display.render_arbitration_result(arbitration)
-
-        display.render_step_header("Council Synthesizer")
-        display.render_synthesized_response(final_summary)
-
-        if council_res.get("degraded"):
-            from rich.text import Text
-
-            console.print(
-                Text(
-                    "Degraded: " + "; ".join(council_res.get("degradation_reasons", [])),
-                    style="dim",
-                )
-            )
-
-        from velune.cli import guidance, ui
-
-        short_task = prompt if len(prompt) <= 40 else prompt[:40].rstrip() + "…"
-        steps = guidance.steps_for("ask_completed", task=f'"{short_task}"')
-        if steps:
-            console.print(
-                ui.next_steps(
-                    "Council answered",
-                    "Turn this deliberation into action.",
-                    steps,
-                )
-            )
+        parts.append("No repository context: answer as a general question.")
+    # The same read-only memory retrieval the REPL uses, so a one-off `ask`
+    # also benefits from what Velune remembers.
+    chunks = await retrieve_memory_context(container, prompt, cli_context.workspace)
+    if chunks:
+        memory = "\n\n".join(f"[{c.source}] {c.content}" for c in chunks)
+        parts.append("Relevant memory:\n" + wrap_untrusted(container, "retrieved_memory", memory))
+    return "\n\n".join(p for p in parts if p)
 
 
-def _render_council_failure(cli_context: CLIContext, summary: str, flags: list[str]) -> None:
-    """Render a single actionable error for a run that produced no answer."""
-    message = summary or "The council could not produce an answer."
+def _fail(cli_context: CLIContext, message: str) -> NoReturn:
+    _render_council_failure(cli_context, message)
+    raise typer.Exit(code=1)
 
-    invalid: list[str] = []
+
+def _invalid_providers() -> list[str]:
     try:
         from velune.providers.keystore import list_invalid_providers
 
-        invalid = list_invalid_providers()
+        return list(list_invalid_providers())
     except Exception:
-        pass
+        return []
 
+
+def _render_council_failure(cli_context: CLIContext, message: str) -> None:
+    """One actionable error for a run that produced no answer."""
+    message = message or "The council could not produce an answer."
+    invalid = _invalid_providers()
     if cli_context.json_mode:
         import json
 
-        print(json.dumps({"error": message, "flags": flags, "invalid_providers": invalid}))
+        print(json.dumps({"error": message, "invalid_providers": invalid}))
         return
 
     from rich.box import ROUNDED
+    from rich.markup import escape
     from rich.panel import Panel
     from rich.text import Text
 
-    lines = [f"[bold red]{message}[/bold red]\n"]
+    lines = [f"[bold red]{escape(message)}[/bold red]\n"]
     if invalid:
         for pid in invalid:
             lines.append(
@@ -325,7 +242,6 @@ def _render_council_failure(cli_context: CLIContext, summary: str, flags: list[s
             "  [dim]or[/dim]  [bold green]velune provider list[/bold green]\n"
             "  [bold white]Stale model?[/bold white] [bold green]velune models refresh[/bold green]"
         )
-
     console.print()
     console.print(
         Panel(
@@ -339,13 +255,11 @@ def _render_council_failure(cli_context: CLIContext, summary: str, flags: list[s
     console.print()
 
 
-# Markers that indicate the workspace is (probably) a real project root, in
-# which case repository context is worth indexing for the answer.
+# Markers of a real project root, where repository context is worth reading.
 _PROJECT_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml", "go.mod")
 
 
 def _looks_like_project(workspace: object) -> bool:
-    """Return True if *workspace* contains a recognizable project marker."""
     from pathlib import Path
 
     try:
@@ -353,32 +267,3 @@ def _looks_like_project(workspace: object) -> bool:
         return any((root / marker).exists() for marker in _PROJECT_MARKERS)
     except Exception:
         return False
-
-
-def _wrap_memory_content(firewall: CognitiveFirewall, content: str) -> str:
-    """Route retrieved memory through the same untrusted-content boundary the
-    REPL uses (see ``prompt_context._wrap_workspace_content``), so retrieved
-    text is never treated as instructions by the model."""
-    try:
-        scan = firewall.scan_file_for_injection("retrieved_memory", content)
-        if scan.get("quarantined"):
-            content = scan.get("neutralized_content", "")
-        return firewall.wrap_workspace_content("retrieved_memory", content)
-    except Exception:
-        return content
-
-
-def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: CognitiveFirewall) -> str:
-    """Format snapshot metadata context for query prompt securely."""
-    lines = [f"Repository Root: {snapshot.root_path}"]
-    lines.append("Codebase Files:")
-    for f in snapshot.files[:25]:
-        # Only expose path and language — no raw symbol names or content
-        risk_marker = " [injection-risk]" if f.metadata.get("injection_risk") else ""
-        lines.append(f"  - {f.path} ({f.language.value}){risk_marker}")
-        # Symbol names are safe to expose (identifiers, not content)
-        if f.symbols:
-            safe_syms = [s.name for s in f.symbols[:3] if s.name.isidentifier()]
-            if safe_syms:
-                lines.append(f"    Symbols: {', '.join(safe_syms)}")
-    return "\n".join(lines)

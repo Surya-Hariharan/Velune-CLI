@@ -299,50 +299,49 @@ def _older_turn(ws: Path):
     return _journal_that_created(ws / "older.txt")
 
 
-async def test_a_council_answer_with_no_proposal_must_not_expose_an_older_turn(ws):
-    """``/run`` can end with an answer and no edit blocks, so apply_council_edits never runs."""
-    from tests.test_council_phase0_characterization import _state
-    from tests.test_council_rendering_ownership import _PhasedOrchestrator, _repl_with
-    from velune.cli.handlers.council import execute_council_task
+def _council_repl(ws: Path, answer: Any, *, cancelled: bool = False):
+    """A REPL whose council model answers every call with *answer* (text or an exception)."""
+    from tests import swarm_fakes as fakes
 
-    repl = _repl_with(_PhasedOrchestrator(_state()))
-    repl._last_turn_journal = _older_turn(ws)
-    await execute_council_task(repl, "explain this", force_tier=None)
-    assert repl._last_turn_journal is None
+    script = (lambda request: answer) if isinstance(answer, BaseException) else None
+    provider = fakes.ScriptedProvider(script or (lambda request: fakes.text(answer)))
+    return fakes.fake_repl(ws, provider, cancelled=cancelled)
+
+
+async def _council(repl, task: str = "--skill research explain this") -> None:
+    await council_handlers.cmd_council(repl, task)
+
+
+async def test_a_council_answer_with_no_proposal_must_not_expose_an_older_turn(ws):
+    """``/council`` can end with an answer and no edit blocks, so apply_council_edits never runs."""
+    repl = _council_repl(ws, "the answer")
+    older = repl._last_turn_journal = _older_turn(ws)
+    await _council(repl)
+    assert repl._last_turn_journal is not older  # this run's own (empty) journal
     await cmd_rewind(repl, "")
     assert (ws / "older.txt").exists()
 
 
 async def test_a_failed_council_run_must_not_expose_an_older_turn(ws):
-    from tests.test_council_phase0_characterization import _state
-    from tests.test_council_rendering_ownership import _ExplodingOrchestrator, _repl_with
-    from velune.cli.handlers.council import execute_council_task
-
-    repl = _repl_with(_ExplodingOrchestrator(_state()))
-    repl._last_turn_journal = _older_turn(ws)
-    await execute_council_task(repl, "explain this", force_tier=None)
-    assert repl._last_turn_journal is None
+    repl = _council_repl(ws, RuntimeError("provider exploded"))
+    older = repl._last_turn_journal = _older_turn(ws)
+    await _council(repl)
+    assert repl._last_turn_journal is not older
+    assert "provider exploded" in repl.output.getvalue()
 
 
 async def test_a_cancelled_council_run_must_not_expose_an_older_turn(ws):
-    from tests.test_council_phase0_characterization import _state
-    from tests.test_council_rendering_ownership import _CancelledOrchestrator, _repl_with
-    from velune.cli.handlers.council import execute_council_task
-
-    repl = _repl_with(_CancelledOrchestrator(_state()), cancelled=True)
-    repl._last_turn_journal = _older_turn(ws)
-    await asyncio.wait_for(execute_council_task(repl, "explain this", force_tier=None), 5)
-    assert repl._last_turn_journal is None
+    repl = _council_repl(ws, asyncio.CancelledError(), cancelled=True)
+    older = repl._last_turn_journal = _older_turn(ws)
+    await asyncio.wait_for(_council(repl), 5)
+    assert repl._last_turn_journal is not older
+    assert "Council run interrupted." in repl.output.getvalue()
 
 
 async def test_an_empty_run_command_does_not_count_as_a_turn(ws):
-    from tests.test_council_phase0_characterization import _state
-    from tests.test_council_rendering_ownership import _PhasedOrchestrator, _repl_with
-    from velune.cli.handlers.council import execute_council_task
-
-    repl = _repl_with(_PhasedOrchestrator(_state()))
+    repl = _council_repl(ws, "unused")
     repl._last_turn_journal = journal = _older_turn(ws)
-    await execute_council_task(repl, "   ", force_tier=None)  # only prints the usage line
+    await council_handlers.execute_council_task(repl, "   ")  # only prints the usage line
     assert repl._last_turn_journal is journal
 
 

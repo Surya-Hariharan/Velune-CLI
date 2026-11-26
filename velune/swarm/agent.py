@@ -89,6 +89,7 @@ class AgentEnv:
     context: str = ""  # repository context, already wrapped as untrusted content
     context_window: int = 32_768  # tokens
     on_event: Callable[[str, str, dict[str, Any]], None] | None = None  # (agent, event, data)
+    tools: bool = True  # False for a model that cannot call tools: agents only answer
 
 
 def build_messages(
@@ -188,13 +189,13 @@ async def run_agent(
 
     runner = ToolLoopRunner(
         env.provider,
-        agent_policy.tool_registry(env.registry),
-        mcp_registry=env.mcp_registry if agent_policy.mcp else None,
+        agent_policy.tool_registry(env.registry if env.tools else None),
+        mcp_registry=env.mcp_registry if agent_policy.mcp and env.tools else None,
         approver=agent_policy.approver(env.base_approver),
         ctx=env.ctx,
         max_turns=spec.max_turns,
         on_event=on_event,
-        dynamic_tools=store.scratch_tools(spec.id),
+        dynamic_tools=store.scratch_tools(spec.id) if env.tools else None,
     )
     store.event("start", spec.id, role=spec.role, stage=spec.stage)
     started = time.perf_counter()

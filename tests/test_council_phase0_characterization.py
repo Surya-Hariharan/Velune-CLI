@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, create_autospec
+from unittest.mock import MagicMock
 
 import pytest
 from rich.console import Console
@@ -27,7 +27,6 @@ from tests.council_fakes import (
     make_orchestrator,
 )
 from velune.cognition.budget import CouncilExecutionBudget
-from velune.cognition.orchestrator import CouncilOrchestrator
 from velune.orchestration.schemas import ExecutionStatus, OrchestrationRequest, OrchestrationState
 
 
@@ -202,24 +201,6 @@ def _repl(orchestrator):
     return repl
 
 
-async def test_repl_stores_a_healthy_council_answer():
-    from velune.cli.handlers.council import execute_council_task
-
-    repl = _repl(_StubOrchestrator(_state()))
-    await execute_council_task(repl, "do it", force_tier=None)
-    assert repl._conversation[-1]["content"] == "the answer"
-
-
-async def test_repl_does_not_store_a_failed_run():
-    from velune.cli.handlers.council import execute_council_task
-
-    failed = _state(ExecutionStatus.FAILED, output="Execution failed: boom", error="boom")
-    repl = _repl(_StubOrchestrator(failed))
-    await execute_council_task(repl, "do it", force_tier=None)
-    assert repl._conversation == []
-    assert "Council Result" not in repl.output.getvalue()
-
-
 # ── Issue 1: tier forwarding ─────────────────────────────────────────────────
 
 
@@ -235,14 +216,6 @@ async def test_stream_forwards_the_requested_tier(monkeypatch):
     async for _ in orch.stream("task", council_tier="full"):
         pass
     assert captured.get("council_tier") == "full"
-
-
-async def test_council_command_forces_the_full_tier():
-    from velune.cli.handlers.council import cmd_council
-
-    stub = _StubOrchestrator(_state())
-    await cmd_council(_repl(stub), "do it")
-    assert stub.stream_kwargs.get("council_tier") == "full"
 
 
 # ── Issue 5: disable_critics ─────────────────────────────────────────────────
@@ -347,21 +320,3 @@ async def test_picker_offers_exactly_the_wired_roles(monkeypatch):
         CouncilRoleMap(), [], Console(file=StringIO(), color_system=None)
     )
     assert offered == ["planner", "coder", "reviewer", "challenger", "synthesizer"]
-
-
-# ── Issue 7: MCP council ─────────────────────────────────────────────────────
-
-
-async def test_mcp_velune_ask_runs_the_real_council_api():
-    from velune.mcp.server import VeluneMCPServer
-
-    stub = create_autospec(CouncilOrchestrator, instance=True)
-    stub.execute_task = AsyncMock(
-        return_value={
-            "final_summary": "council says hi",
-            "arbitration": {"overall_confidence": 0.8, "flags": []},
-        }
-    )
-    server = VeluneMCPServer(council_orchestrator=stub)
-    result = await server._velune_ask("hello")
-    assert result["response"] == "council says hi"

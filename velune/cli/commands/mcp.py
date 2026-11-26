@@ -56,14 +56,21 @@ def mcp_connect(
     submit(_connect_and_list())
 
 
-def _runtime_council_orchestrator(container):
-    """The runtime's council orchestrator, or ``None`` if the runtime has none."""
-    try:
-        if container.has("runtime.council_orchestrator"):
-            return container.get("runtime.council_orchestrator")
-    except Exception:
-        pass
-    return None
+#: An MCP client waits on the call, so a council run over MCP is kept short.
+MCP_COUNCIL_SECONDS = 120.0
+
+
+def council_runner(container):
+    """``task -> SwarmOutcome`` for the MCP council tool: read-only, nothing is changed."""
+    from velune.permissions import ExecutionMode
+    from velune.swarm.setup import run_headless
+
+    async def run(task: str):
+        return await run_headless(
+            container, task, mode=ExecutionMode.PLAN, max_seconds=MCP_COUNCIL_SECONDS
+        )
+
+    return run
 
 
 @mcp_cmd.command("serve")
@@ -77,9 +84,7 @@ def mcp_serve_subcmd(ctx: typer.Context) -> None:
     tool_registry = container.get("runtime.tool_registry")
     from velune.mcp.server import VeluneMCPServer
 
-    server = VeluneMCPServer(
-        tool_registry, council_orchestrator=_runtime_council_orchestrator(container)
-    )
+    server = VeluneMCPServer(tool_registry, council=council_runner(container))
 
     import logging
 

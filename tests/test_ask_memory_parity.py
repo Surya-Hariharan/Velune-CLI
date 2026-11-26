@@ -29,23 +29,25 @@ class _Registry:
 
 
 class _Orchestrator:
-    mapper = SimpleNamespace(map_roles=lambda self=None: {})
+    """Stands in for the council: records the context ``velune ask`` hands it."""
 
-    def __init__(self):
+    def __init__(self, monkeypatch):
         self.received_repo_context: str | None = None
+        monkeypatch.setattr("velune.swarm.setup.run_headless", self.run)
 
-    async def execute_task(self, prompt, repo_context, council_tier=None):
-        self.received_repo_context = repo_context
-        return {
-            "tier": "instant",
-            "arbitration": {"flags": []},
-            "final_summary": "ok",
-            "reviewer_report": None,
-            "challenger_report": None,
-            "is_timeout": False,
-            "execution_trace": None,
-            "contract_verdict": None,
-        }
+    async def run(self, container, task, **kwargs):
+        self.received_repo_context = kwargs["context"]
+        return SimpleNamespace(
+            ok=True,
+            status="ok",
+            content="ok",
+            error="",
+            run_id="r1",
+            results=[],
+            plan=SimpleNamespace(
+                skill="research", permission="answer-only", output="text", notes=[]
+            ),
+        )
 
 
 class _Container:
@@ -53,7 +55,6 @@ class _Container:
         self._values = {
             "runtime.lifecycle": _Lifecycle(),
             "runtime.model_registry": _Registry(),
-            "runtime.council_orchestrator": orchestrator,
             "runtime.repository_cognition": SimpleNamespace(index=lambda: None),
             "runtime.workspace": None,
             "runtime.memory_lifecycle": memory_manager,
@@ -80,7 +81,7 @@ async def test_ask_merges_memory_lifecycle_retrieval_into_council_context(tmp_pa
             ]
         )
     )
-    orchestrator = _Orchestrator()
+    orchestrator = _Orchestrator(monkeypatch)
     container = _Container(manager, orchestrator)
     ctx = SimpleNamespace(container=container, json_mode=True, workspace=tmp_path)
 
@@ -90,18 +91,18 @@ async def test_ask_merges_memory_lifecycle_retrieval_into_council_context(tmp_pa
 
     manager.retrieve.assert_awaited_once()
     assert orchestrator.received_repo_context is not None
-    assert "RELEVANT MEMORY" in orchestrator.received_repo_context
+    assert "Relevant memory" in orchestrator.received_repo_context
     assert "SQLite for episodic memory" in orchestrator.received_repo_context
 
 
 @pytest.mark.asyncio
 async def test_ask_degrades_silently_when_memory_lifecycle_missing(tmp_path, monkeypatch):
     """No runtime.memory_lifecycle registered — ask must still complete, just
-    without the [RELEVANT MEMORY] section, not crash."""
+    without the memory section, not crash."""
     monkeypatch.setattr("velune.providers.keystore.list_invalid_providers", lambda: [])
     monkeypatch.setattr("velune.providers.keystore.is_ollama_live", lambda timeout=0.25: True)
 
-    orchestrator = _Orchestrator()
+    orchestrator = _Orchestrator(monkeypatch)
     container = _Container(memory_manager=None, orchestrator=orchestrator)
     ctx = SimpleNamespace(container=container, json_mode=True, workspace=tmp_path)
 
@@ -110,4 +111,4 @@ async def test_ask_degrades_silently_when_memory_lifecycle_missing(tmp_path, mon
     await ask_mod._ask_with_runtime(ctx, "hello")
 
     assert orchestrator.received_repo_context is not None
-    assert "RELEVANT MEMORY" not in orchestrator.received_repo_context
+    assert "Relevant memory" not in orchestrator.received_repo_context

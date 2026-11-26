@@ -10,8 +10,6 @@ confident the council actually is.
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -402,94 +400,6 @@ async def test_degraded_result_is_completed_and_carries_its_reasons(monkeypatch)
     )
     assert state.status == ExecutionStatus.COMPLETED
     assert state.validation_issues == ["judge_unavailable:reviewer"]
-
-
-# ── REPL handler ─────────────────────────────────────────────────────────────
-
-
-async def test_repl_labels_a_degraded_answer_but_still_stores_it():
-    from tests.test_council_phase0_characterization import _repl, _state, _StubOrchestrator
-    from velune.cli.handlers.council import execute_council_task
-
-    state = _state()
-    state.validation_issues = ["synthesizer_unavailable: timeout"]
-    repl = _repl(_StubOrchestrator(state))
-    await execute_council_task(repl, "do it", force_tier=None)
-    out = repl.output.getvalue()
-    assert "Council Result (degraded)" in out
-    assert "synthesizer_unavailable" in out
-    assert repl._conversation[-1]["content"] == "the answer"
-
-
-async def test_repl_shows_a_failed_run_as_a_failure_and_applies_no_edits(monkeypatch):
-    from tests.test_council_phase0_characterization import _repl, _state, _StubOrchestrator
-    from velune.cli.handlers import council as council_handlers
-
-    applied = MagicMock()
-    monkeypatch.setattr(council_handlers, "apply_council_edits", applied)
-    failed = _state(ExecutionStatus.FAILED, output="Execution failed: boom", error="boom")
-    failed.coder_proposal = "```edit```"
-    repl = _repl(_StubOrchestrator(failed))
-    await council_handlers.execute_council_task(repl, "do it", force_tier=None)
-    out = repl.output.getvalue()
-    assert "Council Failed" in out and "boom" in out
-    assert "Council Result" not in out
-    assert repl._conversation == []
-    applied.assert_not_called()
-
-
-# ── ask ──────────────────────────────────────────────────────────────────────
-
-
-async def test_ask_json_reports_degraded_and_abstaining_judges(monkeypatch, tmp_path, capsys):
-    from velune.cli.commands import ask as ask_mod
-
-    monkeypatch.setattr("velune.providers.keystore.list_invalid_providers", lambda: [])
-    monkeypatch.setattr("velune.providers.keystore.is_ollama_live", lambda timeout=0.25: True)
-
-    class _Lifecycle:
-        async def startup(self):
-            pass
-
-        async def shutdown(self):
-            pass
-
-    class _Registry:
-        async def refresh(self):
-            pass
-
-        def list_all(self):
-            return [SimpleNamespace(provider_id="ollama", model_id="m")]
-
-    class _Orchestrator:
-        mapper = SimpleNamespace(map_roles=lambda self=None: {})
-
-        async def execute_task(self, prompt, repo_context, council_tier=None):
-            return {
-                "tier": "standard",
-                "arbitration": {"flags": ["JUDGE_UNAVAILABLE:reviewer"]},
-                "final_summary": "degraded answer",
-                "reviewer_report": ReviewerMessage.degraded("unavailable", "timeout: gone"),
-                "challenger_report": None,
-                "is_timeout": False,
-                "degraded": True,
-                "degradation_reasons": ["judge_unavailable:reviewer"],
-            }
-
-    services = {
-        "runtime.lifecycle": _Lifecycle(),
-        "runtime.model_registry": _Registry(),
-        "runtime.council_orchestrator": _Orchestrator(),
-        "runtime.repository_cognition": SimpleNamespace(index=lambda: None),
-        "runtime.workspace": tmp_path,
-    }
-    container = SimpleNamespace(get=lambda key: services[key], has=lambda key: key in services)
-    ctx = SimpleNamespace(container=container, json_mode=True, workspace=tmp_path)
-    await ask_mod._ask_with_runtime(ctx, "hello")
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["degraded"] is True
-    assert payload["degradation_reasons"] == ["judge_unavailable:reviewer"]
-    assert payload["reviewer_report"]["status"] == "unavailable"
 
 
 def test_council_view_does_not_render_an_abstaining_judge_as_a_pass():

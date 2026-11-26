@@ -1,15 +1,17 @@
-"""Run command — velune run <task> to trigger Reasoning Council deliberation and sandbox execution."""
+"""``velune run <task>`` — run a task with the agent swarm from the command line."""
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
 from velune.cli.context import CLIContext
-from velune.cognition.firewall import CognitiveFirewall
-from velune.repository.schemas import RepositorySnapshot
 
 console = Console()
 run_cmd = typer.Typer(help="Autonomous council run commands")
@@ -22,16 +24,20 @@ def run_command(
         False,
         "--dry-run",
         "-d",
-        help="Deliberate but do not write modifications or execute scripts",
+        help="Plan and answer, but do not write files or run commands",
     ),
     force: bool = typer.Option(
-        False, "--force", "-f", help="Force execution without human confirm thresholds"
+        False, "--force", "-f", help="Allow changes without asking (AUTO mode)"
     ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip cost confirmation prompts (for scripting)"
     ),
+    skill: str | None = typer.Option(None, "--skill", help="Skill to use (see /skills)"),
+    permission: str | None = typer.Option(
+        None, "--permission", help="Permission profile to use (see /skills)"
+    ),
 ) -> None:
-    """Run a task — AI plans, writes, and executes it in a secure sandbox."""
+    """Run a task: a team of agents plans it, and changes go through your approval."""
 
     cli_context = ctx.obj
     if not isinstance(cli_context, CLIContext):
@@ -42,7 +48,32 @@ def run_command(
 
     from velune.core.event_loop import submit
 
-    submit(_run_command_async(cli_context, task, dry_run, force))
+    submit(_run_command_async(cli_context, task, dry_run, force, skill, permission))
+
+
+def run_mode(dry_run: bool, force: bool):
+    """--dry-run → PLAN (nothing changes), --force → AUTO, otherwise MANUAL (ask)."""
+    from velune.permissions import ExecutionMode
+
+    if dry_run:
+        return ExecutionMode.PLAN
+    return ExecutionMode.AUTO if force else ExecutionMode.MANUAL
+
+
+async def terminal_ask(tool_name: str, decision: Any) -> Any:
+    """Approve one action at the terminal (no full-screen app is running here)."""
+    from rich.prompt import Confirm
+
+    from velune.permissions.gate import Approval
+
+    targets = ", ".join(str(a.target) for a in getattr(decision, "actions", [])[:5])
+    console.print(
+        f"\n[bold yellow]{escape(tool_name)}[/bold yellow] wants to: "
+        f"{escape(getattr(decision, 'reason', '') or 'make a change')}"
+        + (f"\n[dim]{escape(targets)}[/dim]" if targets else "")
+    )
+    allowed = await asyncio.to_thread(Confirm.ask, "Allow?", default=False, console=console)
+    return Approval.ALLOW_ONCE if allowed else Approval.DENY
 
 
 async def _run_command_async(
@@ -50,180 +81,120 @@ async def _run_command_async(
     task: str,
     dry_run: bool,
     force: bool,
+    skill: str | None = None,
+    permission: str | None = None,
 ) -> None:
-    # 1. Access modern services from the DI container
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
-    model_registry = container.get("runtime.model_registry")
-    orchestration_engine = container.get("runtime.orchestration_engine")
-    # 2. Boot up Cognitive OS Subsystems
-    if not cli_context.json_mode:
-        console.print("[bold cyan]Bootstrapping Cognitive Operating System kernel...[/bold cyan]")
-    await lifecycle.startup()
-
-    # 3. Refresh model catalog scan to assign specialized seats
-    if not cli_context.json_mode:
-        console.print(
-            "[bold cyan]Probing system hardware and local/remote providers...[/bold cyan]"
-        )
-    await model_registry.refresh()
-
-    # Onboarding preflight check gate
-    from velune.cli.commands.preflight import run_preflight_check
-
-    if not await run_preflight_check(container, console if not cli_context.json_mode else None):
-        if cli_context.json_mode:
-            import json
-
-            print(
-                json.dumps(
-                    {
-                        "error": "Preflight check failed. Ensure workspace is initialized and models are scanned."
-                    }
-                )
-            )
+    try:
+        await lifecycle.startup()
+        await _run_with_runtime(cli_context, task, dry_run, force, skill, permission)
+    finally:
         await lifecycle.shutdown()
+
+
+async def _run_with_runtime(
+    cli_context: CLIContext,
+    task: str,
+    dry_run: bool,
+    force: bool,
+    skill: str | None,
+    permission: str | None,
+) -> None:
+    import json
+
+    from velune.cli.commands.ask import outcome_json
+    from velune.cli.commands.preflight import run_preflight_check
+    from velune.cli.model_prefs import load_active_model
+    from velune.swarm.router import RouteError
+    from velune.swarm.setup import run_headless
+
+    container = cli_context.container
+    quiet = cli_context.json_mode
+    if not quiet:
+        console.print("[bold cyan]Probing local and remote providers...[/bold cyan]")
+    await container.get("runtime.model_registry").refresh()
+    if not await run_preflight_check(container, None if quiet else console):
+        message = "Preflight check failed. Ensure workspace is initialized and models are scanned."
+        if quiet:
+            print(json.dumps({"error": message}))
         return
 
-    if not cli_context.json_mode:
-        console.print()
+    mode = run_mode(dry_run, force)
+    if not quiet:
         console.print(
             Panel(
-                f"[bold green]Task Auth:[/bold green] {task}",
+                Text(task),
                 border_style="cyan",
-                title="[bold cyan]Velune Stateful Execution Pipeline[/bold cyan]",
+                title=f"[bold cyan]Council run · {mode.value.lower()}[/bold cyan]",
             )
         )
-        # 4. Stream Multi-Agent Council Deliberation & Execution Graph
-        console.print(
-            "[bold magenta]Running the Reasoning Council and checkpointed execution pipeline...[/bold magenta]\n"
-        )
-
-    # --- Pre-operation cost estimation gate ---
-    if not cli_context.json_mode:
         _maybe_confirm_cost(cli_context, task)
 
-    from velune.orchestration.schemas import ExecutionStatus
-
-    async def stream_runner():
-        milestones = []
-        async for milestone in orchestration_engine.stream(task):
-            if not cli_context.json_mode:
-                console.print(f"  [bold cyan]{milestone}[/bold cyan]")
-            milestones.append(milestone)
-
-        # Parse run_id from milestones (format: "[run_id] milestone_name")
-        run_id = None
-        for m in milestones:
-            if hasattr(m, "run_id"):
-                run_id = m.run_id
-                break
-            elif isinstance(m, str) and m.startswith("[") and "]" in m:
-                run_id = m.split("]")[0][1:]
-                break
-        return orchestration_engine.get_state(run_id) if run_id else None
-
-    state = await stream_runner()
-
-    # 5. Display Task Execution Results
-    if not cli_context.json_mode:
-        console.print()
-    if state is None:
-        if cli_context.json_mode:
-            import json
-
-            print(json.dumps({"error": "Pipeline failed to initialize state."}))
+    try:
+        outcome = await run_headless(
+            container,
+            task,
+            mode=mode,
+            skill=skill,
+            permission=permission,
+            ask=None if quiet else terminal_ask,
+            preferred=load_active_model(),
+        )
+    except (RouteError, RuntimeError) as exc:
+        if quiet:
+            print(json.dumps({"error": str(exc)}))
         else:
-            console.print("[bold red]Pipeline failed to initialize state.[/bold red]")
-        await lifecycle.shutdown()
+            console.print(f"[bold red]{escape(str(exc))}[/bold red]")
         return
 
-    success = state.status == ExecutionStatus.COMPLETED
-    attempts_count = len(state.attempts)
-    plan_steps = len(state.task_plan.steps) if state.task_plan else 0
-    checkpoints_count = len(state.checkpoints)
+    if quiet:
+        print(json.dumps(outcome_json(task, outcome)))
+        return
+    render_outcome(outcome)
+    _print_run_next_steps(success=outcome.ok, run_id=outcome.run_id)
 
-    if cli_context.json_mode:
-        import json
 
-        print(
-            json.dumps(
-                {
-                    "success": success,
-                    "run_id": state.run_id,
-                    "plan_steps": plan_steps,
-                    "retry_attempts": attempts_count,
-                    "checkpoints_saved": checkpoints_count,
-                    "output": state.output or "Execution completed successfully.",
-                    "error": state.error,
-                    "validation_issues": state.validation_issues or [],
-                }
+def render_outcome(outcome: Any) -> None:
+    """The lead's answer, or why the run failed, plus how each agent finished."""
+    from velune.cli.rendering import CustomMarkdown
+
+    agents = Text()
+    for result in outcome.results:
+        agents.append(f"\n{result.agent_id} · {result.status}", style="dim")
+        if result.error:
+            agents.append(f": {result.error}", style="dim")
+    if outcome.ok:
+        from rich.console import Group
+
+        console.print(
+            Panel(
+                Group(CustomMarkdown(outcome.content), agents),
+                border_style="green",
+                title=f"[bold green]{outcome.plan.skill} · {outcome.plan.permission}[/bold green]",
             )
         )
-    else:
-        # Static chrome goes through Text.from_markup (Text.assemble never parses
-        # markup, so these tags used to print verbatim). Model-generated values
-        # (state.output / state.error / validation_issues) are appended as plain
-        # text instead — routing them through markup would let a stray "[...]"
-        # in model output be parsed as a style tag and mangle or break the panel.
-        if success:
-            body = Text.from_markup(
-                "[bold green]STATEFUL AUTONOMOUS EXECUTION COMPLETED[/bold green]\n\n"
-                f"Run ID: [bold white]{state.run_id}[/bold white]\n"
-                f"Plan Steps: [bold white]{plan_steps}[/bold white] steps processed\n"
-                f"Retry Attempts: [bold white]{attempts_count}[/bold white]\n"
-                f"Checkpoints Saved: [bold white]{checkpoints_count}[/bold white]\n\n"
-                "[bold green]Synthesized Output:[/bold green]\n"
-            )
-            # The output is Markdown (often with math): render it, never as markup.
-            from rich.console import Group
-
-            from velune.cli.rendering import CustomMarkdown
-
-            output = CustomMarkdown(state.output or "Execution completed successfully.")
+        if outcome.plan.output == "diff":
             console.print(
-                Panel(
-                    Group(body, output),
-                    border_style="green",
-                    title="[bold green]Success Report[/bold green]",
-                )
+                "[dim]The edits above are proposed, not applied. Open [bold]velune[/bold] and use "
+                "[bold]/council[/bold] to review and apply them.[/dim]"
             )
-            _print_run_next_steps(success=True, run_id=str(state.run_id))
-        else:
-            issues = ", ".join(state.validation_issues) if state.validation_issues else "None"
-            body = Text.from_markup(
-                "[bold red]AUTONOMOUS PIPELINE BLOCKED & ROLLED BACK[/bold red]\n\n"
-                f"Run ID: [bold white]{state.run_id}[/bold white]\n"
-            )
-            body.append("Failure Reason: ")
-            body.append(state.error or "Validation/Execution mismatch", style="bold red")
-            body.append_text(
-                Text.from_markup(
-                    f"\nRetry Attempts: [bold white]{attempts_count}[/bold white]\nValidation Issues: "
-                )
-            )
-            body.append(issues, style="bold yellow")
-            body.append_text(
-                Text.from_markup(
-                    "\n\n[yellow]State checkpointer stashed checkpoints, and Git workspace "
-                    "states have been preserved/rolled back.[/yellow]"
-                )
-            )
-            console.print(
-                Panel(
-                    body,
-                    border_style="red",
-                    title="[bold red]Rollback Execution Report[/bold red]",
-                )
-            )
-            _print_run_next_steps(success=False, run_id=str(state.run_id))
-
-    # 6. Graceful Shutdown
-    await lifecycle.shutdown()
+        return
+    body = Text(outcome.error or "The council could not produce an answer.", style="bold red")
+    body.append_text(agents)
+    console.print(
+        Panel(
+            body,
+            border_style="red" if outcome.status == "failed" else "yellow",
+            title="[bold red]Council Failed[/bold red]"
+            if outcome.status == "failed"
+            else "[bold yellow]Council Stopped[/bold yellow]",
+        )
+    )
 
 
 def _print_run_next_steps(*, success: bool, run_id: str) -> None:
-    """Close the run with review steps (success) or recovery steps (rollback)."""
+    """Close the run with review steps (success) or recovery steps (failure)."""
     from velune.cli import guidance, ui
 
     outcome = "run_succeeded" if success else "run_rolled_back"
@@ -231,12 +202,12 @@ def _print_run_next_steps(*, success: bool, run_id: str) -> None:
     if not steps:
         return
     if success:
-        console.print(ui.next_steps("Run complete", "Changes applied and checkpointed.", steps))
+        console.print(ui.next_steps("Run complete", "Review what changed with git diff.", steps))
     else:
         console.print(
             ui.next_steps(
-                "Run rolled back",
-                "No changes were kept — your workspace is intact.",
+                "Run failed",
+                "Changes you approved before it stopped are kept; /rewind is not available here.",
                 steps,
                 kind="warning",
             )
@@ -292,19 +263,3 @@ def _maybe_confirm_cost(cli_context: CLIContext, task: str) -> None:
     if answer in ("n", "no"):
         console.print("[red]Aborted.[/red]")
         raise typer.Exit(0)
-
-
-def _format_snapshot_context_safe(snapshot: RepositorySnapshot, firewall: CognitiveFirewall) -> str:
-    """Format the RepositorySnapshot securely as a text summary context for the planner/coder agents."""
-    lines = [f"Repository Root: {snapshot.root_path}"]
-    lines.append("Codebase Files:")
-    for f in snapshot.files[:25]:
-        # Only expose path and language — no raw symbol names or content
-        risk_marker = " [injection-risk]" if f.metadata.get("injection_risk") else ""
-        lines.append(f"  - {f.path} ({f.language.value}){risk_marker}")
-        # Symbol names are safe to expose (identifiers, not content)
-        if f.symbols:
-            safe_syms = [s.name for s in f.symbols[:3] if s.name.isidentifier()]
-            if safe_syms:
-                lines.append(f"    Symbols: {', '.join(safe_syms)}")
-    return "\n".join(lines)

@@ -37,10 +37,6 @@ if TYPE_CHECKING:
 _log = logging.getLogger("velune.cli.handlers.prompt_context")
 
 _RETRIEVAL_TIMEOUT_S = 2.0
-# Larger than the retrieval budget: a warm snapshot is a cache read, but a cold
-# one falls through to a full index. This bounds that worst case rather than
-# letting it hold the turn open indefinitely.
-_REPO_SNAPSHOT_TIMEOUT_S = 5.0
 
 # Tier-1 subsystems the turn path degrades without. Waited on briefly so a
 # prompt typed during warm-up gets real context instead of silent emptiness.
@@ -445,55 +441,15 @@ async def _repository_snapshot_chunks(
     per-turn reindexing: it's a cache read + merge, with a one-time full
     ``index()`` only on true cold start (then seeded for the fast path).
     """
-    try:
-        repo_service = repl.container.get("runtime.repository_cognition")
-    except Exception:
-        return []
-    if not repo_service:
-        return []
+    # The read is bounded by a timeout: on a cold cache it falls through to a
+    # full repository index, and the first prompt in an unindexed repo must not
+    # wait for the whole tree. The background auto-index warms the cache anyway,
+    # so a timeout costs this turn some context, not the feature.
+    from velune.swarm.setup import repository_texts
 
-    try:
-        fresh = getattr(repo_service, "get_snapshot_fresh", None)
-        if fresh is not None:
-            # Bounded like its sibling _retrieve_hybrid. On a cold cache this
-            # call falls through to a full repository index, which previously
-            # ran unbounded inside the turn's gather — the first prompt in an
-            # unindexed repo blocked until the whole tree had been walked. The
-            # background auto-index warms the cache regardless, so a timeout
-            # here costs this turn some context, not the feature.
-            snapshot = await asyncio.wait_for(fresh(), timeout=_REPO_SNAPSHOT_TIMEOUT_S)
-        else:  # defensive: mocks/older services without the fast path
-            snapshot = repo_service.get_snapshot()
-    except asyncio.TimeoutError:
-        _log.debug(
-            "Repository snapshot exceeded %.1fs (likely a cold index); "
-            "continuing without repository context this turn.",
-            _REPO_SNAPSHOT_TIMEOUT_S,
-        )
-        return []
-    except Exception as exc:
-        _log.debug("Repository snapshot read failed (non-fatal): %s", exc)
-        return []
-    if snapshot is None:
-        return []
-
-    try:
-        from velune.repository.context_builder import WorkspaceContextBuilder
-
-        builder = WorkspaceContextBuilder()
-        snapshot_text, drift_text = builder.build(
-            snapshot,
-            delta=None,
-            max_snapshot_tokens=max_snapshot_tokens,
-            api_map=getattr(snapshot, "api_map", None),
-        )
-    except Exception as exc:
-        _log.debug("Repository snapshot build failed (non-fatal): %s", exc)
-        return []
-
+    wrapped, wrapped_drift = await repository_texts(repl.container, max_snapshot_tokens)
     chunks: list[ContextChunk] = []
-    if snapshot_text:
-        wrapped = _wrap_workspace_content(repl, "repository_context", snapshot_text)
+    if wrapped:
         chunks.append(
             ContextChunk(
                 section=ContextSection.REPOSITORY_SNAPSHOT,
@@ -504,8 +460,7 @@ async def _repository_snapshot_chunks(
                 priority=0.6,
             )
         )
-    if drift_text:
-        wrapped_drift = _wrap_workspace_content(repl, "architectural_drift", drift_text)
+    if wrapped_drift:
         chunks.append(
             ContextChunk(
                 section=ContextSection.ARCHITECTURAL_DRIFT,
@@ -517,28 +472,6 @@ async def _repository_snapshot_chunks(
             )
         )
     return chunks
-
-
-def _wrap_workspace_content(repl: VeluneREPL, name: str, content: str) -> str:
-    """Route workspace-derived text through the same untrusted-content boundary
-    ``CouncilOrchestrator`` already uses, so repo-derived text is never treated
-    as instructions by the model.
-    """
-    try:
-        firewall = repl.container.get("runtime.firewall")
-    except Exception:
-        firewall = None
-    if firewall is None:
-        from velune.cognition.firewall import CognitiveFirewall
-
-        firewall = CognitiveFirewall()
-    try:
-        scan = firewall.scan_file_for_injection(name, content)
-        if scan.get("quarantined"):
-            content = scan.get("neutralized_content", "")
-        return firewall.wrap_workspace_content(name, content)
-    except Exception:
-        return content
 
 
 def _execution_mode_instructions(repl: Any, workspace: Path) -> str:

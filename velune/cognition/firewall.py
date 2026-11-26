@@ -82,7 +82,7 @@ class CognitiveFirewall:
             r"(?i)```\s*(system|instruction)\s*```",
             r"(?i)---+\s*(system|instruction|override)\s*---+",
             r"(?i)base64.*decode",
-            r"(?i)eval\s*\(",
+            r"(?i)\beval\s*\(",  # \b: "retrieval(10)" is not a call to eval
             r"(?i)\byou\b.*\bare\b.*\ban?\b.*\b(assistant|agent|bot|coder|evaluator)\b",
             r"(?i)\bnew\b.*\binstructions\b",
             r"(?i)\bsystem\b.*\bprompt\b",

@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -126,7 +127,7 @@ class VeluneMCPServer:
         calls_per_minute: int = 60,
         *,
         allow_mutations: bool = False,
-        council_orchestrator: Any = None,
+        council: Callable[[str], Awaitable[Any]] | None = None,
     ):
         self.tool_registry = tool_registry
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd()
@@ -146,39 +147,30 @@ class VeluneMCPServer:
         ).strip().lower() in {"1", "true", "yes", "on"}
 
         # Lazy-load Velune components
-        self._council_orchestrator = council_orchestrator
+        # ``task -> SwarmOutcome``: the council (agent swarm), read-only over MCP.
+        self._council = council
         self._memory_manager = None
         self._repository_cognition = None
 
         self._register_handlers()
 
-    @property
-    def council_orchestrator(self):
-        """The runtime's council orchestrator, if this server was given one."""
-        return self._council_orchestrator
+    async def _run_council(self, task: str) -> dict[str, Any]:
+        """Run the council once.
 
-    async def _run_council(self, task: str, repo_context: str) -> dict[str, Any]:
-        """Run the real council once.
-
-        Returns ``{"response", "confidence", "degraded"}`` on success and ``{"error"}`` when
-        the council is unavailable or produced no answer.
+        Returns ``{"response", "degraded", "run_id"}`` on success and ``{"error"}`` when
+        the council is unavailable or produced no answer. ``degraded`` means the
+        plan was corrected or limited along the way (see ``notes``).
         """
-        orchestrator = self.council_orchestrator
-        if orchestrator is None:
+        if self._council is None:
             return {"error": COUNCIL_UNAVAILABLE}
-        from velune.cognition.budget import CouncilExecutionBudget
-
-        budget = CouncilExecutionBudget(max_wall_time_seconds=30, max_review_cycles=1)
-        result = await orchestrator.execute_task(task, repo_context, budget=budget)
-        if result.get("is_timeout"):
-            return {
-                "error": result.get("final_summary") or "The council could not produce an answer."
-            }
-        arbitration = result.get("arbitration") or {}
+        outcome = await self._council(task)
+        if not outcome.ok:
+            return {"error": outcome.error or "The council could not produce an answer."}
         return {
-            "response": result.get("final_summary") or "No response",
-            "confidence": arbitration.get("overall_confidence"),
-            "degraded": bool(result.get("degraded")),
+            "response": outcome.content,
+            "degraded": bool(outcome.plan.notes),
+            "notes": list(outcome.plan.notes),
+            "run_id": outcome.run_id,
         }
 
     @property
@@ -443,12 +435,13 @@ class VeluneMCPServer:
     async def _velune_ask(self, prompt: str, workspace_path: str | None = None) -> dict[str, Any]:
         """Ask Velune about the repository."""
         try:
-            workspace = self._validator.validate(workspace_path or str(self.workspace_path))
+            # Refuse a path outside the allowed workspaces before doing any work.
+            self._validator.validate(workspace_path or str(self.workspace_path))
         except ValueError as e:
             return {"error": str(e)}
 
         try:
-            outcome = await self._run_council(prompt, "Repository: " + str(workspace))
+            outcome = await self._run_council(prompt)
             if "error" in outcome:
                 return outcome
             return {**outcome, "model": "velune-council"}
@@ -664,7 +657,7 @@ class VeluneMCPServer:
         task = "\n".join(task_parts) or "Respond helpfully."
 
         try:
-            outcome = await self._run_council(task, "")
+            outcome = await self._run_council(task)
             if "error" in outcome:
                 return {
                     "role": "assistant",

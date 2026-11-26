@@ -450,8 +450,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="run",
             aliases=["r"],
-            description="Execute a task through the Reasoning Council",
-            usage="/run <task description>",
+            description="Hand a task to the council (same as /council; --bg runs it read-only)",
+            usage="/run [--bg] <task description>",
             handler=repl._cmd_run,
             examples=(
                 "/run write a REST endpoint for user auth",
@@ -466,12 +466,13 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="council",
             aliases=["c"],
-            description="Force full council tier regardless of task complexity (slow, many model calls)",
-            usage="/council <task description>",
+            description="A team of agents, picked for the task, works on it in stages",
+            usage="/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]",
             handler=repl._cmd_council,
             examples=(
                 "/council analyze security vulnerabilities in this codebase",
-                "/council review this architecture for scalability issues",
+                "/council --skill coding --permission read-only add input validation",
+                "/council show",
             ),
             search_terms=(
                 "full council",

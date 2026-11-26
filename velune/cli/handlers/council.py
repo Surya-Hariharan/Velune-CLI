@@ -1,39 +1,65 @@
-"""Council/run/jobs slash command handlers: /run /council /jobs /dashboard + edit pipeline."""
+"""Council/run/jobs slash command handlers: /run /council /jobs /dashboard + edit pipeline.
+
+``/council`` (and ``/run``) hand the task to the agent swarm (``velune.swarm``):
+a skill and a permission profile are chosen, a team is created, and its
+stages run with the session's permission gate.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from velune.cli.repl import VeluneREPL
 
 _log = logging.getLogger("velune.cli.handlers.council")
 
-
-def _mode_council_tier(repl: VeluneREPL) -> str | None:
-    """The tier the session mode forces (``/mode fast|max``); ``None`` in normal mode."""
-    return None if repl._mode_manager.is_normal() else repl._mode_manager.config.council_tier
+_USAGE = "Usage: /council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
+_OPTIONS = {"--skill": "skill", "--permission": "permission"}
 
 
-def _mode_disables_critics(repl: VeluneREPL) -> bool:
-    """Whether the session mode (``/mode fast``) turns the critic seats off."""
-    return bool(repl._mode_manager.config.disable_critics)
+def parse_council_args(args: str) -> tuple[str, dict[str, str], str]:
+    """Split ``/council`` arguments into (task, options, error)."""
+    words = args.split()
+    options: dict[str, str] = {}
+    task: list[str] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word in _OPTIONS:
+            if index + 1 >= len(words):
+                return "", {}, f"{word} needs a name"
+            options[_OPTIONS[word]] = words[index + 1]
+            index += 2
+            continue
+        task.append(word)
+        index += 1
+    return " ".join(task), options, ""
 
 
 async def cmd_run(repl: VeluneREPL, args: str) -> None:
-    force_tier = _mode_council_tier(repl)
-    if "--bg" in args:
-        clean = args.replace("--bg", "").strip()
-        await _submit_background_job(repl, clean, force_tier=force_tier)
+    if "--bg" in args.split():
+        clean = " ".join(w for w in args.split() if w != "--bg")
+        await _submit_background_job(repl, clean)
         return
-    await execute_council_task(repl, args, force_tier=force_tier)
+    await cmd_council(repl, args)
 
 
 async def cmd_council(repl: VeluneREPL, args: str) -> None:
-    await execute_council_task(repl, args, force_tier="full")
+    words = args.split()
+    if words[:1] == ["show"]:
+        show_runs(repl, words[1] if len(words) > 1 else "")
+        return
+    task, options, error = parse_council_args(args)
+    if error:
+        repl.console.print(f"[yellow]{error}.[/yellow] [dim]{_USAGE}[/dim]")
+        return
+    await execute_council_task(repl, task, **options)
 
 
 _JOB_KINDS = ("task", "cognition", "shell")
@@ -179,10 +205,12 @@ async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
                 uncancel_task(task)
 
 
-async def _submit_background_job(
-    repl: VeluneREPL, task: str, force_tier: str | None = None
-) -> None:
-    """Submit *task* as a fire-and-forget background council job."""
+async def _submit_background_job(repl: VeluneREPL, task: str) -> None:
+    """Submit *task* as a fire-and-forget background council job.
+
+    A background job runs in PLAN mode: it never writes files or asks for
+    approval while the user is typing something else.
+    """
     if not task.strip():
         repl.console.print("[yellow]Usage: /run --bg <task>[/yellow]")
         return
@@ -197,24 +225,25 @@ async def _submit_background_job(
     repl._job_registry.register(job)
 
     async def _run_in_bg() -> None:
+        from velune.cli.display.swarm_view import JobSwarmUI
+        from velune.permissions import ExecutionMode
+        from velune.swarm.setup import run_headless
+
         repl._job_registry.update(job_id, status=JobStatus.RUNNING)
         try:
-            orchestrator = repl.container.get("runtime.council_orchestrator")
-            last_output: str | None = None
-            async for milestone in orchestrator.stream(
+            outcome = await run_headless(
+                repl.container,
                 task,
-                council_tier=force_tier,
-                disable_critics=_mode_disables_critics(repl),
-            ):
-                if hasattr(milestone, "phase") and milestone.phase:
-                    repl._job_registry.update(job_id, current_phase=milestone.phase)
-                if hasattr(milestone, "message") and milestone.message:
-                    last_output = milestone.message
-
+                mode=ExecutionMode.PLAN,
+                preferred=repl.active_model,
+                ui=JobSwarmUI(lambda **fields: repl._job_registry.update(job_id, **fields)),
+            )
+            if not outcome.ok:
+                raise RuntimeError(outcome.error)
             repl._job_registry.update(
                 job_id,
                 status=JobStatus.COMPLETED,
-                result_preview=(last_output or "")[:200],
+                result_preview=outcome.content[:200],
                 completed_at=time.monotonic(),
             )
             try:
@@ -264,101 +293,122 @@ async def _submit_background_job(
         f"[green]Job submitted:[/green] [cyan]{job_id}[/cyan]  [dim]{task[:60]}[/dim]"
     )
     repl.console.print(
-        "[dim]Use [bold]/jobs[/bold] to track progress, "
-        "[bold]/dashboard[/bold] for live view.[/dim]"
+        "[dim]Background jobs only read and answer; nothing is changed. Use [bold]/jobs[/bold] "
+        "to track progress, [bold]/dashboard[/bold] for live view.[/dim]"
     )
 
 
-async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | None) -> None:
+def serialize_asks(gate: Any) -> None:
+    """Let only one agent at a time open an approval prompt on *gate*."""
+    lock = asyncio.Lock()
+    ask, ask_batch = gate.ask, gate.ask_batch
+
+    if ask is not None:
+
+        async def one_ask(tool_name: str, decision: Any) -> Any:
+            async with lock:
+                return await ask(tool_name, decision)
+
+        gate.ask = one_ask
+    if ask_batch is not None:
+
+        async def one_batch(items: list) -> bool:
+            async with lock:
+                return await ask_batch(items)
+
+        gate.ask_batch = one_batch
+
+
+async def _repl_env(repl: VeluneREPL, model: Any, provider: Any) -> tuple[Any, Any]:
+    """The agents' environment for a REPL run, and the session gate it uses."""
+    from velune.cli.handlers.tool_chat import (
+        _make_approver,
+        _ToolActivityUI,
+        session_gate,
+        tool_loop_available,
+    )
+    from velune.swarm.agent import AgentEnv
+    from velune.swarm.setup import repository_summary
+    from velune.tools.base.tool import ToolCallContext
+
+    workspace = repl.container.get("runtime.workspace")
+    activity = _ToolActivityUI(repl)
+    gate = session_gate(repl, activity)
+    serialize_asks(gate)
+    ctx = ToolCallContext(
+        run_id=repl._session_id,
+        actor="council",
+        workspace=Path(workspace) if workspace else None,
+        hook_dispatcher=repl._hook_dispatcher,
+        session_id=repl._episodic_session_id or repl._session_id,
+    )
+    ctx.gate = gate
+    env = AgentEnv(
+        provider=provider,
+        model_id=model.model_id,
+        registry=repl.container.get("runtime.tool_registry"),
+        mcp_registry=repl._mcp_registry,
+        ctx=ctx,
+        base_approver=_make_approver(repl, activity),
+        context=await repository_summary(repl.container),
+        context_window=int(getattr(model, "context_length", 0) or 32_768),
+        tools=tool_loop_available(repl, model, provider),
+    )
+    return env, gate
+
+
+async def execute_council_task(
+    repl: VeluneREPL, task: str, *, skill: str | None = None, permission: str | None = None
+) -> None:
     from rich.panel import Panel
+    from rich.text import Text
 
     from velune._compat import uncancel_task
-    from velune.cli.display.pipeline import PipelineTracker
+    from velune.cli.display.swarm_view import ReplSwarmUI
+    from velune.cli.handlers.tool_chat import current_execution_mode
+    from velune.cli.rendering import CustomMarkdown
+    from velune.swarm.router import RouteError
+    from velune.swarm.run import run_swarm
+    from velune.swarm.setup import load_library, runs_root, swarm_settings
+    from velune.tools.filesystem.mutation import TurnJournal
 
     if not task.strip():
-        repl.console.print("[yellow]Usage: /run <task>  or  /council <task>[/yellow]")
+        repl.console.print(f"[yellow]{_USAGE}[/yellow]")
         return
 
-    # A Council run is the newest turn from the moment it starts. It may end without a proposal
-    # (so apply_council_edits never runs), fail or be cancelled; none of that may leave an older
-    # turn's journal for /rewind to undo.
+    # A Council run is the newest turn from the moment it starts: whatever happens, /rewind
+    # must undo this run (or nothing), never an older turn.
     repl._last_turn_journal = None
+    model, provider = await repl._resolve_active_model_and_provider()
+    if model is None or provider is None:
+        repl.console.print("[red]No usable model.[/red] [dim]Pick one with /model.[/dim]")
+        return
 
-    orchestrator = repl.container.get("runtime.council_orchestrator")
-    repl.console.print()
-
-    tracker = PipelineTracker()
-
-    _phase_colors: dict[str, str] = {
-        "planner": "magenta",
-        "coder": "green",
-        "reviewer": "yellow",
-        "challenger": "red",
-        "arbitration": "blue",
-        "synthesis": "cyan",
-        "context reconstruction": "dim",
-        "debate": "orange1",
-        "council": "dim",
-        "model assignment": "cyan",
-    }
-
-    last_run_id: str | None = None
-    current_phase: str | None = None
-    phase_messages: list[str] = []
-    _phase_timings: dict[str, float] = {}
-
-    def make_panel(phase_name: str, messages: list[str]) -> Panel:
-        color = _phase_colors.get(phase_name.lower(), "dim")
-        label = phase_name.capitalize()
-        body = "\n".join(f"  [{color}]{msg}[/{color}]" for msg in messages)
-        return Panel(
-            body,
-            title=f"[bold {color}]{label} Phase[/bold {color}]",
-            border_style=color,
-            padding=(0, 2),
-            expand=True,
-        )
-
+    ui = ReplSwarmUI(repl.console)
+    env, gate = await _repl_env(repl, model, provider)
+    manager = getattr(repl, "_plugin_manager", None)
+    library = load_library(repl.container, manager.all_skills() if manager is not None else [])
+    for warning in library.warnings:
+        repl.console.print(f"[yellow]Skipped:[/yellow] [dim]{warning}[/dim]")
+    workspace = Path(repl.container.get("runtime.workspace") or Path.cwd())
+    journal = TurnJournal()
     try:
         async with repl._interrupts.foreground():
-            async for milestone in orchestrator.stream(
+            outcome = await run_swarm(
                 task,
-                council_tier=force_tier,
-                disable_critics=_mode_disables_critics(repl),
-            ):
-                last_run_id = milestone.run_id
-                phase = milestone.phase or "council"
-                message = milestone.message
-
-                if phase != current_phase:
-                    # A finished phase becomes one panel in the transcript. There
-                    # is deliberately no live region here: the console is the
-                    # full-screen app's transcript sink, so a Live view would
-                    # either draw nothing or fight the composer for the screen.
-                    if current_phase is not None:
-                        repl.console.print(make_panel(current_phase, phase_messages))
-
-                    if milestone.elapsed_ms is not None and current_phase:
-                        _phase_timings[current_phase] = milestone.elapsed_ms
-
-                    current_phase = phase
-                    phase_messages = []
-                    tracker.advance(phase)
-                    # Immediate, append-only progress: the phase that just began.
-                    repl.console.print(f"[dim]▸ {phase.capitalize()}…[/dim]")
-
-                phase_messages.append(message)
-
-            if current_phase is not None:
-                repl.console.print(make_panel(current_phase, phase_messages))
-            tracker.complete()
-            repl.console.print()
-            repl.console.print(tracker.render())
-            if len(_phase_timings) > 1:
-                from velune.cli.display.council_view import render_phase_timing_footer
-
-                render_phase_timing_footer(repl.console, _phase_timings)
-
+                library,
+                env,
+                runs_root=runs_root(workspace),
+                settings=swarm_settings(getattr(repl.runtime, "config", None), model),
+                ui=ui,
+                skill=skill,
+                permission=permission,
+                mode=current_execution_mode(repl),
+                journal=journal,
+            )
+    except RouteError as exc:
+        repl.console.print(f"[yellow]{exc}[/yellow]")
+        return
     except asyncio.CancelledError:
         if not repl._interrupts.consume_user_cancelled():
             raise
@@ -367,64 +417,117 @@ async def execute_council_task(repl: VeluneREPL, task: str, force_tier: str | No
             uncancel_task(task_obj)
         repl.console.print("\n[yellow]Council run interrupted.[/yellow]")
         return
-    except KeyboardInterrupt:
-        repl.console.print("\n[yellow]Council run interrupted.[/yellow]")
-        return
-    except Exception as e:
-        tracker.fail(current_phase)
-        repl.console.print(tracker.render())
+    except Exception as exc:
         from velune.cli.rendering.error_panel import render_error, render_unexpected_error
         from velune.core.errors.catalog import VeluneError
 
-        if isinstance(e, VeluneError):
-            repl.console.print(render_error(e))
-        else:
-            repl.console.print(render_unexpected_error(e))
+        repl.console.print(
+            render_error(exc) if isinstance(exc, VeluneError) else render_unexpected_error(exc)
+        )
+        return
+    finally:
+        gate.boundary.clear_grants()
+        repl._last_turn_journal = journal
+
+    if not outcome.ok:
+        lines = [outcome.error, ""] + [
+            f"{r.agent_id}: {r.status}" + (f" — {r.error}" if r.error else "")
+            for r in outcome.results
+        ]
+        repl.console.print()
+        repl.console.print(
+            Panel(
+                Text("\n".join(lines).strip()),
+                title="[bold red]Council Failed[/bold red]"
+                if outcome.status == "failed"
+                else "[bold yellow]Council Stopped[/bold yellow]",
+                border_style="red" if outcome.status == "failed" else "yellow",
+                padding=(1, 2),
+            )
+        )
+        repl.console.print(f"[dim]Run saved: /council show {outcome.run_id}[/dim]")
         return
 
-    if last_run_id:
-        from rich.text import Text
+    repl.console.print()
+    repl.console.print(
+        Panel(
+            CustomMarkdown(outcome.content),
+            title="[bold cyan]Council Result[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
+    repl._conversation.append({"role": "user", "content": f"/council {task}"})
+    repl._conversation.append({"role": "assistant", "content": outcome.content})
+    if outcome.plan.output == "diff":
+        await apply_council_edits(repl, outcome.content, task)
 
-        from velune.orchestration.schemas import ExecutionStatus
 
-        state = orchestrator.get_state(last_run_id)
-        if state and state.status == ExecutionStatus.FAILED:
-            # No answer was produced: show it as a failure, and keep it out of
-            # the conversation history (it is not an assistant answer).
-            repl.console.print()
-            repl.console.print(
-                Panel(
-                    Text(state.error or state.output or "The council could not produce an answer."),
-                    title="[bold red]Council Failed[/bold red]",
-                    border_style="red",
-                    padding=(1, 2),
-                )
-            )
+def show_runs(repl: VeluneREPL, run_id: str) -> None:
+    """``/council show``: list recent runs, or one run's plan and each agent's result."""
+    from rich.table import Table
+
+    from velune.swarm.setup import runs_root
+
+    root = runs_root(Path(repl.container.get("runtime.workspace") or Path.cwd()))
+    folders = (
+        sorted((p for p in root.glob("*") if p.is_dir()), reverse=True) if root.exists() else []
+    )
+    if not run_id:
+        if not folders:
+            repl.console.print("[dim]No council runs yet.[/dim]")
             return
-        if state and state.output:
-            degraded = bool(state.validation_issues)
-            repl.console.print()
-            repl.console.print(
-                Panel(
-                    state.output,
-                    title=(
-                        "[bold yellow]Council Result (degraded)[/bold yellow]"
-                        if degraded
-                        else "[bold cyan]Council Result[/bold cyan]"
-                    ),
-                    border_style="yellow" if degraded else "cyan",
-                    padding=(1, 2),
-                )
+        table = Table(box=None, header_style="bold", padding=(0, 1))
+        for column in ("Run", "Skill", "Status", "Task"):
+            table.add_column(column, overflow="fold")
+        for folder in folders[:20]:
+            plan, events = _read_run(folder)
+            done = next((e for e in reversed(events) if e.get("event") == "done"), {})
+            table.add_row(
+                folder.name,
+                str(plan.get("skill", "?")),
+                str(done.get("status", "unfinished")),
+                str(plan.get("task", ""))[:70],
             )
-            if degraded:
-                repl.console.print(
-                    Text("Degraded: " + "; ".join(state.validation_issues), style="dim")
-                )
-            repl._conversation.append({"role": "user", "content": f"/run {task}"})
-            repl._conversation.append({"role": "assistant", "content": state.output})
+        repl.console.print(table)
+        return
+    folder = root / run_id
+    if not folder.is_dir() or folder.parent != root:
+        repl.console.print(
+            f"[yellow]No run named '{run_id}'.[/yellow] [dim]See /council show[/dim]"
+        )
+        return
+    plan, events = _read_run(folder)
+    finished = {e.get("agent"): e for e in events if e.get("event") == "finish"}
+    repl.console.print(
+        f"[bold]{folder.name}[/bold] [dim]{plan.get('skill')} · {plan.get('permission')} · "
+        f"{plan.get('output')}[/dim]\n{plan.get('task', '')}"
+    )
+    for agent in plan.get("agents", []):
+        agent_id = agent.get("id", "")
+        event = finished.get(agent_id, {})
+        status = event.get("status", "did not run")
+        repl.console.print(f"\n[bold]{agent_id}[/bold] [dim]({agent.get('role')}) · {status}[/dim]")
+        result = folder / f"{agent_id}.md"
+        if result.exists():
+            repl.console.print(result.read_text(encoding="utf-8", errors="replace")[:4000])
 
-            if state.coder_proposal:
-                await apply_council_edits(repl, state.coder_proposal, task)
+
+def _read_run(folder: Path) -> tuple[dict, list[dict]]:
+    try:
+        plan = json.loads((folder / "plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        plan = {}
+    events: list[dict] = []
+    try:
+        for line in (folder / "events.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                continue
+    except OSError:
+        pass
+    return plan, events
 
 
 async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) -> None:

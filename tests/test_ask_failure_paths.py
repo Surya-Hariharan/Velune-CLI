@@ -202,11 +202,10 @@ def test_render_council_failure_json_mode(capsys, monkeypatch):
         lambda: ["groq"],
     )
     ctx = SimpleNamespace(json_mode=True)
-    _render_council_failure(ctx, "The council could not produce an answer.", ["ALL_AGENTS_FAILED"])
+    _render_council_failure(ctx, "The council could not produce an answer.")
     payload = json.loads(capsys.readouterr().out)
-    assert payload["flags"] == ["ALL_AGENTS_FAILED"]
     assert payload["invalid_providers"] == ["groq"]
-    assert "error" in payload
+    assert payload["error"] == "The council could not produce an answer."
 
 
 def test_render_council_failure_names_rejected_provider(monkeypatch):
@@ -223,12 +222,14 @@ def test_render_council_failure_names_rejected_provider(monkeypatch):
     buffer = io.StringIO()
     monkeypatch.setattr(ask_mod, "console", Console(file=buffer, width=100))
     ctx = SimpleNamespace(json_mode=False)
-    ask_mod._render_council_failure(ctx, "No answer.", ["ALL_AGENTS_FAILED"])
+    ask_mod._render_council_failure(ctx, "No answer.")
     assert "velune provider add groq" in buffer.getvalue()
 
 
-async def test_ask_exits_nonzero_on_council_failure(monkeypatch, tmp_path):
-    """End-to-end through _ask_with_runtime: is_timeout result → typer.Exit(1)."""
+async def test_ask_exits_nonzero_on_council_failure(monkeypatch, tmp_path, capsys):
+    """End-to-end through _ask_with_runtime: a failed council run → typer.Exit(1)."""
+    import json
+
     from velune.cli.commands import ask as ask_mod
 
     class _Lifecycle:
@@ -245,25 +246,24 @@ async def test_ask_exits_nonzero_on_council_failure(monkeypatch, tmp_path):
         def list_all(self):
             return [_FakeModel("ollama")]
 
-    class _Orchestrator:
-        mapper = SimpleNamespace(map_roles=lambda self=None: {})
-
-        async def execute_task(self, prompt, repo_context, council_tier=None):
-            return {
-                "tier": "instant",
-                "arbitration": {"flags": ["ALL_AGENTS_FAILED"]},
-                "final_summary": "The council could not produce an answer.",
-                "reviewer_report": None,
-                "challenger_report": None,
-                "is_timeout": True,
-            }
+    async def failed_run(container, task, **kwargs):
+        return SimpleNamespace(
+            ok=False,
+            status="failed",
+            content="",
+            error="writer failed: ProviderAuthenticationError: 401",
+            run_id="r1",
+            results=[SimpleNamespace(agent_id="writer", status="error", error="401")],
+            plan=SimpleNamespace(
+                skill="research", permission="answer-only", output="text", notes=[]
+            ),
+        )
 
     class _Container:
         def __init__(self):
             self._values = {
                 "runtime.lifecycle": _Lifecycle(),
                 "runtime.model_registry": _Registry(),
-                "runtime.council_orchestrator": _Orchestrator(),
                 "runtime.repository_cognition": SimpleNamespace(index=lambda: None),
                 "runtime.workspace": tmp_path,
             }
@@ -271,11 +271,13 @@ async def test_ask_exits_nonzero_on_council_failure(monkeypatch, tmp_path):
         def get(self, key):
             return self._values[key]
 
-    monkeypatch.setattr(
-        "velune.providers.keystore.list_invalid_providers",
-        lambda: [],
-    )
+    monkeypatch.setattr("velune.swarm.setup.run_headless", failed_run)
+    monkeypatch.setattr("velune.providers.keystore.list_invalid_providers", lambda: [])
+    monkeypatch.setattr("velune.providers.keystore.is_ollama_live", lambda timeout=0.25: True)
     ctx = SimpleNamespace(container=_Container(), json_mode=True, workspace=tmp_path)
     with pytest.raises(typer.Exit) as excinfo:
         await ask_mod._ask_with_runtime(ctx, "hello")
     assert excinfo.value.exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "failed" and "401" in payload["error"]
+    assert payload["agents"] == [{"id": "writer", "status": "error", "error": "401"}]

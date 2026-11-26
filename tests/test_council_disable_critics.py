@@ -3,15 +3,11 @@ contract / trace verification must describe the run that actually happened."""
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
 from tests.council_fakes import CODE, REVIEW_FAIL, REVIEW_OK, healthy, make_orchestrator
-from tests.test_council_phase0_characterization import _repl, _state, _StubOrchestrator
-from velune.cli.handlers.council import _submit_background_job, cmd_council, cmd_run
-from velune.cli.modes import SessionMode
 from velune.cognition.budget import CouncilExecutionBudget
 from velune.cognition.council.contracts import (
     ALL_CRITIC_SEATS,
@@ -147,55 +143,3 @@ async def test_debate_without_critics_is_a_single_reviewer_round(monkeypatch):
     assert counts["coder"] == 4  # three diverge samples + one revision
     assert counts["reviewer"] == 2
     assert result["contract_verdict"]["ok"] is True
-
-
-# ── commands ─────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("mode", "expected"),
-    [(SessionMode.NORMAL, False), (SessionMode.OPTIMUS, True), (SessionMode.GODLY, False)],
-)
-async def test_run_and_council_pass_the_mode_flag(mode, expected):
-    for command in (cmd_run, cmd_council):
-        stub = _StubOrchestrator(_state())
-        repl = _repl(stub)
-        repl._mode_manager.set_mode(mode)
-        await command(repl, "do it")
-        assert stub.stream_kwargs["disable_critics"] is expected
-
-
-async def test_explicit_council_tier_still_wins_but_the_mode_flag_still_applies():
-    stub = _StubOrchestrator(_state())
-    repl = _repl(stub)
-    repl._mode_manager.set_mode(SessionMode.OPTIMUS)
-    await cmd_council(repl, "do it")
-    assert stub.stream_kwargs["council_tier"] == "full"
-    assert stub.stream_kwargs["disable_critics"] is True
-
-
-async def test_background_runs_pass_the_mode_flag():
-    stub = _StubOrchestrator(_state())
-    jobs: dict = {}
-
-    class _Registry:
-        def new_id(self):
-            return "job1"
-
-        def register(self, job):
-            jobs[job.job_id] = job
-
-        def update(self, job_id, **fields):
-            for key, value in fields.items():
-                setattr(jobs[job_id], key, value)
-
-    repl = _repl(stub)
-    repl._job_registry = _Registry()
-    repl._mode_manager.set_mode(SessionMode.OPTIMUS)
-    await _submit_background_job(repl, "do it", force_tier="instant")
-    for _ in range(50):
-        if stub.stream_kwargs:
-            break
-        await asyncio.sleep(0.01)
-    assert stub.stream_kwargs["disable_critics"] is True
-    assert stub.stream_kwargs["council_tier"] == "instant"

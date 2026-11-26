@@ -50,6 +50,14 @@ class ScriptedProvider:
         self.requests: list[InferenceRequest] = []
         self.active = 0
         self.max_active = 0
+        self.function_calling = True
+
+    def get_capabilities(self) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            supports_function_calling=self.function_calling, supports_streaming=False
+        )
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
         self.requests.append(request)
@@ -64,7 +72,7 @@ class ScriptedProvider:
                 if not self._script:
                     raise AssertionError("ScriptedProvider ran out of answers")
                 answer = self._script.pop(0)
-            if isinstance(answer, Exception):
+            if isinstance(answer, BaseException):  # CancelledError too
                 raise answer
             return answer
         finally:
@@ -144,6 +152,93 @@ def registry(*tools: BaseTool) -> ToolRegistry:
     for tool in tools:
         reg.register(tool)
     return reg
+
+
+def model(model_id: str = "fake-model", *, local: bool = False) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        model_id=model_id,
+        provider_id="fake",
+        is_local=local,
+        context_length=32_768,
+        metadata={},
+    )
+
+
+class FakeContainer:
+    def __init__(self, services: dict[str, Any]) -> None:
+        self.services = services
+        self.asked: list[str] = []
+
+    def get(self, key: str) -> Any:
+        self.asked.append(key)
+        if key not in self.services:
+            raise KeyError(key)
+        return self.services[key]
+
+    def get_optional(self, key: str) -> Any:
+        return self.services.get(key)
+
+    def has(self, key: str) -> bool:
+        return key in self.services
+
+
+def fake_repl(
+    workspace: Path,
+    provider: Any,
+    *,
+    tools: ToolRegistry | None = None,
+    cancelled: bool = False,
+    mode: Any = None,
+) -> Any:
+    """Just enough of ``VeluneREPL`` for ``/council``; ``repl.output`` holds what it printed."""
+    import contextlib
+    from io import StringIO
+    from types import SimpleNamespace
+
+    from rich.console import Console
+
+    from velune.permissions import ExecutionMode
+
+    buffer = StringIO()
+
+    @contextlib.asynccontextmanager
+    async def foreground():
+        yield
+
+    the_model = model()
+
+    async def resolve():
+        return the_model, provider
+
+    container = FakeContainer(
+        {"runtime.workspace": str(workspace), "runtime.tool_registry": tools or ToolRegistry()}
+    )
+    repl = SimpleNamespace(
+        console=Console(file=buffer, width=120, color_system=None),
+        container=container,
+        runtime=SimpleNamespace(config=None),
+        output=buffer,
+        active_model=the_model,
+        _resolve_active_model_and_provider=resolve,
+        _interrupts=SimpleNamespace(
+            foreground=foreground, consume_user_cancelled=lambda: cancelled
+        ),
+        _conversation=[],
+        _last_turn_journal=None,
+        _session_id="s1",
+        _episodic_session_id=None,
+        _hook_dispatcher=None,
+        _mcp_registry=None,
+        _tool_session_grants=set(),
+        _tools_unsupported_models=set(),
+        _execution_mode=mode or ExecutionMode.MANUAL,
+        _plugin_manager=None,
+        _job_registry=None,
+        _hunk_review_mode=False,
+    )
+    return repl
 
 
 class RecordingGate:

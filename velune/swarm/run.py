@@ -112,6 +112,11 @@ async def run_swarm(
     )
     for agent in plan.agents:
         agent.max_turns = settings.turns_per_agent
+    if not env.tools:
+        plan.notes.append(
+            "This model can't call tools: agents answer from the repository summary; "
+            "nothing is read or changed."
+        )
     skill_obj = library.skill(plan.skill)
     profile = library.profile(plan.permission)
     assert skill_obj is not None and profile is not None  # route() only returns known names

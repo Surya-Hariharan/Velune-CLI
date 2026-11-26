@@ -7,7 +7,7 @@ fake backend and assert on the emulated screen *and* the raw byte stream.
 
 "A later prompt was processed" is always proven with a marker only that reply
 contains (``give me MULTILINE`` -> ``Done.``), never with text a council panel could
-have left behind (every council seat answers ``FAKE-REPLY-OK``).
+have left behind (every council agent answers ``FAKE-REPLY-OK``).
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def test_council_run_shows_the_answer_and_never_paints_over_the_terminal(council
     t = s.text()
     assert "Council Result" in t
     assert "FAKE-REPLY-OK" in t  # the final answer is on screen
-    assert "▸ " in s.raw  # phase progress was appended to the transcript
+    assert "Stage 1/" in t  # stage progress was appended to the transcript
     assert_terminal_intact(s)
     assert_next_prompt_processed(s)
 
@@ -128,9 +128,9 @@ def test_council_run_on_narrow_terminals_stays_intact(council_repl, rows, cols):
 
 def test_cancelling_a_council_run_stops_the_work_and_restores_the_prompt(council_repl, backend):
     s = council_repl
-    backend.chunk_delay = 3.0  # keep every seat busy long enough to interrupt
+    backend.chunk_delay = 3.0  # keep every agent busy long enough to interrupt
     flows.run_command(s, TASK)
-    s.wait_for("Planner", 60)
+    s.wait_for("Stage 1/", 60)
     time.sleep(1.0)
 
     s.key("ctrl-c")

@@ -188,7 +188,7 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
                 "  [cyan]!new[/cyan]                   Start a fresh conversation (saves current)\n"
                 "  [cyan]!sessions[/cyan]              List recent sessions for this workspace\n"
                 "\n[bold]Execution commands[/bold]\n"
-                "  [cyan]!run <task>[/cyan]            Escalate to the full Reasoning Council\n"
+                "  [cyan]!run <task>[/cyan]            Hand a task to the council (a team of agents)\n"
                 "  [cyan]!exit[/cyan]                  Exit chat (session is saved automatically)\n"
             )
             continue
@@ -410,44 +410,17 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
                     "[yellow]Usage: !run <task>  — please specify a task to execute[/yellow]"
                 )
                 continue
-            console.print(
-                f"[bold cyan]Escalating task to full Reasoning Council: '{task}'...[/bold cyan]"
-            )
+            console.print(f"[bold cyan]Handing the task to the council: '{task}'...[/bold cyan]")
 
-            orchestration_engine = container.get("runtime.orchestration_engine")
+            from velune.cli.commands.run import render_outcome, terminal_ask
+            from velune.permissions import ExecutionMode
+            from velune.swarm.setup import run_headless
+
             try:
-                milestones = []
-                async for milestone in orchestration_engine.stream(task):
-                    console.print(f"  [bold cyan]{milestone}[/bold cyan]")
-                    milestones.append(milestone)
-
-                run_id = None
-                for m in milestones:
-                    if hasattr(m, "run_id"):
-                        run_id = m.run_id
-                        break
-                    elif isinstance(m, str) and m.startswith("[") and "]" in m:
-                        run_id = m.split("]")[0][1:]
-                        break
-                state = orchestration_engine.get_state(run_id) if run_id else None
-                if state:
-                    from velune.orchestration.schemas import ExecutionStatus
-
-                    success = state.status == ExecutionStatus.COMPLETED
-                    if success:
-                        console.print(
-                            f"[bold green]Execution completed successfully: {state.output or 'Done'}[/bold green]"
-                        )
-                    else:
-                        from velune.cli.rendering.error_panel import render_unexpected_error
-
-                        console.print(
-                            render_unexpected_error(
-                                RuntimeError(state.error or "Unknown execution failure")
-                            )
-                        )
-                else:
-                    console.print("[dim]Council run completed but returned no state.[/dim]")
+                outcome = await run_headless(
+                    container, task, mode=ExecutionMode.MANUAL, ask=terminal_ask
+                )
+                render_outcome(outcome)
             except Exception as e:
                 from velune.cli.rendering.error_panel import render_error, render_unexpected_error
                 from velune.core.errors.catalog import VeluneError

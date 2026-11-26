@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 from velune.core.types.model import CapabilityLevel, ModelCapabilityProfile, ModelDescriptor
 from velune.models.local_models import (
@@ -56,6 +57,16 @@ def _coerce_capabilities(model: ModelDescriptor) -> None:
 def is_available(model: ModelDescriptor) -> bool:
     """False only for a model known to be unusable right now (see refresh)."""
     return (model.metadata or {}).get("availability") != Availability.UNAVAILABLE
+
+
+def model_usable(model: ModelDescriptor, provider_registry: Any) -> bool:
+    """Cheap, offline check: not known-unavailable, and a cloud key exists."""
+    if not is_available(model):
+        return False
+    if model.is_local:
+        return True
+    checker = getattr(provider_registry, "check_provider_available", None)
+    return True if checker is None else bool(checker(model.provider_id))
 
 
 def unavailable_reason(model: ModelDescriptor) -> str | None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.markdown import Markdown
@@ -17,14 +16,10 @@ if TYPE_CHECKING:
 
 def load_library(repl: VeluneREPL) -> SkillLibrary:
     """The library for the REPL's workspace (project files only when trusted)."""
-    from velune.core import trust
+    from velune.swarm.setup import load_library as load
 
-    workspace = Path(str(repl.container.get("runtime.workspace") or Path.cwd()))
     manager = getattr(repl, "_plugin_manager", None)
-    plugin_skills = manager.all_skills() if manager is not None else []
-    return SkillLibrary.load(
-        workspace=workspace, trusted=trust.is_trusted(workspace), plugin_skills=plugin_skills
-    )
+    return load(repl.container, manager.all_skills() if manager is not None else [])
 
 
 def _flow_text(stages: tuple[tuple[str, ...], ...]) -> str:

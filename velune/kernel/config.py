@@ -268,6 +268,18 @@ class CognitionConfig(BaseModel):
     default_tier_override: str = "auto"  # auto, instant, minimal, standard, full
 
 
+class SwarmConfig(BaseModel):
+    """Limits for a ``/council`` run (``[swarm]``): one budget shared by all its agents."""
+
+    max_seconds: float = Field(default=600.0, gt=0)
+    max_calls: int = Field(default=40, ge=1)
+    max_tokens: int = Field(default=200_000, ge=1_000)
+    turns_per_agent: int = Field(default=8, ge=1)
+    #: Agents run at the same time on one cloud provider / one local model server.
+    parallel_cloud: int = Field(default=3, ge=1)
+    parallel_local: int = Field(default=1, ge=1)
+
+
 class ResourceEntry(BaseModel):
     """Per-connector settings for the Resource Connector Framework."""
 
@@ -454,6 +466,7 @@ class VeluneConfig(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     cognition: CognitionConfig = Field(default_factory=CognitionConfig)
+    swarm: SwarmConfig = Field(default_factory=SwarmConfig)
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
