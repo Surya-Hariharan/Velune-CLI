@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
+import io
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -114,6 +117,19 @@ def adaptive_interval(base: float, render_cost_s: float) -> float:
     return min(max(base, render_cost_s * _PACING_FACTOR), max(base, _PACING_CEILING_S))
 
 
+@dataclass(eq=False)
+class _Block:
+    """Output drawn for one width that knows how to draw itself for another.
+
+    Panels, tables, replies and diffs are laid out to the terminal width when
+    they arrive. Each of their lines points back at its block, so a resize can
+    redraw them at the new width instead of leaving them wrapped mid-border.
+    """
+
+    render: Callable[[int], list[_Line]]
+    count: int = 0  # lines currently in the transcript for this block
+
+
 @dataclass
 class _Line:
     text: str
@@ -123,6 +139,32 @@ class _Line:
     # streaming line). None means "render `text`/`style` flat," the original
     # behavior.
     fragments: list[tuple[str, str]] | None = field(default=None)
+    # Set for width-dependent output; None for text the window wraps itself.
+    block: _Block | None = field(default=None, repr=False)
+
+
+def _clean_console_text(data: str) -> str:
+    """Drop what the transcript pane can't show: OSC, cursor moves, carriage returns."""
+    return _strip_non_sgr_csi(_OSC_RE.sub("", data)).replace("\r", "")
+
+
+def _console_line(line: str) -> _Line:
+    """One line of Rich console output as a transcript line, keeping its colours."""
+    if "\x1b" in line:
+        # Parsed once here, not on every frame.
+        fragments = to_formatted_text(ANSI(line))
+        return _Line(_ANSI_RE.sub("", line), "class:conversation.system", fragments=fragments)
+    return _Line(line, "class:conversation.system")
+
+
+def _fragment_line(frags: list[tuple[str, str]], style: str) -> _Line:
+    return _Line("".join(t for _s, t in frags), style, fragments=frags)
+
+
+def _tag(lines: list[_Line], block: _Block) -> None:
+    for line in lines:
+        line.block = block
+    block.count = len(lines)
 
 
 @contextlib.contextmanager
@@ -180,9 +222,8 @@ class _ConsoleSink:
     def write(self, data: str) -> int:
         if not data:
             return 0
-        data = _OSC_RE.sub("", data)
-        data = _strip_non_sgr_csi(data)
-        self._pending += data.replace("\r", "")
+        data = _clean_console_text(data)
+        self._pending += data
         while "\n" in self._pending:
             line, self._pending = self._pending.split("\n", 1)
             self._ui.append_console_line(line.rstrip())
@@ -218,7 +259,31 @@ class _LiveSizedConsole(Console):
 
     def __init__(self, ui: FullscreenREPLUI, **kwargs: Any) -> None:
         self._sync_ui = ui
+        # Same settings minus the sink, for redrawing a print at another width.
+        self._redraw_kwargs = {k: v for k, v in kwargs.items() if k != "file"}
         super().__init__(**kwargs)
+
+    def print(self, *objects: Any, **kwargs: Any) -> None:
+        """Print into the transcript, remembering what was printed for a resize."""
+        ui = self._sync_ui
+        end = kwargs.get("end", "\n")
+        if ui._capture is not None or not str(end).endswith("\n"):
+            # Nested, or a partial line that later output will finish: not redrawable.
+            super().print(*objects, **kwargs)
+            return
+        ui._capture = _Block(functools.partial(self._redraw, objects, kwargs))
+        try:
+            super().print(*objects, **kwargs)
+        finally:
+            ui._capture = None
+
+    def _redraw(self, objects: tuple[Any, ...], kwargs: dict[str, Any], width: int) -> list[_Line]:
+        out = io.StringIO()
+        Console(file=out, width=width, **self._redraw_kwargs).print(*objects, **kwargs)
+        lines = _clean_console_text(out.getvalue()).split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+        return [_console_line(line.rstrip()) for line in lines]
 
     @property
     def size(self) -> ConsoleDimensions:
@@ -448,6 +513,10 @@ class FullscreenREPLUI:
     _stable_text: str = ""
     _stable_frags: list[list[tuple[str, str]]] = []  # noqa: RUF012 - replaced, never mutated
     _stable_width: int = 0
+    # The console.print being recorded (see _LiveSizedConsole.print), if any.
+    _capture: _Block | None = None
+    # Width the transcript was last laid out for; a change triggers _reflow.
+    _layout_width: int | None = None
 
     def _build_style(self) -> dict[str, str]:
         """The complete style sheet, interpolated from the *current* theme.
@@ -672,7 +741,9 @@ class FullscreenREPLUI:
             # through this console during a live session.
             force_interactive=False,
             highlight=False,
-            soft_wrap=True,
+            # Rich wraps to the pane width itself. soft_wrap=True turned wrapping off,
+            # which cropped text inside panels and split plain lines mid-word.
+            soft_wrap=False,
         )
 
         # Kept so `restyle()` can rebuild the whole sheet after a theme change.
@@ -1008,6 +1079,10 @@ class FullscreenREPLUI:
         (a warning, a status line) was silently wiped. Such lines go just above
         the reply instead.
         """
+        if self._capture is not None:  # lines of a console.print being recorded
+            for line in lines:
+                line.block = self._capture
+            self._capture.count += len(lines)
         if self._stream_start is None:
             self._lines.extend(lines)
         else:
@@ -1019,14 +1094,7 @@ class FullscreenREPLUI:
         if not line and (not self._lines or not self._lines[-1].text):
             return
         self._history_started = True
-        if "\x1b" in line:
-            # Parse once, at append time, not on every _render_conversation()
-            # call (which can run many times/sec under min_redraw_interval).
-            plain = _ANSI_RE.sub("", line)
-            fragments = to_formatted_text(ANSI(line))
-            self._add_lines([_Line(plain, "class:conversation.system", fragments=fragments)])
-        else:
-            self._add_lines([_Line(line, "class:conversation.system")])
+        self._add_lines([_console_line(line)])
         self.invalidate()
 
     def append_system(self, text: str) -> None:
@@ -1118,6 +1186,12 @@ class FullscreenREPLUI:
 
         if self._stream_start is not None:
             self._render_stream_markdown(final=True)
+            if self._stream_text.strip():
+                text = self._stream_text
+                _tag(
+                    self._lines[self._stream_start :],
+                    _Block(lambda width: self._reply_lines(text, width)),
+                )
         if self._stream_text:
             self._last_response_text = self._stream_text
         self._stream_start = None
@@ -1205,15 +1279,23 @@ class FullscreenREPLUI:
         handle._task = track(asyncio.create_task(_spin(), name="velune.fullscreen_toolcard"))
         return handle
 
-    def append_fragment_lines(self, lines: list[list[tuple[str, str]]]) -> None:
-        """Append pre-built prompt_toolkit fragment lines (result rows, diffs)."""
+    def append_fragment_lines(
+        self,
+        lines: list[list[tuple[str, str]]],
+        *,
+        render: Callable[[int], list[list[tuple[str, str]]]] | None = None,
+    ) -> None:
+        """Append pre-built prompt_toolkit fragment lines (result rows, diffs).
+
+        Pass ``render`` (width -> the same lines laid out for that width) when the
+        lines depend on the terminal width, so a resize can lay them out again.
+        """
         self._history_started = True
-        self._add_lines(
-            [
-                _Line("".join(t for _s, t in frags), "class:conversation.system", fragments=frags)
-                for frags in lines
-            ]
-        )
+        style = "class:conversation.system"
+        built = [_fragment_line(frags, style) for frags in lines]
+        if render is not None:
+            _tag(built, _Block(lambda width: [_fragment_line(f, style) for f in render(width)]))
+        self._add_lines(built)
         self.invalidate()
 
     def cancel_live_cards(self, note: str = "Interrupted") -> None:
@@ -1316,11 +1398,59 @@ class FullscreenREPLUI:
                 self._lines.append(_Line(plain, style, fragments=frags))
         self._trim()
 
-    def _markdown_fragments(self, text: str, *, final: bool) -> list[list[tuple[str, str]]]:
+    def _markdown_fragments(
+        self, text: str, *, final: bool, width: int | None = None
+    ) -> list[list[tuple[str, str]]]:
         stabilized = MarkdownStreamBuffer._stabilize(text)
         return render_to_fragments(
-            self.console, CustomMarkdown(stabilized, streaming=not final), self._width()
+            self.console, CustomMarkdown(stabilized, streaming=not final), width or self._width()
         )
+
+    def _reply_lines(self, text: str, width: int) -> list[_Line]:
+        """A finished reply laid out for *width* (used when the terminal is resized)."""
+        style = "class:conversation.assistant"
+        rendered = self._markdown_fragments(text, final=True, width=width)
+        return [_fragment_line(frags, style) for frags in rendered] or [_Line("", style)]
+
+    def _reflow(self, width: int) -> None:
+        """Lay width-dependent output out again after the terminal width changed.
+
+        Each run of lines from one block is replaced by that block drawn at the
+        new width. Left as they are: plain text (the window wraps it), the reply
+        still streaming (its next update uses the new width), and a block whose
+        first lines the transcript cap already dropped (redrawing would bring
+        them back). Absolute indices (stream start, scroll anchor) are remapped.
+        """
+        old = self._lines
+        stream = self._stream_start if self._stream_start is not None else len(old)
+        new: list[_Line] = []
+        index_map: list[int] = []  # old index -> new index
+        i = 0
+        while i < len(old):
+            block = old[i].block
+            j = i + 1
+            while block is not None and j < len(old) and old[j].block is block:
+                j += 1
+            redrawn: list[_Line] | None = None
+            if block is not None and j <= stream and j - i == block.count:
+                try:
+                    redrawn = block.render(width)
+                except Exception:
+                    _log.debug("Could not redraw a block at width %s", width, exc_info=True)
+            if redrawn is None:
+                index_map.extend(range(len(new), len(new) + j - i))
+                new.extend(old[i:j])
+            else:
+                _tag(redrawn, block)  # type: ignore[arg-type]  # not None when redrawn
+                last = len(new) + max(len(redrawn) - 1, 0)
+                index_map.extend(min(len(new) + k, last) for k in range(j - i))
+                new.extend(redrawn)
+            i = j
+        if self._stream_start is not None:
+            self._stream_start = index_map[stream] if stream < len(old) else len(new)
+        if self._scroll_anchor is not None and self._scroll_anchor < len(old):
+            self._scroll_anchor = index_map[self._scroll_anchor]
+        self._lines = new
 
     def _stream_fragments(self, text: str, *, final: bool) -> list[list[tuple[str, str]]]:
         """Render a streaming reply, re-rendering only its unfinished tail.
@@ -1523,6 +1653,10 @@ class FullscreenREPLUI:
         return FormattedText([("class:prompt.border", "│ "), ("", "  ")])
 
     def _render_conversation(self) -> AnyFormattedText:
+        width = self._width()
+        if self._layout_width is not None and width != self._layout_width and self._lines:
+            self._reflow(width)
+        self._layout_width = width
         if not self._lines:
             # Once flushed, finished turns live in real scrollback, not
             # here — an empty live area no longer means "nothing was ever

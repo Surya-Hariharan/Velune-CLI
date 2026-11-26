@@ -756,7 +756,7 @@ async def _prompt_approval(
             )
         )
         if ui._fullscreen_ui is not None:
-            ui._fullscreen_ui.append_fragment_lines(ui._diff_fragments(diff))
+            ui.show_diff(diff)
         else:
             from velune.execution.diff_preview import DiffPreview
 
@@ -994,7 +994,7 @@ class _ToolActivityUI:
             else:
                 self._fullscreen_ui.append_fragment_lines([[(_RESULT_STYLE, "  ⎿ "), *summary]])
             if show_diff:
-                self._fullscreen_ui.append_fragment_lines(self._diff_fragments(diff))
+                self.show_diff(diff)
         else:
             mark = "[red]✗[/red]" if error else "[green]✓[/green]"
             plain = "".join(text for _style, text in summary)
@@ -1067,6 +1067,15 @@ class _ToolActivityUI:
         except Exception:
             width = 100
         return render_diff_fragments(diff, width)
+
+    def show_diff(self, diff: FileDiff) -> None:
+        """Add a diff to the transcript, laid out again if the terminal is resized."""
+        from velune.cli.rendering.diff_fragments import render_diff_fragments
+
+        self._fullscreen_ui.append_fragment_lines(
+            self._diff_fragments(diff),
+            render=lambda width: render_diff_fragments(diff, max(40, width)),
+        )
 
     def note(self, markup: str) -> None:
         self.pause_status()
