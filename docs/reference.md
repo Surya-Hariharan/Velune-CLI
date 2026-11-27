@@ -478,7 +478,7 @@ unread proactive alerts (`alerts:N`) and MCP connection counts.
 
 | Group | Commands |
 | :--- | :--- |
-| Core | `velune` (REPL), `chat`, `run "<task>"`, `ask "<question>"`, `native "<task>"` (experimental), `init`, `onboard` |
+| Core | `velune` (REPL), `chat` (the same REPL; `--session <id>` resumes), `run "<task>"`, `ask "<question>"`, `init`, `onboard` |
 | Workspace and sessions | `project init\|status\|graph\|tree\|list\|open\|resume\|explain\|forget` (alias `workspace`), `session list\|resume\|show\|delete\|import\|rename\|search\|archive\|unarchive\|export` |
 | Setup and models | `setup`, `models scan\|list\|refresh\|pull\|delete\|assign\|use\|benchmark\|health\|show`, `provider list\|add\|remove\|test\|models\|status\|api\|edit\|inspect\|default\|backup\|restore\|repair`, `config show\|get\|set`, `trust add\|list\|forget` |
 | Analytics and monitoring | `usage`, `quota`, `health` |

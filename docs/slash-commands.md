@@ -250,7 +250,7 @@ Git and forge (GitHub/GitLab) integration, plus the execution sandbox.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `diff` | `d` | `/diff` | Show uncommitted file changes from the last council run |
+| `diff` | `d` | `/diff` | Show the uncommitted changes in the working tree |
 | `rewind` | *(none)* | `/rewind` | Undo the file changes the agent made in its last turn (skips files changed since) |
 | `push` | `gp` | `/push [--force]` | Push current branch to remote origin |
 | `pr` | `pull-request`, `mr` | `/pr <title> [--base <branch>] [--draft]` | Create a pull request / merge request on GitHub or GitLab |

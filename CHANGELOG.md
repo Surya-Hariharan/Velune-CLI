@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
-- **A council built for each task.** `/council` (and `/run`) now picks a *skill* (coding,
+- **A council built for each task.** `/council` now picks a *skill* (coding,
   planning, review, research) and a *permission profile* (from answer-only to edit-workspace),
   and creates a small team of agents for the task. Agents work in stages, at the same time where
   they can, each with only the tools its profile allows; writes still go through your approval,
@@ -33,6 +33,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Removed
 
+- **Slash commands that repeated another command.** Use the command in brackets instead:
+  `/approve` (`/manual`, `/plan`, `/auto`), `/fast`, `/max` and `/normal` (`/mode fast|max|normal`),
+  `/run` (`/council`; `/run --bg` is now `/council --bg`), `/undo` (`/rewind`, or
+  `git reset --soft HEAD~1` after an auto-commit) and `/hunk`, along with the
+  `[execution] hunk_review_default` setting. 56 commands are now 43.
+- **Slash commands that did not work.** `/settings` (`/setup`): 19 of its 22 rows saved keys
+  that Velune never reads; use `/config`, `/theme` and `/crashreports`. `/lint`, `/refactor` and
+  `/types`, with the checks they ran on files named with `@`; `/types` wrote files without
+  asking. `/bench`, which started paid probes of every model without asking
+  (`velune models benchmark` is unchanged). `/graph`, which only printed four counts.
+- Modules nothing imported: the old display theme, git and config context helpers, the model
+  scorer and profiler with the provider benchmarker, the error loop detector and the
+  `velune.cli.main` shim.
+
 - **The fixed five-seat council** (Planner, Coder, Reviewer, Challenger, Synthesizer, the critics,
   arbitration, tiers and debate), replaced by the council above. With it go `/roles` (`/cm`),
   `velune models assign`, the council tier and critic settings of `/fast` and `/max`, and
@@ -51,17 +65,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - The "Git snapshot and rollback for plan-driven changes" entry in `SECURITY.md`. That code was
   never reached. `/rewind` is unaffected.
 - **`velune native`** and the experimental native orchestration engine, together with the
-  unused second ("deliberative") council engine. Chat, `/council`, `/run`, `ask` and `run` never
+  unused second ("deliberative") council engine. Chat, `/council`, `ask` and `run` never
   used them. The settings `[orchestration] engine` and `[cognition] council_engine` are gone;
   config files that still contain them load as before.
 
 ### Changed
 
-- `/graph` shows a summary of the repository knowledge graph. It previously read a store that
-  nothing wrote to, so it was always empty.
+- **`velune chat` opens the normal REPL**, with its tools and slash commands, instead of a
+  separate chat loop that had neither. `velune chat --session <id>` and `velune session resume`
+  open it with that session loaded, and `--plain` works as it does for `velune`.
+- The home screen's "no providers configured" hint points to `/connect`.
 
 ### Fixed
 
+- `/session save` and `/session export` wrote a new session file on every call. They now update
+  the session's own file.
+- `/new` kept the old session id and the last turn's file journal, so `/rewind` could undo a
+  change from the previous conversation. `/new` and `/fork` now archive under the old id, clear
+  its autosave (the next launch no longer reports a crash) and start a new id.
+- `/recover` listed the session that was still running, and `--all` promoted it.
+- `/mode fast` and `/mode max` changed the model without saving it as the default.
+- The REPL's `/doctor` ran a shorter, out-of-date list of checks. It now runs the same checks as
+  `velune doctor`, except memory health (shown by `/memory`).
+- `/session resume` hid errors when loading a saved session, and `/session summary` did not find
+  the ids that `/session list` shows.
+- `/stats` showed a fixed "Approval mode" instead of the execution mode; `/context` said `/clear`
+  resets the conversation (it is `/new`); `/diff` claimed to show only council changes.
 - **`/council` failed with "every model call failed or timed out" before calling a model.** The
   security filter read `retrieval(10)` in the repository summary as a call to `eval`, and a
   match rejected the whole request. It now matches only a real `eval(`, and repository text is
