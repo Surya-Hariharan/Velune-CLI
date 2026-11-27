@@ -62,14 +62,13 @@ touches a file, so `/diff` mostly confirms what you already accepted.
 
 ```bash
 cd your-project
-velune init      # one-time: registers the workspace, trust prompt if new
-velune           # opens the REPL
+velune init      # one-time: project configuration, .veluneignore and a first index
+velune           # opens the REPL; asks whether to trust a new folder
 ```
 
-Velune does **not** index your repository automatically. The REPL opens immediately, with
-no symbol index built. This is deliberate: indexing a large repository can take real time
-and CPU, and most sessions (a quick question, a one-file edit) do not need it. Build the
-index explicitly, sized to what you are about to do:
+The REPL opens immediately. In a folder it recognises as a project it also starts an index in the
+background, which you can turn off with `[workspace] index_on_init = false`. Run `/index` yourself,
+sized to what you are about to do, when you want a particular depth:
 
 | Command | Cost | Use for |
 | --- | --- | --- |
@@ -81,13 +80,12 @@ index explicitly, sized to what you are about to do:
 > backward compatibility. `/index status` shows freshness, and `/index rebuild` forces a
 > full rescan.
 
-If you skip this step, `/run` still works. The agents just start with less repository context
+Without an index, chat and `/council` still work; they just start with less repository context
 (see [Choosing how a task runs](#4-choosing-how-a-task-runs)).
 
 Once you have indexed, most of the upkeep happens off the prompt path: a background engine
 watches the filesystem and keeps the index current incrementally, without re-scanning the
-whole repository on every turn. `velune status` and `velune context` show what is indexed
-and how fresh it is.
+whole repository on every turn. `velune status` shows what is indexed and how fresh it is.
 
 ---
 
@@ -207,24 +205,28 @@ before you accept it, especially in Auto mode.
 
 ## 6. Making Velune remember your codebase
 
-The five-tier memory system (working, episodic, semantic, graph, lineage) lets context
-accumulate across sessions without you re-explaining it. It only has something to draw on
-once you have used the tool for a while:
+Memory has four tiers per workspace (working, episodic, semantic and lineage), so context can
+accumulate across sessions without you re-explaining it. It only has something to draw on once
+you have used the tool for a while:
 
+- **Working** memory holds the current conversation.
 - **Episodic** memory persists your conversation history per workspace.
 - **Semantic** memory lets "fix the auth thing from yesterday" resolve to the actual prior
   conversation and files touched, once there is session history to search. It needs the
   optional `rag` extra.
-- **Graph** memory captures repository structure once the repository is indexed.
+- **Lineage** memory records decisions and what was tried.
 
-`/memory stats` shows what is actually populated. `/context` shows how much of your active
-context window is being spent on retrieved memory versus your current conversation. If a
-prompt feels like it is ignoring history it should know about, check `/memory stats` before
-assuming the model is at fault: an empty or stale tier is a common cause.
+Indexing separately builds a graph of the repository's files, symbols and imports, which
+retrieval also draws on.
 
-`/memory clear` is destructive. It drops the persisted SQLite, Qdrant and LanceDB state for
-the workspace, not just the current turn, and prompts for confirmation. Use it when memory
-has gone stale or wrong, not routinely.
+`/memory` shows what is actually populated, and `/context` shows how many tokens the current
+conversation uses out of the model's context window. If a prompt seems to ignore history it
+should know about, check `/memory` before blaming the model: an empty or stale tier is a
+common cause.
+
+`/memory clear` clears **working memory only** (the current turns), after a confirmation. To
+remove stored data, use `velune memory clear <working|episodic|all>` in the terminal, or
+`velune purge-data` (see the [data inventory](data-inventory.md)).
 
 > **How sources are chosen.** Which sources feed a given answer, and how much of each, is
 > decided by intent-aware retrieval rather than a fixed mix. Keyword (BM25), vector and
@@ -232,7 +234,7 @@ has gone stale or wrong, not routinely.
 > keywords; refactors and dependency questions lean on the graph), then reranked
 > heuristically.
 
-From the terminal, the equivalent commands are `velune memory stats|inspect|clear|compact`.
+From the terminal, memory commands are `velune memory stats|inspect|clear|compact`.
 
 ---
 
@@ -241,8 +243,8 @@ From the terminal, the equivalent commands are `velune memory stats|inspect|clea
 `/project list` and `/project open <path>` switch workspaces without restarting the REPL.
 Each workspace has its own index, memory and MCP configuration. `/project add <path>`
 registers a workspace you want to switch to later without opening it immediately. From the
-terminal, `velune session list` and `velune session delete <id>` manage saved sessions in
-bulk.
+terminal, `velune session list` shows saved sessions, and `velune session resume|delete <id>`
+act on one.
 
 ---
 
@@ -279,44 +281,18 @@ for where each configuration file lives.
   it in `.mcp.json` and use `/mcp connect <name>`. See [mcp.md](mcp.md) for trust gating and
   transport details. Outbound connections are trust-gated per workspace, so a repository you
   have not explicitly trusted will not silently load its `.mcp.json`.
-- **Resource connectors.** For Velune to query a database or container directly (Docker,
-  Postgres, MySQL, Supabase), use `/resource discover`, then `/resource configure <id>` for
-  the database connectors. Credentials are encrypted at rest and masked in anything Velune
-  shows or sends. Connector actions follow your execution mode like any other change: reads
-  always run, Manual asks, Plan refuses, and Auto still asks for destructive operations and for
-  anything this task did not create, such as a container that was already running. That friction
-  is intentional for actions against real infrastructure. The agent does not see these tools up
-  front: it asks which integrations exist, enables the ones the task needs (their tools appear on
-  its next turn) and can also start, read the output of, wait for and stop its own background
-  commands. Enabling a tool never approves it; every call is still checked as above. Set
-  `resources.expose_to_model = false` in `velune.toml` to keep integrations away from the model.
-  In `/council` with the `integrations` profile, every agent can read through these tools and only
-  the lead can change anything through them; `velune ask`, `velune run` and MCP runs do not get them.
-- **Docker.** With `pip install "velune-cli[docker]"` the agent manages containers, images, volumes,
-  networks and Compose projects through the Docker SDK (see [docker.md](docker.md)). It tracks what it
-  created: in Auto mode it can start, stop, restart and remove its own containers and create ordinary
-  ones, but anything that already existed — your containers, images, volumes, networks in use — and anything
-  privileged (host network, devices, the Docker socket, host mounts) needs your approval. Plan mode
-  changes nothing.
-- **HTTP and API testing.** The agent can send requests to a local dev server or a remote API,
-  check responses with assertions, run saved API collections and explore an OpenAPI spec, with
-  no Postman installation. Describe your API once in `velune.toml` (`[resources.http]` with
-  `trusted_origins` and `[resources.http.environments.<name>]` for `base_url`, variables and a
-  credential reference), store tokens with `/resource configure http <reference>` (encrypted,
-  and each one is sent only to its own origin), then ask, for example, "test the login API on my
-  local backend". Reads run; Manual asks before a change; Plan refuses one; Auto still asks for a
-  DELETE, for changes to a production environment and for changes to a remote service you have not
-  trusted. Running a collection is approved for all of its requests at once. Cloud-metadata and
-  private-network addresses are never reachable. See [http.md](http.md).
-- **Databases.** With `pip install "velune-cli[postgres]"` (or `[mysql]`) the agent can list your
-  databases, tables, columns, keys and indexes, run read-only queries and, with your approval, change
-  data. Store each connection with `/resource configure postgres [name]` (encrypted; the agent sees only
-  its name), then ask, for example, "which tables reference `orders`?" or "how many users signed up
-  this week?". Reads always run and are bounded and redacted; every change asks you (Auto included, since
-  no database is assumed disposable) and Plan refuses it; transactions group several statements so they
-  commit or roll back together. Supabase projects are read through their REST API with Row Level Security
-  applied; using the service-role key always asks. See [database.md](database.md) and the overview in
-  [integrations.md](integrations.md).
+- **Application integrations.** Velune can work with Docker, HTTP APIs, PostgreSQL, MySQL /
+  MariaDB, Supabase and its own background processes. Run `/resource discover` to see what a
+  project uses and `/resource configure <id>` to store a database or HTTP credential
+  (encrypted; the model sees only its name). Connector actions follow your execution mode like
+  any other change: reads run, Manual asks before a change, Plan refuses it, and Auto still
+  asks for destructive operations and for anything the task did not create. The agent enables
+  only the integrations a task needs; set `resources.expose_to_model = false` in `velune.toml`
+  to keep them away from the model. In `/council` with the `integrations` profile every agent
+  can read through them and only the lead can change anything; `velune ask`, `velune run` and
+  MCP runs do not get them. Guides: [Docker](docker.md), [databases](database.md),
+  [HTTP and API testing](http.md); how connectors are authorized is in the
+  [development guide](development.md#resource-connectors-and-the-authorization-pipeline).
 - **GitHub and GitLab.** `/push`, `/pr` and `/issue` use the same git and REST integrations
   as the git tools. They need no separate setup beyond a configured `git` and, for pull
   request and issue commands, a token available to the underlying REST client.
@@ -325,16 +301,15 @@ for where each configuration file lives.
 
 ## 10. Diagnosing problems
 
-Start with `/doctor` (in the REPL) or `velune doctor check` (in the terminal). The terminal
-version is more thorough: it checks providers, storage, security posture, performance and
-council role coverage in one pass, and `--fix` remediates what it safely can. More specific
-checks:
+Start with `/doctor` (in the REPL) or `velune doctor` (in the terminal). Both check the
+installation, providers, storage, configuration and the council's skills; the terminal run also
+checks memory health. `velune doctor --fix` remediates what it safely can, and `--perf` times
+startup. More specific checks:
 
 - `velune doctor providers` checks connectivity to every configured provider.
-- `velune doctor network` runs the SSRF and reachability checks relevant to MCP and resource
-  connectors.
+- `velune doctor network` pings every registered provider and shows a status table.
 - `velune logs` and `velune logs live` show recent or streaming execution events read back
-  from the trace log. `velune trace --type permission` shows the approval decisions.
+  from the trace log. `velune logs --type permission` shows the approval decisions.
 - `velune status` shows index freshness, file and symbol counts, and workspace health, read
   from on-disk state.
 - `velune pipeline trace "<query>"` traces a query through the retrieval pipeline (lexical,
@@ -344,8 +319,8 @@ checks:
 indexing or a tool call really happened, and not only that a command returned success.
 
 **Which check first?** If Velune seems to be ignoring something you said earlier in the
-session, check `/context` first (was it truncated out of the budget?) and `/memory stats`
-second (was it ever persisted?).
+session, check `/context` first (is the conversation near the model's limit?) and `/memory`
+second (was anything persisted?).
 
 ---
 
@@ -358,7 +333,7 @@ cases:
   keeps automatically.
 - `backup` and `restore` are the manual, explicit path for moving or restoring the full
   state (sessions, config, providers, memory, trust) as one archive. They are useful before
-  a risky operation such as `/memory clear`, or before upgrading Velune itself.
+  a risky operation such as `velune memory clear all`, or before upgrading Velune itself.
 
 Restore only archives you made yourself: an archive carries the workspace trust list. See
 [SECURITY.md](../SECURITY.md#backup-and-recovery-secrets).

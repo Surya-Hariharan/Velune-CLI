@@ -44,7 +44,7 @@ flowchart LR
 
 ## 1. Running Velune CLI as a server
 
-Expose Velune CLI's local tools (council reasoning, memory search, symbol
+Expose Velune CLI's local tools (a council run, memory search, symbol
 lookup, blast-radius estimation, plus anything registered in the tool
 registry) to Claude Desktop, VS Code, or any other MCP-capable client,
 without sending your code to a third party:
@@ -82,11 +82,11 @@ Velune-native tools (`velune_ask`, `velune_search_memory`,
 `velune_get_symbols`, `velune_estimate_blast_radius`) are always available
 regardless of this flag; they're read-only by construction.
 
-`velune_ask` (and `sampling/createMessage`) runs the real Reasoning Council
-through the server's own runtime, so the server has to be started with
-`velune mcp serve`. It uses a 30-second wall-clock budget and a single review
-cycle, and returns `response`, `confidence` and `degraded` — or an `error` if
-the council timed out or every agent failed. It only analyses; it never applies edits.
+`velune_ask` (and `sampling/createMessage`) runs a council (`velune/swarm/`) in Plan mode
+through the server's own runtime, so the server has to be started with `velune mcp serve`.
+A run is limited to 120 seconds and returns `response`, `degraded`, `notes`,
+`files_changed`, `diagram`, `run_id` and `model`, or an `error` if it timed out or every
+agent failed. It only analyses; it never applies edits.
 
 The server also enforces:
 
@@ -146,9 +146,9 @@ from an earlier one** (so a `velune.toml` entry wins over a same-named
 `.mcp.json` entry). The environment variable is lowest priority: it only
 fills in server names that aren't already defined by a file-based source.
 
-Config changes are picked up without a restart — the registry watches
-`.mcp.json` and `velune.toml` mtimes and hot-reloads roughly every 30
-seconds.
+The REPL checks the workspace's `.mcp.json` and `velune.toml` for changes about every 30
+seconds (longer on slow machines) and connects servers **added** there. Editing or removing
+an existing entry, or changing `~/.mcp.json`, takes effect the next time Velune starts.
 
 ### `.mcp.json` shape
 
@@ -189,15 +189,18 @@ Transport selection per entry:
   "my-api": {
     "type": "http",
     "url": "https://api.example.com/mcp",
-    "headers": { "Authorization": "Bearer ${API_TOKEN}" }
+    "headers": { "Authorization": "Bearer <token>" }
   },
   "my-ws-server": {
     "type": "ws",
     "url": "ws://localhost:8765/mcp",
-    "headers": { "Authorization": "Bearer ${API_TOKEN}" }
+    "headers": { "Authorization": "Bearer <token>" }
   }
 }
 ```
+
+Header and `env` values are used exactly as written: Velune does not expand `${VAR}`
+references, so keep a file that holds a real token out of version control.
 
 `velune.toml` accepts the same shape under `[mcp.servers]`, plus a string
 shorthand for quick SSE entries:
@@ -268,7 +271,7 @@ decisions. Every call to an external server's tool runs through
 `authorize_and_execute` and the session's permission gate, exactly like a
 built-in tool (`velune/mcp/authorization.py`). The call is described as an
 integration action with the scope `mcp.<server>.<tool>`, so your execution mode
-decides it and it appears in the audit trail (`velune trace --type permission`):
+decides it and it appears in the audit trail (`velune logs --type permission`):
 
 | Mode | An MCP tool call |
 | --- | --- |
@@ -344,5 +347,5 @@ which takes a raw SSE URL and doesn't touch config at all (see
 - **Velune-as-server isn't editing files even though it's connected** —
   check whether `VELUNE_MCP_ALLOW_MUTATIONS` is set in the environment the
   server process runs in; by default it's read-only.
-- **`velune mcp serve` only seems to work over stdio** — that's current
-  behavior, not a bug; see the callout in [§1](#1-running-velune-cli-as-a-server).
+- **A client expects an HTTP endpoint** — `velune mcp serve` speaks stdio only; see
+  [§1](#1-running-velune-cli-as-a-server).

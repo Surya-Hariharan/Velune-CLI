@@ -527,7 +527,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="memory",
             aliases=["mem"],
-            description="Inspect the 5-tier memory system: working, episodic, semantic, graph, lineage",
+            description="Inspect the 4-tier memory system: working, episodic, semantic, lineage",
             usage="/memory [clear|stats]",
             handler=repl._cmd_memory,
             examples=("/memory", "/memory stats", "/memory clear"),

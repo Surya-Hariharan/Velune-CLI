@@ -11,8 +11,8 @@ rewritten or backdated; the commits and tags are the primary record.
   ([@Surya-Hariharan](https://github.com/Surya-Hariharan)).
 - **Canonical repository:** <https://github.com/Surya-Hariharan/Velune-CLI>
 - **First commit:** `7a2ff33` ("Initial commit"), 2026-05-22. As of
-  this writing, 289 of the 294 commits are authored by Surya HA; the rest are
-  3 GitHub Copilot coding-agent commits and 2 Dependabot commits.
+  2026-11-27, 649 of the 657 commits are authored by Surya HA; the rest are
+  5 Dependabot commits and 3 GitHub Copilot coding-agent commits.
 - **Public release files:** `0e48379` (2026-05-22) added CI, CONTRIBUTING,
   SECURITY, and CHANGELOG files.
 - **License file:** the Apache-2.0 `LICENSE` first appears in commit `45c3974`
@@ -21,7 +21,7 @@ rewritten or backdated; the commits and tags are the primary record.
 
 ## Release history
 
-The **Git tag** and **PyPI** columns state what exists today, checked on 2026-11-17 against `git tag` and the PyPI
+The **Git tag** and **PyPI** columns state what exists today, as of the 0.9.10 release (2026-11-18), checked against `git tag` and the PyPI
 JSON API (commands under [How to verify](#how-to-verify)). A dash means there is none. CHANGELOG headings carry their
 own dates, which differ from the tag dates for a few early versions; both are listed where they differ. A version can
 appear in the CHANGELOG, or in `velune/__init__.py`, without ever having been tagged or published.
@@ -92,6 +92,9 @@ relevant code.
   execution modes.
 - **0.9.10:** ask-first automatic updates (`[update] auto`), installers and updates that never replace a
   running Velune, and the `/council` freeze and background-load fixes.
+- **After 0.9.10 (unreleased):** the fixed five-seat council was replaced by a skills-based
+  agent swarm (`velune/swarm/`), and unused commands and modules were removed (see the
+  CHANGELOG).
 
 ## Security milestones
 

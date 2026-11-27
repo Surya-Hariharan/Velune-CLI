@@ -63,7 +63,7 @@ spec with hundreds of operations still costs the model one `openapi_call` tool.
 | `method`, `url` | The method, and an absolute URL **or** a path starting with `/` (joined to the environment's base URL). `{{variables}}` are allowed. |
 | `environment` | Environment name. Optional when one is `default_environment` or the only one configured. |
 | `query` | List of `name=value`. |
-| `headers` | List of `Name: value`. `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Upgrade`, `Expect` and the method-override headers are refused. |
+| `headers` | List of `Name: value`. `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Upgrade`, `TE`, `Trailer`, `Keep-Alive`, `Proxy-Authorization`, `Proxy-Connection`, `Expect` and the method-override headers are refused. |
 | `json` / `form` / `multipart` / `body` + `content_type` | At most one body. `json` is a JSON document string; `multipart` accepts `name=value` or `name=@relative/path` to upload a workspace file. |
 | `auth` | A credential **reference** (never a secret). Defaults to the environment's credential; `none` sends no credentials. |
 | `timeout` | Overall limit in seconds (at most 120), covering redirects. |
@@ -352,8 +352,7 @@ python -m pytest tests/test_http_*.py tests/test_web_fetch_pinning.py   # no net
 
 The suite runs a real HTTP server on `127.0.0.1` (`tests/http_server.py`, including a throw-away TLS
 certificate) and a scripted model through the real tool loop, so redirects, limits, timeouts, TLS, pinning and
-approvals exercise real code. DNS is simulated with an injected resolver; nothing leaves the machine. As on
-Windows elsewhere in this repo, put the virtualenv's `Scripts` directory first on `PATH` before running tests.
+approvals exercise real code. DNS is simulated with an injected resolver; nothing leaves the machine.
 
 To extend the integration, follow [development.md](development.md#resource-connectors-and-the-authorization-pipeline):
 every new operation needs a scope, a `describe_actions` that can only *add* risk, and a test through the real

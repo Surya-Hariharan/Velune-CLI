@@ -161,6 +161,7 @@ Changing these is high-risk because they make other programs run code:
 | anything under `.git/` (`hooks/`, `config`, …) | git runs hooks and honours config such as `core.hooksPath` and `core.fsmonitor` |
 | `.velune/hooks.json` | Velune runs the commands in its hook configuration |
 | `velune.toml` | it can define hooks |
+| the `.velune/` folder itself | creating, moving, replacing or deleting it changes which hook file is active |
 
 Reading them is ordinary. `.gitignore`, `.github/` and similar names are not
 protected. The protection covers the file tools only: a shell command run through
@@ -290,8 +291,6 @@ Windows the folder case uses a directory junction instead.
    passing the shared `tracker` if it reads or writes file content.
    - Add a verb in `_TOOL_VERBS` in `velune/cli/handlers/tool_chat.py`, and add it
      to `_FILE_MUTATORS` if the approval prompt should show a diff.
-   - Add it to `EXCLUDED_TOOLS` in `velune/orchestration/engine/toolpolicy.py`
-     if it mutates; the native engine is read-only.
 6. **Test it through the loop.** Build the registry with
    `tests/_fs_registry.py::production_registry`. Drive it with a scripted model and
    `ToolLoopRunner`, as `tests/test_agent_filesystem_e2e.py` does, and assert on

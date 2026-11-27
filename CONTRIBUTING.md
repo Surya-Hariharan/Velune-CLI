@@ -503,7 +503,7 @@ chore: bump httpx to 0.27
 
 Subject line: imperative tense, ≤ 72 characters, no trailing period.
 
-For breaking changes add `!` after the type: `feat!: rename /run to /exec`
+For breaking changes add `!` after the type: `feat!: rename /council to /team`
 
 ---
 

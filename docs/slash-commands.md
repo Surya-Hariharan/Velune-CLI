@@ -45,7 +45,7 @@ too.
 
 ## AI
 
-Running tasks through the Reasoning Council, and controlling how much of
+Running tasks through the council, and controlling how much of
 it runs.
 
 | Command | Aliases | Usage | Description |
@@ -134,19 +134,8 @@ Connecting and managing cloud/local AI providers.
 > still works as an alias, but `/connect` is the name that actually describes
 > what it does — this isn't a username/password sign-in.
 >
-> **`/providers` (and `/provider`, `/prov`) was removed.** It duplicated
-> `/connect` behind a management menu, so two commands both meant "connect a
-> provider". Its management-only operations were *not* dropped — they live in
-> the terminal CLI, outside the REPL:
->
-> | Was | Now |
-> | --- | --- |
-> | `/providers add` | `/connect` |
-> | `/providers status` | `velune provider status` |
-> | `/providers test` | `velune provider test [id]` |
-> | `/providers manage` | `velune provider inspect <id>` / `edit <id>` |
-> | `/providers remove` | `velune provider remove <id>` |
-> | `/providers discover` | `/model discover` |
+> Managing saved providers (status, test, edit, remove) is done in the terminal with
+> `velune provider ...`.
 
 ---
 
@@ -172,30 +161,30 @@ Opening workspaces and indexing them so Velune CLI understands the code.
 | `project` | `proj`, `workspace` | `/project [open <path>\|close\|status\|list\|add <path>\|<name\|path>]` | Open, close, or inspect project workspaces (no indexing) |
 | `index` | `cognition`, `cog` | `/index [init\|quick\|standard\|deep\|status\|cancel\|rebuild]` | Index the workspace so Velune understands its code: quick, standard, or deep |
 
-> `/index` is never automatic — nothing indexes your repo until you ask,
-> or until the REPL kicks off a background refresh because an existing
-> index has gone stale. Bare `/index` behaves like `/index init` (a
+> Opening the REPL in a recognised project starts a background index (turn it
+> off with `[workspace] index_on_init = false`), and a stale index is refreshed
+> in the background. Bare `/index` behaves like `/index init` (a
 > standard-depth scan with an intro banner). `/index rebuild` runs the
 > same full reindex as `/index deep` — there's no separate "wipe and
 > start clean" mode, since a deep pass already rebuilds from scratch.
-> Every run previews the file count first and asks you to confirm before
-> indexing. `/cognition` is kept as a full alias of `/index` for anyone
+> A `/index` run you start previews the file count and asks you to confirm
+> before indexing. `/cognition` is kept as a full alias of `/index` for anyone
 > used to the old name.
 
 ---
 
 ## Memory
 
-Inspecting the 5-tier memory system and the context window.
+Inspecting the 4-tier memory system and the context window.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `memory` | `mem` | `/memory [clear\|stats]` | Inspect the 5-tier memory system: working, episodic, semantic, graph, lineage |
+| `memory` | `mem` | `/memory [clear\|stats]` | Inspect the 4-tier memory system: working, episodic, semantic, lineage |
 | `context` | `ctx` | `/context` | Show context window usage for the current conversation |
 
-> `/memory clear` asks for confirmation before it runs — it drops
-> persisted state (SQLite, Qdrant, LanceDB) for the current workspace, not
-> just the in-process turn buffer.
+> `/memory clear` clears **working memory only** (the current turns), after a
+> confirmation. To remove stored data use `velune memory clear <tier>` or
+> `velune purge-data`.
 
 ---
 

@@ -139,7 +139,7 @@ def test_memory_tier_count_matches_the_memory_command():
     memory = next(cmd for cmd in registry._commands.values() if cmd.name == "memory")
     tiers = memory.description.split(":", 1)[1].split(",")
     assert _facts()["memory_tiers"] == str(len(tiers))
-    assert [t.strip() for t in tiers] == ["working", "episodic", "semantic", "graph", "lineage"]
+    assert [t.strip() for t in tiers] == ["working", "episodic", "semantic", "lineage"]
 
 
 def test_council_skill_and_profile_counts_match_the_library():

@@ -1,9 +1,10 @@
 # Velune CLI: technical reference
 
-The full technical reference for [Velune CLI](https://github.com/Surya-Hariharan/Velune-CLI): installation and platform
+The technical reference for [Velune CLI](https://github.com/Surya-Hariharan/Velune-CLI): installation and platform
 support, optional extras, providers, file operations, memory, execution modes and permissions, MCP, configuration,
-commands, the contributor workflow, and project status and licensing. For the overview and pitch, see the
-[README](https://github.com/Surya-Hariharan/Velune-CLI#readme).
+commands, and project status and licensing. For the overview, see the
+[README](https://github.com/Surya-Hariharan/Velune-CLI#readme); for day-to-day use, the
+[usage guide](usage-guide.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/scripts/install.sh | sh
@@ -119,7 +120,7 @@ when the extra is missing (semantic search is disabled while keyword search keep
 | `telemetry` | Export spans and metrics to an OTLP collector |
 | `gguf`, `docker`, `api` | GGUF metadata reading; the Docker sandbox and the native Docker Engine integration (see [docs/docker.md](docker.md)); YAML OpenAPI specs for the HTTP integration |
 | `postgres`, `mysql` | Drivers for the PostgreSQL and MySQL / MariaDB integrations (named connections, schema discovery, read-only queries, approved changes and transactions; see [docs/database.md](database.md)) |
-| `all` | Every optional feature |
+| `all` | Every optional feature except the `postgres` and `mysql` drivers |
 
 ```bash
 pip install 'velune-cli[rag]'
@@ -137,102 +138,29 @@ which is not recommended outside a trusted single-user environment.
 **Python:** 3.10 to 3.14 (CPython). CI runs the test suite on every combination of these versions with Windows, macOS
 and Linux.
 
-## See it in the terminal
-
-<div align="center">
-<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-terminal.svg" alt="Animated terminal showing the real output of velune --version and velune --help: the command groups Core, Workspace and Sessions, and Setup and Models" width="728">
-</div>
-
-The animation replays real output captured from Velune CLI 0.9.9 (`velune --version` and `velune --help`, shortened
-after the *Setup and Models* group). It shows what is installed and where to start, not a full session. A recording of
-a complete plan-review-approve workflow is on the [wish list](#ways-to-contribute).
-
-A typical session in the REPL uses these real commands:
-
-```text
-/index standard                       build the symbol index (once, then kept fresh)
-/model use <model-id>                 choose a connected model
-/plan add input validation to signup  investigate and write a plan; no project files change
-approve                               run the plan; each change is shown for approval in Manual mode
-/diff                                 review what changed on disk
-/rewind                               undo the file changes from the agent's last turn
-```
-
-### Quickstart
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**With a local model (Ollama)**
-
-```bash
-ollama pull qwen2.5-coder:7b
-cd your-project
-velune init
-velune
-```
-
-Install Ollama from [ollama.com](https://ollama.com) first. For a remote Ollama, set `OLLAMA_HOST`.
-
-</td>
-<td width="50%" valign="top">
-
-**With a cloud provider (Groq)**
+## First run
 
 ```bash
 cd your-project
-velune init --provider groq
-velune setup   # asks for your key
+velune init                  # or: velune init --provider groq, then velune setup
 velune
 ```
 
-Groq has a free tier; create a key at [console.groq.com/keys](https://console.groq.com/keys).
+For a local model, install [Ollama](https://ollama.com) and run `ollama pull qwen2.5-coder:7b` first (for a remote
+Ollama, set `OLLAMA_HOST`). `velune init` creates the project configuration and `.veluneignore` and builds the
+repository index (`--no-index` skips it). If you skip it, the first time you open the REPL in that folder Velune starts
+indexing in the background; set `[workspace] index_on_init = false` to turn that off. Run `velune doctor` at any time to
+check your setup. The [usage guide](usage-guide.md) walks through a session.
 
-</td>
-</tr>
-</table>
+## Architecture
 
-`velune init` creates the project configuration and `.veluneignore` and builds the repository index (`--no-index` skips
-it). Otherwise indexing is explicit: nothing is indexed when Velune starts. Run `velune doctor` at any time to check
-your setup.
-
-## Why Velune
-
-Plenty of tools put a model in your terminal. Velune is built around four decisions, each of which exists in the code
-today:
-
-- **You choose where your prompts go.** Eighteen provider adapters cover local servers and cloud APIs. Velune has no
-  analytics service, and a failed local model is not retried on a cloud provider unless you opt in.
-- **Hard tasks get more than one opinion.** A council of five agents plans, writes, reviews and challenges the work, and
-  the depth is chosen per task. Simple questions skip the council.
-- **It remembers, and it reads your repository when you ask.** Five memory tiers persist per workspace, and indexing
-  (symbols, import graph, blast radius) runs only on request.
-- **You decide how much it may do.** Manual, Plan and Auto modes, path containment, diff preview and git snapshots keep
-  the agent inside limits you set. This is process management, not a security sandbox; a Docker sandbox is available as
-  an opt-in for real isolation.
-
-It also speaks MCP in both directions, so editors can call Velune's tools and Velune can use other MCP servers.
-
-## What you get
-
-| | |
-| :--- | :--- |
-| **Council of agents**<br>A team picked for each task from a skill (coding, planning, review, research) and a permission profile, working in stages. | **Repository cognition**<br>On-demand index of files, symbols and the import graph, with blast-radius estimates and incremental updates. |
-| **Persistent memory**<br>Working, episodic, semantic, graph and lineage tiers per workspace, with hybrid retrieval (BM25, vectors, graph). | **18 providers**<br>Ollama, LM Studio, OpenAI-compatible servers, Groq, OpenRouter, OpenAI, Anthropic, Google, Mistral and more. |
-| **Controlled execution**<br>Manual, Plan and Auto modes, path guard, diff preview, git snapshots, resource-limited command runner. | **MCP both ways**<br>`velune mcp serve` for editors; connect to external servers over stdio, SSE, HTTP or WebSocket. |
-| **Recovery tools**<br>`backup`, `restore` and crash `recover`, plus `doctor`, `status` and a trace log of what actually ran. | **Extensible**<br>Declarative plugins, lifecycle hooks, custom slash commands and resource connectors (Docker, Postgres, MySQL, Supabase). |
-
-Opt-in: the Docker sandbox, and the `rag` and `parsing` extras.
-
-## Multi-agent architecture
-
-For tasks that need it, `/council` (or `/run`) hands the work to a team of agents. One model call picks a *skill* — how
-a kind of task is done, and its default team — and a *permission profile*: what the agents may do, from answering only
-to editing files. It then gives each agent its own part of the task. Agents in the same stage run at the same time; a
-later stage sees what the earlier ones found; the last agent writes the result. Every change still passes the approval
-rules of your execution mode, and one `/rewind` undoes the whole run. `--skill` and `--permission` choose for you, and
-`/skills` lists both; your own go in `~/.velune/skills/` and `~/.velune/permissions/`.
+`/council` hands a task to a team of agents. One model call picks a *skill* (how a kind of task is done, and its default
+team) and a *permission profile* (what the agents may do, from answering only to editing files), then gives each agent
+its own part. Agents in the same stage run at the same time, a later stage sees what the earlier ones found, and the
+last agent writes the result. Every change still passes the approval rules of your execution mode, and one `/rewind`
+undoes the whole run. `--skill` and `--permission` choose for you, `--bg` runs it read-only in the background, and
+`/skills` lists skills and profiles; your own go in `~/.velune/skills/` and `~/.velune/permissions/`. A council costs
+more calls and time than a single model and does not guarantee a good answer. Read diffs before accepting them.
 
 ```mermaid
 flowchart LR
@@ -244,27 +172,8 @@ flowchart LR
     A --> F[(Workspace files)]
 ```
 
-A council improves the odds of a good answer and does not guarantee one, and it costs more calls and time than a single
-model. Read diffs before accepting them.
-
-Around the council, Velune is one Python process. The CLI builds a runtime (configuration, providers and models first;
-repository, memory, retrieval, execution and agent subsystems warm up in the background), then routes each request
-through the provider layer. Heavy subsystems load lazily, so `velune --version` and `--help` start quickly.
-
-```mermaid
-flowchart LR
-    User([You]) --> CLI["CLI and REPL<br/>velune/cli"]
-    CLI --> Agents["Council and tool loop<br/>velune/cognition, velune/orchestration"]
-    Agents --> Ctx["Context assembly<br/>velune/context"]
-    Ctx --> Mem["Memory<br/>velune/memory"]
-    Ctx --> Ret["Retrieval<br/>velune/retrieval"]
-    Ret --> Repo["Repository index<br/>velune/repository"]
-    Agents --> Providers["Providers<br/>velune/providers"]
-    Agents --> Exec["Execution and permissions<br/>velune/execution, velune/permissions"]
-    Exec --> FS[(Workspace files)]
-    Providers --> Models[("Local or cloud models")]
-    Agents --> MCP["MCP client and server<br/>velune/mcp"]
-```
+Velune is one Python process. The CLI builds a runtime (configuration, providers and models first; repository, memory,
+retrieval and execution subsystems warm up in the background), then routes each request through the provider layer.
 
 <details>
 <summary>Package map</summary>
@@ -274,16 +183,16 @@ flowchart LR
 | `velune/cli` | Typer commands, full-screen REPL, slash commands, themes, onboarding |
 | `velune/providers`, `velune/models` | Provider adapters, discovery, credentials, model registry |
 | `velune/swarm` | `/council`: skills, permission profiles, planner, stage runner |
-| `velune/cognition` | Prompts and the injection firewall |
-| `velune/orchestration` | Native tool-calling loop and the experimental native engine |
+| `velune/orchestration` | The tool-calling loop |
+| `velune/cognition` | Prompts, intent classification and the injection firewall |
+| `velune/context` | Per-turn context assembly and token budget |
 | `velune/memory`, `velune/retrieval` | Memory tiers, SQLite and vector stores, hybrid retrieval |
 | `velune/repository`, `velune/intelligence`, `velune/knowledge` | Scanner, symbol and import index, incremental re-indexing, knowledge graph |
-| `velune/execution`, `velune/permissions`, `velune/tools` | Command runner, path guard, diff preview, rollback, approval policy, tools |
-| `velune/mcp`, `velune/hooks`, `velune/plugins`, `velune/resources` | MCP, lifecycle hooks, declarative plugins, Docker and database connectors |
+| `velune/execution`, `velune/permissions`, `velune/tools` | Command runner, path guard, diff preview, approval policy, tools |
+| `velune/mcp`, `velune/hooks`, `velune/plugins`, `velune/resources` | MCP, lifecycle hooks, declarative plugins, integrations |
 | `velune/recovery`, `velune/lifecycle` | Backup, restore, crash recovery; update, repair, uninstall |
 
-Module boundaries and the bootstrap sequence are in
-[docs/development.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/development.md).
+Module boundaries and the bootstrap sequence are in the [development guide](development.md).
 
 </details>
 
@@ -293,10 +202,15 @@ Module boundaries and the bootstrap sequence are in
   `OLLAMA_HOST` or an OpenAI-compatible server on another host receives your prompts and repository context.
 - **Cloud providers** receive the prompt and whatever repository or memory context Velune includes. Their retention and
   training policies are set by the provider, not by Velune.
-- A council run keeps the model it started with: a failed call is retried on the same provider, never moved to
+- **Chat can switch provider when one fails.** If the active provider is unreachable, rejects the key, is rate limited,
+  times out or no longer has the model, and no tool has changed anything yet, the REPL retries the turn on your next
+  configured provider and prints `Falling back to …`. That provider may be a cloud one even when you started on a local
+  model, so configure only providers you are willing to send a prompt to.
+- A council run keeps the models it started with: a failed call is retried on the same provider, never moved to
   another one.
 - Velune has no analytics service and sends no usage data to its maintainers. Network traffic is limited to the
-  providers, MCP servers, git hosts and web pages you use, plus the PyPI request made when you run `velune update`.
+  providers, MCP servers, git hosts, web pages and integrations you use, plus a request to PyPI (at most once a day, and
+  when you run `velune update`). `[update] auto = "off"` or `VELUNE_NO_UPDATE_CHECK=1` stops the daily check.
 - API keys are stored AES-GCM-encrypted in your user configuration directory, with the encryption key in the OS keyring
   (or derived from `VELUNE_MASTER_PASSPHRASE` where none exists). A key saved through Velune takes precedence over a
   provider environment variable; set `VELUNE_PREFER_ENV_KEYS=1` to reverse that. Limits of this protection are in
@@ -338,7 +252,7 @@ read from the provider when available; if a listing fails, Velune keeps the last
 <summary>Hardware guidance and models on an external drive</summary>
 
 Velune detects RAM, GPU and accelerator at startup, classifies the machine, and prints warnings and suggestions. These
-are suggestions only; Velune does not move your prompts to a cloud provider because of them.
+are suggestions only; hardware detection never changes which provider receives your prompts.
 
 | RAM | Accelerator | Local models |
 | :--- | :--- | :--- |
@@ -364,10 +278,11 @@ which copies the file, so Velune shows the size and asks first.
 Velune can read, create, edit, move and delete files and run commands in your project, depending on the
 [execution mode](#execution-modes-and-permissions).
 
-- **Indexing is explicit.** Use `/index quick|standard|deep|status|rebuild` in the REPL, or `velune project init` from
-  the shell (`velune status` reports index freshness). Memory and retrieval stores live per workspace in your user data
-  directory, not in the repository; a project's `.velune/` folder holds plans and small local files. `.veluneignore`
-  excludes paths from indexing, and its default template excludes `.env`, `*.pem`, `*.key` and similar files.
+- **Indexing.** Use `/index quick|standard|deep|status|rebuild` in the REPL, or `velune project init` from the shell
+  (`velune status` reports index freshness). Besides the first-run background index described above, an index that has
+  gone stale is refreshed in the background. Memory and retrieval stores live per workspace in your user data directory,
+  not in the repository; a project's `.velune/` folder holds plans and small local files. `.veluneignore` excludes paths
+  from indexing, and its default template excludes `.env`, `*.pem`, `*.key` and similar files.
 - **Targeted edits.** The agent changes part of a file with `edit_file` (exact, unique string replacement) instead of
   rewriting it, and every change comes back to the model as a verified diff.
 - **Safe writes.** Writes are atomic, keep each file's encoding and line endings (a CRLF file stays CRLF), and are
@@ -375,26 +290,25 @@ Velune can read, create, edit, move and delete files and run commands in your pr
 - **Path guard.** Filesystem and git tools resolve paths, including symlinks, and refuse anything outside the workspace
   unless you approve it. Changing `.git/`, `.velune/hooks.json` or `velune.toml` always asks first.
 - **Diff preview.** In Manual mode every change is shown as a diff and applied only after you approve it.
-- **Snapshots and undo.** Plan-driven changes take a git stash or branch snapshot first and are restored if execution
-  fails. `/rewind` undoes the file changes from the agent's last turn.
-  Velune does not commit council edits unless you set `execution.council_auto_commit = true`.
+- **Undo.** `/rewind` undoes the file changes from the agent's last turn. Velune does not commit council edits unless
+  you set `execution.council_auto_commit = true`.
 
 See [Filesystem tools](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/filesystem-tools.md) for every
 tool, the safety model and provider support.
 
 ## Memory and repository cognition
 
-Memory has five tiers, stored per workspace:
+Memory has four tiers, stored per workspace:
 
 1. **Working:** current conversation turns, in process.
 2. **Episodic:** session history in SQLite.
 3. **Semantic:** vector search over past interactions (needs the `rag` extra).
-4. **Graph:** entities and relationships observed in conversations and executions.
-5. **Lineage:** decisions and what was tried.
+4. **Lineage:** decisions and what was tried.
 
-Retrieval combines BM25 keyword search, vector search and graph signals, then reranks with a heuristic reranker. Without
-the `rag` extra, vector search is disabled and keyword and graph retrieval keep working. A background watcher keeps the
-index current incrementally once you have built it. Inspect memory with `velune memory stats|inspect|clear|compact`, and
+Separately, indexing builds a repository knowledge graph of files, symbols and imports. Retrieval combines BM25 keyword
+search, vector search and graph signals, then reranks with a heuristic reranker. Without the `rag` extra, vector search
+is disabled and keyword and graph retrieval keep working. A background watcher keeps the index current incrementally
+once you have built it. Inspect memory with `velune memory stats|inspect|clear|compact`, and
 trace a query with `velune pipeline trace "<query>"`. Each workspace has its own memory store, keyed by the folder's
 absolute path, so same-named folders in different locations are kept apart.
 
@@ -412,7 +326,7 @@ without asking. Press Shift+Tab to cycle modes, use the slash commands, or start
 In every mode Velune still asks before touching anything outside the project folder, before high-risk operations (for
 example `git reset --hard`, `git clean`, force-push, recursive deletes, global installs), and before reading or changing
 secrets. Commands such as `sudo` and disk formatting are not run. These rules are enforced in the tool layer rather than
-by instructions to the model, and each decision is logged (`velune trace --type permission`).
+by instructions to the model, and each decision is logged (`velune logs --type permission`).
 
 **Limits.** Commands run as your user through a managed runner (allowlisted executables, no shell, resource limits).
 That is process management, not OS-level isolation, and allowlisted interpreters can run any file in the workspace. For
@@ -426,17 +340,19 @@ processes through a configuration file.
 ## MCP, configuration and commands
 
 **MCP.** `velune mcp serve` exposes Velune's tools to MCP-capable clients such as Claude Desktop or editors, over stdio
-(read-only unless `VELUNE_MCP_ALLOW_MUTATIONS=1`). `velune mcp connect <url> <name>` or `/mcp connect` connects to an
-external server over stdio, SSE, HTTP or WebSocket; servers can be declared in `.mcp.json` (trusted directories only).
-Cloud-metadata and link-local addresses are always blocked, and `[mcp] allowed_hosts` can restrict connections further.
+(read-only unless `VELUNE_MCP_ALLOW_MUTATIONS=1`). In the other direction, declare external servers (stdio, SSE, HTTP or
+WebSocket) in `.mcp.json` or `[mcp.servers]` (project files are honored in trusted directories only) and connect with
+`/mcp connect <name>`; `velune mcp connect <url> <name>` tests an SSE server from the shell. Cloud-metadata and
+link-local addresses are always blocked, and `[mcp] allowed_hosts` can restrict connections further.
 See [docs/mcp.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/mcp.md).
 
 **Configuration.** Settings come from `velune.toml`, looked up in the workspace, then parent directories, then
 `~/.velune/velune.toml`. A value in the file takes precedence over a `VELUNE_*` environment variable (nested keys use
 `__`, for example `VELUNE_EXECUTION__MODE=plan`), and both override the built-in defaults. Read and change values with
 `velune config show|get|set`. The repository's
-[velune.toml](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/velune.toml) lists every available setting at its
-default, with explanations.
+[velune.toml](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/velune.toml) shows the common settings at their
+defaults, with explanations; integration settings are documented in the [Docker](docker.md), [database](database.md) and
+[HTTP](http.md) guides.
 
 ```toml
 [providers]
@@ -460,8 +376,6 @@ Velune keeps its own background work light, and has a few switches for slow mach
   agents run at once (one at a time on a local model server).
   `[swarm.models]` gives a role its own model (`reviewer = "provider/model"`, or `lead` for whichever agent
   leads); a model that is unavailable is reported in the plan and the chat model is used.
-- **Time limits.** `VELUNE_COUNCIL_MAX_SECONDS` (default 600) bounds a whole council run;
-  `VELUNE_COUNCIL_CONTEXT_SECONDS` (default 30) bounds the repository-context step before it starts.
 - **Rate limits.** A provider's `Retry-After` is honoured up to 20 s; a longer wait fails fast with the provider's error
   instead of stalling the run. At most 4 requests per provider are in flight, and at most 4 startup model probes.
 - **Optional vector memory.** Vector stores need the `rag` extra. `VELUNE_SKIP_LANCEDB=1` and `VELUNE_SKIP_QDRANT=1`
@@ -469,7 +383,7 @@ Velune keeps its own background work light, and has a few switches for slow mach
 
 ### Commands
 
-Run `velune --help` or `velune <command> --help` for full signatures. Inside the REPL there are 55 slash commands in 12
+Run `velune --help` or `velune <command> --help` for full signatures. Inside the REPL there are 43 slash commands in 12
 categories; press Tab to complete, and run `/help` for aliases and usage. The status bar shows background jobs (`bg:N`),
 unread proactive alerts (`alerts:N`) and MCP connection counts.
 
@@ -480,7 +394,7 @@ unread proactive alerts (`alerts:N`) and MCP connection counts.
 | :--- | :--- |
 | Core | `velune` (REPL), `chat` (the same REPL; `--session <id>` resumes), `run "<task>"`, `ask "<question>"`, `init`, `onboard` |
 | Workspace and sessions | `project init\|status\|graph\|tree\|list\|open\|resume\|explain\|forget` (alias `workspace`), `session list\|resume\|show\|delete\|import\|rename\|search\|archive\|unarchive\|export` |
-| Setup and models | `setup`, `models scan\|list\|refresh\|pull\|delete\|assign\|use\|benchmark\|health\|show`, `provider list\|add\|remove\|test\|models\|status\|api\|edit\|inspect\|default\|backup\|restore\|repair`, `config show\|get\|set`, `trust add\|list\|forget` |
+| Setup and models | `setup`, `models scan\|list\|refresh\|pull\|delete\|use\|benchmark\|health\|show`, `provider list\|add\|remove\|test\|models\|status\|api\|edit\|inspect\|default\|backup\|restore\|repair`, `config show\|get\|set`, `trust add\|list\|forget` |
 | Analytics and monitoring | `usage`, `quota`, `health` |
 | Diagnostics | `doctor [providers\|network]`, `logs [recent\|live]`, `status`, `pipeline trace "<query>"`, `daemon start\|stop\|status`, `mcp serve\|connect`, `memory stats\|inspect\|clear\|compact` |
 | Lifecycle | `update [--check]`, `repair`, `uninstall`, `purge-data` |
@@ -495,100 +409,16 @@ slash-command reference is in
 
 </details>
 
-## Documentation
+## More documentation
 
-| Start here | For |
-| :--- | :--- |
-| [Usage guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/usage-guide.md) | Day-to-day use: models, modes, review, memory, troubleshooting |
-| [Slash commands](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/slash-commands.md) | Every REPL command, alias and usage string |
-| [Filesystem tools](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/filesystem-tools.md) | How the agent edits files, the safety model, provider support |
-| [MCP guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/mcp.md) | MCP server and client, transports, trust gating |
-| [Development guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/development.md) | Architecture, module boundaries, testing, CI |
-| [Security policy](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/SECURITY.md) | Threat model, limitations, reporting |
-| [Changelog](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CHANGELOG.md) | Version history |
-| [Project origin](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/project-origin.md), [Authors](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/AUTHORS.md), [Governance](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/GOVERNANCE.md) | Provenance and how the project is run |
+[Usage guide](usage-guide.md) · [Slash commands](slash-commands.md) · [Filesystem tools](filesystem-tools.md) ·
+[MCP](mcp.md) · [Docker](docker.md) · [Databases](database.md) · [HTTP](http.md) · [Lifecycle](lifecycle.md) ·
+[Data inventory](data-inventory.md) · [Development](development.md) · [Project origin](project-origin.md)
 
-## Roadmap
-
-There is no committed, dated roadmap. These are the real open areas, taken from the project's own documentation:
-
-- **MCP server transports.** The server code can listen over HTTP, but `velune mcp serve` offers stdio only
-  ([docs/mcp.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/mcp.md)).
-- **MCP SDK 2.x.** Velune pins `mcp<2.0.0` until its server code is migrated to the new API.
-- **Platform verification.** Intel macOS is unverified, and Linux arm64 and musl are not covered by CI (see
-  [Platform support](#platform-support)).
-- **OS-level isolation by default.** Command execution is not sandboxed unless you enable the Docker sandbox.
-
-Ideas and questions are welcome in [Discussions](https://github.com/Surya-Hariharan/Velune-CLI/discussions).
-
-## Contributing
-
-Velune is ambitious, has a lot of surface area, and has one maintainer, so careful help goes a long way. The code base is
-typed, tested on three operating systems and five Python versions, and documented well enough to find your way around.
-
-### What makes it interesting to work on
-
-- **Hybrid retrieval:** fusing BM25, vector and graph results with weights chosen per intent.
-- **Incremental repository cognition:** keeping a symbol and import index fresh without rescanning.
-- **A permission layer that has to hold:** path containment, a command runner that resists PATH hijacking on both
-  Windows and POSIX, and approval rules enforced outside the model.
-- **Provider adapters:** eighteen of them, with live model-list reconciliation and credential handling that must fail
-  safely.
-- **Fast startup:** a tiered runtime so heavy subsystems stay off the critical path.
-
-Start with the [development guide](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/development.md).
-
-### Ways to contribute
-
-- **Add a provider, command or council critic.**
-  [CONTRIBUTING.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CONTRIBUTING.md) has a step-by-step guide
-  for each, with real adapters to copy from.
-- **Record a demo.** A short terminal recording of a real plan, review and approve workflow is the most visible thing
-  missing. The two animated assets in this README are original SVGs; a screen recording would complement them.
-- **Verify platforms.** Try the installer on Intel macOS, Linux arm64 or Alpine and report what happens.
-- **Improve tests and docs.** Fix an unclear passage, add a missing example, or cover an untested path.
-- **Work on a documented gap** from the [roadmap](#roadmap); comment on an issue first so the scope is agreed.
-
-New here? Look for issues labelled
-[good first issue](https://github.com/Surya-Hariharan/Velune-CLI/labels/good%20first%20issue) or
-[help wanted](https://github.com/Surya-Hariharan/Velune-CLI/labels/help%20wanted). There may be none open at a given
-time; in that case open an issue or a [discussion](https://github.com/Surya-Hariharan/Velune-CLI/discussions) describing
-what you would like to do.
-
-### Workflow
-
-1. For anything beyond a small fix, open an issue to agree on scope.
-2. Fork, then set up a development environment:
-
-   ```bash
-   git clone https://github.com/<your-username>/Velune-CLI.git
-   cd Velune-CLI
-   python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-   pip install -e ".[dev]"
-   ```
-
-3. Make your change with tests, then run what CI runs:
-
-   ```bash
-   ruff check velune/ && ruff format --check velune/ && pyright velune/ && pytest -q
-   ```
-
-4. Add a line under `[Unreleased]` in the changelog for user-visible changes, and open a pull request.
-
-The maintainer reviews every pull request and decides what is merged; CI must pass first
-([governance](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/GOVERNANCE.md)). Keep changes focused, explain the
-why, and respond to review comments within a few days. By contributing you agree your work is licensed under Apache-2.0,
-with no CLA. Participation is governed by the
-[Code of Conduct](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CODE_OF_CONDUCT.md).
-
-### Contributors and community
-
-Contributors are credited in the Git history, in pull requests, and in the changelog where a change affects users. See
-the live [contributors graph](https://github.com/Surya-Hariharan/Velune-CLI/graphs/contributors),
-[releases](https://github.com/Surya-Hariharan/Velune-CLI/releases),
-[Discussions](https://github.com/Surya-Hariharan/Velune-CLI/discussions) and
-[AUTHORS.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/AUTHORS.md). This README does not embed a
-third-party contributor widget: GitHub's own graph is always accurate and needs no extra service or workflow.
+To contribute, read [CONTRIBUTING.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/CONTRIBUTING.md); it covers setup, the checks CI runs, and how to add a
+provider or command. Known gaps: Intel macOS is unverified, Linux arm64 and musl are not covered by CI (see
+[Platform support](#platform-support)), command execution is not sandboxed unless you enable the Docker sandbox, and
+Velune pins `mcp<2.0.0` until its server code is migrated to the new API.
 
 ## Project status, security and license
 
@@ -615,6 +445,6 @@ and "Velune CLI" names, wordmark or logo other than for reasonable and customary
 This is a statement about project naming, not a claim of registered trademark status. Forks are welcome; they are
 separate projects and should not present themselves as the canonical Velune CLI. Third-party product and company names
 (for example Claude, Ollama, OpenAI) belong to their owners and are used only to identify the services Velune can
-connect to. The hero and terminal images in `docs/assets/` were created for this project and are part of the repository, so the
+connect to. The images in `docs/assets/` were created for this project and are part of the repository, so the
 repository license applies to them. See [AUTHORS.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/AUTHORS.md) and
 [GOVERNANCE.md](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/GOVERNANCE.md).

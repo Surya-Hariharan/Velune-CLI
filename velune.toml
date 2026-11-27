@@ -69,7 +69,6 @@ default_provider = "groq"
 # approval mode.
 #native_tools = true
 #max_tool_turns = 10
-#hunk_review_default = false
 # Commit the files a council edit session changed. Off by default because a
 # commit is a durable change to your history.
 #council_auto_commit = false

@@ -28,7 +28,7 @@ Endpoints are tried in this order; an explicit choice is never silently replaced
 3. the active `docker context`
 4. the platform default — Windows: `npipe:////./pipe/docker_engine`, then `…/dockerDesktopLinuxEngine`; Linux:
    `/var/run/docker.sock`, then rootless `$XDG_RUNTIME_DIR/docker.sock`; macOS: `/var/run/docker.sock`, then Docker
-   Desktop's `~/.docker/run/docker.sock`
+   Desktop's `~/.docker/run/docker.sock`. Linux finally tries Docker Desktop's `~/.docker/desktop/docker.sock`.
 
 **Remote daemons.** An unauthenticated `tcp://` socket is **refused** (even `127.0.0.1`): it gives root on that
 host. A `tcp://` endpoint needs TLS with a CA and a client certificate — `tls_ca`, `tls_cert`, `tls_key` (paths

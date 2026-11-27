@@ -195,7 +195,7 @@ postgres__transaction_commit  {"transaction_id": "3f9c…"}
 * **The service-role key is never shown to the model.** `service_role: true` (and `rls_policies`) use it to
   *bypass* RLS; that is a privileged act: it is a high-risk, secret-touching action that **asks in every mode,
   is denied in PLAN and is never covered by a session grant**.
-* `query` takes `table`, `select`, `limit`, `offset`, `order`, one `filter_*` triple (`eq neq gt gte lt lte like
+* `query` takes `table`, `select`, `limit` (default 100, at most 1000), `offset`, `order`, `descending`, one `filter_*` triple (`eq neq gt gte lt lte like
   ilike is`); the table, column and `select` are validated, the project host is the only host ever contacted, and
   rows are bounded and column-redacted like SQL results. HTTP failures map to `authentication_failed` (bad key),
   `authorization_denied` (RLS or grants — the hint says so), `not_found`, `validation_failed`, `timeout`, …

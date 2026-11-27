@@ -49,7 +49,7 @@ Velune answers every one of them. And every answer points at a file in this repo
 - 🧠 **A team picked for the task.** `/council` chooses a skill (coding, planning, review or research), builds up to
   five agents for it, and a permission profile decides what they may touch.
 - 🛡️ **You hold the leash.** Manual by default. Every change is a diff you approve. One command to undo.
-- 📚 **It remembers.** Five memory tiers per project, so it knows your code before you explain it.
+- 📚 **It remembers.** Four memory tiers per project, so it knows your code before you explain it.
 
 <div align="center">
 <img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-swarm.svg" alt="The four built-in council skills and their stages. Coding: explorer, then implementer and tester together, then reviewer. Planning: analyst, architect, critic, planner. Review: mapper, then correctness and security together, then lead. Research: researcher, then writer. Six permission profiles decide what a team may do" width="100%">
@@ -82,7 +82,7 @@ ordinary chat uses one model and the team only runs when you ask for it (`/counc
 No hype. Counted from the code. A test recomputes them on every CI run and fails if they drift.
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-numbers.svg" alt="Counted from the repository: 18 provider adapters, 43 slash commands in 12 categories, 5 memory tiers, 4 council skills with 6 permission profiles, 3 operating systems by 5 Python versions in CI, and 0 analytics services" width="100%">
+<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-numbers.svg" alt="Counted from the repository: 18 provider adapters, 43 slash commands in 12 categories, 4 memory tiers, 4 council skills with 6 permission profiles, 3 operating systems by 5 Python versions in CI, and 0 analytics services" width="100%">
 </div>
 
 The honest part: this is **beta**. Things change between releases. Command execution is process management, not an

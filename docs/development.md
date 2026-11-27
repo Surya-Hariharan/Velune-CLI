@@ -45,8 +45,9 @@ kernel in `velune/kernel/`:
     `LifecycleCoordinator`, and a factory failure aborts startup. A module without one is optional — a
     failure is logged and the module skipped. A factory that returns `None` is treated as "not provided".
   - **`tier`** — `0` runs synchronously and must be cheap (it delays the first prompt: providers, models,
-    the event bus, observability); `1` is background warm-up after the prompt is interactive (memory,
-    retrieval, repository cognition, tools, the council, the knowledge graph, the intelligence engine).
+    the event bus, observability); `1` is background warm-up after the prompt is interactive (repository
+    cognition, memory, retrieval, execution, tools, the injection firewall, the knowledge graph, the
+    intelligence engine).
     Tier-1 imports are deferred in `kernel/modules.py:load_background_modules()` so heavy package imports
     never run on the startup path.
 - **CLI bootstrap levels** — independently of subsystem tiers, `velune/cli/registry.py:CommandSpec.
@@ -61,7 +62,7 @@ flowchart TD
     B --> C{"Which command?"}
     C -->|"--version, --help"| D["No runtime built"]
     C -->|"light command<br/>e.g. config show"| E["Tier 0 only<br/>providers, models, event bus, observability"]
-    C -->|"full command or REPL"| F["Tier 0, then Tier 1 in the background<br/>memory, retrieval, repository cognition,<br/>tools, council, knowledge graph"]
+    C -->|"full command or REPL"| F["Tier 0, then Tier 1 in the background<br/>memory, retrieval, repository cognition,<br/>execution, tools, knowledge graph"]
 ```
 
 **Practical implication:** if you add a subsystem, give it a factory in its package's `subsystems.py` and
@@ -78,8 +79,10 @@ There is no enforced layering; this is the *intended* direction (higher layers d
 
 ```text
 cli/            ← REPL, commands, rendering — depends on almost everything below
-cognition/      ← the Reasoning Council — depends on providers, memory, models, execution
-orchestration/  ← native tool loop (+ an alias of the council orchestrator)
+swarm/          ← /council: skills, permission profiles, planner, stage runner
+orchestration/  ← the tool-calling loop
+cognition/      ← prompts, intent classification, injection firewall
+context/        ← per-turn context assembly and token budget
 retrieval/      ← hybrid search — depends on repository/knowledge data and the memory stores
 memory/         ← tiered conversational memory — depends on core/kernel
 intelligence/   ← change detection → incremental reindex; drives knowledge/
@@ -92,7 +95,7 @@ hooks/ plugins/ resources/ integrations/  ← extension points
 kernel/ core/   ← DI, config, paths, trust, retry, task registry, errors
 ```
 
-In practice a few packages reach "upward" — `cognition/`, `context/` and `proactive/` import helpers from
+In practice a few packages reach "upward" — `context/` and `proactive/` import helpers from
 `cli/` — so treat the diagram as a guide, not a guarantee, and prefer not to add new upward imports.
 Subsystems used headlessly (for example `velune mcp serve`, which has no REPL) should not import `cli/`.
 
@@ -153,8 +156,8 @@ pyright velune/                     # type check (blocking)
 
 ## 4. CI pipeline
 
-`.github/workflows/ci.yml` runs on every push/PR to `main` or `develop`, gated by a final `CI Pass`
-aggregation job:
+`.github/workflows/ci.yml` runs on pushes to `main` or `develop`, on pull requests to those branches and
+`feat/**`, and when another workflow calls it. A final `CI Pass` job gates the result:
 
 | Job | What it does |
 | --- | --- |
@@ -163,7 +166,7 @@ aggregation job:
 | **Tests** | `pip install -e ".[all,dev]"` then `pytest`, across Python 3.10–3.14 × Ubuntu / Windows / macOS |
 | **Build & Validate Artifacts** | Hatchling sdist + wheel (reproducible via `SOURCE_DATE_EPOCH`), `twine check --strict`, and the wheel must be pure-Python (`py3-none-any`) |
 | **Wheel Install + REPL Smoke** | installs the built wheel into a clean environment and runs `velune --version`, `velune --help`, `python -m velune --version`, `velune <doctor|config|provider|models> --help` (strict), and `velune doctor` / `velune doctor --json` (strict: they fail only on a *core* installation problem) across OS × Python |
-| **Lowest Dependency Versions** | installs the *lowest* version allowed by every `pyproject.toml` floor, **wheels only** (`uv pip install --no-build --resolution lowest-direct`), then runs the smoke test and `pytest -m "not integration"` on Python 3.10 and 3.14 × all three OSes, plus two jobs that also install the `[rag,parsing]` extras at their floors. It fails if a floor is too old for the code, or if it has no prebuilt wheel for some Python/OS (which would make a user's `pip install` compile from source) |
+| **Lowest Dependency Versions** | installs the *lowest* version allowed by every `pyproject.toml` floor, **wheels only** (`uv pip install --no-build --resolution lowest-direct`), then runs the smoke test and `pytest -m "not integration"` (without `tests/tui`) on Python 3.10 and 3.14 × all three OSes, plus two jobs that also install the `[rag,parsing]` extras at their floors. It fails if a floor is too old for the code, or if it has no prebuilt wheel for some Python/OS (which would make a user's `pip install` compile from source) |
 | **Install Over Stale Dependencies** | pre-installs old, incompatible versions of core deps (as another tool in a shared environment would), installs the wheel on top, and asserts pip upgraded them and Velune starts |
 | **One-line Installer** | runs `scripts/install.sh` (Linux/macOS, plus `shellcheck`) and `scripts/install.ps1` (Windows) on clean runners against the built wheel |
 | **CI Pass** | fails if any of the above failed — the single required status check |
@@ -199,7 +202,8 @@ dependency for that reason), so it always matches `pyproject.toml`.
 
 > Dependency versions are pinned in the committed `uv.lock` (check with `uv lock --check`; refresh with
 > `uv lock --upgrade-package <name>`). `[project.optional-dependencies]` defines `rag`, `parsing`,
-> `telemetry`, `git`, `gguf`, `docker`, `all`, and `dev`.
+> `telemetry`, `git`, `gguf`, `docker`, `postgres`, `mysql`, `api`, `all` (everything except the two
+> database drivers) and `dev`.
 
 ---
 
@@ -230,9 +234,30 @@ Prefer extending one of these registries over inventing a new loading mechanism.
 
 ### Resource connectors and the authorization pipeline
 
-`velune/resources/` connects Velune to applications on the developer's machine (Docker through the Docker SDK — see [docker.md](docker.md) —
-PostgreSQL, MySQL and Supabase — see [database.md](database.md) —, background processes, and HTTP APIs — see [http.md](http.md); the overall design is in [integrations.md](integrations.md)). A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
-`ResourceManager.register`; nothing else needs to change.
+`velune/resources/` connects Velune to applications on the developer's machine through one framework (the
+Velune Application Integration Runtime). An integration operation is an ordinary tool call: it passes through
+the same permission gate as a file edit or a shell command.
+
+| Integration | What it operates | Guide |
+| --- | --- | --- |
+| `docker` | Docker Engine (containers, images, volumes, networks, Compose) through the Docker SDK | [docker.md](docker.md) |
+| `http` | HTTP APIs: requests, assertions, collections, OpenAPI | [http.md](http.md) |
+| `postgres`, `mysql`, `supabase` | Databases: schema, read queries, approved changes and transactions | [database.md](database.md) |
+| `process` | Background jobs the agent started | [below](#capability-discovery-and-dynamic-tool-exposure) |
+
+A connector is one `ResourceConnector` subclass (`resources/base.py`) registered with
+`ResourceManager.register`; nothing else needs to change. Guarantees that hold for every connector:
+
+- **Credentials** live only in the encrypted keystore, are referred to by name, are registered for redaction,
+  and never appear in results, errors, previews, logs or model context.
+- **Ownership is proven.** The Docker ledger records what Velune created by stable id and creation fingerprint.
+  The record file is authenticated (HMAC-SHA256 with a key held in the keystore, bound to the daemon and the
+  workspace), written atomically under a cross-process lock, and set aside if it is corrupt or fails
+  verification. Labels are claims, not proof.
+- **Untrusted input everywhere.** Model arguments are validated; SQL is tokenized and classified; Compose files
+  are parsed structurally and scanned; HTTP destinations are classified and pinned; nothing runs through a shell.
+- **Bounded output.** Every operation caps rows, lines, bytes and characters, and says when it truncated.
+- **Failure is data.** A connector returns a normalized error with a hint; it does not raise.
 
 **What a connector declares.** `capabilities()` lists each action with a permission tier
 (`READ`/`WRITE`/`EXECUTE`/`ADMIN`), a `destructive` flag and a dotted `scope` (`docker.container.start`; empty
@@ -274,8 +299,8 @@ annotations only raise risk (`destructiveHint` makes it `INTEGRATION_DELETE`); `
 **Ownership.** `OwnershipLedger` (`resources/ownership.py`) records what *this session* created. A connector
 consults it in `describe_actions` and raises the risk of acting on anything else; a resource that existed
 before, or whose origin is unknown, is never assumed to be the task's own. `ownership_effects()` reports what a
-successful call created or removed. The CLI-based Docker connector has no action that creates a container, so
-starting, stopping or restarting an existing container always needs confirmation today. `compose_up` inspects
+successful call created or removed, so acting on a container Velune did not create always needs
+confirmation. `compose_up` inspects
 the compose file (`resources/docker/compose_scan.py`) and treats a privileged container, host network or
 namespaces, a host bind mount, the Docker socket, a device, or anything it cannot inspect as high-risk.
 
@@ -361,8 +386,7 @@ for the prefix that follows it, which is why tools keep a stable, append-only or
 (is the application there right now). The manifest, the discovery tools, the schemas and the gate integration
 follow from that.
 
-The shipped integrations are Docker (through the Docker CLI), local PostgreSQL and MySQL, Supabase, and
-`process`. The example below is **illustrative**, not implemented:
+The example below is **illustrative**, not implemented:
 
 ```python
 class RedisConnector(ResourceConnector):          # illustrative: there is no Redis connector yet
@@ -442,8 +466,8 @@ through the host shell when invoked and are not currently gated by directory tru
   stdout/stderr (a module-level `Console()`, `print`, a logging stream handler) tears it apart. Print
   through `repl.console`, and use `asyncio.to_thread` for blocking work so the UI keeps repainting.
 - **"Memory/retrieval results look stale or wrong"** — there are two vector stores (Qdrant for code
-  retrieval, LanceDB for conversational memory) and three unrelated "graphs" (memory graph tier, repository
-  import graph, knowledge graph). Confirm which one the code path reads before assuming a shared cause.
+  retrieval, LanceDB for conversational memory) and two unrelated "graphs" (the repository
+  import graph and the knowledge graph). Confirm which one the code path reads before assuming a shared cause.
 - **"A council run picked the wrong team or could not change a file"** — `swarm/router.py` records every
   correction it made in `plan.notes`; the run folder (`/council show <id>`) holds the plan, events and each
   agent's result. Tool access comes from the permission profile narrowed by the execution mode
@@ -465,6 +489,6 @@ through the host shell when invoked and are not currently gated by directory tru
 | What can I type in the REPL? | [slash-commands.md](slash-commands.md) |
 | How do I use this well as an end user? | [usage-guide.md](usage-guide.md) |
 | How does MCP client/server/trust work? | [mcp.md](mcp.md) |
-| How do I add a provider / command / council agent, step by step? | [CONTRIBUTING.md](../CONTRIBUTING.md) |
+| How do I add a provider, command, council skill or permission profile? | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | What is the threat model and trust boundary? | [SECURITY.md](../SECURITY.md) |
 | Who made this and how was it built over time? | [project-origin.md](project-origin.md), [AUTHORS.md](../AUTHORS.md) |

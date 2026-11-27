@@ -70,7 +70,7 @@ the result. Data is removed solely by `purge-data`, never implicitly.
 
 ## Windows: never in place
 
-Windows locks the files of the running installation (observed in the P2.0 spike:
+Windows locks the files of the running installation (observed in testing:
 half-replaced or destroyed environments). So on Windows `repair` and `uninstall`
 **refuse to change the installation Velune is running from** and print the exact command
 to run after closing Velune, in a fresh terminal. There is no self-deletion workaround
@@ -119,7 +119,7 @@ automatically.
 
 No equivalent refusal is applied on Linux/macOS because no evidence justifies one;
 this is an open question, not a guarantee that in-place replacement is safe. The
-only real-uv Linux evidence is the P2.3.1 spike (WSL2, a synthetic package, an
+only real-uv Linux evidence is one experiment (WSL2, a synthetic package, an
 interrupted `uv tool upgrade`); Velune's own `update` has not been run against a real
 uv on POSIX. `repair` and `uninstall` were exercised against a real uv (0.13.7) only in
 a disposable, isolated tool environment on Windows x64 during the audit (not part of the

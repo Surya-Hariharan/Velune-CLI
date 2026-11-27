@@ -147,7 +147,7 @@ toward that goal; they reduce risk and do not eliminate it.
   deletes, global installs) and access to secrets still require approval, and
   commands such as `sudo` and disk formatting are not run. These rules are
   enforced in the tool layer rather than by instructions to the model, and each
-  decision is logged (`velune trace --type permission`).
+  decision is logged (`velune logs --type permission`).
 - Operations on applications (Docker, databases, external MCP servers) are
   described as integration actions with a permission scope such as
   `docker.container.stop` or `mcp.<server>.<tool>` and decided by the same
@@ -335,8 +335,7 @@ beyond that mount. It is **opt-in and off by default**:
   and are applied only after you confirm. In Auto mode, changes inside the project
   are applied without a per-change prompt; the path guard and the high-risk
   approvals described above still apply.
-- Plan-driven changes create a git stash or branch snapshot before any edit, and
-  the workspace is restored to that snapshot if execution fails. Velune does not
+- `/rewind` undoes the file changes from the agent's last turn. Velune does not
   commit council edits unless `execution.council_auto_commit = true`.
 
 ### Workspace and memory isolation

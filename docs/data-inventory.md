@@ -18,11 +18,11 @@ directory name alone.
 | Category | Exact entries | Sensitive / user-created | Reversible | Preserved unless named |
 | --- | --- | --- | --- | --- |
 | `cache` | home: `model_registry_cache.json` | no | yes (rebuilt) | yes |
-| `logs` | home: `logs/`, `crash_reports/` | may hold local paths | no | yes |
+| `logs` | home: `logs/` (legacy), `crash_reports/` | may hold local paths | no | yes |
 | `state` | home: `repl_history`, `palette_favorites.json`, `onboarding_progress.json`, `active_model.json` | prompt history | no | yes |
-| `config` | home: `velune.toml`, `workspaces.json`, `council_roles.json`, `hooks.json`, `local_models.json` | user settings | no | yes |
+| `config` | home: `velune.toml`, `workspaces.json`, `council_roles.json`, `hooks.json`, `local_models.json` (`council_roles.json` is legacy) | user settings | no | yes |
 | `sessions` | home: `sessions/` | **user content** | no | **protected** |
-| `skills` | home: `commands/`, `plugins/` | **user-created** | no | **protected** |
+| `skills` | home: `commands/`, `plugins/` (not `skills/`, see below) | **user-created** | no | **protected** |
 | `credentials` | config: `credentials.json`, `credentials.json.bak`, `master.passphrase` | **secret** (never printed) | no | **protected** |
 | `memory` | data: `workspaces/<name>-<10 hex>/` → cognitive DB (+`-wal`/`-shm`), `qdrant_local_store/`, `lancedb_semantic_store/`, `.migrated_from_workspace` | **user content** | no | **protected** |
 
@@ -36,6 +36,21 @@ project files, including a workspace's own `.velune/` folder; the uv cache; othe
 tools; daemon socket/PID files (live runtime state); the OS keyring entry (it holds a
 key, not credentials); anything not listed above. These are not candidates, so no
 option can select them.
+
+## Data no category covers yet
+
+Velune also writes the files below. `purge-data` cannot select them; delete them by hand if
+you want them gone.
+
+| Location | Data |
+| --- | --- |
+| home: `skills/`, `permissions/` | **user-created** council skills and permission profiles |
+| home: `telemetry/usage.db` | local usage and cost records |
+| home: `hardware.json`, `model_locations.json`, `openrouter_models_cache.json`, `model_paths.json` | detected hardware, model locations and caches |
+| data: `trusted_dirs.json` | the workspace trust list |
+| data: `velune_cognitive_core.db` | local telemetry store |
+| data: `workspaces/<name>-<10 hex>/` → `runs/`, `trace.jsonl`, `docker-ownership.json` | council run records, the event trace, the Docker ownership ledger |
+| data: `lifecycle/` → `update_state.json`, `update.log` | update state (part of the lifecycle folder above) |
 
 ## Safeguards
 

@@ -12,7 +12,7 @@ from rich.text import Text
 
 
 class MemoryDisplayView:
-    """Beautiful Rich-based UI components to visualize Velune's 5-tier Hierarchical Memory system."""
+    """Beautiful Rich-based UI components to visualize Velune's tiered memory system."""
 
     def __init__(self, console: Console) -> None:
         self.console = console

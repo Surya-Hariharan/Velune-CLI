@@ -75,9 +75,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   separate chat loop that had neither. `velune chat --session <id>` and `velune session resume`
   open it with that session loaded, and `--plain` works as it does for `velune`.
 - The home screen's "no providers configured" hint points to `/connect`.
+- Documentation corrected against the code; `docs/integrations.md` merged into
+  `docs/development.md`. The docs now state that chat can fall back to another configured
+  provider (including a cloud one) when the active provider fails.
 
 ### Fixed
 
+- `[mcp] allowed_hosts` was ignored by the REPL, so `/mcp connect` and auto-connect could reach
+  hosts outside the allowlist.
+- A `[mcp.servers.<name>]` table in `velune.toml` made Velune discard the whole file and use
+  default settings.
 - `/session save` and `/session export` wrote a new session file on every call. They now update
   the session's own file.
 - `/new` kept the old session id and the last turn's file journal, so `/rewind` could undo a
@@ -155,7 +162,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   relationships (bounded, paged, filtered by the connected role's own privileges), run read-only queries, make
   approved changes, and group statements in explicit transactions, discovered with `integrations_list` /
   `integrations_enable` in the categories `connections`, `schema`, `query_read`, `query_write` and
-  `transactions`. See [docs/database.md](docs/database.md) and [docs/integrations.md](docs/integrations.md).
+  `transactions`. See [docs/database.md](docs/database.md) and [docs/development.md](docs/development.md).
   - **Named connections.** One integration serves any number of connections (`connection="staging"`);
     `/resource configure postgres staging --env staging --read-only` stores the endpoint and password together in the encrypted keystore, and
     `[resources.postgres.connections.<name>]` only names a credential and sets policy (`read_only`, `environment`,
