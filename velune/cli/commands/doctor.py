@@ -187,6 +187,15 @@ def _all_checks() -> list:
     ]
 
 
+def repl_checks() -> list:
+    """The checks the REPL's ``/doctor`` runs: every check except memory health.
+
+    That one starts its own event loop, which must not happen beside the REPL's running
+    loop; ``/memory`` shows the same numbers there.
+    """
+    return [check for check in _all_checks() if check is not _check_memory_health]
+
+
 def _run_checks(checks: list) -> list[dict]:
     """Run each check; a check that raises becomes an ``error`` row, never a crash."""
     results = []

@@ -356,8 +356,9 @@ async def _project_switch_target(repl: VeluneREPL, target: str) -> None:
         await switch_workspace(repl, path)
         return
     repl.console.print(
-        f"[red]Unknown project: {target!r}[/red]  "
-        "[dim]Use /project list or /project add <path>.[/dim]"
+        f"[red]No project or subcommand named {target!r}.[/red]  "
+        "[dim]Subcommands: open, close, status, list, add, switch. "
+        "/project list shows the registered projects.[/dim]"
     )
 
 

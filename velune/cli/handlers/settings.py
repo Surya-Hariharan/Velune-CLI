@@ -273,55 +273,16 @@ async def cmd_crashreports(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
+    """Run the same health checks as ``velune doctor`` and render them in the REPL."""
     from velune.cli.commands.doctor import (
-        _check_anthropic_api_key,
-        _check_config,
-        _check_core_dependencies,
-        _check_credential_chain,
-        _check_git,
-        _check_gpu,
-        _check_groq,
-        _check_lm_studio,
-        _check_model_benchmarks,
-        _check_ollama_connectivity,
-        _check_ollama_models,
-        _check_openai_api_key,
-        _check_python_version,
-        _check_qdrant,
-        _check_sqlite,
-        _check_telemetry,
-        _check_theme,
-        _check_treesitter,
-        _check_velune_dir,
-        _check_vram,
         _render_results,
         _render_verdict,
         _run_checks,
         _verdict,
+        repl_checks,
     )
 
-    checks = [
-        _check_python_version,
-        _check_core_dependencies,
-        _check_ollama_connectivity,
-        _check_ollama_models,
-        _check_lm_studio,
-        _check_openai_api_key,
-        _check_anthropic_api_key,
-        _check_groq,
-        _check_velune_dir,
-        _check_sqlite,
-        _check_qdrant,
-        _check_config,
-        _check_theme,
-        _check_credential_chain,
-        _check_telemetry,
-        _check_treesitter,
-        _check_git,
-        _check_gpu,
-        _check_vram,
-        _check_model_benchmarks,
-    ]
+    checks = repl_checks()
 
     # The checks do blocking network/subprocess work: run them off the event
     # loop so the full-screen UI keeps repainting and accepting input.
@@ -339,7 +300,7 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
         )
     if verdict["optional_attention"]:
         repl.console.print(
-            "[dim]→ /connect to add or fix API keys  ·  /settings to reconfigure[/dim]"
+            "[dim]→ /connect to add or fix API keys  ·  /config to see the settings[/dim]"
         )
 
 

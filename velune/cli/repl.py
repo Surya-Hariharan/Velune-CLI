@@ -84,9 +84,6 @@ class VeluneREPL:
 
         self._session_start_time: float = _time.monotonic()
         self._tool_call_count: int = 0
-        from velune.tools.safety import ApprovalMode
-
-        self._approval_mode: ApprovalMode = ApprovalMode.ASK
         # Execution mode (MANUAL / PLAN / AUTO) — see velune/cli/execution_modes.py.
         from velune.cli.execution_modes import initial_mode
 

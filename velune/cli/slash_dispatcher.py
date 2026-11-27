@@ -568,7 +568,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="diff",
             aliases=["d"],
-            description="Show uncommitted file changes from the last council run",
+            description="Show the uncommitted changes in the working tree",
             usage="/diff",
             handler=repl._cmd_diff,
             examples=("/diff",),

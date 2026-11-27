@@ -72,5 +72,5 @@ async def cmd_context(repl: VeluneREPL, args: str) -> None:
     )
     if pct > 85:
         repl.console.print(
-            "[yellow]Context window nearly full. Type /clear to reset conversation.[/yellow]"
+            "[yellow]Context window nearly full. Type /new to start a fresh conversation.[/yellow]"
         )

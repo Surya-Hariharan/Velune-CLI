@@ -435,13 +435,21 @@ class SessionStore:
         surfaces as a recoverable session while sitting in another project's
         directory; pass ``None`` explicitly to see orphans from every
         workspace (e.g. for a global ``velune recover --all-workspaces``).
+
+        A sidecar whose session is still running on this machine (this one included) is not
+        an orphan, so it is left out.
         """
         if not self.autosave_dir.exists():
             return []
+        from velune.execution.processes import process_alive
+
+        host = socket.gethostname()
         metas: list[SessionMeta] = []
         for f in self.autosave_dir.glob("*.json"):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
+                if data.get("host") == host and process_alive(data.get("pid")):
+                    continue
                 meta = self._meta_from(data)
                 if workspace is not None and not self._same_workspace(meta.workspace, workspace):
                     continue

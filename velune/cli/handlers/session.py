@@ -110,43 +110,60 @@ async def cmd_clear(repl: VeluneREPL, args: str) -> None:
         print("\033c", end="", flush=True)
 
 
-async def cmd_new(repl: VeluneREPL, args: str) -> None:
-    """Start an isolated conversation session inside the same workspace."""
-    from velune.cli import ui
+async def _archive_and_restart(
+    repl: VeluneREPL, conversation: list[dict], *, title: str | None = None
+) -> str:
+    """Archive the live session under its own id, then start a new one holding *conversation*.
 
-    archived_note = ""
+    Shared by /new and /fork. The archive replaces the old id's autosave file, so the next
+    launch does not report it as a crash, and the new session gets a fresh id, so saving it
+    never overwrites the archive. Returns the archived session's title ("" when there was
+    nothing worth keeping).
+    """
+    import uuid
+
+    archived_title = ""
+    old_id = repl._session_id
     try:
-        has_exchange = any(m.get("role") == "assistant" for m in repl._conversation)
-        if has_exchange:
-            workspace = str(repl.container.get("runtime.workspace") or "")
+        if any(m.get("role") == "assistant" for m in repl._conversation):
             from velune.cli.sessions import auto_title
 
             meta = repl._session_store.save(
                 repl._conversation,
-                workspace=workspace,
+                workspace=str(repl.container.get("runtime.workspace") or ""),
                 model_id=repl.active_model.model_id if repl.active_model else "unknown",
                 mode=repl._mode_manager.current.value,
-                title=args.strip() or auto_title(repl._conversation),
+                title=title or auto_title(repl._conversation),
                 total_tokens=repl.session_tokens,
+                session_id=old_id,
             )
-            archived_note = f" (Previous saved as {meta.title})"
+            archived_title = meta.title
+        repl._session_store.clear_autosave(old_id)
     except Exception as exc:
-        _log.warning("Could not archive previous session: %s", exc)
+        _log.warning("Could not archive the previous session: %s", exc)
 
     await repl._end_episodic_session()
-    repl._conversation = []
+    repl._conversation = conversation
+    repl._session_id = uuid.uuid4().hex[:8]
     repl.session_tokens = 0
     repl.session_cost = 0.0
     repl._context_tracker.update(repl._conversation)
+    await repl._start_episodic_session()
+    return archived_title
+
+
+async def cmd_new(repl: VeluneREPL, args: str) -> None:
+    """Start an isolated conversation session inside the same workspace."""
+    from velune.cli import ui
     from velune.cli.handlers.tool_chat import reset_integration_tools
 
+    archived = await _archive_and_restart(repl, [], title=args.strip() or None)
+    # The last turn's file changes belong to the old conversation: /rewind must not reach them.
+    repl._last_turn_journal = None
     reset_integration_tools(repl)
-    await repl._start_episodic_session()
+    note = f" (Previous saved as {archived})" if archived else ""
     repl.console.print(
-        ui.notification(
-            f"New session started — project memory preserved.{archived_note}",
-            kind="success",
-        )
+        ui.notification(f"New session started — project memory preserved.{note}", kind="success")
     )
 
 
@@ -162,8 +179,6 @@ async def cmd_fork(repl: VeluneREPL, args: str) -> None:
     there's no session schema change, and the two sessions are otherwise
     unrelated once forked.
     """
-    import uuid
-
     from velune.cli import ui
 
     if not repl._conversation:
@@ -183,32 +198,8 @@ async def cmd_fork(repl: VeluneREPL, args: str) -> None:
             return
     turn_index = max(0, min(turn_index, len(repl._conversation)))
 
-    archived_note = ""
-    try:
-        has_exchange = any(m.get("role") == "assistant" for m in repl._conversation)
-        if has_exchange:
-            workspace = str(repl.container.get("runtime.workspace") or "")
-            from velune.cli.sessions import auto_title
-
-            meta = repl._session_store.save(
-                repl._conversation,
-                workspace=workspace,
-                model_id=repl.active_model.model_id if repl.active_model else "unknown",
-                mode=repl._mode_manager.current.value,
-                title=auto_title(repl._conversation),
-                total_tokens=repl.session_tokens,
-            )
-            archived_note = f" Original preserved as {meta.title!r}."
-    except Exception as exc:
-        _log.warning("Could not archive session before forking: %s", exc)
-
-    await repl._end_episodic_session()
-    repl._conversation = repl._conversation[:turn_index]
-    repl._session_id = uuid.uuid4().hex[:8]
-    repl.session_tokens = 0
-    repl.session_cost = 0.0
-    repl._context_tracker.update(repl._conversation)
-    await repl._start_episodic_session()
+    archived = await _archive_and_restart(repl, repl._conversation[:turn_index])
+    archived_note = f" Original preserved as {archived!r}." if archived else ""
 
     repl.console.print(
         ui.notification(
@@ -286,7 +277,8 @@ async def cmd_stats(repl: VeluneREPL, args: str) -> None:
         "Active model",
         repl.active_model.model_id if repl.active_model else "none",
     )
-    table.add_row("Approval mode", repl._approval_mode.value)
+    execution_mode = getattr(repl, "_execution_mode", None)
+    table.add_row("Execution mode", execution_mode.label if execution_mode else "—")
     table.add_row("Session mode", repl._mode_manager.current.value.upper())
 
     repl.console.print(table)

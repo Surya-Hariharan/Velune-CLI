@@ -21,7 +21,7 @@ def chat_command(
 ) -> None:
     """Start an interactive chat session with your codebase.
 
-    This is the same REPL that a bare ``velune`` opens, with its tools and slash commands.
+    The same REPL that plain `velune` opens, with its tools and slash commands.
     """
     cli_context = ctx.obj
     if not isinstance(cli_context, CLIContext):

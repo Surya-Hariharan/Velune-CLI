@@ -428,7 +428,22 @@ def test_restore_encrypted_secrets_without_passphrase_skips(env, mock_keystore):
 # ── Autosave / crash recovery ────────────────────────────────────────────────
 
 
-def test_autosave_orphan_lifecycle(env):
+@pytest.fixture
+def crashed(monkeypatch):
+    """Sidecars written by this test count as left behind by a process that has exited."""
+    monkeypatch.setattr("velune.execution.processes.process_alive", lambda pid: False)
+
+
+def test_a_running_sessions_autosave_is_not_an_orphan(env):
+    """/recover must not offer (or --all promote) the session that is still open."""
+    from velune.cli.sessions import SessionStore
+
+    store = SessionStore(root=env["sessions_dir"])
+    store.autosave([{"role": "user", "content": "x"}], session_id="mine", workspace="", model_id="m")
+    assert store.list_orphaned_autosaves() == []
+
+
+def test_autosave_orphan_lifecycle(env, crashed):
     from velune.cli.sessions import SessionStore
 
     store = SessionStore(root=env["sessions_dir"])
@@ -451,7 +466,7 @@ def test_autosave_orphan_lifecycle(env):
     assert loaded[1] == conv
 
 
-def test_clear_autosave_marks_clean_exit(env):
+def test_clear_autosave_marks_clean_exit(env, crashed):
     from velune.cli.sessions import SessionStore
 
     store = SessionStore(root=env["sessions_dir"])
@@ -461,7 +476,7 @@ def test_clear_autosave_marks_clean_exit(env):
     assert store.list_orphaned_autosaves() == []
 
 
-def test_discard_autosave(env):
+def test_discard_autosave(env, crashed):
     from velune.cli.sessions import SessionStore
 
     store = SessionStore(root=env["sessions_dir"])

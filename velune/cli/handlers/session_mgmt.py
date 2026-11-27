@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rich.table import Table
@@ -15,10 +16,14 @@ if TYPE_CHECKING:
 _log = logging.getLogger("velune.cli.handlers.session_mgmt")
 
 
+@dataclass(frozen=True, slots=True)
+class _Turn:
+    role: str
+    content: str
+
+
 async def cmd_session(repl: VeluneREPL, args: str) -> None:
     from pathlib import Path as _Path
-
-    from velune.cli.session_manager import export_session_markdown, save_session
 
     workspace = str(repl.container.get("runtime.workspace") or "")
     model_id = repl.active_model.model_id if repl.active_model else "unknown"
@@ -30,7 +35,7 @@ async def cmd_session(repl: VeluneREPL, args: str) -> None:
         await _session_picker(repl, workspace)
 
     elif sub == "save":
-        session_id = save_session(repl._conversation, model_id, workspace)
+        session_id = _save_current(repl, workspace, model_id)
         repl.console.print(f"[green]Session saved:[/green] [cyan]{session_id}[/cyan]")
 
     elif sub == "list":
@@ -51,8 +56,8 @@ async def cmd_session(repl: VeluneREPL, args: str) -> None:
     elif sub == "export":
         target = sub_args.strip()
         if not target:
-            target = save_session(repl._conversation, model_id, workspace)
-        md = export_session_markdown(target)
+            target = _save_current(repl, workspace, model_id)
+        md = repl._session_store.export_markdown(target)
         if md is None:
             repl.console.print(f"[red]Session '{target}' not found.[/red]")
             return
@@ -242,12 +247,26 @@ async def _cmd_session_list(repl: VeluneREPL, workspace: str) -> None:
     repl.console.print()
 
 
+def _save_current(repl: VeluneREPL, workspace: str, model_id: str) -> str:
+    """Save the live conversation under the session's own id, so saving twice updates one file."""
+    meta = repl._session_store.save(
+        repl._conversation,
+        workspace=workspace,
+        model_id=model_id,
+        mode=repl._mode_manager.current.value,
+        total_tokens=repl.session_tokens,
+        session_id=repl._session_id,
+    )
+    return meta.id
+
+
 async def _cmd_session_resume(repl: VeluneREPL, session_id: str) -> None:
     try:
         if await _resume_snapshot(repl, session_id):
             return
-    except Exception:
-        pass
+    except Exception as exc:
+        repl.console.print(f"[red]Could not load session '{session_id}': {exc}[/red]")
+        return
     try:
         episodic = repl.container.get("runtime.episodic_session_memory")
         turns = await episodic.get_recent_turns(session_id, limit=20)
@@ -259,10 +278,16 @@ async def _cmd_session_resume(repl: VeluneREPL, session_id: str) -> None:
         repl.console.print(f"[red]Session '{session_id}' not found or has no turns.[/red]")
         return
 
-    # Same data-loss guard as the snapshot path: preserve the live conversation
-    # before overwriting it with the episodic reconstruction.
+    # Same as the snapshot path: archive the live conversation, then give the restored one
+    # a new id, so saving it can never overwrite the archive just written.
+    import uuid
+
     repl._archive_current_session()
+    await repl._end_episodic_session()
     repl._conversation = [{"role": t.role, "content": t.content} for t in turns]
+    repl._session_id = uuid.uuid4().hex[:8]
+    repl._last_turn_journal = None
+    await repl._start_episodic_session()
     repl.console.print(
         f"[green]Resumed[/green] [cyan]{session_id}[/cyan] "
         f"[dim]({len(repl._conversation)} turns loaded into context)[/dim]"
@@ -272,26 +297,44 @@ async def _cmd_session_resume(repl: VeluneREPL, session_id: str) -> None:
 async def _cmd_session_summary(repl: VeluneREPL, session_id: str) -> None:
     from rich.panel import Panel
 
-    try:
-        episodic = repl.container.get("runtime.episodic_session_memory")
-    except Exception as exc:
-        repl.console.print(f"[red]Could not access episodic memory: {exc}[/red]")
-        return
-
-    existing = await episodic.get_session_summary(session_id)
-    if existing:
+    def show(text: str) -> None:
         repl.console.print(
             Panel(
-                existing,
+                text,
                 title=f"[bold cyan]Session Summary — {session_id}[/bold cyan]",
                 border_style="cyan",
             )
         )
-        return
 
-    turns = await episodic.get_session_history(session_id)
+    # The ids /session list shows are saved-session ids; read those first.
+    episodic = None
+    loaded = repl._session_store.load(session_id)
+    if loaded is not None:
+        meta, conversation = loaded
+        if meta.summary:
+            show(meta.summary)
+            return
+        turns = [
+            _Turn(m["role"], str(m.get("content") or ""))
+            for m in conversation
+            if m.get("role") in ("user", "assistant")
+        ]
+    else:
+        try:
+            episodic = repl.container.get("runtime.episodic_session_memory")
+        except Exception as exc:
+            repl.console.print(f"[red]Could not access episodic memory: {exc}[/red]")
+            return
+        existing = await episodic.get_session_summary(session_id)
+        if existing:
+            show(existing)
+            return
+        turns = await episodic.get_session_history(session_id)
     if not turns:
-        repl.console.print(f"[yellow]No turns found for session '{session_id}'.[/yellow]")
+        repl.console.print(
+            f"[yellow]No session '{session_id}' with turns. "
+            "/session list shows the saved sessions.[/yellow]"
+        )
         return
 
     model, provider = await repl._resolve_active_model_and_provider()
@@ -319,11 +362,6 @@ async def _cmd_session_summary(repl: VeluneREPL, session_id: str) -> None:
     with repl.console.status("[cyan]Generating summary...[/cyan]"):
         response = await provider.infer(req)
     summary_text = response.content.strip()
-    await episodic.set_session_summary(session_id, summary_text)
-    repl.console.print(
-        Panel(
-            summary_text,
-            title=f"[bold cyan]Session Summary — {session_id}[/bold cyan]",
-            border_style="cyan",
-        )
-    )
+    if episodic is not None:
+        await episodic.set_session_summary(session_id, summary_text)
+    show(summary_text)

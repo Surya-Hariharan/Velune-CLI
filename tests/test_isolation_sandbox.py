@@ -22,7 +22,6 @@ HOME_CONSTANTS = [
     ("velune.providers.discovery.gpu", "_DISK_CACHE_PATH"),
     ("velune.cli.workspaces", "DEFAULT_REGISTRY_PATH"),
     ("velune.cli.sessions", "DEFAULT_SESSIONS_DIR"),
-    ("velune.cli.session_manager", "SESSIONS_DIR"),
     ("velune.cli.onboarding.logic", "_PROGRESS_FILE"),
     ("velune.cli.model_prefs", "DEFAULT_PREFS_PATH"),
     ("velune.cli.crash_reporter", "CRASH_REPORT_DIR"),

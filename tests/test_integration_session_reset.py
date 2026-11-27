@@ -15,6 +15,7 @@ from rich.console import Console
 
 from tests.integration_fakes import make_env
 from velune.cli.handlers.tool_chat import reset_integration_tools
+from velune.cli.sessions import SessionStore
 
 
 class Container:
@@ -47,6 +48,9 @@ def fake_repl(tmp_path: Path, source) -> SimpleNamespace:
         _project_profile=None,
         _workspace_registry=SimpleNamespace(touch=lambda path: None),
         _integration_tools=source,
+        _session_id="live",
+        _session_store=SessionStore(root=tmp_path / "sessions"),
+        _last_turn_journal=None,
     )
 
 

@@ -13,17 +13,20 @@ _log = logging.getLogger("velune.cli.handlers.mode")
 
 async def _set_session_mode(repl: VeluneREPL, mode_enum, label: str, color: str) -> None:
     """Switch to *mode_enum* and pick a model that suits it."""
+    from velune.cli.handlers.model import activate_model
     from velune.cli.model_selector import ModeAwareModelSelector
 
     config = repl._mode_manager.set_mode(mode_enum)
-    selector = ModeAwareModelSelector(
-        repl.container.get_optional("runtime.model_registry"),
-        repl.container.get_optional("runtime.provider_registry"),
-        runtime_profile=repl._runtime_profile,
-    )
-    auto_model = selector.select_for_mode(config, repl.active_model)
-    if auto_model:
-        repl.active_model = auto_model
+    model_registry = repl.container.get_optional("runtime.model_registry")
+    provider_registry = repl.container.get_optional("runtime.provider_registry")
+    if model_registry is not None and provider_registry is not None:
+        selector = ModeAwareModelSelector(
+            model_registry, provider_registry, runtime_profile=repl._runtime_profile
+        )
+        auto_model = selector.select_for_mode(config, repl.active_model)
+        if auto_model is not None and auto_model is not repl.active_model:
+            # The same path as /model use: saved for next launch and added to recents.
+            await activate_model(repl, auto_model)
 
     repl.console.print(
         f"[{color}]{label}[/{color}] — {config.description}\n"
