@@ -3,7 +3,7 @@
 Registers a :class:`~velune.observability.trace_sink.TraceSink` as a
 lifecycle-managed subsystem so that, for the duration of any real Velune
 session, every event emitted on the :class:`~velune.events.CognitiveBus` is
-persisted to the workspace trace log and later replayable via ``velune trace``.
+persisted to the workspace trace log and later replayable via ``velune logs``.
 
 The subsystem is failure-isolated: attaching the sink can never abort runtime
 startup, because observability must not be able to take down the system it

@@ -1,10 +1,10 @@
-"""Shared foundation for the future ``update`` / ``repair`` / ``uninstall`` commands.
+"""Install lifecycle behind ``velune update`` / ``repair`` / ``uninstall`` / ``purge-data``.
 
-Internal and deliberately small: ownership detection, the result/exit-code
-model, Windows self-mutation safety, and the journal data model. There is no
-command here and nothing is registered in the CLI; later phases build on it.
+Ownership detection, the result/exit-code model, Windows self-mutation safety,
+the journal, and the operations themselves. The CLI commands live in
+``velune/cli/commands/{update,repair,uninstall,purge_data}.py``.
 
-Design rule for those phases: uv's exit code is never proof of the resulting
+Design rule: uv's exit code is never proof of the resulting
 installation state (it exited 1 after upgrading, and 0 while reporting a
 damaged environment). Re-detect ownership and re-check the version afterwards.
 """

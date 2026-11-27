@@ -20,7 +20,7 @@ class ConfigValidationError:
     field: str
     value: str | None
     reason: str
-    severity: str = "CRITICAL"  # "CRITICAL" or "WARNING"
+    severity: str = "WARNING"  # every problem is reported, none stops startup
 
 
 class ProjectConfig(BaseModel):
@@ -116,7 +116,6 @@ class ProvidersConfig(BaseModel):
     """Configuration for active and fallback models."""
 
     default_provider: str = "openai"
-    fallback_providers: list[str] = Field(default_factory=lambda: ["anthropic", "ollama"])
     cost_threshold_usd: float = Field(
         default=0.01,
         description="Prompt for confirmation before cloud calls estimated to cost more than this (USD). Set to 0 to always ask.",
@@ -460,65 +459,45 @@ class VeluneConfig(BaseSettings):
     # ---------------------------------------------------------------------------
 
     def validate(self) -> list[ConfigValidationError]:
-        """Validate the configuration and return any problems found.
+        """Check the settings Velune can verify offline; return the problems found.
 
-        Returns a list of :class:`ConfigValidationError`.  An empty list means
-        the configuration is healthy.  Callers should treat ``severity="CRITICAL"``
-        errors as startup-blocking failures.
+        Run once at startup (``LifecycleCoordinator.startup``), which logs each
+        problem as a warning. Every problem is a ``WARNING``: a typo in
+        ``velune.toml`` should be reported, never stop Velune from starting.
+        API keys are not checked here: they usually live in Velune's encrypted
+        keystore, not in environment variables.
         """
+        from velune.providers import catalog
+
         errors: list[ConfigValidationError] = []
 
         provider_name = self.providers.default_provider
-        provider_entry: ProviderEntry | None = getattr(self.providers, provider_name, None)
-
-        if not isinstance(provider_entry, ProviderEntry):
+        known = catalog.get(provider_name) or catalog.get(provider_name.replace("_", "-"))
+        if known is None:
             errors.append(
                 ConfigValidationError(
                     field="providers.default_provider",
                     value=provider_name,
                     reason=(
-                        f"Provider '{provider_name}' is not defined in the [providers] section. "
-                        f"Add a [{provider_name}] entry or change default_provider."
+                        f"'{provider_name}' is not a known provider. "
+                        "Run `velune provider list` to see the valid ids."
                     ),
-                    severity="CRITICAL",
+                    severity="WARNING",
                 )
             )
-        else:
-            # Remote providers require an API key env var to be populated.
-            if provider_entry.api_key_env:
-                resolved = os.getenv(provider_entry.api_key_env)
-                if not resolved:
-                    errors.append(
-                        ConfigValidationError(
-                            field=f"providers.{provider_name}.api_key_env",
-                            value=provider_entry.api_key_env,
-                            reason=(
-                                f"Environment variable '{provider_entry.api_key_env}' is not set. "
-                                f"Provider '{provider_name}' requires an API key to function."
-                            ),
-                            severity="CRITICAL",
-                        )
-                    )
 
-        # Optional workspace root — validate if explicitly configured.
         if self.workspace.root is not None:
             wp = Path(self.workspace.root)
             if not wp.exists():
-                errors.append(
-                    ConfigValidationError(
-                        field="workspace.root",
-                        value=str(wp),
-                        reason=f"Workspace path '{wp}' does not exist.",
-                        severity="CRITICAL",
-                    )
-                )
+                reason = f"Workspace path '{wp}' does not exist."
             elif not os.access(wp, os.R_OK):
+                reason = f"Workspace path '{wp}' exists but is not readable."
+            else:
+                reason = ""
+            if reason:
                 errors.append(
                     ConfigValidationError(
-                        field="workspace.root",
-                        value=str(wp),
-                        reason=f"Workspace path '{wp}' exists but is not readable.",
-                        severity="CRITICAL",
+                        field="workspace.root", value=str(wp), reason=reason, severity="WARNING"
                     )
                 )
 

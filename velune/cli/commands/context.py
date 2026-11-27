@@ -1,4 +1,4 @@
-"""``velune context`` — prove the repository context is real and fresh.
+"""``velune status`` — prove the repository context is real and fresh.
 
 This is the flagship operational-transparency command. It renders a truthful
 snapshot of what Velune has actually indexed and persisted for the current

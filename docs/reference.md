@@ -204,8 +204,9 @@ Module boundaries and the bootstrap sequence are in the [development guide](deve
   training policies are set by the provider, not by Velune.
 - **Chat can switch provider when one fails.** If the active provider is unreachable, rejects the key, is rate limited,
   times out or no longer has the model, and no tool has changed anything yet, the REPL retries the turn on your next
-  configured provider and prints `Falling back to …`. That provider may be a cloud one even when you started on a local
-  model, so configure only providers you are willing to send a prompt to.
+  configured provider and prints `Falling back to …`. A turn that started on a local model only falls back to other
+  local models, so a failure never sends your prompt to a cloud provider. A turn on a cloud model may fall back to any
+  configured provider.
 - A council run keeps the models it started with: a failed call is retried on the same provider, never moved to
   another one.
 - Velune has no analytics service and sends no usage data to its maintainers. Network traffic is limited to the

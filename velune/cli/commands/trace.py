@@ -1,4 +1,4 @@
-"""``velune trace`` — replay the real execution event stream.
+"""``velune logs`` — replay the real execution event stream.
 
 Every command, indexing pass, tool launch, and orchestration milestone emits an
 event on the :class:`~velune.events.CognitiveBus`; a session-side
@@ -10,9 +10,9 @@ ids — rather than trusting a black box.
 It shows only events that were genuinely emitted. It never fabricates reasoning,
 chain-of-thought, or hidden prompts; an empty log honestly reports "no events".
 
-    velune trace            # recent events (default)
-    velune trace recent     # same, with --limit / --type / --run filters
-    velune trace live       # follow new events as they are written
+    velune logs             # recent events (default)
+    velune logs recent      # same, with --limit / --type / --run filters
+    velune logs live        # follow new events as they are written
 """
 
 from __future__ import annotations

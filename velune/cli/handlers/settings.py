@@ -305,39 +305,12 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_sandbox(repl: VeluneREPL, args: str) -> None:
-    """Show current sandbox type and status, or start Docker sandbox."""
+    """Show the current sandbox type and whether Docker is available."""
     from pathlib import Path
-
-    sub = args.strip().lower()
 
     workspace_raw = repl.container.get("runtime.workspace")
     workspace = Path(workspace_raw) if workspace_raw else Path.cwd()
 
-    if sub in ("docker", "start"):
-        from velune.execution.docker_sandbox import DockerSandbox, DockerUnavailableError
-
-        try:
-            sb = DockerSandbox.for_workspace(workspace)
-            with repl.console.status("[cyan]Starting Docker sandbox…[/cyan]"):
-                sb.start()
-            repl.console.print(
-                f"[green]Docker sandbox started[/green]\n"
-                f"  Container: [bold]{sb.session_id}[/bold]\n"
-                f"  Image:     [dim]{sb.image}[/dim]\n"
-                f"  Workspace: [dim]{workspace} → /workspace[/dim]\n\n"
-                f"[dim]This sandbox is standalone. To route agent execution through Docker,\n"
-                f"set [bold]execution.docker_sandbox = true[/bold] in [bold]velune.toml[/bold].[/dim]"
-            )
-        except DockerUnavailableError as exc:
-            repl.console.print(
-                f"[red]Docker unavailable:[/red] {exc}\n"
-                "[dim]Install Docker Desktop and ensure the daemon is running.[/dim]"
-            )
-        except Exception as exc:
-            repl.console.print(f"[red]Sandbox start failed:[/red] {exc}")
-        return
-
-    # Default: show status info
     try:
         from velune.execution.docker_sandbox import DockerSandbox
 

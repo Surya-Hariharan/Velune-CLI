@@ -27,7 +27,6 @@
 # Provider used when no model is chosen explicitly. The built-in default is
 # "openai"; this repository uses "groq".
 default_provider = "groq"
-#fallback_providers = ["anthropic", "ollama"]
 # Ask for confirmation before a cloud call estimated to cost more than this
 # (USD). 0 means always ask.
 #cost_threshold_usd = 0.01

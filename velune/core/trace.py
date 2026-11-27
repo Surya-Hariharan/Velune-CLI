@@ -35,10 +35,6 @@ class TraceContext:
 
 def get_trace_prefix() -> str:
     """Generate the structured trace prefix string from active context variables."""
-    import os
-
-    if os.environ.get("VELUNE_LOG_FORMAT", "").lower() == "json":
-        return ""
     parts = []
     if r := _run_id.get():
         parts.append(f"run={r[:8]}")

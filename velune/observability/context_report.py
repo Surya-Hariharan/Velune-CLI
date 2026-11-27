@@ -1,6 +1,6 @@
 """Build a truthful, inspectable report of Velune's repository context state.
 
-``velune context`` exists to answer one suspicion directly: *is the project
+``velune status`` exists to answer one suspicion directly: *is the project
 context real, or is it placeholder logic?* This module assembles the answer from
 data Velune actually persists — the incremental index state at
 ``.velune/index_state.json``, the per-file symbol cache, the cognitive SQLite

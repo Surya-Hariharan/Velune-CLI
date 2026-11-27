@@ -2,7 +2,7 @@
 
 A :class:`TraceSink` subscribes to *every* event on the bus and writes each one
 to a :class:`~velune.observability.trace_log.TraceLog`, so the real execution
-stream survives the process and can be replayed by ``velune trace``. It records
+stream survives the process and can be replayed by ``velune logs``. It records
 only what is actually emitted — it never synthesizes events, reasoning, or
 prompts.
 

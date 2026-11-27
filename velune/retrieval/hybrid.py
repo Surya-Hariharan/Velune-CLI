@@ -159,7 +159,7 @@ class HybridRetriever:
         Records real, measured per-stage diagnostics (enablement, hit counts,
         wall-clock timing, and whether a vector embedding was available) into
         ``result.metadata["diagnostics"]`` so callers — notably
-        ``velune retrieval trace`` — can prove what the pipeline actually did.
+        ``velune pipeline trace`` — can prove what the pipeline actually did.
         """
         # Pick up a re-indexed corpus before querying it, so lexical retrieval
         # reflects the workspace as it is now rather than as it was at boot.

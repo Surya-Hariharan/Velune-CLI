@@ -142,7 +142,9 @@ class ResourceManager:
         self.register("process", lambda: ProcessConnector(registry))
 
     def register_defaults(self) -> None:
-        """Register the built-in connectors (Docker, Postgres, MySQL, Supabase).
+        """Register the built-in connectors (Docker, Postgres, MySQL, Supabase, HTTP).
+
+        ``process`` is added too when a job registry is attached.
 
         Imports are deferred to call time so an unused DB driver is never loaded.
         """

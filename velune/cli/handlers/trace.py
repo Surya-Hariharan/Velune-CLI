@@ -1,10 +1,10 @@
 """Execution trace slash command handler: /trace.
 
-Same persisted, secret-redacted trace log the top-level `velune trace`
+Same persisted, secret-redacted trace log the top-level `velune logs`
 command reads at the shell — this is a REPL-native window onto the current
 workspace's recent events so a user doesn't have to exit the session to
 check what Velune actually did. Only the "recent" view is offered here;
-`velune trace live` (tailing a separate running session) stays a shell-only
+`velune logs live` (tailing a separate running session) stays a shell-only
 command since it's an open-ended polling loop that doesn't fit a single
 slash-command turn.
 """

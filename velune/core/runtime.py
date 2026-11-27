@@ -100,6 +100,7 @@ def build_runtime(
     container = ServiceContainer()
     lifecycle = LifecycleCoordinator()
     lifecycle.container = container
+    lifecycle.set_config(config)  # validated (warnings only) on the first startup()
 
     # Pre-register basic primitive context dependencies
     container.register_instance("runtime.config", config)

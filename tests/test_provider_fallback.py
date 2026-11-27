@@ -98,3 +98,31 @@ def test_follows_model_registry_order():
     )
     model, provider = VeluneREPL._next_fallback_candidate(fake, set())
     assert model.provider_id == "mistral"  # first in registry order, not tried yet
+
+
+def _local(model_id: str, provider_id: str) -> ModelDescriptor:
+    return _model(model_id, provider_id).model_copy(update={"is_local": True})
+
+
+def test_local_only_never_picks_a_cloud_model():
+    """A failed local turn must not send the prompt to a cloud provider."""
+    fake = _repl_with(
+        [_model("gpt", "openai"), _local("llama", "lmstudio")],
+        configured_providers={"openai", "lmstudio"},
+    )
+    model, _provider = VeluneREPL._next_fallback_candidate(fake, {"ollama"}, local_only=True)
+    assert model.provider_id == "lmstudio"
+
+
+def test_local_only_returns_none_when_only_cloud_models_remain():
+    fake = _repl_with([_model("gpt", "openai")], configured_providers={"openai"})
+    assert VeluneREPL._next_fallback_candidate(fake, {"ollama"}, local_only=True) is None
+
+
+def test_cloud_turn_may_still_fall_back_to_any_provider():
+    fake = _repl_with(
+        [_local("llama", "ollama"), _model("gpt", "openai")],
+        configured_providers={"ollama", "openai"},
+    )
+    model, _provider = VeluneREPL._next_fallback_candidate(fake, {"anthropic"})
+    assert model.provider_id == "ollama"

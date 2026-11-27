@@ -57,10 +57,10 @@ _GUIDANCE: dict[str, list[Step]] = {
     # ── Autonomous run ───────────────────────────────────────────────────────
     "run_succeeded": [
         ("Review the changes", "git diff", None),
-        ("Inspect what ran", "velune trace --run {run_id}", "execution trace"),
+        ("Inspect what ran", "velune logs --run {run_id}", "execution trace"),
     ],
     "run_rolled_back": [
-        ("Inspect why it blocked", "velune trace --run {run_id}", None),
+        ("Inspect why it blocked", "velune logs --run {run_id}", None),
         ("Diagnose the environment", "velune doctor check", None),
         ("Retry interactively", "velune chat", "step through the fix"),
     ],

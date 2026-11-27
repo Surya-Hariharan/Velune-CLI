@@ -74,37 +74,15 @@ class LifecycleCoordinator:
         background subsystems registered after the first call.
 
         If a :class:`~velune.kernel.config.VeluneConfig` was attached via
-        :meth:`set_config`, it is validated once, on the first call. Any
-        ``CRITICAL`` validation errors abort startup immediately with a
-        descriptive exception.
+        :meth:`set_config`, it is validated once, on the first call, and each
+        problem is logged as a warning. Validation never stops startup.
         """
         if self._config is not None and not self._config_validated:
             self._config_validated = True
-            from velune.kernel.config import ConfigValidationError  # noqa: F401
-
-            errors = self._config.validate()
-            critical = [e for e in errors if e.severity == "CRITICAL"]
-            if critical:
-                for err in critical:
-                    logger.critical(
-                        "Config validation failed — %s = %r: %s",
-                        err.field,
-                        err.value,
-                        err.reason,
-                    )
-                summary = "; ".join(f"{e.field}: {e.reason}" for e in critical)
-                raise RuntimeError(
-                    f"VeluneConfig has {len(critical)} critical error(s). "
-                    f"Startup aborted. Details: {summary}"
+            for problem in self._config.validate():
+                logger.warning(
+                    "Config problem: %s = %r: %s", problem.field, problem.value, problem.reason
                 )
-            for warn in errors:
-                if warn.severity != "CRITICAL":
-                    logger.warning(
-                        "Config warning — %s = %r: %s",
-                        warn.field,
-                        warn.value,
-                        warn.reason,
-                    )
 
         self._started = True
         logger.info("Initializing Velune systems...")

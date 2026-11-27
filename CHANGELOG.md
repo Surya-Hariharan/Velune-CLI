@@ -17,7 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   and one `/rewind` undoes the whole run. `/council --skill <name> --permission <name>`,
   `/council show [run]` and `/skills` (lists skills and profiles). Add your own in
   `~/.velune/skills/` and `~/.velune/permissions/`. Limits live in a new `[swarm]` section.
-  `velune ask` (read-only), `velune run`, chat `!run` and the MCP council tool use it too.
+  `velune ask` (read-only), `velune run` and the MCP council tool use it too.
 - A council run reports what it left behind: the files its tool calls really changed (also
   `files_changed` in `velune ask --json` and the MCP result), a warning when a run meant to
   change files changed none, and a diagram saved as `diagram.mmd` in the run folder. A profile
@@ -33,6 +33,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Removed
 
+- `/sandbox docker`, which started a Docker container that was never stopped. `/sandbox` still
+  shows the active runner; set `execution.docker_sandbox = true` to run commands in Docker.
+- The `[providers] fallback_providers` setting (nothing read it) and the `VELUNE_LOG_FORMAT`
+  variable (it had no effect). An old `velune.toml` that still sets `fallback_providers` loads
+  as before.
 - **Slash commands that repeated another command.** Use the command in brackets instead:
   `/approve` (`/manual`, `/plan`, `/auto`), `/fast`, `/max` and `/normal` (`/mode fast|max|normal`),
   `/run` (`/council`; `/run --bg` is now `/council --bg`), `/undo` (`/rewind`, or
@@ -81,6 +86,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **Chat no longer sends a local-model prompt to a cloud provider.** When a chat turn on a local
+  model failed, the REPL could retry it on any configured provider, including a cloud one. It now
+  only falls back to other local models; a turn on a cloud model may still use any provider.
+- `velune.toml` is checked at startup again. An unknown `default_provider` or a missing
+  `workspace.root` is logged as a warning; Velune still starts. The check no longer requires an
+  API key in an environment variable, since keys are normally kept in Velune's keystore.
+- The hint after a council run pointed at `velune trace --run <id>`, which does not exist; it now
+  says `velune logs --run <id>`.
 - `[mcp] allowed_hosts` was ignored by the REPL, so `/mcp connect` and auto-connect could reach
   hosts outside the allowlist.
 - A `[mcp.servers.<name>]` table in `velune.toml` made Velune discard the whole file and use

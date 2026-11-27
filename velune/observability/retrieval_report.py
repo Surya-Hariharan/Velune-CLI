@@ -1,6 +1,6 @@
 """Turn a real retrieval run into an inspectable trace report.
 
-``velune retrieval trace`` answers the suspicion: *does retrieval actually run,
+``velune pipeline trace`` answers the suspicion: *does retrieval actually run,
 or is it a stub?* It executes a genuine query through the live
 :class:`~velune.retrieval.hybrid.HybridRetriever` and this module renders the
 outcome — which sub-retrievers fired, how long each took, how many candidates

@@ -1,7 +1,7 @@
 """Persistent, bounded, secret-redacted store for the execution event stream.
 
 The :class:`~velune.events.CognitiveBus` keeps only an in-memory history that
-dies with the process, so ``velune trace`` — invoked as a *separate* process
+dies with the process, so ``velune logs`` — invoked as a *separate* process
 from the session that produced the work — would otherwise have nothing to read.
 :class:`TraceLog` closes that gap: a session-side sink appends each real emitted
 event here as one JSON line, and the command reads it back.
@@ -130,7 +130,7 @@ class TraceLog:
             logger.debug("Could not trim trace log: %s", exc)
 
     # ------------------------------------------------------------------
-    # Read side (used by `velune trace`)
+    # Read side (used by `velune logs`)
     # ------------------------------------------------------------------
 
     def read_recent(

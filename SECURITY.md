@@ -304,8 +304,8 @@ beyond that mount. It is **opt-in and off by default**:
 - It requires the `docker` extra and a reachable Docker daemon, and falls back to
   the managed runner automatically if Docker is unavailable.
 - Enable it for all agent execution with `execution.docker_sandbox = true` in
-  `velune.toml`, or start and inspect it with `/sandbox docker` and
-  `/sandbox status`.
+  `velune.toml`; `/sandbox` shows which runner is active and whether Docker is
+  available.
 - Each session gets its own container (`velune-<random>`), which is stopped and
   removed at the end of the session. State does not persist across sessions.
 - The workspace mount is writable, so the sandbox protects the rest of the host,

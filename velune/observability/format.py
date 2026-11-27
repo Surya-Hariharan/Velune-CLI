@@ -1,7 +1,7 @@
 """Tiny pure formatters shared by the observability commands.
 
 Kept dependency-free and deterministic so they can be unit-tested without a
-terminal and reused by both ``velune context`` and ``velune trace``.
+terminal and reused by both ``velune status`` and ``velune logs``.
 """
 
 from __future__ import annotations

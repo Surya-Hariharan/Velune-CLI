@@ -11,7 +11,7 @@ This module provides:
   live values of any configured provider env vars.
 * :class:`SecretRedactingFilter` — a ``logging.Filter`` that runs every emitted
   record's final message through :func:`redact_secrets`. Installed on the root
-  handlers in :func:`velune.core.logging.configure_logging`.
+  handlers by :func:`install_log_redaction` (called from ``build_runtime``).
 
 The patterns are deliberately high-precision (long, prefix-anchored tokens) so
 normal log text is never garbled.

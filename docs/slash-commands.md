@@ -244,7 +244,7 @@ Git and forge (GitHub/GitLab) integration, plus the execution sandbox.
 | `push` | `gp` | `/push [--force]` | Push current branch to remote origin |
 | `pr` | `pull-request`, `mr` | `/pr <title> [--base <branch>] [--draft]` | Create a pull request / merge request on GitHub or GitLab |
 | `issue` | `gh-issue`, `gl-issue` | `/issue <number>` | Fetch a GitHub/GitLab issue and inject it as conversation context |
-| `sandbox` | `sb` | `/sandbox [docker\|status]` | Show current sandbox type and status (subprocess or Docker) |
+| `sandbox` | `sb` | `/sandbox` | Show current sandbox type and status (subprocess or Docker) |
 
 ---
 

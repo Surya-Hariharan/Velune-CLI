@@ -1,5 +1,3 @@
-import os
-
 import toml
 
 from velune.kernel.config import (
@@ -79,17 +77,15 @@ name = "toml_project"
 
 
 def test_validate_healthy_config():
+    # The defaults are valid. No API key is required: keys live in the keystore.
+    assert VeluneConfig().validate() == []
+
+
+def test_validate_accepts_every_catalog_provider():
     config = VeluneConfig()
-    errors = config.validate()
-    # Should only fail on API key missing if it's strictly checking
-    # Actually, default_provider is openai, api_key_env is OPENAI_API_KEY
-    # If it's not set, it gives an error.
-    if not os.getenv("OPENAI_API_KEY"):
-        assert len(errors) == 1
-        assert errors[0].field == "providers.openai.api_key_env"
-        assert errors[0].severity == "CRITICAL"
-    else:
-        assert len(errors) == 0
+    for name in ("groq", "google", "openai-compat", "openai_compat", "ollama"):
+        config.providers.default_provider = name
+        assert config.validate() == [], name
 
 
 def test_validate_missing_provider():
@@ -98,6 +94,7 @@ def test_validate_missing_provider():
     errors = config.validate()
     assert len(errors) == 1
     assert errors[0].field == "providers.default_provider"
+    assert errors[0].severity == "WARNING"
 
 
 def test_validate_workspace_root_invalid(tmp_path):
@@ -136,3 +133,23 @@ def test_strip_defaults():
     current = {"a": 1, "b": {"c": 2, "d": 4}, "e": 5}
     stripped = _strip_defaults(current, defaults)
     assert stripped == {"b": {"d": 4}, "e": 5}
+
+
+async def test_startup_logs_config_problems_but_keeps_going(caplog):
+    from velune.kernel.lifecycle import LifecycleCoordinator
+
+    config = VeluneConfig()
+    config.providers.default_provider = "nonexistent_provider"
+    lifecycle = LifecycleCoordinator()
+    lifecycle.set_config(config)
+    with caplog.at_level("WARNING", logger="velune.kernel.lifecycle"):
+        await lifecycle.startup()  # must not raise
+    assert "nonexistent_provider" in caplog.text
+
+
+def test_build_runtime_attaches_the_config_for_validation(tmp_path):
+    from velune.core.runtime import build_runtime
+
+    runtime = build_runtime(tmp_path, defer_background=True)
+    lifecycle = runtime.container.get("runtime.lifecycle")
+    assert lifecycle._config is runtime.config

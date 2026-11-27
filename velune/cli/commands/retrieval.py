@@ -1,4 +1,4 @@
-"""``velune retrieval trace`` — prove the retrieval pipeline is real.
+"""``velune pipeline trace`` — prove the retrieval pipeline is real.
 
 Runs a genuine query through the live hybrid retriever and shows exactly which
 sub-retrievers fired (lexical / vector / graph), how long each took, how many
@@ -6,8 +6,8 @@ candidates they produced, and the final ranked, redacted hits. Every figure is
 measured during the run — see
 :func:`velune.observability.retrieval_report.build_retrieval_trace`.
 
-    velune retrieval trace "where is the sandbox validated?"
-    velune retrieval trace "auth" --top-k 5 --no-vector
+    velune pipeline trace "where is the sandbox validated?"
+    velune pipeline trace "auth" --top-k 5 --no-vector
 """
 
 from __future__ import annotations

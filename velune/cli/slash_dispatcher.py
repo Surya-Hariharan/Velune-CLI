@@ -789,9 +789,9 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="sandbox",
             aliases=["sb"],
             description="Show current sandbox type and status (subprocess or Docker)",
-            usage="/sandbox [docker|status]",
+            usage="/sandbox",
             handler=repl._cmd_sandbox,
-            examples=("/sandbox", "/sandbox docker", "/sandbox status"),
+            examples=("/sandbox",),
             search_terms=("isolation", "docker", "security", "execution environment", "container"),
             shortcut="/sb",
         )

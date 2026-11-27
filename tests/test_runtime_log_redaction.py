@@ -1,6 +1,6 @@
 """The real CLI runtime masks registered secrets in its log output.
 
-``SecretRedactingFilter`` used to be installed only by ``core.logging.configure_logging``,
+``SecretRedactingFilter`` used to be installed only by a logging setup function nothing called,
 which nothing calls; the runtime's ``logging.basicConfig`` handler had no filter, so a
 value registered with ``register_secret_value`` (a database password, an API token)
 reached stderr in clear text. Separately, a secret inside an exception was printed in

@@ -13,7 +13,7 @@ deliberately splits two clocks:
   are read each tick via :class:`LiveSessionState`, never cached.
 
 Every value is read from real state. An absent index yields zeroed counts and a
-``no-index`` freshness, never invented numbers — mirroring the ``velune context``
+``no-index`` freshness, never invented numbers — mirroring the ``velune status``
 truthfulness contract.
 """
 

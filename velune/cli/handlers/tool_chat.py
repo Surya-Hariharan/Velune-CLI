@@ -915,7 +915,7 @@ class _ToolActivityUI:
         """Best-effort, fire-and-forget bus emission for observability.
 
         Council/sandbox runs already emit step-level events; a normal chat
-        turn's native tool loop did not — ``velune trace`` could only ever
+        turn's native tool loop did not — ``velune logs`` could only ever
         show one truncated ``turn.completed`` per turn, with no visibility
         into which tools ran. Mirrors the fire-and-forget pattern
         ``execution/sandbox.py``'s ``emit_rejection`` already uses: ``on_event``

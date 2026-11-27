@@ -1,7 +1,7 @@
 """Build what a swarm run needs from the runtime container.
 
 Shared by every entry point: ``/council`` in the REPL, ``velune ask``,
-``velune run``, chat ``!run`` and the MCP council tool. The container is
+``velune run`` and the MCP council tool. The container is
 always passed in.
 """
 
@@ -230,7 +230,7 @@ async def run_headless(
     ui: Any = None,
     context: str | None = None,
 ) -> SwarmOutcome:
-    """Run *task* with no screen (``velune ask``/``run``, chat ``!run``, MCP).
+    """Run *task* with no screen (``velune ask``/``run``, MCP).
 
     *ask* answers approval requests (``(tool_name, decision) -> Approval``);
     without it anything that needs approval is refused. *context* replaces the

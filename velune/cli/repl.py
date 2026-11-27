@@ -1241,7 +1241,7 @@ class VeluneREPL:
         return False
 
     def _next_fallback_candidate(
-        self, tried_provider_ids: set[str]
+        self, tried_provider_ids: set[str], *, local_only: bool = False
     ) -> tuple[ModelDescriptor, ModelProvider] | None:
         """Next configured model/provider not already tried this turn.
 
@@ -1250,6 +1250,10 @@ class VeluneREPL:
         and with a usable adapter (a configured key). Returns None once every
         configured provider has been tried, so the caller surfaces the last
         real error instead of looping forever.
+
+        ``local_only`` keeps a prompt written for a local model on this
+        machine: cloud models are skipped, so a failure never sends it to a
+        cloud provider without the user choosing that model themselves.
         """
         try:
             model_registry = self.container.get("runtime.model_registry")
@@ -1258,6 +1262,8 @@ class VeluneREPL:
             return None
         for candidate_model in model_registry.list_all():
             if candidate_model.provider_id in tried_provider_ids:
+                continue
+            if local_only and not candidate_model.is_local:
                 continue
             if not _model_usable(candidate_model, provider_registry):
                 continue
@@ -1629,6 +1635,9 @@ class VeluneREPL:
         )
 
         tried_provider_ids = {provider.provider_id}
+        # Decided once, from the model the user picked: a local turn stays local
+        # for every fallback step, not just the first.
+        local_only = bool(model.is_local)
         while True:
             try:
                 loop_result = await run_tool_chat(
@@ -1732,7 +1741,7 @@ class VeluneREPL:
                 original = exc.original if isinstance(exc, TurnProviderError) else exc
                 if not safe:
                     raise original
-                fallback = self._next_fallback_candidate(tried_provider_ids)
+                fallback = self._next_fallback_candidate(tried_provider_ids, local_only=local_only)
                 if fallback is None:
                     raise original
                 model, provider = fallback
