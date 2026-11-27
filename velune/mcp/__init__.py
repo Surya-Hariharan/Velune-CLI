@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from velune.mcp.client import VeluneMCPClient
-    from velune.mcp.config import load_mcp_servers
     from velune.mcp.registry import MCPServerRegistry
     from velune.mcp.server import VeluneMCPServer
 
@@ -31,7 +30,6 @@ __all__ = [
     "VeluneMCPServer",
     "VeluneMCPClient",
     "MCPServerRegistry",
-    "load_mcp_servers",
 ]
 
 
@@ -44,10 +42,6 @@ def __getattr__(name: str) -> Any:
         from velune.mcp.registry import MCPServerRegistry
 
         return MCPServerRegistry
-    if name == "load_mcp_servers":
-        from velune.mcp.config import load_mcp_servers
-
-        return load_mcp_servers
     if name == "VeluneMCPServer":
         from velune.mcp.server import VeluneMCPServer
 

@@ -113,8 +113,10 @@ class VeluneREPL:
         )
         from velune.mcp.registry import MCPServerRegistry
 
+        mcp_config = getattr(self.container.get_optional("runtime.config"), "mcp", None)
         self._mcp_registry = MCPServerRegistry(
             workspace=Path(workspace_path) if workspace_path else None,
+            allowed_hosts=list(getattr(mcp_config, "allowed_hosts", None) or []) or None,
         )
         self._mcp_watch_task: asyncio.Task | None = None
         from velune.plugins.manager import PluginManager

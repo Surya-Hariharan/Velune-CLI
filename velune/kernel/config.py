@@ -6,7 +6,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import toml
 from pydantic import BaseModel, Field
@@ -239,7 +239,9 @@ class UpdateConfig(BaseModel):
 class MCPConfig(BaseModel):
     """MCP configuration settings."""
 
-    servers: dict[str, str] = Field(default_factory=dict)
+    #: ``name = "url"`` shorthand, or a ``[mcp.servers.<name>]`` table with the same keys as
+    #: an ``.mcp.json`` entry. ``mcp/registry.py`` reads and validates each entry.
+    servers: dict[str, str | dict[str, Any]] = Field(default_factory=dict)
     #: Optional allowlist of permitted external MCP hostnames. When non-empty,
     #: the client refuses to connect to any host not listed here (deny-by-default).
     #: Empty means "no allowlist" — cloud-metadata/link-local targets are still

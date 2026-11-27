@@ -1,8 +1,6 @@
 """MCP server exposing Velune's council and memory as remote tools.
 
-Serves two transports:
-- stdio: for Claude Desktop and local clients
-- HTTP/SSE on localhost:7777: for VS Code and browser clients
+Serves stdio, for Claude Desktop and other local clients.
 
 Security: Validates workspace_path against allowed_workspaces, read-only by default.
 """
@@ -111,9 +109,7 @@ class WorkspaceValidator:
 class VeluneMCPServer:
     """Exposes Velune's council, memory, and code analysis as MCP tools.
 
-    Supports two transports:
-    - stdio: for Claude Desktop
-    - HTTP/SSE: for VS Code and other clients
+    Speaks stdio only.
 
     Security: Workspace paths validated against allowed list.
     """
