@@ -103,9 +103,9 @@ async def test_labels_have_no_rich_markup_to_swallow():
     """Regression: '[a]ccept / [r]eject' rendered as 'ccept / eject' (Rich ate the tags)."""
     import inspect
 
-    from velune.execution import diff_preview, hunk_review, multi_diff
+    from velune.execution import diff_preview, multi_diff
 
-    for module in (diff_preview, hunk_review, multi_diff):
+    for module in (diff_preview, multi_diff):
         src = inspect.getsource(module)
         assert "[a]ccept" not in src and "[r]eject" not in src, module.__name__
         assert "Prompt.ask" not in src, module.__name__

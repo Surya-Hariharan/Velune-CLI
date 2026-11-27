@@ -171,12 +171,6 @@ async def test_council_prints_the_plan_stages_and_result(tmp_path, no_live):
     assert repl._conversation[-1] == {"role": "assistant", "content": "the answer"}
 
 
-async def test_run_is_the_same_command(tmp_path, no_live):
-    repl = fakes.fake_repl(tmp_path, _always("the answer"))
-    await council_handlers.cmd_run(repl, "--skill research explain the budget")
-    assert "Council Result" in repl.output.getvalue()
-
-
 async def test_an_unknown_skill_is_explained(tmp_path):
     repl = fakes.fake_repl(tmp_path, _always("unused"))
     await council_handlers.cmd_council(repl, "--skill nope do it")
@@ -294,7 +288,7 @@ async def test_a_background_job_runs_read_only(tmp_path, monkeypatch):
 
     repl = fakes.fake_repl(tmp_path, _always("unused"))
     repl._job_registry = _Registry()
-    await council_handlers.cmd_run(repl, "explain it --bg")
+    await council_handlers.cmd_council(repl, "explain it --bg")
     for _ in range(100):
         if jobs["job1"].status.value == "completed":
             break

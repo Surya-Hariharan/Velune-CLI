@@ -445,8 +445,8 @@ def make_resource_context_factory(repl: VeluneREPL):
     Every resource action is authorized by the same
     :class:`~velune.permissions.gate.PermissionGate` as the agent's own tools —
     the session's execution mode (PLAN / MANUAL / AUTO), its "always allow"
-    grants, its approval prompts and its audit trail. ``/approve block`` needs no
-    special case: it selects PLAN mode, which refuses every change.
+    grants, its approval prompts and its audit trail. PLAN mode refuses every
+    change, with no special case here.
     """
     from pathlib import Path
 

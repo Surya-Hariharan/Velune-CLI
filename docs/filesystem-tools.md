@@ -214,8 +214,7 @@ back, and re-creates deleted folders.
   overwritten.
 - Files or folder trees over 20 MB are not kept, so their deletion cannot be
   rewound; the tool result says so when that happens.
-- The journal lives in memory for the last turn only. `/undo` is different: it
-  reverts the last Velune git commit.
+- The journal lives in memory for the last turn only.
 
 ---
 

@@ -156,7 +156,6 @@ A typical session in the REPL uses these real commands:
 approve                               run the plan; each change is shown for approval in Manual mode
 /diff                                 review what changed on disk
 /rewind                               undo the file changes from the agent's last turn
-/undo                                 revert the last Velune-authored commit if you disagree
 ```
 
 ### Quickstart
@@ -375,10 +374,9 @@ Velune can read, create, edit, move and delete files and run commands in your pr
   refused if the file changed on disk since the agent last read it.
 - **Path guard.** Filesystem and git tools resolve paths, including symlinks, and refuse anything outside the workspace
   unless you approve it. Changing `.git/`, `.velune/hooks.json` or `velune.toml` always asks first.
-- **Diff preview.** In Manual mode every change is shown as a diff and applied only after you approve it (`/hunk`
-  enables hunk-by-hunk review).
+- **Diff preview.** In Manual mode every change is shown as a diff and applied only after you approve it.
 - **Snapshots and undo.** Plan-driven changes take a git stash or branch snapshot first and are restored if execution
-  fails. `/rewind` undoes the file changes from the agent's last turn; `/undo` reverts the last Velune-authored commit.
+  fails. `/rewind` undoes the file changes from the agent's last turn.
   Velune does not commit council edits unless you set `execution.council_auto_commit = true`.
 
 See [Filesystem tools](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/docs/filesystem-tools.md) for every
@@ -414,8 +412,7 @@ without asking. Press Shift+Tab to cycle modes, use the slash commands, or start
 In every mode Velune still asks before touching anything outside the project folder, before high-risk operations (for
 example `git reset --hard`, `git clean`, force-push, recursive deletes, global installs), and before reading or changing
 secrets. Commands such as `sudo` and disk formatting are not run. These rules are enforced in the tool layer rather than
-by instructions to the model, and each decision is logged (`velune trace --type permission`). `/approve safe|ask|block`
-separately controls tool-call confirmation for the session.
+by instructions to the model, and each decision is logged (`velune trace --type permission`).
 
 **Limits.** Commands run as your user through a managed runner (allowlisted executables, no shell, resource limits).
 That is process management, not OS-level isolation, and allowlisted interpreters can run any file in the workspace. For

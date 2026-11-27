@@ -181,9 +181,7 @@ async def _submit_cognition_job(repl: VeluneREPL, cog, *, deep: bool, silent: bo
                 return
         if not silent:
             repl.console.print(f"[green]Index complete ({mode}).[/green]")
-            repl.console.print(
-                "[dim]→ /run <task> to start using the indexed context  ·  /graph to explore knowledge graph[/dim]"
-            )
+            repl.console.print("[dim]→ /council <task> to start using the indexed context[/dim]")
         return
 
     job_id = repl._job_registry.new_id()

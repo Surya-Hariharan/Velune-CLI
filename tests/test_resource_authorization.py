@@ -480,24 +480,6 @@ async def test_repl_resource_actions_follow_the_session_mode(tmp_path):
     assert repl._permission_gate is not None
 
 
-async def test_approve_block_refuses_changes_because_it_selects_plan_mode(tmp_path):
-    """`/approve block` maps to PLAN (see handlers/settings.py); no special case is needed."""
-    from velune.cli.handlers.resources import make_resource_context_factory
-    from velune.cli.handlers.settings import cmd_approve
-
-    repl = _fake_repl(tmp_path, ExecutionMode.AUTO)
-    repl._status_state = SimpleNamespace(execution_label="")
-    repl._plan_manager = None
-    await cmd_approve(repl, "block")
-    assert repl._execution_mode is ExecutionMode.PLAN
-
-    m = ResourceManager(workspace=tmp_path, context_factory=make_resource_context_factory(repl))
-    m.register("fake", Recorder)
-    assert (await m.execute("fake", "peek")).ok
-    assert (await m.execute("fake", "poke")).denied
-    assert m.get("fake").ran == ["peek"]
-
-
 def test_repl_builds_the_manager_with_the_session_context(tmp_path, monkeypatch):
     """`_build_resource_manager` installs the gate-backed context factory."""
     from velune.cli.repl import VeluneREPL

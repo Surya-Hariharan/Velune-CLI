@@ -250,7 +250,6 @@ def fake_repl(
         _execution_mode=mode or ExecutionMode.MANUAL,
         _plugin_manager=None,
         _job_registry=None,
-        _hunk_review_mode=False,
     )
     return repl
 

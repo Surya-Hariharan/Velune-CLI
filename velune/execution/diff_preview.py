@@ -112,10 +112,8 @@ def diff_stats(diff: FileDiff) -> tuple[int, int]:
 def format_stat_bar(added: int, removed: int, *, width: int = 24, label: str = "") -> str:
     """A `git --stat`-style `+`/`-` bar: a size-at-a-glance summary line.
 
-    Shared by :class:`DiffPreview` and :class:`~velune.execution.hunk_review.
-    HunkReviewer` so a very large diff — either a truncated unified diff or a
-    long run of individual hunks to click through — shows its scale up front
-    instead of making the reviewer infer it by scrolling.
+    Lets a very large (truncated) diff show its scale up front instead of
+    making the reviewer infer it by scrolling.
     """
     total = added + removed
     plus_w = round(width * added / total) if total else 0

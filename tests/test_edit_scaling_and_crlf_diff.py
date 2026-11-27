@@ -18,7 +18,6 @@ import pytest
 from rich.console import Console
 
 from velune.execution.diff_preview import DiffPreview, compute_file_diff, diff_stats
-from velune.execution.hunk_review import HunkReviewer
 from velune.tools.filesystem import mutation as mut
 from velune.tools.filesystem.edit import EditError, EditFile, plan_edit
 
@@ -207,14 +206,6 @@ def test_a_one_line_edit_in_a_crlf_file_shows_one_changed_row(tmp_path):
     assert len(rows) == 2, rows  # one removed, one added
     assert any("line3" in r for r in rows) and any("LINE-THREE" in r for r in rows)
     assert not any("line1" in r or "line5" in r for r in rows)
-
-
-def test_the_hunk_reviewer_sees_a_single_hunk_for_a_crlf_edit(tmp_path):
-    diff = _approval_diff(tmp_path, CRLF_FILE, "line3", "LINE-THREE")
-    groups = HunkReviewer(Console(file=StringIO())).split_into_hunks(diff)
-    assert len(groups) == 1
-    changed = [op for op in groups[0] if op[0] != "equal"]
-    assert len(changed) == 1  # a single replace, not a rewrite of the whole file
 
 
 def test_a_crlf_file_stays_crlf_after_the_edit_is_applied(tmp_path):

@@ -61,13 +61,6 @@ class VeluneREPL:
         self._conversation: list[dict] = []
         # A newer release found by the background update check, asked about between prompts.
         self._update_offer: Any = None
-        try:
-            _config = self.container.get_optional("runtime.config")
-            self._hunk_review_mode: bool = bool(
-                getattr(getattr(_config, "execution", None), "hunk_review_default", False)
-            )
-        except Exception:
-            self._hunk_review_mode = False
         from velune.cli.interrupts import InterruptController
         from velune.cli.sessions import SessionStore
         from velune.cli.workspaces import WorkspaceRegistry
@@ -1865,11 +1858,6 @@ class VeluneREPL:
 
         await cmd_hooks(self, args)
 
-    async def _cmd_approve(self, args: str) -> None:
-        from velune.cli.handlers.settings import cmd_approve
-
-        await cmd_approve(self, args)
-
     async def _cmd_manual(self, args: str) -> None:
         from velune.cli.handlers.execution_mode import cmd_set_mode
         from velune.permissions import ExecutionMode
@@ -1961,11 +1949,6 @@ class VeluneREPL:
 
         await cmd_cognition(self, args)
 
-    async def _cmd_run(self, args: str) -> None:
-        from velune.cli.handlers.council import cmd_run
-
-        await cmd_run(self, args)
-
     async def _cmd_council(self, args: str) -> None:
         from velune.cli.handlers.council import cmd_council
 
@@ -2006,21 +1989,6 @@ class VeluneREPL:
 
         await cmd_graph(self, args)
 
-    async def _cmd_optimus(self, args: str) -> None:
-        from velune.cli.handlers.mode import cmd_optimus
-
-        await cmd_optimus(self, args)
-
-    async def _cmd_godly(self, args: str) -> None:
-        from velune.cli.handlers.mode import cmd_godly
-
-        await cmd_godly(self, args)
-
-    async def _cmd_normal(self, args: str) -> None:
-        from velune.cli.handlers.mode import cmd_normal
-
-        await cmd_normal(self, args)
-
     async def _cmd_mode(self, args: str) -> None:
         from velune.cli.handlers.mode import cmd_mode
 
@@ -2036,11 +2004,6 @@ class VeluneREPL:
 
         await cmd_diff(self, args)
 
-    async def _cmd_undo(self, args: str) -> None:
-        from velune.cli.handlers.git import cmd_undo
-
-        await cmd_undo(self, args)
-
     async def _cmd_rewind(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_rewind
 
@@ -2050,11 +2013,6 @@ class VeluneREPL:
         from velune.cli.handlers.retry import cmd_retry
 
         await cmd_retry(self, args)
-
-    async def _cmd_hunk(self, args: str) -> None:
-        from velune.cli.handlers.git import cmd_hunk
-
-        await cmd_hunk(self, args)
 
     async def _cmd_theme(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_theme

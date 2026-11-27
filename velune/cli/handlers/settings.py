@@ -1,4 +1,4 @@
-"""Settings slash command handlers: /config /hooks /approve /doctor /sandbox."""
+"""Settings slash command handlers: /config /hooks /doctor /sandbox."""
 
 from __future__ import annotations
 
@@ -100,36 +100,6 @@ async def cmd_hooks(repl: VeluneREPL, args: str) -> None:
     repl.console.print(
         f"\n[dim]{len(rows)} hook(s) loaded. "
         "Use [bold]/hooks[/bold] to see updates (cache reloads automatically).[/dim]"
-    )
-
-
-async def cmd_approve(repl: VeluneREPL, args: str) -> None:
-    """Legacy ``/approve``: maps onto the execution modes.
-
-    ask → MANUAL, safe → AUTO, block → PLAN. Prefer /manual /plan /auto.
-    """
-    from velune.cli.execution_modes import parse_mode, set_execution_mode
-    from velune.permissions import ExecutionMode
-
-    sub = args.strip().lower()
-    current = getattr(repl, "_execution_mode", ExecutionMode.MANUAL)
-    if not sub:
-        repl.console.print(
-            f"[cyan]Execution mode:[/cyan] [bold]{current.label}[/bold]\n"
-            "[dim]/approve now sets the execution mode: ask → /manual, safe → /auto, "
-            "block → /plan. Shift+Tab cycles them.[/dim]"
-        )
-        return
-    if sub not in {"ask", "safe", "block"}:
-        repl.console.print(
-            f"[red]Unknown mode: {sub!r}[/red]  [dim]Choose: ask | safe | block[/dim]"
-        )
-        return
-    mode = parse_mode(sub)
-    assert mode is not None
-    set_execution_mode(repl, mode)
-    repl.console.print(
-        f"[dim]Tip: use /{mode.value} directly — /approve {sub} is kept for compatibility.[/dim]"
     )
 
 
@@ -365,7 +335,7 @@ async def cmd_doctor(repl: VeluneREPL, args: str) -> None:
     _render_verdict(verdict, repl.console)
     if verdict["core_healthy"]:
         repl.console.print(
-            "[dim]→ /model to see available models  ·  /run <task> to start working[/dim]"
+            "[dim]→ /model to see available models  ·  /council <task> to start working[/dim]"
         )
     if verdict["optional_attention"]:
         repl.console.print(

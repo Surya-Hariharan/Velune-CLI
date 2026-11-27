@@ -6,7 +6,7 @@ retrieval depth, compression, local model size). It is computed once
 at bootstrap and registered in the service container as ``runtime.profile``
 so every layer can adapt without re-probing hardware.
 
-Profiles never override an explicit user mode (/fast, /max); they only
+Profiles never override an explicit user mode (/mode fast, /mode max); they only
 shape the defaults of NORMAL mode and routing preferences.
 """
 

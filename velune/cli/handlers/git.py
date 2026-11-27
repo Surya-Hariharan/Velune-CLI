@@ -1,4 +1,4 @@
-"""Git-related slash command handlers: /diff /undo /hunk /push /pr /issue."""
+"""Git-related slash command handlers: /diff /rewind /push /pr /issue."""
 
 from __future__ import annotations
 
@@ -63,55 +63,6 @@ async def cmd_diff(repl: VeluneREPL, args: str) -> None:
     )
 
 
-async def cmd_undo(repl: VeluneREPL, args: str) -> None:
-    """Revert the last Velune-generated git commit, keeping changes staged."""
-    import subprocess
-    from pathlib import Path as _Path
-
-    workspace = _Path(repl.container.get("runtime.workspace") or ".").resolve()
-
-    log = await asyncio.to_thread(
-        subprocess.run,
-        ["git", "log", "-1", "--format=%s%n%b"],
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if log.returncode != 0:
-        repl.console.print("[red]No git repository found or git log failed.[/red]")
-        return
-
-    last_msg = log.stdout.strip().lower()
-    is_velune_commit = "velune:" in last_msg or "co-authored-by: velune" in last_msg
-
-    if not is_velune_commit:
-        repl.console.print(
-            "[yellow]Last commit is not a Velune-generated commit — undo aborted.[/yellow]\n"
-            "[dim]Only commits created by Velune's edit pipeline can be undone with /undo.[/dim]"
-        )
-        return
-
-    reset = await asyncio.to_thread(
-        subprocess.run,
-        ["git", "reset", "--soft", "HEAD^"],
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if reset.returncode == 0:
-        repl.console.print(
-            "[green]Git commit reverted.[/green] "
-            "[dim]Changes kept staged. This only undoes the last Velune git "
-            "commit — it does not undo a conversation turn.[/dim]"
-        )
-    else:
-        repl.console.print(f"[red]Undo failed:[/red] {reset.stderr.strip()}")
-
-
 async def cmd_rewind(repl: VeluneREPL, args: str) -> None:
     """Undo the file changes the agent made during its most recent turn (and only that turn).
 
@@ -137,33 +88,6 @@ async def cmd_rewind(repl: VeluneREPL, args: str) -> None:
     repl.console.print(
         f"[bold]Rewound {len(report.restored)} of {total} change(s)[/bold]"
         + (f" — {len(report.skipped)} skipped" if report.skipped else "")
-    )
-
-
-async def cmd_hunk(repl: VeluneREPL, args: str) -> None:
-    """Toggle hunk-by-hunk review mode for edit sessions.
-
-    Persisted to this workspace's velune.toml (``execution.hunk_review_default``)
-    so the choice carries over to the next session opened in the same
-    workspace, instead of resetting to off on every launch.
-    """
-    from velune.cli.handlers.settings import save_setting_to_toml
-
-    repl._hunk_review_mode = not repl._hunk_review_mode
-    state = "enabled" if repl._hunk_review_mode else "disabled"
-
-    save_setting_to_toml(repl, "execution", "hunk_review_default", repl._hunk_review_mode)
-    try:
-        config = repl.container.get_optional("runtime.config")
-        if config is not None and hasattr(config, "execution"):
-            config.execution.hunk_review_default = repl._hunk_review_mode
-    except Exception:
-        pass
-
-    repl.console.print(
-        f"[cyan]Hunk review mode {state}.[/cyan] "
-        f"[dim]{'Each hunk in a diff will be reviewed individually.' if repl._hunk_review_mode else 'Diffs are reviewed file-by-file (default).'} "
-        f"Saved as this workspace's default.[/dim]"
     )
 
 

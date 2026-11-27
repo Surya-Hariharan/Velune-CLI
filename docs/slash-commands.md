@@ -1,7 +1,7 @@
 # Slash Commands
 
 *The full reference for everything you can type inside the Velune CLI REPL —
-56 commands across 12 categories.*
+49 commands across 12 categories.*
 
 For commands run in the terminal *before* the REPL starts (`velune run`,
 `velune doctor`, …), see the [command table in the reference](reference.md#commands)
@@ -50,18 +50,14 @@ it runs.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `run` | `r` | `/run [--bg] <task description>` | Hand a task to the council (same as /council; --bg runs it read-only) |
-| `council` | `c` | `/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]  ·  /council models [set <role> <provider/model> \| clear <role\|--all>]` | A team of agents, picked for the task, works on it in stages |
+| `council` | `c` | `/council [--bg] [--skill <name>] [--permission <name>] <task>  ·  /council show [run]  ·  /council models [set <role> <provider/model> \| clear <role\|--all>]` | A team of agents, picked for the task, works on it in stages |
 | `skills` | *(none)* | `/skills [show <name>]` | List the council's skills and permission profiles, or show one |
 | `jobs` | `job` | `/jobs [task\|cognition\|shell] [cancel <id>]` | List background jobs (optionally filtered by kind) or cancel one |
 | `dashboard` | `dash`, `status` | `/dashboard` | Live system dashboard: session, state, jobs, alerts, health |
-| `fast` | `optimus`, `opt` | `/fast` | Speed mode — compressed context, smallest model |
-| `max` | `godly`, `full`, `god` | `/max` | Max power — largest model, full context |
-| `normal` | `reset`, `n` | `/normal` | Return to balanced normal mode |
 | `mode` | *(none)* | `/mode [fast\|max\|normal\|status]` | Show or switch the session mode: fast \| max \| normal \| status |
 | `retry` | *(none)* | `/retry [model]` | Regenerate the last response, optionally on a different model |
 
-> `/council` (and `/run`) picks a skill — coding, planning, review or
+> `/council` picks a skill — coding, planning, review or
 > research — and a permission profile for the task, creates a team of up to
 > five agents, shows the plan, and runs it in stages. `--skill` and
 > `--permission` choose them yourself; `/skills` lists both. One `/rewind`
@@ -69,10 +65,10 @@ it runs.
 > Every agent uses the chat model unless its role has one of its own:
 > `/council models set reviewer <provider/model>` (or `lead`, for whichever
 > agent leads) saves it under `[swarm.models]` in `velune.toml`.
-> `/fast`, `/max` and `/normal` set the model, context budget and retrieval
-> depth for the session. Their names match `/mode`'s own vocabulary
-> (`/mode fast`, `/mode max`, `/mode normal`); `optimus`/`godly` still work
-> as aliases.
+> `/council --bg <task>` runs the task as a read-only background job; follow
+> it with `/jobs`.
+> `/mode fast`, `/mode max` and `/mode normal` set the model, context budget
+> and retrieval depth for the session.
 
 ---
 
@@ -90,7 +86,6 @@ e.g. `⏸ PLAN · awaiting approval`.
 | `manual` | *(none)* | `/manual` | Manual mode: read freely, ask before every change |
 | `plan` | *(none)* | `/plan [task]` | Plan mode: write a plan to .velune/plans/, change nothing until you approve |
 | `auto` | *(none)* | `/auto` | Auto mode: change the workspace without asking (high-risk still asks) |
-| `approve` | `approval` | `/approve [ask\|safe\|block]` | Legacy: set the execution mode (ask→manual, safe→auto, block→plan) |
 
 > **MANUAL** (default) — Velune reads, searches and analyzes freely, and
 > shows you every change (files, folders, state-changing commands) for
@@ -260,9 +255,7 @@ Git and forge (GitHub/GitLab) integration, plus the execution sandbox.
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `diff` | `d` | `/diff` | Show uncommitted file changes from the last council run |
-| `undo` | `u` | `/undo` | Revert the last Velune git commit — not a conversation undo (keeps changes staged) |
 | `rewind` | *(none)* | `/rewind` | Undo the file changes the agent made in its last turn (skips files changed since) |
-| `hunk` | `hunks` | `/hunk` | Toggle hunk-by-hunk review mode — approve each change before it's applied |
 | `push` | `gp` | `/push [--force]` | Push current branch to remote origin |
 | `pr` | `pull-request`, `mr` | `/pr <title> [--base <branch>] [--draft]` | Create a pull request / merge request on GitHub or GitLab |
 | `issue` | `gh-issue`, `gl-issue` | `/issue <number>` | Fetch a GitHub/GitLab issue and inject it as conversation context |
@@ -334,35 +327,30 @@ Session lifecycle, diagnostics, and disaster recovery.
 | --- | --- | --- | --- |
 | `?` | `/help` | `job` | `/jobs` |
 | `appearance` | `/theme` | `login` | `/connect` |
-| `approval` | `/approve` | `logs` | `/trace` |
-| `auth` | `/connect` | `m` | `/model` |
-| `b` | `/bench` | `mem` | `/memory` |
-| `c` | `/council` | `mr` | `/pr` |
-| `cfg` | `/config` | `n` | `/normal` |
-| `check` | `/lint` | `opt` | `/fast` |
-| `cls` | `/clear` | `optimus` | `/fast` |
-| `cog` | `/index` | `pl` | `/plugin` |
-| `cognition` | `/index` | `plugins` | `/plugin` |
-| `crash-reports` | `/crashreports` | `proj` | `/project` |
-| `ctx` | `/context` | `pull-request` | `/pr` |
-| `d` | `/diff` | `q` | `/exit` |
-| `dash` | `/dashboard` | `quit` | `/exit` |
-| `diag` | `/doctor` | `r` | `/run` |
-| `download` | `/pull` | `remove` | `/delete` |
-| `f` | `/fork` | `res` | `/resource` |
-| `fresh` | `/new` | `reset` | `/normal` |
-| `full` | `/max` | `resources` | `/resource` |
-| `g` | `/graph` | `rm` | `/delete` |
-| `get` | `/pull` | `s` | `/session` |
-| `gh-issue` | `/issue` | `sb` | `/sandbox` |
-| `gl-issue` | `/issue` | `setup` | `/settings` |
-| `god` | `/max` | `smell` | `/refactor` |
-| `godly` | `/max` | `smells` | `/refactor` |
-| `gp` | `/push` | `status` | `/dashboard` |
-| `h` | `/help` | `typify` | `/types` |
-| `hints` | `/types` | `u` | `/undo` |
-| `hist` | `/history` | `usage` | `/stats` |
-| `hunks` | `/hunk` | `workspace` | `/project` |
+| `auth` | `/connect` | `logs` | `/trace` |
+| `b` | `/bench` | `m` | `/model` |
+| `c` | `/council` | `mem` | `/memory` |
+| `cfg` | `/config` | `mr` | `/pr` |
+| `check` | `/lint` | `pl` | `/plugin` |
+| `cls` | `/clear` | `plugins` | `/plugin` |
+| `cog` | `/index` | `proj` | `/project` |
+| `cognition` | `/index` | `pull-request` | `/pr` |
+| `crash-reports` | `/crashreports` | `q` | `/exit` |
+| `ctx` | `/context` | `quit` | `/exit` |
+| `d` | `/diff` | `remove` | `/delete` |
+| `dash` | `/dashboard` | `res` | `/resource` |
+| `diag` | `/doctor` | `resources` | `/resource` |
+| `download` | `/pull` | `rm` | `/delete` |
+| `f` | `/fork` | `s` | `/session` |
+| `fresh` | `/new` | `sb` | `/sandbox` |
+| `g` | `/graph` | `setup` | `/settings` |
+| `get` | `/pull` | `smell` | `/refactor` |
+| `gh-issue` | `/issue` | `smells` | `/refactor` |
+| `gl-issue` | `/issue` | `status` | `/dashboard` |
+| `gp` | `/push` | `typify` | `/types` |
+| `h` | `/help` | `usage` | `/stats` |
+| `hints` | `/types` | `workspace` | `/project` |
+| `hist` | `/history`  | |
 
 </details>
 

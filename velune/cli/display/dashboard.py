@@ -92,7 +92,9 @@ class ProgressDashboard:
 
         jobs = self._jobs.all_jobs()
         if not jobs:
-            table.add_row("—", f"[{design.FAINT}]no jobs yet — use /run --bg[/]", "", "", "", "")
+            table.add_row(
+                "—", f"[{design.FAINT}]no jobs yet — use /council --bg[/]", "", "", "", ""
+            )
             return table
 
         for job in jobs:

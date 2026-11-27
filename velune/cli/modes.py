@@ -81,7 +81,7 @@ class ModeManager:
     def config(self) -> ModeConfig:
         config = MODE_CONFIGS[self._active]
         # NORMAL mode adapts to the hardware-derived runtime profile; explicit
-        # user modes (/fast, /max) always keep their fixed settings.
+        # user modes (/mode fast, /mode max) always keep their fixed settings.
         if self._active == SessionMode.NORMAL and self._profile is not None:
             return replace(
                 config,

@@ -1,8 +1,4 @@
-"""Mode switch slash command handlers: /fast /max /normal /mode.
-
-Deduplicates /fast and /max which shared identical structure —
-now both delegate to a single _set_session_mode helper.
-"""
+"""``/mode``: show the session mode or switch it (fast | max | normal)."""
 
 from __future__ import annotations
 
@@ -16,7 +12,7 @@ _log = logging.getLogger("velune.cli.handlers.mode")
 
 
 async def _set_session_mode(repl: VeluneREPL, mode_enum, label: str, color: str) -> None:
-    """Shared body for /fast, /max, /normal — avoids copy-paste."""
+    """Switch to *mode_enum* and pick a model that suits it."""
     from velune.cli.model_selector import ModeAwareModelSelector
 
     config = repl._mode_manager.set_mode(mode_enum)
@@ -37,19 +33,19 @@ async def _set_session_mode(repl: VeluneREPL, mode_enum, label: str, color: str)
     )
 
 
-async def cmd_optimus(repl: VeluneREPL, args: str) -> None:
+async def _fast(repl: VeluneREPL) -> None:
     from velune.cli.modes import SessionMode
 
     await _set_session_mode(repl, SessionMode.OPTIMUS, "OPTIMUS MODE", "yellow")
 
 
-async def cmd_godly(repl: VeluneREPL, args: str) -> None:
+async def _max(repl: VeluneREPL) -> None:
     from velune.cli.modes import SessionMode
 
     await _set_session_mode(repl, SessionMode.GODLY, "GODLY MODE", "magenta")
 
 
-async def cmd_normal(repl: VeluneREPL, args: str) -> None:
+async def _normal(repl: VeluneREPL) -> None:
     from velune.cli.modes import SessionMode
 
     config = repl._mode_manager.set_mode(SessionMode.NORMAL)
@@ -57,14 +53,14 @@ async def cmd_normal(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_mode(repl: VeluneREPL, args: str) -> None:
-    """/mode doubles as a switcher: fast|max|normal change mode, or show current."""
+    """``/mode fast|max|normal`` switches the session mode; bare ``/mode`` shows it."""
     sub = args.strip().lower()
     if sub in ("fast", "optimus", "speed"):
-        return await cmd_optimus(repl, "")
+        return await _fast(repl)
     if sub in ("max", "godly", "full"):
-        return await cmd_godly(repl, "")
-    if sub in ("normal", "reset", "balanced"):
-        return await cmd_normal(repl, "")
+        return await _max(repl)
+    if sub in ("normal", "balanced"):
+        return await _normal(repl)
     if sub not in ("", "status", "show"):
         repl.console.print(
             f"[yellow]Unknown /mode subcommand: {sub}[/yellow]  "

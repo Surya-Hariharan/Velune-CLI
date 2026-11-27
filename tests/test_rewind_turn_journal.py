@@ -207,7 +207,6 @@ def council_repl(ws: Path, monkeypatch):
         container=container,
         console=Console(file=StringIO(), force_terminal=False, width=120),
         active_model=None,
-        _hunk_review_mode=False,
         _last_turn_journal=None,
     )
     (ws / "older.txt").write_text("from an older turn\n")

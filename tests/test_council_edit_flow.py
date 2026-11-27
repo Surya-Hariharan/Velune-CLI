@@ -1,8 +1,8 @@
 """The real council edit path, in a throwaway git repository.
 
 ``apply_council_edits`` parses the coder's SEARCH/REPLACE blocks, writes the accepted
-files and (only when opted in) commits them. These tests drive that whole path, and
-``/undo`` after it, against a temporary repository -- never the project's own.
+files and (only when opted in) commits them. These tests drive that whole path against a
+temporary repository -- never the project's own.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from rich.console import Console
 
 from velune.cli.handlers import council as council_handlers
 from velune.cli.handlers.council import apply_council_edits
-from velune.cli.handlers.git import cmd_undo
 from velune.kernel.config import ExecutionConfig
 
 PROPOSAL = "edited.py\n<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE\n"
@@ -78,7 +77,6 @@ def _repl(repo: Path, *, auto_commit: bool | None) -> SimpleNamespace:
         container=container,
         console=Console(file=StringIO(), force_terminal=False, width=120),
         active_model=None,
-        _hunk_review_mode=False,
     )
 
 
@@ -160,29 +158,3 @@ async def test_a_failing_commit_is_reported_not_raised_and_creates_no_commit(rep
 
     assert _head(repo) == before
     assert (repo / "edited.py").read_text(encoding="utf-8") == "x = 2\n"  # the edit itself stands
-
-
-# ── /undo ────────────────────────────────────────────────────────────────────
-
-
-async def test_undo_reverts_the_council_commit_and_keeps_the_changes_staged(repo):
-    base = _head(repo)
-    await apply_council_edits(_repl(repo, auto_commit=True), PROPOSAL, "bump x")
-    assert _head(repo) != base
-
-    await cmd_undo(_repl(repo, auto_commit=True), "")
-
-    assert _head(repo) == base
-    assert (repo / "edited.py").read_text(encoding="utf-8") == "x = 2\n"
-    assert "edited.py" in _git(repo, "diff", "--cached", "--name-only").split()
-
-
-async def test_undo_refuses_a_commit_velune_did_not_make(repo):
-    _git(repo, "commit", "-q", "-m", "my own commit")
-    mine = _head(repo)
-    repl = _repl(repo, auto_commit=True)
-
-    await cmd_undo(repl, "")
-
-    assert _head(repo) == mine
-    assert "not a Velune-generated commit" in repl.console.file.getvalue()

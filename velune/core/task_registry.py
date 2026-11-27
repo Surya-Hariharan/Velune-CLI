@@ -190,7 +190,7 @@ class BackgroundTaskRegistry:
 
 
 # ---------------------------------------------------------------------------
-# User-visible background job registry (for /run --bg tasks)
+# User-visible background job registry (for /council --bg tasks)
 # ---------------------------------------------------------------------------
 
 
@@ -273,7 +273,7 @@ class JobRecord:
     job_id: str
     name: str
     # Broad category for `/jobs <kind>` filtering: "task" (a council/reasoning
-    # run submitted via `/run --bg`), "cognition" (background indexing/repo
+    # run submitted via `/council --bg`), "cognition" (background indexing/repo
     # cognition refresh), or "shell" (a background shell command). Kept as an
     # explicit field rather than parsed from `name`'s prefix so filtering
     # doesn't break if a task's own text happens to start with "shell:" etc.

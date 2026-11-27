@@ -10,7 +10,7 @@ audited and redacted like any other.
 Boundaries, all enforced here rather than by instruction to the model:
 
 * Only **shell jobs the agent started** are visible. A job started by the user
-  (``/run --bg``), indexing, or anything else answers "no such job" — the
+  (``/council --bg``), indexing, or anything else answers "no such job" — the
   existence of other jobs is not revealed and they can never be stopped here.
 * Jobs are addressed by **job id only**. The operating-system process id is
   never shown and never accepted, so this cannot become "kill any process".

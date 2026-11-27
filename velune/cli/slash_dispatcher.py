@@ -33,14 +33,10 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "plan": "Execution",
     "auto": "Execution",
     # AI
-    "run": "AI",
     "council": "AI",
     "skills": "AI",
     "jobs": "AI",
     "dashboard": "AI",
-    "fast": "AI",
-    "max": "AI",
-    "normal": "AI",
     "mode": "AI",
     "retry": "AI",
     # Providers
@@ -69,9 +65,7 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "resource": "Resources",
     # Git
     "diff": "Git",
-    "undo": "Git",
     "rewind": "Git",
-    "hunk": "Git",
     "push": "Git",
     "pr": "Git",
     "issue": "Git",
@@ -79,7 +73,6 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     # Settings
     "settings": "Settings",
     "config": "Settings",
-    "approve": "Execution",
     "theme": "Settings",
     "crashreports": "Settings",
     # System
@@ -434,33 +427,18 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
 
     registry.register(
         SlashCommand(
-            name="run",
-            aliases=["r"],
-            description="Hand a task to the council (same as /council; --bg runs it read-only)",
-            usage="/run [--bg] <task description>",
-            handler=repl._cmd_run,
-            examples=(
-                "/run write a REST endpoint for user auth",
-                "/run fix the bug in auth.py",
-                "/run explain how the payment flow works",
-            ),
-            search_terms=("task", "execute", "ai", "ask", "do", "generate", "write code"),
-            shortcut="/r",
-        )
-    )
-    registry.register(
-        SlashCommand(
             name="council",
             aliases=["c"],
             description="A team of agents, picked for the task, works on it in stages",
             usage=(
-                "/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
+                "/council [--bg] [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
                 "  ·  /council models [set <role> <provider/model> | clear <role|--all>]"
             ),
             handler=repl._cmd_council,
             examples=(
                 "/council analyze security vulnerabilities in this codebase",
                 "/council --skill coding --permission read-only add input validation",
+                "/council --bg explain how the payment flow works",
                 "/council show",
                 "/council models set reviewer ollama/qwen3:8b",
             ),
@@ -470,6 +448,8 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "complex task",
                 "deep analysis",
                 "best quality",
+                "background",
+                "run",
             ),
             shortcut="/c",
         )
@@ -601,40 +581,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
 
     registry.register(
         SlashCommand(
-            name="fast",
-            aliases=["optimus", "opt"],
-            description="Speed mode — compressed context, smallest model",
-            usage="/fast",
-            handler=repl._cmd_optimus,
-            examples=("/fast",),
-            search_terms=("fast", "quick", "speed", "instant", "lightweight", "small model"),
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="max",
-            aliases=["godly", "full", "god"],
-            description="Max power — largest model, full context",
-            usage="/max",
-            handler=repl._cmd_godly,
-            examples=("/max",),
-            search_terms=("max", "full power", "powerful", "best model", "maximum quality"),
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="normal",
-            aliases=["reset", "n"],
-            description="Return to balanced normal mode",
-            usage="/normal",
-            handler=repl._cmd_normal,
-            examples=("/normal",),
-            search_terms=("balanced", "reset mode", "default mode"),
-            shortcut="/n",
-        )
-    )
-    registry.register(
-        SlashCommand(
             name="mode",
             aliases=[],
             description="Show or switch the session mode: fast | max | normal | status",
@@ -661,20 +607,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     )
     registry.register(
         SlashCommand(
-            name="undo",
-            aliases=["u"],
-            description=(
-                "Revert the last Velune git commit — not a conversation undo (keeps changes staged)"
-            ),
-            usage="/undo",
-            handler=repl._cmd_undo,
-            examples=("/undo",),
-            search_terms=("revert", "rollback", "git undo", "undo commit", "take back"),
-            shortcut="/u",
-        )
-    )
-    registry.register(
-        SlashCommand(
             name="rewind",
             aliases=[],
             description=(
@@ -695,17 +627,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             handler=repl._cmd_retry,
             examples=("/retry", "/retry gpt-4o"),
             search_terms=("regenerate", "redo", "try again", "different model", "resubmit"),
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="hunk",
-            aliases=["hunks"],
-            description="Toggle hunk-by-hunk review mode — approve each change before it's applied",
-            usage="/hunk",
-            handler=repl._cmd_hunk,
-            examples=("/hunk",),
-            search_terms=("review changes", "approve change", "hunk by hunk", "interactive review"),
         )
     )
     registry.register(
@@ -739,17 +660,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             handler=repl._cmd_auto,
             examples=("/auto",),
             search_terms=("execution mode", "autonomous", "agent", "auto-approve", "yolo"),
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="approve",
-            aliases=["approval"],
-            description="Legacy: set the execution mode (ask→manual, safe→auto, block→plan)",
-            usage="/approve [ask|safe|block]",
-            handler=repl._cmd_approve,
-            examples=("/approve ask", "/approve safe"),
-            search_terms=("permissions", "safety", "tool approval", "confirmation"),
         )
     )
     registry.register(

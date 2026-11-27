@@ -12,7 +12,7 @@ Approval policy (per call):
 - ``execute_command`` — classified by :func:`velune.tools.safety.classify_command`:
   BLOCK verdicts are denied outright; SAFE verdicts auto-run when the session
   approval mode is ``safe``; everything else prompts.
-- ``/approve block`` — denies every non-read-only call without prompting.
+- PLAN mode (``/plan``) — denies every non-read-only call without prompting.
 - everything else (writes, git mutations, network, MCP) — prompts, with a
   per-session "always allow this tool" option.
 """

@@ -37,8 +37,8 @@ you do not need: a quick question needs neither an index nor a council.
 flowchart LR
     A["Set up once<br/>velune init, connect a model"] --> B["Index when useful<br/>/index quick, standard, deep"]
     B --> C["Choose autonomy<br/>/manual, /plan, /auto"]
-    C --> D["Give a task<br/>/run, or just chat"]
-    D --> E["Review<br/>/diff, /hunk, /undo"]
+    C --> D["Give a task<br/>/council, or just chat"]
+    D --> E["Review<br/>/diff, /rewind"]
     E --> D
     E --> F["Memory carries over<br/>to the next session"]
 ```
@@ -48,10 +48,9 @@ A short example of the loop, in the REPL:
 ```text
 /index standard            # build the symbol index (one time, then kept fresh)
 /model use <id>            # pick a model you have connected
-/run add input validation to the signup handler
+/council add input validation to the signup handler
 /diff                      # see what changed on disk
 /rewind                    # undo the file changes from the agent's last turn
-/undo                      # revert the last Velune-authored commit, if you do not want it
 ```
 
 In the default Manual mode, Velune shows each change and waits for your approval before it
@@ -150,18 +149,11 @@ deletes), and before reading or changing secrets. These rules are enforced in th
 layer, not only requested of the model. See [SECURITY.md](../SECURITY.md) for the details
 and the limits.
 
-`/approve safe|ask|block` is a separate, session-scoped control over individual tool calls:
-
-- `safe`: known read-only calls run without asking; writes and commands prompt.
-- `ask` (default): you see everything non-trivial.
-- `block`: calls are rejected, which suits stepping through a task you are not sure about
-  or working in a sensitive repository.
-
 ---
 
 ## 4. Choosing how a task runs
 
-Ordinary chat uses one model with tools. `/council <task>` (or `/run <task>`) gives the task
+Ordinary chat uses one model with tools. `/council <task>` gives the task
 to a team of agents instead:
 
 1. A **skill** is chosen: `coding`, `planning`, `review` or `research`. The skill sets the
@@ -185,10 +177,10 @@ Your execution mode still applies: Plan mode changes nothing, whatever the profi
 stops at the time, model-call and token limits in the `[swarm]` section of `velune.toml`. You
 can add your own skills and profiles; see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-`/fast`, `/max` and `/normal` are separate: they set the model and context size for the
-session.
+`/mode fast`, `/mode max` and `/mode normal` are separate: they set the model and context
+size for the session.
 
-For anything that will take a while, `/run --bg <task>` submits it as a background job and
+For anything that will take a while, `/council --bg <task>` submits it as a background job and
 returns your prompt immediately. A background job only reads and answers. `/jobs` and
 `/dashboard` track progress, and the status bar shows a live `bg:N` counter.
 
@@ -198,14 +190,10 @@ returns your prompt immediately. A background job only reads and answers. `/jobs
 
 Velune edits files on disk rather than pasting diffs into chat. After a run:
 
-- `/diff` shows what actually changed on disk from the last council run.
-- `/hunk` switches to hunk-by-hunk review before edits are accepted, for finer control than
-  "accept everything".
+- `/diff` shows the uncommitted changes in the working tree.
 - `/rewind` undoes the file changes the agent made in its last turn: edited and deleted
   files come back, created ones are removed, moved ones return. A file you changed after
   the turn is left alone and reported.
-- `/undo` reverts the last Velune-authored git commit. The changes stay staged, so you can
-  inspect them before deciding what to do next.
 
 The agent edits part of a file with `edit_file` rather than rewriting it, and keeps each
 file's encoding and line endings. If you save a file while the agent is working on it, its

@@ -1,6 +1,6 @@
-"""Council/run/jobs slash command handlers: /run /council /jobs /dashboard + edit pipeline.
+"""Council/jobs slash command handlers: /council /jobs /dashboard + edit pipeline.
 
-``/council`` (and ``/run``) hand the task to the agent swarm (``velune.swarm``):
+``/council`` hands the task to the agent swarm (``velune.swarm``):
 a skill and a permission profile are chosen, a team is created, and its
 stages run with the session's permission gate.
 """
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger("velune.cli.handlers.council")
 
 _USAGE = (
-    "Usage: /council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
+    "Usage: /council [--bg] [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
     "  ·  /council models"
 )
 _MODELS_USAGE = (
@@ -49,16 +49,11 @@ def parse_council_args(args: str) -> tuple[str, dict[str, str], str]:
     return " ".join(task), options, ""
 
 
-async def cmd_run(repl: VeluneREPL, args: str) -> None:
-    if "--bg" in args.split():
-        clean = " ".join(w for w in args.split() if w != "--bg")
-        await _submit_background_job(repl, clean)
-        return
-    await cmd_council(repl, args)
-
-
 async def cmd_council(repl: VeluneREPL, args: str) -> None:
     words = args.split()
+    if "--bg" in words:
+        await _submit_background_job(repl, " ".join(w for w in words if w != "--bg"))
+        return
     if words[:1] == ["show"]:
         show_runs(repl, words[1] if len(words) > 1 else "")
         return
@@ -182,7 +177,7 @@ async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
 
     ``/jobs`` on its own lists everything; ``/jobs cognition`` (or ``task`` /
     ``shell``) narrows the listing to just that kind — useful once a session
-    has a mix of `/run --bg` reasoning jobs, indexing refreshes, and
+    has a mix of `/council --bg` reasoning jobs, indexing refreshes, and
     background shell commands all in flight at once.
     """
     from rich.table import Table as RichTable
@@ -229,7 +224,7 @@ async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
             repl.console.print(f"[dim]No {kind_filter} jobs.[/dim]")
         else:
             repl.console.print(
-                "[dim]No background jobs yet. Use [bold]/run --bg <task>[/bold] to start one.[/dim]"
+                "[dim]No background jobs yet. Use [bold]/council --bg <task>[/bold] to start one.[/dim]"
             )
         return
 
@@ -324,7 +319,7 @@ async def _submit_background_job(repl: VeluneREPL, task: str) -> None:
     approval while the user is typing something else.
     """
     if not task.strip():
-        repl.console.print("[yellow]Usage: /run --bg <task>[/yellow]")
+        repl.console.print("[yellow]Usage: /council --bg <task>[/yellow]")
         return
     if repl._job_registry is None:
         repl.console.print("[red]Job registry unavailable — cannot run background jobs.[/red]")
@@ -775,42 +770,20 @@ async def apply_council_edits(repl: VeluneREPL, coder_proposal: str, task: str) 
 
     committed = await _auto_commit_edits(repl, accepted_paths, task, workspace)
     if committed:
-        repl.console.print("[dim]Changes committed. Use [bold]/undo[/bold] to revert.[/dim]")
+        repl.console.print(
+            "[dim]Changes committed. Revert with [bold]git reset --soft HEAD~1[/bold].[/dim]"
+        )
         await _show_edit_summary_panel(repl, accepted_paths, workspace)
 
 
 async def _write_accepted(repl, applier, preview, decisions, file_writes, accepted_paths) -> None:
-    """Write the edits the user accepted (hunk by hunk when hunk review is on)."""
+    """Write the edits the user accepted."""
     from velune.execution.diff_preview import DiffDecision
-    from velune.tools.filesystem.mutation import FileTooLargeError
 
-    if repl._hunk_review_mode:
-        from velune.execution.hunk_review import HunkReviewer
-
-        hunk_reviewer = HunkReviewer(repl.console)
-        for path, decision in decisions.items():
-            if decision != DiffDecision.ACCEPT:
-                continue
-            try:
-                file_diff = preview.preview.compute_diff(path, file_writes[path])
-            except FileTooLargeError:
-                # Too large to load and split into hunks: the change the user accepted
-                # is applied whole, as for a change with a single hunk.
-                applier.write(path, file_writes[path])
-                accepted_paths.append(path)
-                continue
-            hunks = hunk_reviewer.split_into_hunks(file_diff)
-            if len(hunks) <= 1 or file_diff.is_new_file or file_diff.is_deletion:
-                applier.write(path, file_writes[path])
-            else:
-                final_content = await hunk_reviewer.review_hunks(file_diff)
-                applier.write(path, final_content)
+    for path, decision in decisions.items():
+        if decision == DiffDecision.ACCEPT:
+            applier.write(path, file_writes[path])
             accepted_paths.append(path)
-    else:
-        for path, decision in decisions.items():
-            if decision == DiffDecision.ACCEPT:
-                applier.write(path, file_writes[path])
-                accepted_paths.append(path)
 
 
 async def _authorize_council_edits(repl: VeluneREPL, file_writes: dict) -> bool | None:

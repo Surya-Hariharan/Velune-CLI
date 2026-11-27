@@ -37,7 +37,6 @@ def _repl(ws: Path) -> SimpleNamespace:
         container=container,
         console=Console(file=StringIO(), force_terminal=False, width=140),
         active_model=None,
-        _hunk_review_mode=False,
         _last_turn_journal=None,
     )
 

@@ -1,4 +1,4 @@
-"""Execution-mode UX: startup value, switching, Shift+Tab cycle, /approve alias, status badge."""
+"""Execution-mode UX: startup value, switching, Shift+Tab cycle, status badge."""
 
 from __future__ import annotations
 
@@ -106,18 +106,6 @@ def test_status_bar_shows_the_execution_mode():
     assert "NORMAL" in text  # the separate fast/normal/max tier is still shown
 
 
-async def test_approve_alias_maps_onto_modes():
-    from velune.cli.handlers.settings import cmd_approve
-
-    repl = _repl()
-    await cmd_approve(repl, "safe")
-    assert repl._execution_mode is ExecutionMode.AUTO
-    await cmd_approve(repl, "block")
-    assert repl._execution_mode is ExecutionMode.PLAN
-    await cmd_approve(repl, "ask")
-    assert repl._execution_mode is ExecutionMode.MANUAL
-
-
 def test_mode_commands_are_registered_in_the_execution_category():
     from unittest.mock import MagicMock
 
@@ -125,7 +113,7 @@ def test_mode_commands_are_registered_in_the_execution_category():
 
     registry = build_slash_registry(MagicMock())
     by_name = {c.name: c for c in registry.all_unique()}
-    for name in ("manual", "plan", "auto", "approve"):
+    for name in ("manual", "plan", "auto"):
         assert by_name[name].category == "Execution"
 
 

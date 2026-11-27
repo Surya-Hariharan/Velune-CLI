@@ -110,7 +110,7 @@ class ReplSwarmUI:
 
 
 class JobSwarmUI:
-    """The ``SwarmUI`` for ``/run --bg``: reports the stage on the job record."""
+    """The ``SwarmUI`` for ``/council --bg``: reports the stage on the job record."""
 
     def __init__(self, update: Any) -> None:
         self._update = update  # called with current_phase=...

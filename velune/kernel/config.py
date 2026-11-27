@@ -57,11 +57,6 @@ class RetrievalConfig(BaseModel):
 class ExecutionConfig(BaseModel):
     """Safety and sandboxing options."""
 
-    # Per-workspace default for `/hunk` (hunk-by-hunk diff review before
-    # applying edits). Persisted to this workspace's velune.toml by the
-    # `/hunk` command itself, so toggling it once carries over to the next
-    # session in the same workspace instead of resetting every launch.
-    hunk_review_default: bool = False
     # Commit the files a council edit session changed. Off by default: a commit is
     # a durable change to the user's history that they did not ask for, so it must
     # be opted into (``execution.council_auto_commit = true`` in velune.toml).
@@ -74,7 +69,7 @@ class ExecutionConfig(BaseModel):
     # Native tool calling in chat — when True (default), models that support
     # function calling can invoke workspace tools mid-conversation through the
     # permission-gated tool loop. Read-only tools run without prompting;
-    # write/exec tools follow the session approval mode (/approve). Disable
+    # write/exec tools follow the session execution mode (/manual /plan /auto). Disable
     # with VELUNE_EXECUTION__NATIVE_TOOLS=0 or [execution] native_tools=false.
     native_tools: bool = True
     # Upper bound on model turns per prompt inside the tool loop.
