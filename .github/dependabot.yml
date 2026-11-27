@@ -8,7 +8,9 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "03:00"
-    open-pull-requests-limit: 10
+    # Version updates are paused: 0 opens no routine bump PRs. Security update PRs are
+    # unaffected. Restore to 10 to resume.
+    open-pull-requests-limit: 0
     # Wait a week before proposing a freshly published release, so a compromised or yanked
     # version is usually withdrawn before it reaches a PR. Security updates are not delayed.
     cooldown:
@@ -48,7 +50,8 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "04:00"
-    open-pull-requests-limit: 5
+    # Paused, as above. Restore to 5 to resume.
+    open-pull-requests-limit: 0
     cooldown:
       default-days: 7
     reviewers:
