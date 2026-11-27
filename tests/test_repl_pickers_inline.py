@@ -90,3 +90,55 @@ async def test_project_status_lists_recent_jobs_by_name(tmp_path, monkeypatch):
     assert "Recent Tasks" in out
     assert "abc123" in out and "Refactor the parser" in out and "running" in out
     assert "Value" not in out  # no meaningless "Key / Value" header row
+
+
+class _ScriptedHost:
+    """Answers each select with the next picker step, recording where it was."""
+
+    def __init__(self, steps) -> None:
+        self._steps = list(steps)
+        self.seen: list[tuple[str | None, list[str]]] = []
+
+    async def select(self, title, options, *, subtitle="", **_kwargs):
+        self.seen.append((subtitle, [o.label for o in options]))
+        step = self._steps.pop(0)
+        return step(options) if callable(step) else step
+
+
+def _by_label(label: str):
+    return lambda options: next(o.id for o in options if o.label == label)
+
+
+async def test_browse_directory_runs_in_the_repl_palette(tmp_path, monkeypatch):
+    from velune.cli.interactive.widgets.dir_browser import UP, USE
+
+    async def _no_standalone(*_a, **_k):
+        raise AssertionError("a second Application was started inside the REPL")
+
+    monkeypatch.setattr(interactive, "run_standalone", _no_standalone)
+    store = tmp_path / "models"
+    (store / "manifests").mkdir(parents=True)
+    (tmp_path / "other").mkdir()
+
+    scripted = _ScriptedHost([_by_label("other/"), UP, _by_label("models/"), USE])
+    interactive_host.install(scripted)
+    try:
+        chosen = await interactive.browse_directory(
+            title="Locate", start=tmp_path, validate=lambda p: (p / "manifests").is_dir()
+        )
+    finally:
+        interactive_host.uninstall(scripted)
+
+    assert chosen == store
+    where = [group for group, _labels in scripted.seen]
+    assert where == [str(tmp_path), str(tmp_path / "other"), str(tmp_path), str(store)]
+    assert "[ Use this folder ]" in scripted.seen[0][1] and "models/" in scripted.seen[0][1]
+
+
+async def test_browse_directory_esc_returns_back(tmp_path):
+    scripted = _ScriptedHost([interactive.BACK])
+    interactive_host.install(scripted)
+    try:
+        assert await interactive.browse_directory(start=tmp_path) is interactive.BACK
+    finally:
+        interactive_host.uninstall(scripted)

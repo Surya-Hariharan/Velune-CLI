@@ -29,8 +29,8 @@ from velune.cli.autocomplete import fuzzy_score
 from velune.cli.interactive.widget import Widget
 
 # Sentinel ids for the two pinned rows.
-_USE = "\x00use"
-_UP = "\x00up"
+USE = "\x00use"
+UP = "\x00up"
 
 
 def _list_drives() -> list[Path]:
@@ -78,6 +78,38 @@ def _safe_listdir(path: Path) -> list[Path]:
     return entries
 
 
+def parent_of(path: Path) -> Path | None:
+    """The folder above *path*; ``None`` (the drive list) from a filesystem root."""
+    return None if path.parent == path else path.parent
+
+
+def browse_rows(
+    current: Path | None, validate: Callable[[Path], bool] | None = None
+) -> list[tuple[str, str, str]]:
+    """``(id, label, meta)`` rows for *current*, or the drive list when it is None.
+
+    Shared by the standalone widget and the REPL's palette browser
+    (``interactive.browse_directory``), so both list the same rows.
+    """
+
+    def _check(path: Path) -> bool | None:
+        if validate is None:
+            return None
+        try:
+            return validate(path)
+        except Exception:
+            return None
+
+    if current is None:
+        return [(str(d), str(d), "drive") for d in _list_drives()]
+    ok = _check(current)
+    meta = "" if ok is None else ("valid Ollama store" if ok else "not an Ollama store")
+    rows = [(USE, "[ Use this folder ]", meta), (UP, ".. (up)", "")]
+    for child in _safe_listdir(current):
+        rows.append((str(child), child.name + "/", "Ollama store" if _check(child) else ""))
+    return rows
+
+
 @dataclass(kw_only=True)
 class DirBrowserWidget(Widget[Path]):
     """Navigable directory tree. Submits the chosen ``Path`` on "Use this folder"."""
@@ -96,40 +128,15 @@ class DirBrowserWidget(Widget[Path]):
     # -- rows ---------------------------------------------------------------
 
     def _rows(self) -> list[tuple[str, str, str]]:
-        """Build (id, label, meta) rows for the current location."""
-        cur = self._current
-        rows: list[tuple[str, str, str]] = []
-        if cur is None:
-            for d in _list_drives():
-                rows.append((str(d), str(d), "drive"))
-            return rows
-
-        meta = ""
-        if self.validate is not None:
-            try:
-                meta = "valid Ollama store" if self.validate(cur) else "not an Ollama store"
-            except Exception:
-                meta = ""
-        rows.append((_USE, "[ Use this folder ]", meta))
-        rows.append((_UP, ".. (up)", ""))
-        for child in _safe_listdir(cur):
-            ann = ""
-            if self.validate is not None:
-                try:
-                    if self.validate(child):
-                        ann = "Ollama store"
-                except Exception:
-                    ann = ""
-            rows.append((str(child), child.name + "/", ann))
-        return rows
+        return browse_rows(self._current, self.validate)
 
     def _visible(self) -> list[tuple[str, str, str]]:
         rows = self._rows()
         if not self._filter:
             return rows
         # Keep the pinned action rows; fuzzy-filter the rest by label.
-        pinned = [r for r in rows if r[0] in (_USE, _UP)]
-        rest = [r for r in rows if r[0] not in (_USE, _UP)]
+        pinned = [r for r in rows if r[0] in (USE, UP)]
+        rest = [r for r in rows if r[0] not in (USE, UP)]
         scored = [(fuzzy_score(self._filter, r[1]), r) for r in rest]
         filtered = [r for s, r in sorted(scored, key=lambda t: -t[0]) if s > 0]
         return pinned + filtered
@@ -157,15 +164,9 @@ class DirBrowserWidget(Widget[Path]):
             self.go_up()
 
     def go_up(self) -> None:
-        cur = self._current
-        if cur is None:
+        if self._current is None:
             return
-        parent = cur.parent
-        if parent == cur:
-            # At a filesystem root — surface the drive/volume list.
-            self._current = None
-        else:
-            self._current = parent
+        self._current = parent_of(self._current)
         self._filter = ""
         self._index = 0
 
@@ -174,10 +175,10 @@ class DirBrowserWidget(Widget[Path]):
         if not visible:
             return
         _id, _label, _meta = visible[self._index % len(visible)]
-        if _id == _USE:
+        if _id == USE:
             self.on_submit(self._current)
             return
-        if _id == _UP:
+        if _id == UP:
             self.go_up()
             return
         # Descend into the chosen directory (or drive root).
@@ -209,7 +210,7 @@ class DirBrowserWidget(Widget[Path]):
         for i, (_id, label, meta) in enumerate(visible):
             is_sel = i == self._index
             prefix = "❯ " if is_sel else "  "
-            if _id == _USE:
+            if _id == USE:
                 row_style = f"bold fg:{design.OK}" if is_sel else f"fg:{design.OK}"
             else:
                 row_style = f"bold fg:{design.ACCENT}" if is_sel else f"fg:{design.WHITE}"

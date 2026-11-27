@@ -29,6 +29,7 @@ from velune.cli.interactive.widgets import (
     StatusWidget,
     TextInputWidget,
 )
+from velune.cli.interactive.widgets.dir_browser import UP, USE, browse_rows, parent_of
 
 __all__ = [
     "BACK",
@@ -195,6 +196,26 @@ async def browse_directory(
     start: Path | None = None,
     validate: Callable[[Path], bool] | None = None,
 ) -> WidgetResult:
-    """Navigable directory browser. Returns the chosen ``Path``, or BACK/CANCEL."""
+    """Navigable directory browser. Returns the chosen ``Path``, or BACK/CANCEL.
+
+    Inside the REPL each folder is one palette select (same rows as the
+    standalone widget), so the browser never starts a second Application.
+    """
+    if (installed := host.active()) is not None:
+        current: Path | None = Path(start).expanduser() if start else Path.home()
+        while True:
+            where = "Drives / volumes" if current is None else str(current)
+            options = [
+                Option(id=row_id, label=label, meta=meta)
+                for row_id, label, meta in browse_rows(current, validate)
+            ]
+            chosen = await installed.select(title, options, subtitle=where, frame_title=title)
+            if chosen in (BACK, CANCEL):
+                return chosen
+            if chosen == USE:
+                return current
+            # ".." only appears inside a folder, never on the drive list.
+            current = parent_of(current) if chosen == UP and current is not None else Path(chosen)
+
     widget = DirBrowserWidget(title=title, start=start, validate=validate)
     return await run_standalone(widget)

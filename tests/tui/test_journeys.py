@@ -387,6 +387,41 @@ def test_dashboard_then_project_picker_keeps_the_screen_intact(repl, tmp_path):
     assert_clean_frame(s)
 
 
+def test_model_locate_browses_in_the_palette_and_registers(repl, tmp_path):
+    """/model locate's folder browser runs in the REPL's palette, start to finish."""
+    s = repl
+    store = tmp_path / "sandbox" / "home" / "ollama-models"  # under the session's ~
+    (store / "manifests").mkdir(parents=True)
+    (store / "blobs").mkdir()
+
+    flows.run_command(s, "/model locate")
+    s.wait_for("LOCATE YOUR OLLAMA MODEL STORE", 20)
+    assert_clean_frame(s)
+    s.type("ollama-models")
+    s.wait_for("Ollama store", 10)
+    s.key("enter")  # into the folder
+    s.wait_for("valid Ollama store", 10)
+    s.key("enter")  # "[ Use this folder ]" is the first row
+    s.wait_for("Registered model location", 15)
+    s.wait_gone("LOCATE YOUR OLLAMA MODEL STORE", 10)
+    flows.idle(s)
+    assert_clean_frame(s)
+    assert "↑↓ navigate" not in s.text()
+
+
+def test_model_locate_esc_cancels_cleanly(repl):
+    s = repl
+    flows.run_command(s, "/model locate")
+    s.wait_for("LOCATE YOUR OLLAMA MODEL STORE", 20)
+    s.key("esc")
+    s.wait_for("Cancelled.", 10)
+    flows.idle(s)
+    assert_clean_frame(s)
+    s.type("still-typing")
+    s.wait_for("❯ still-typing", 10)
+    s.key("ctrl-u")
+
+
 def test_new_session_command_resets_view(connected):
     s = connected
     flows.ask(s, "first")

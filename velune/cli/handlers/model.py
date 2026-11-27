@@ -998,7 +998,7 @@ async def _model_locate(repl: VeluneREPL) -> None:
     repl.console.print(
         "[dim]Browse to the folder that contains your Ollama models "
         "(the one with [bold]manifests/[/bold] and [bold]blobs/[/bold]). "
-        "Use ← to go up to drives/volumes.[/dim]"
+        "Pick .. (up) to go up, as far as the drives/volumes.[/dim]"
     )
     try:
         chosen = await browse_directory(
