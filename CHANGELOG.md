@@ -23,6 +23,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   change files changed none, and a diagram saved as `diagram.mmd` in the run folder. A profile
   that writes files never also offers a diff to apply, plan mode proposes changes instead, and
   when a skill has no writing role its lead writes.
+- With the `integrations` profile, `/council` agents are now offered Velune's integration
+  tools: every agent can read through them, and only the lead can change things. Headless
+  runs say that integrations are not available.
 
 ### Removed
 

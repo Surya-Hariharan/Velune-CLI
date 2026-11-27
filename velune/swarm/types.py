@@ -18,6 +18,7 @@ class AgentSpec:
     task: str  # the specific sub-task the router assigned
     stage: int = 0  # position in the flow
     can_write: bool = False  # role is a skill writer AND the profile allows writes
+    can_act: bool = False  # the one agent that may change things through integrations
     max_turns: int = 8
 
 

@@ -20,10 +20,10 @@ from velune.core.types.inference import InferenceRequest
 from velune.orchestration.tool_loop import Approver, ToolLoopResult, ToolLoopRunner
 from velune.swarm.library import PermissionProfile, Skill
 from velune.swarm.policy import SwarmPolicy
-from velune.swarm.store import RunStore
+from velune.swarm.store import RunStore, ScratchTools
 from velune.swarm.types import AgentResult, AgentSpec, SwarmPlan
 from velune.tools.base.registry import ToolRegistry
-from velune.tools.base.tool import ToolCallContext
+from velune.tools.base.tool import BaseTool, ToolCallContext, ToolPermission
 
 logger = logging.getLogger("velune.swarm.agent")
 
@@ -102,6 +102,63 @@ class AgentEnv:
     context_window: int = 32_768  # tokens
     on_event: Callable[[str, str, dict[str, Any]], None] | None = None  # (agent, event, data)
     tools: bool = True  # False for a model that cannot call tools: agents only answer
+    # Given an agent's task, a fresh source of integration tools for it. None
+    # when the entry point has no integrations (headless runs).
+    integrations: Callable[[str], Any] | None = None
+
+
+class _AgentTools:
+    """One agent's dynamic tools: the scratch tools plus the integrations it may use.
+
+    Each agent has its own integration source, so enabling an integration changes
+    only that agent's tools. A failing source leaves the scratch tools in place.
+    """
+
+    def __init__(self, scratch: ScratchTools, integrations: Any, policy: SwarmPolicy) -> None:
+        self._scratch = scratch
+        self._integrations = integrations
+        self._policy = policy
+
+    @property
+    def version(self) -> int:
+        return self._scratch.version + self._integrations.version
+
+    def tools(self) -> list[BaseTool]:
+        try:
+            offered = [t for t in self._integrations.tools() if self._offers(t)]
+        except Exception as exc:
+            logger.warning("Integration tools unavailable: %s", exc)
+            offered = []
+        return self._scratch.tools() + offered
+
+    def _offers(self, tool: BaseTool) -> bool:
+        # The dispatcher declares a write until its target is known; the policy
+        # approver then judges the operation it resolves to.
+        name = tool.get_name()
+        return name == "integration_call" or self._policy.permits(
+            name, tool.get_required_permissions()
+        )
+
+    def unknown_tool_hint(self, name: str) -> str | None:
+        if any(t.get_name() == name and not self._offers(t) for t in self._integrations.tools()):
+            return f" '{name}' makes changes, which this agent may not do in this run."
+        return self._integrations.unknown_tool_hint(name)
+
+
+def _dynamic_tools(
+    spec: AgentSpec, policy: SwarmPolicy, store: RunStore, env: AgentEnv
+) -> ScratchTools | _AgentTools | None:
+    if not env.tools:
+        return None
+    scratch = store.scratch_tools(spec.id)
+    if env.integrations is None or ToolPermission.INTEGRATION_READ not in policy.allowed:
+        return scratch
+    try:
+        source = env.integrations(spec.task)
+    except Exception as exc:  # discovery must never fail an agent
+        logger.warning("Integration tools unavailable: %s", exc)
+        return scratch
+    return _AgentTools(scratch, source, policy)
 
 
 def build_messages(
@@ -189,7 +246,7 @@ async def run_agent(
     env: AgentEnv,
 ) -> AgentResult:
     """Run one agent to completion and record its result in the store."""
-    agent_policy = policy.for_agent(can_write=spec.can_write)
+    agent_policy = policy.for_agent(can_write=spec.can_write, can_act=spec.can_act)
     messages = build_messages(
         spec,
         plan,
@@ -213,7 +270,7 @@ async def run_agent(
         ctx=env.ctx,
         max_turns=spec.max_turns,
         on_event=on_event,
-        dynamic_tools=store.scratch_tools(spec.id) if env.tools else None,
+        dynamic_tools=_dynamic_tools(spec, agent_policy, store, env),
     )
     store.event("start", spec.id, role=spec.role, stage=spec.stage)
     started = time.perf_counter()

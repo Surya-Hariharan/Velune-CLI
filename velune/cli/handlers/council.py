@@ -319,6 +319,24 @@ def serialize_asks(gate: Any) -> None:
         gate.ask_batch = one_batch
 
 
+def _swarm_integrations(repl: VeluneREPL, workspace: Path | None) -> Any:
+    """A fresh integration source per agent, primed with that agent's task, or None."""
+    from velune.cli.handlers.tool_chat import integration_source_factory
+
+    build = integration_source_factory(repl)
+    if build is None:
+        return None
+
+    def for_task(task: str) -> Any:
+        from velune.resources.discovery import scan_workspace
+
+        source = build()
+        source.begin_run(task, scan_workspace(workspace))
+        return source
+
+    return for_task
+
+
 async def _repl_env(repl: VeluneREPL, model: Any, provider: Any) -> tuple[Any, Any]:
     """The agents' environment for a REPL run, and the session gate it uses."""
     from velune.cli.handlers.tool_chat import (
@@ -353,6 +371,7 @@ async def _repl_env(repl: VeluneREPL, model: Any, provider: Any) -> tuple[Any, A
         context=await repository_summary(repl.container),
         context_window=int(getattr(model, "context_length", 0) or 32_768),
         tools=tool_loop_available(repl, model, provider),
+        integrations=_swarm_integrations(repl, ctx.workspace),
     )
     return env, gate
 

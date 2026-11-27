@@ -245,6 +245,8 @@ def _plan_from_answer(
 
     for agent in agents:
         agent.can_write = agent.role in skill.writers and profile.write == "workspace"
+        # One actor, alone in the last stage: integration changes never run in parallel.
+        agent.can_act = agent.id == lead and "integrations" in profile.tools
     if output == "files" and not any(a.can_write for a in agents):
         next(a for a in agents if a.id == lead).can_write = True
         notes.append(f"No agent in this team writes files, so the lead '{lead}' does.")

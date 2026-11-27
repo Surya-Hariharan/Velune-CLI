@@ -280,14 +280,10 @@ def _last_user_text(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _integration_source(repl: VeluneREPL, request: InferenceRequest, workspace: Path | None):
-    """The session's integration tool source, primed for this run — or None.
+def integration_source_factory(repl: VeluneREPL):
+    """Builds integration tool sources for the model, or None when it is offered none.
 
-    None means the model is offered no integration tools: there is no resource
-    manager, or ``resources.expose_to_model`` is off. The source (and which
-    integrations the model has enabled) lives for the session; each run
-    re-validates it against the current connectors and re-reads the workspace
-    hints that *suggest* integrations. Nothing here grants any permission.
+    None means there is no resource manager, or ``resources.expose_to_model`` is off.
     """
     manager = getattr(repl, "_resource_manager", None)
     if manager is None:
@@ -295,15 +291,33 @@ def _integration_source(repl: VeluneREPL, request: InferenceRequest, workspace: 
     cfg = getattr(getattr(getattr(repl, "runtime", None), "config", None), "resources", None)
     if cfg is not None and not getattr(cfg, "expose_to_model", True):
         return None
+
+    def build():
+        from velune.resources.tools import IntegrationToolSource
+
+        return IntegrationToolSource(manager, max_tools=int(getattr(cfg, "max_exposed_tools", 24)))
+
+    return build
+
+
+def _integration_source(repl: VeluneREPL, request: InferenceRequest, workspace: Path | None):
+    """The session's integration tool source, primed for this run — or None.
+
+    None means the model is offered no integration tools (see
+    :func:`integration_source_factory`). The source (and which integrations the
+    model has enabled) lives for the session; each run re-validates it against the
+    current connectors and re-reads the workspace hints that *suggest*
+    integrations. Nothing here grants any permission.
+    """
+    build = integration_source_factory(repl)
+    if build is None:
+        return None
     try:
         from velune.resources.discovery import scan_workspace
-        from velune.resources.tools import IntegrationToolSource
 
         source = getattr(repl, "_integration_tools", None)
         if source is None:
-            source = IntegrationToolSource(
-                manager, max_tools=int(getattr(cfg, "max_exposed_tools", 24))
-            )
+            source = build()
             repl._integration_tools = source
         source.begin_run(_last_user_text(request.messages), scan_workspace(workspace))
         return source

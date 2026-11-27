@@ -75,15 +75,22 @@ class SwarmPolicy:
             max_tool_calls=profile.max_tool_calls,
         )
 
-    def for_agent(self, *, can_write: bool) -> SwarmPolicy:
-        """The policy for one agent: non-writers lose writes and commands."""
+    def for_agent(self, *, can_write: bool, can_act: bool = False) -> SwarmPolicy:
+        """The policy for one agent.
+
+        File changes and commands follow *can_write*; changes made through an
+        integration follow *can_act*.
+        """
+        removed: frozenset[ToolPermission] = frozenset()
+        if not can_write:
+            removed |= _GROUPS["write"] | _GROUPS["shell"]
+        if not can_act:
+            removed |= {P.INTEGRATION_WRITE}
+        narrowed = replace(self, allowed=self.allowed - removed)
         if can_write:
-            return self
+            return narrowed
         return replace(
-            self,
-            allowed=self.allowed - _CHANGES_STATE,
-            write="none" if self.write == "workspace" else self.write,
-            commands="none",
+            narrowed, write="none" if self.write == "workspace" else self.write, commands="none"
         )
 
     @property
@@ -116,7 +123,8 @@ class SwarmPolicy:
             nonlocal calls
             if not self.permits(name, permissions):
                 return Denied(
-                    f"'{name}' is not allowed by the '{self.profile}' permission profile."
+                    f"'{name}' is not allowed for this agent by the '{self.profile}' "
+                    "permission profile."
                 )
             if name not in SCRATCH_TOOLS:
                 calls += 1

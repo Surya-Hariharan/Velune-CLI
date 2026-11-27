@@ -183,9 +183,17 @@ async def test_the_career_question_routes_to_research_without_tools():
 # ── running ──────────────────────────────────────────────────────────────────
 
 
-async def _swarm(tmp_path, script, *, parallel=3, delay=0.0, tools=None, ctx=None, **kwargs):
+async def _swarm(
+    tmp_path, script, *, parallel=3, delay=0.0, tools=None, ctx=None, integrations=None, **kwargs
+):
     provider = ScriptedProvider(script, delay=delay)
-    env = AgentEnv(provider=provider, model_id="m", registry=tools or registry(ReadTool()), ctx=ctx)
+    env = AgentEnv(
+        provider=provider,
+        model_id="m",
+        registry=tools or registry(ReadTool()),
+        ctx=ctx,
+        integrations=integrations,
+    )
     settings = kwargs.pop("settings", SwarmSettings(parallel=parallel))
     outcome = await run_swarm(
         "add gc_content", LIBRARY, env, runs_root=tmp_path / "runs", settings=settings, **kwargs

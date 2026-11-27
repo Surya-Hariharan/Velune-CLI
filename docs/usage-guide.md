@@ -302,6 +302,8 @@ for where each configuration file lives.
   its next turn) and can also start, read the output of, wait for and stop its own background
   commands. Enabling a tool never approves it; every call is still checked as above. Set
   `resources.expose_to_model = false` in `velune.toml` to keep integrations away from the model.
+  In `/council` with the `integrations` profile, every agent can read through these tools and only
+  the lead can change anything through them; `velune ask`, `velune run` and MCP runs do not get them.
 - **Docker.** With `pip install "velune-cli[docker]"` the agent manages containers, images, volumes,
   networks and Compose projects through the Docker SDK (see [docker.md](docker.md)). It tracks what it
   created: in Auto mode it can start, stop, restart and remove its own containers and create ordinary

@@ -22,6 +22,7 @@ from velune.swarm.policy import SwarmPolicy
 from velune.swarm.router import route
 from velune.swarm.store import RunStore
 from velune.swarm.types import AgentResult, SwarmPlan
+from velune.tools.base.tool import ToolPermission
 from velune.tools.filesystem.mutation import (
     TurnJournal,
     reset_active_journal,
@@ -130,6 +131,11 @@ async def run_swarm(
     if plan.output == "files" and not (policy.can_write and env.tools):
         plan.output = "diff"
         plan.notes.append("No files can be changed in this run: the changes are proposed instead.")
+    if env.tools and env.integrations is None and ToolPermission.INTEGRATION_READ in policy.allowed:
+        plan.notes.append(
+            "Velune integrations are not offered in this run: they need /council inside "
+            "`velune`, with resources.expose_to_model on."
+        )
     store = RunStore.create(runs_root, plan)
     ui.show_plan(plan)
 
