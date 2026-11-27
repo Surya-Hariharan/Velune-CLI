@@ -15,7 +15,7 @@ process.*
 - [How to add a new cloud provider](#how-to-add-a-new-cloud-provider)
 - [How to add a new top-level CLI command](#how-to-add-a-new-top-level-cli-command)
 - [How to add a new slash command](#how-to-add-a-new-slash-command)
-- [How to add a new council agent or critic](#how-to-add-a-new-council-agent-or-critic)
+- [How to add a council skill or permission profile](#how-to-add-a-council-skill-or-permission-profile)
 - [Pull request checklist](#pull-request-checklist)
 - [Commit message format](#commit-message-format)
 - [Code style](#code-style)
@@ -422,101 +422,55 @@ async def test_cmd_yourcommand():
 
 ---
 
-## How to add a new council agent or critic
+## How to add a council skill or permission profile
 
-The core council pipeline (`velune/cognition/council_runner.py`) is a
-**fixed six-phase sequence** — Planner → Coder → Reviewer loop → Challenger
-→ Debate → Synthesizer — not a per-tier configurable list. Adding a wholly
-new pipeline phase is a structural change to that runner, not a drop-in
-extension point.
+The council builds its team from two kinds of Markdown file, so a new kind of task
+usually needs no Python at all.
 
-The actual extension point is **critics** — specialized reviewers
-(currently Scalability, Security, Performance, Maintainability) that are
-config-driven and independently tier-gated in
-`velune/cognition/orchestrator.py`. Follow this pattern for a new critic:
+- A **skill** (`velune/swarm/skills/<slug>/SKILL.md`) says how a kind of task is done:
+  shared knowledge, the default team and its order, which roles may change files, the
+  lead, the default permission profile and the kind of output.
+- A **permission profile** (`velune/swarm/permissions/<slug>.md`) says what agents may
+  do: tool groups (`read`, `search`, `write`, `shell`, `web`, `integrations`), MCP
+  servers, `write: none | proposal | workspace`, `commands: none | ask | allowlist`, and
+  a tool-call limit.
 
-### Step 1 — Define the critic's config
+The frontmatter is flat `key: value` YAML. `velune/swarm/library.py` parses and checks
+both, and `/skills show <name>` prints what it loaded. A skill's body is shared by the
+whole team, and each `## <role>` section is that role's own instructions:
 
-`velune/cognition/council/critic_configs.py`
+```markdown
+---
+name: Documentation
+description: Write or update documentation for existing code
+triggers: [document, docs, readme, docstring]
+team: [reader, writer]
+flow: "reader > writer"        # ">" = then, "," = at the same time
+lead: writer
+writers: [writer]
+default_permission: propose-changes
+output: diff
+max_agents: 3
+---
+Shared guidance for the whole team.
 
-```python
-from velune.cognition.council.critic_configs import CriticConfig
-from velune.models.specializations import CouncilRole
+## reader
+Read the code and list what the documentation must cover.
 
-ACCESSIBILITY_CONFIG = CriticConfig(
-    name="Accessibility",
-    council_role=CouncilRole.REVIEWER,
-    system_prompt="""You are the Accessibility Critic for the Velune CLI Reasoning Council.
-Your role is to critique UI-facing changes for a11y regressions.
-
-OUTPUT EXCLUSIVELY A RAW VALID JSON OBJECT WITH NO CODEBLOCK WRAPPERS OR Markdown.
-JSON Format:
-{
-  "passed": true/false,
-  "issues": ["Issue description 1"],
-  "score": 0.0 to 1.0,
-  "rationale": "..."
-}
-""",
-    output_fields={"passed": True, "issues": [], "score": 0.9, "rationale": ""},
-)
+## writer
+Write the documentation as proposed edits.
 ```
 
-### Step 2 — Create the critic class
+Users can add their own in `~/.velune/skills/` and `~/.velune/permissions/`, and a trusted
+repository in `.velune/`. These may add new names but never replace a built-in one, and
+the router only picks a project's profile when the user names it with `--permission`.
+Whatever a profile says, every write and command still goes through the permission gate,
+so a profile can narrow what the user's execution mode allows but never widen it.
 
-`velune/cognition/council/critics.py`
-
-```python
-class AccessibilityCritic(CriticAgent):
-    def __init__(self, model: ModelDescriptor, provider: ModelProvider) -> None:
-        super().__init__(ACCESSIBILITY_CONFIG, model, provider)
-```
-
-> `CriticAgent` itself is fully config-driven (its docstring literally says
-> "replace all specific critic classes with this") — a dedicated subclass
-> is only for symmetry with the existing four. You can skip this step and
-> instantiate `CriticAgent(ACCESSIBILITY_CONFIG, model, provider)` directly
-> in the factory method below if you'd rather not add a one-line class.
-
-### Step 3 — Register a factory method
-
-`velune/cognition/council/factory.py` → `CouncilAgentFactory`
-
-Add a `create_accessibility_critic(self, run_id: str)` method following the
-shape of the existing `create_scalability_critic` / `create_security_critic`
-/ `create_performance_critic` / `create_maintainability_critic` methods.
-
-### Step 4 — Wire tier gating
-
-`velune/cognition/orchestrator.py`, near the other `agent_factory.create_*`
-calls — gate instantiation on `tier_level` the same way the existing critics
-are (e.g. `tier_level >= 2` for lightweight critics, `tier_level >= 3` for
-more expensive ones):
-
-```python
-accessibility_critic = (
-    self.agent_factory.create_accessibility_critic(run_id) if tier_level >= 2 else None
-)
-```
-
-### Step 5 — Write tests
-
-There's no dedicated `test_council.py` yet — `tests/test_council_view.py`
-is the closest existing file (it currently only covers the display layer,
-not agent logic), so either extend it or start a new
-`tests/test_council_agents.py`. A critic's public entry point is
-`critique(task, proposal, context)`, returning a `CriticMessage`:
-
-```python
-async def test_accessibility_critic_flags_issues(mock_provider):
-    from velune.cognition.council.critics import AccessibilityCritic
-    critic = AccessibilityCritic(model=mock_model, provider=mock_provider)
-    result = await critic.critique(task="...", proposal="...", context="...")
-    assert result.parse_error is None
-```
+Add tests next to `tests/test_swarm_library.py` (parsing) and `tests/test_swarm_run.py`
+(a run with `tests/swarm_fakes.py`).
 
 ---
-
 ## Pull request checklist
 
 Before requesting review:

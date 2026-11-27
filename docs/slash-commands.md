@@ -50,29 +50,26 @@ it runs.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `run` | `r` | `/run <task description>` | Execute a task through the Reasoning Council |
-| `council` | `c` | `/council <task description>` | Force full council tier regardless of task complexity (slow, many model calls) |
+| `run` | `r` | `/run [--bg] <task description>` | Hand a task to the council (same as /council; --bg runs it read-only) |
+| `council` | `c` | `/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]` | A team of agents, picked for the task, works on it in stages |
+| `skills` | *(none)* | `/skills [show <name>]` | List the council's skills and permission profiles, or show one |
 | `jobs` | `job` | `/jobs [task\|cognition\|shell] [cancel <id>]` | List background jobs (optionally filtered by kind) or cancel one |
 | `dashboard` | `dash`, `status` | `/dashboard` | Live system dashboard: session, state, jobs, alerts, health |
-| `fast` | `optimus`, `opt` | `/fast` | Speed mode — instant tier, compressed context, smallest model |
-| `max` | `godly`, `full`, `god` | `/max` | Max power — full council, largest model, full context |
+| `fast` | `optimus`, `opt` | `/fast` | Speed mode — compressed context, smallest model |
+| `max` | `godly`, `full`, `god` | `/max` | Max power — largest model, full context |
 | `normal` | `reset`, `n` | `/normal` | Return to balanced normal mode |
 | `mode` | *(none)* | `/mode [fast\|max\|normal\|status]` | Show or switch the session mode: fast \| max \| normal \| status |
 | `retry` | *(none)* | `/retry [model]` | Regenerate the last response, optionally on a different model |
 
-> `/run` routes through `TierClassifier`, which picks `INSTANT`, `MINIMAL`,
-> `STANDARD`, or `FULL` council depth based on the task and how many files
-> in the repo depend on whatever you mention. `/council` skips
-> classification and runs the full council (Planner, Coder samples,
-> Reviewer, Challenger, four specialised critics, Synthesizer) — slow, and
-> many model calls. `/fast`, `/max`, and `/normal` are user-facing presets
-> over that same `CouncilTier` system — they pin the tier and context budget
-> so you don't have to think about it mid-task. `/fast` also skips the
-> Challenger and the specialised critics (the Reviewer stays), for every
-> council command including `/council`. A forced tier that your hardware or
-> `cognition.max_council_tier` lowers is announced rather than silently
-> downgraded. Their names match `/mode`'s own vocabulary (`/mode fast`,
-> `/mode max`, `/mode normal`); `optimus`/`godly` still work as aliases.
+> `/council` (and `/run`) picks a skill — coding, planning, review or
+> research — and a permission profile for the task, creates a team of up to
+> five agents, shows the plan, and runs it in stages. `--skill` and
+> `--permission` choose them yourself; `/skills` lists both. One `/rewind`
+> undoes everything a run changed, and `/council show` reopens a past run.
+> `/fast`, `/max` and `/normal` set the model, context budget and retrieval
+> depth for the session. Their names match `/mode`'s own vocabulary
+> (`/mode fast`, `/mode max`, `/mode normal`); `optimus`/`godly` still work
+> as aliases.
 
 ---
 
@@ -157,23 +154,14 @@ Connecting and managing cloud/local AI providers.
 
 ## Models
 
-Discovering, connecting, and benchmarking models — including per-role
-council assignment.
+Discovering, connecting, and benchmarking models.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `model` | `m` | `/model [model-id\|discover\|connect <id>\|use <id>\|list\|status\|remove <id>\|locate\|locations\|register <path>\|recheck [id]\|relocate <id> <path>]` | Discover, connect, switch, inspect, or locate models |
 | `pull` | `download`, `get` | `/pull [model-id]` | Download an Ollama model interactively |
 | `delete` | `remove`, `rm` | `/delete <model-id>` | Delete a locally installed Ollama model |
-| `roles` | `councilmodel`, `cm` | `/roles [show\|reset]` | Assign specific models to each Reasoning Council agent role |
 | `bench` | `b` | `/bench [run]` | View or run empirical model capability benchmarks |
-
-> `/roles` assigns models to the five roles a council run uses: `planner`,
-> `coder`, `reviewer`, `challenger` and `synthesizer`. Assignments apply to
-> every command that runs the council, not only the REPL. An assigned model
-> that is not available falls back to automatic routing and says so. Saved
-> entries for names with no effect (`architect`, `security`, `embedding`) are
-> ignored with a notice and left in the file.
 
 ---
 
@@ -341,38 +329,37 @@ Session lifecycle, diagnostics, and disaster recovery.
 
 | Alias | Command | Alias | Command |
 | --- | --- | --- | --- |
-| `?` | `/help` | `hunks` | `/hunk` |
-| `appearance` | `/theme` | `job` | `/jobs` |
-| `approval` | `/approve` | `login` | `/connect` |
-| `auth` | `/connect` | `logs` | `/trace` |
-| `b` | `/bench` | `m` | `/model` |
-| `c` | `/council` | `mem` | `/memory` |
-| `cfg` | `/config` | `mr` | `/pr` |
-| `check` | `/lint` | `n` | `/normal` |
-| `cls` | `/clear` | `opt` | `/fast` |
-| `cm` | `/roles` | `optimus` | `/fast` |
+| `?` | `/help` | `job` | `/jobs` |
+| `appearance` | `/theme` | `login` | `/connect` |
+| `approval` | `/approve` | `logs` | `/trace` |
+| `auth` | `/connect` | `m` | `/model` |
+| `b` | `/bench` | `mem` | `/memory` |
+| `c` | `/council` | `mr` | `/pr` |
+| `cfg` | `/config` | `n` | `/normal` |
+| `check` | `/lint` | `opt` | `/fast` |
+| `cls` | `/clear` | `optimus` | `/fast` |
 | `cog` | `/index` | `pl` | `/plugin` |
 | `cognition` | `/index` | `plugins` | `/plugin` |
-| `councilmodel` | `/roles` | `proj` | `/project` |
-| `crash-reports` | `/crashreports` | `pull-request` | `/pr` |
-| `ctx` | `/context` | `q` | `/exit` |
-| `d` | `/diff` | `quit` | `/exit` |
-| `dash` | `/dashboard` | `r` | `/run` |
-| `diag` | `/doctor` | `remove` | `/delete` |
-| `download` | `/pull` | `res` | `/resource` |
-| `f` | `/fork` | `reset` | `/normal` |
-| `fresh` | `/new` | `resources` | `/resource` |
-| `full` | `/max` | `rm` | `/delete` |
-| `g` | `/graph` | `s` | `/session` |
-| `get` | `/pull` | `sb` | `/sandbox` |
-| `gh-issue` | `/issue` | `setup` | `/settings` |
-| `gl-issue` | `/issue` | `smell` | `/refactor` |
-| `god` | `/max` | `smells` | `/refactor` |
-| `godly` | `/max` | `status` | `/dashboard` |
-| `gp` | `/push` | `typify` | `/types` |
-| `h` | `/help` | `u` | `/undo` |
-| `hints` | `/types` | `usage` | `/stats` |
-| `hist` | `/history` | `workspace` | `/project` |
+| `crash-reports` | `/crashreports` | `proj` | `/project` |
+| `ctx` | `/context` | `pull-request` | `/pr` |
+| `d` | `/diff` | `q` | `/exit` |
+| `dash` | `/dashboard` | `quit` | `/exit` |
+| `diag` | `/doctor` | `r` | `/run` |
+| `download` | `/pull` | `remove` | `/delete` |
+| `f` | `/fork` | `res` | `/resource` |
+| `fresh` | `/new` | `reset` | `/normal` |
+| `full` | `/max` | `resources` | `/resource` |
+| `g` | `/graph` | `rm` | `/delete` |
+| `get` | `/pull` | `s` | `/session` |
+| `gh-issue` | `/issue` | `sb` | `/sandbox` |
+| `gl-issue` | `/issue` | `setup` | `/settings` |
+| `god` | `/max` | `smell` | `/refactor` |
+| `godly` | `/max` | `smells` | `/refactor` |
+| `gp` | `/push` | `status` | `/dashboard` |
+| `h` | `/help` | `typify` | `/types` |
+| `hints` | `/types` | `u` | `/undo` |
+| `hist` | `/history` | `usage` | `/stats` |
+| `hunks` | `/hunk` | `workspace` | `/project` |
 
 </details>
 

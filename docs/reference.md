@@ -219,7 +219,7 @@ It also speaks MCP in both directions, so editors can call Velune's tools and Ve
 
 | | |
 | :--- | :--- |
-| **Council of agents**<br>Planner, Coder, Reviewer, Challenger and Synthesizer, scaled by task tier. `/fast`, `/normal` and `/max` pin the depth. | **Repository cognition**<br>On-demand index of files, symbols and the import graph, with blast-radius estimates and incremental updates. |
+| **Council of agents**<br>A team picked for each task from a skill (coding, planning, review, research) and a permission profile, working in stages. | **Repository cognition**<br>On-demand index of files, symbols and the import graph, with blast-radius estimates and incremental updates. |
 | **Persistent memory**<br>Working, episodic, semantic, graph and lineage tiers per workspace, with hybrid retrieval (BM25, vectors, graph). | **18 providers**<br>Ollama, LM Studio, OpenAI-compatible servers, Groq, OpenRouter, OpenAI, Anthropic, Google, Mistral and more. |
 | **Controlled execution**<br>Manual, Plan and Auto modes, path guard, diff preview, git snapshots, resource-limited command runner. | **MCP both ways**<br>`velune mcp serve` for editors; connect to external servers over stdio, SSE, HTTP or WebSocket. |
 | **Recovery tools**<br>`backup`, `restore` and crash `recover`, plus `doctor`, `status` and a trace log of what actually ran. | **Extensible**<br>Declarative plugins, lifecycle hooks, custom slash commands and resource connectors (Docker, Postgres, MySQL, Supabase). |
@@ -228,18 +228,20 @@ Opt-in: the Docker sandbox, and the `rag` and `parsing` extras.
 
 ## Multi-agent architecture
 
-For tasks that need it, `/run` and `/council` pass the work through five agents in sequence. How many of them run is set
-by the task tier (`instant`, `minimal`, `standard`, `full`), which Velune classifies from the prompt and from how many
-files depend on the code you mention, unless you pin it with `/fast`, `/normal` or `/max`.
+For tasks that need it, `/council` (or `/run`) hands the work to a team of agents. One model call picks a *skill* — how
+a kind of task is done, and its default team — and a *permission profile*: what the agents may do, from answering only
+to editing files. It then gives each agent its own part of the task. Agents in the same stage run at the same time; a
+later stage sees what the earlier ones found; the last agent writes the result. Every change still passes the approval
+rules of your execution mode, and one `/rewind` undoes the whole run. `--skill` and `--permission` choose for you, and
+`/skills` lists both; your own go in `~/.velune/skills/` and `~/.velune/permissions/`.
 
 ```mermaid
 flowchart LR
-    T([Task]) --> P[Planner]
-    P --> C[Coder]
-    C --> R[Reviewer]
-    R --> X[Challenger]
-    X --> S[Synthesizer]
-    S --> A{{"Approval rules<br/>of your execution mode"}}
+    T([Task]) --> R[Pick skill, profile<br/>and team]
+    R --> S1[Stage 1<br/>e.g. explorer]
+    S1 --> S2[Stage 2<br/>e.g. implementer, tester]
+    S2 --> L[Lead<br/>e.g. reviewer]
+    L --> A{{"Approval rules<br/>of your execution mode"}}
     A --> F[(Workspace files)]
 ```
 
@@ -456,8 +458,8 @@ Velune keeps its own background work light, and has a few switches for slow mach
   watcher off entirely.
 - **Animations pace themselves.** The spinner and streamed-text refresh slow down when the terminal is slow to repaint
   (long transcripts). `VELUNE_REDUCED_MOTION=1` (or `[display] reduced_motion = true`) stops the spinner animating.
-- **Lighter council runs.** `[execution] low_resource_mode = true` or `VELUNE_LOW_RESOURCE=1` caps the council tier,
-  uses a single coder sample, and skips the debate round.
+- **Lighter council runs.** `[swarm]` sets the time, model-call and token limits of a `/council` run, and how many
+  agents run at once (one at a time on a local model server).
 - **Time limits.** `VELUNE_COUNCIL_MAX_SECONDS` (default 600) bounds a whole council run;
   `VELUNE_COUNCIL_CONTEXT_SECONDS` (default 30) bounds the repository-context step before it starts.
 - **Rate limits.** A provider's `Retry-After` is honoured up to 20 s; a longer wait fails fast with the provider's error

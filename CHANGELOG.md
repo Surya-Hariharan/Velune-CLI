@@ -8,7 +8,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **A council built for each task.** `/council` (and `/run`) now picks a *skill* (coding,
+  planning, review, research) and a *permission profile* (from answer-only to edit-workspace),
+  and creates a small team of agents for the task. Agents work in stages, at the same time where
+  they can, each with only the tools its profile allows; writes still go through your approval,
+  and one `/rewind` undoes the whole run. `/council --skill <name> --permission <name>`,
+  `/council show [run]` and `/skills` (lists skills and profiles). Add your own in
+  `~/.velune/skills/` and `~/.velune/permissions/`. Limits live in a new `[swarm]` section.
+  `velune ask` (read-only), `velune run`, chat `!run` and the MCP council tool use it too.
+
 ### Removed
+
+- **The fixed five-seat council** (Planner, Coder, Reviewer, Challenger, Synthesizer, the critics,
+  arbitration, tiers and debate), replaced by the council above. With it go `/roles` (`/cm`),
+  `velune models assign`, the council tier and critic settings of `/fast` and `/max`, and
+  `--council-tier` on `velune ask` (still accepted, with no effect). The settings
+  `[cognition] max_council_tier` and `default_tier_override` and
+  `[providers] allow_cloud_fallback_from_local` are gone; config files that still contain them
+  load as before.
 
 - Code that nothing ran: the prompt-intelligence package, the unused agent classes, the task-plan
   executor with its rollback and validation steps, the provider router, the graph memory tier,
@@ -31,6 +50,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **`/council` failed with "every model call failed or timed out" before calling a model.** The
+  security filter read `retrieval(10)` in the repository summary as a call to `eval`, and a
+  match rejected the whole request. It now matches only a real `eval(`, and repository text is
+  marked as data instead of ever stopping a run.
 - **pip installs: "velune is not recognized" after the "Scripts ... not on PATH" warning.**
   `python -m velune doctor --fix` now adds the Scripts directory to the Windows *user* PATH
   (never the machine PATH) instead of only printing a PowerShell command. Open a new terminal
