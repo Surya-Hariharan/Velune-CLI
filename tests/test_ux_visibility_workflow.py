@@ -1,7 +1,7 @@
 """Tests for the discoverability / visibility / workflow UX layer.
 
 Covers the three coordinated workstreams:
-  * Visibility — ``SystemSnapshot`` composition + the extended ``ProgressDashboard``.
+  * Visibility — ``SystemSnapshot`` composition + the ``/dashboard`` renderable.
   * Workflow   — the ``next_steps`` footer primitive + the ``guidance`` map.
   * Discoverability — intent-based palette search + the ``/status`` alias.
 """
@@ -96,8 +96,8 @@ def test_system_snapshot_matches_context_report(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_renders_session_and_state_panels(tmp_path: Path):
-    from velune.cli.display.dashboard import ProgressDashboard
+def test_dashboard_renders_every_section(tmp_path: Path):
+    from velune.cli.display.dashboard import build_dashboard
     from velune.cli.display.system_snapshot import (
         LiveSessionState,
         build_system_snapshot,
@@ -107,66 +107,44 @@ def test_dashboard_renders_session_and_state_panels(tmp_path: Path):
     live = LiveSessionState(
         model_id="gpt-4o", mode_label="NORMAL", context_pct=31.0, provider_id="openai"
     )
-    dash = ProgressDashboard(
-        console=_recording_console(),
-        job_registry=None,
-        alert_store=None,
-        health_monitor=None,
-        snapshot=snap,
-        live_state=lambda: live,
-    )
     console = _recording_console()
-    console.print(dash._build_layout())
+    console.print(build_dashboard(snapshot=snap, live=live))
     out = console.export_text()
-    for label in ("Session", "Index", "Memory", "Integrations"):
+    for label in (
+        "Session",
+        "Index",
+        "Memory",
+        "Integrations",
+        "Background Jobs",
+        "Alerts",
+        "Provider Health",
+    ):
         assert label in out, f"missing dashboard panel: {label}"
     assert "gpt-4o" in out
     assert "openai" in out
 
 
-def test_dashboard_static_snapshot_built_once(tmp_path: Path, monkeypatch):
-    """The expensive snapshot must not be rebuilt on every refresh tick."""
-    from velune.cli.display import system_snapshot
-    from velune.cli.display.dashboard import ProgressDashboard
-    from velune.cli.display.system_snapshot import LiveSessionState
+def test_dashboard_renders_with_no_sources():
+    from velune.cli.display.dashboard import build_dashboard
 
-    snap = system_snapshot.build_system_snapshot(tmp_path)
-    live_calls = {"n": 0}
-
-    def _live() -> LiveSessionState:
-        live_calls["n"] += 1
-        return LiveSessionState(model_id="m", mode_label="NORMAL", context_pct=0.0)
-
-    dash = ProgressDashboard(
-        console=_recording_console(),
-        job_registry=None,
-        alert_store=None,
-        health_monitor=None,
-        snapshot=snap,
-        live_state=_live,
-    )
-    # Multiple refreshes reuse the same cached snapshot object…
-    for _ in range(3):
-        dash._build_layout()
-    assert dash._snapshot is snap
-    # …while live state is re-read each tick.
-    assert live_calls["n"] >= 3
-
-
-def test_dashboard_without_snapshot_keeps_legacy_layout():
-    from velune.cli.display.dashboard import ProgressDashboard
-
-    dash = ProgressDashboard(
-        console=_recording_console(),
-        job_registry=None,
-        alert_store=None,
-        health_monitor=None,
-    )
     console = _recording_console()
-    console.print(dash._build_layout())
+    console.print(build_dashboard())
     out = console.export_text()
-    assert "Session" not in out  # no session band when no snapshot supplied
-    assert "Background Jobs" in out
+    assert "no model" in out
+    assert "job registry unavailable" in out
+    assert "alert store unavailable" in out
+
+
+def test_dashboard_is_content_sized_and_fits_narrow_panes(tmp_path: Path):
+    """No terminal-high block (the old Live/Layout dump) and no line past the width."""
+    from velune.cli.display.dashboard import build_dashboard
+    from velune.cli.display.system_snapshot import build_system_snapshot
+
+    console = Console(record=True, width=60, height=200, file=io.StringIO())
+    console.print(build_dashboard(snapshot=build_system_snapshot(tmp_path)))
+    lines = console.export_text().splitlines()
+    assert len(lines) < 40
+    assert all(len(line) <= 60 for line in lines)
 
 
 # ---------------------------------------------------------------------------

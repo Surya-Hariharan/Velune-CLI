@@ -440,7 +440,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     registry.register(
         SlashCommand(
             name="skills",
-            aliases=[],
+            aliases=["skill"],
             description="List the council's skills and permission profiles, or show one",
             usage="/skills [show <name>]",
             handler=repl._cmd_skills,
@@ -473,12 +473,11 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="dashboard",
             aliases=["dash", "status"],
-            description="Live system dashboard: session, state, jobs, alerts, health",
+            description="System dashboard: session, state, jobs, alerts, health",
             usage="/dashboard",
             handler=repl._cmd_dashboard,
             examples=("/dashboard", "/status"),
             search_terms=(
-                "live",
                 "monitor",
                 "status",
                 "health",

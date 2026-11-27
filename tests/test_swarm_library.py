@@ -223,14 +223,14 @@ def test_flow_rejects_bad_input(flow, message):
 # ── /skills ──────────────────────────────────────────────────────────────────
 
 
-def _repl(tmp_path: Path):
+def _repl(tmp_path: Path, width: int = 160):
     import io
 
     from rich.console import Console
 
     container = SimpleNamespace(get=lambda key: str(tmp_path))
     return SimpleNamespace(
-        console=Console(file=io.StringIO(), width=160), container=container, _plugin_manager=None
+        console=Console(file=io.StringIO(), width=width), container=container, _plugin_manager=None
     )
 
 
@@ -254,3 +254,14 @@ async def test_skills_show_prints_one_skill_with_its_roles(tmp_path):
     assert "Writers: implementer, tester" in out and "reviewer" in out
     await cmd_skills(repl, "show nothing-here")
     assert "No skill or permission profile named 'nothing-here'" in repl.console.file.getvalue()
+
+
+async def test_skills_keeps_names_whole_in_a_narrow_terminal(tmp_path):
+    from velune.cli.handlers.skills import cmd_skills
+
+    repl = _repl(tmp_path, width=60)
+    await cmd_skills(repl, "")
+    out = repl.console.file.getvalue()
+    for name in ("build-project", "propose-changes", "edit-workspace", "answer-only", "planning"):
+        assert name in out
+    assert "…" not in out

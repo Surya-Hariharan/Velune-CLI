@@ -86,6 +86,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **`/dashboard` no longer breaks the screen.** It used a live view that showed nothing in the
+  full-screen REPL, then dumped a terminal-high block into the transcript, and read the keyboard
+  from a second thread that could swallow your next line. It now prints the dashboard once and
+  returns to the prompt; run it again to refresh.
+- `/skills` keeps skill and profile names whole in narrow terminals, and `/skill` works as an
+  alias.
 - **Chat no longer sends a local-model prompt to a cloud provider.** When a chat turn on a local
   model failed, the REPL could retry it on any configured provider, including a cloud one. It now
   only falls back to other local models; a turn on a cloud model may still use any provider.

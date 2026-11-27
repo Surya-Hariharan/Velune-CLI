@@ -257,11 +257,11 @@ async def cmd_jobs(repl: VeluneREPL, args: str) -> None:
 
 
 async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
-    """Open the live system dashboard (session, state, jobs, alerts, health)."""
+    """Print the system dashboard (session, state, jobs, alerts, health) once."""
     from pathlib import Path
 
-    from velune._compat import uncancel_task
-    from velune.cli.display.dashboard import ProgressDashboard
+    from velune.cli import design
+    from velune.cli.display.dashboard import build_dashboard
     from velune.cli.display.system_snapshot import LiveSessionState, build_system_snapshot
 
     health_monitor = None
@@ -270,7 +270,6 @@ async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
     except Exception:
         pass
 
-    # Build the static snapshot once — on-disk reads must not run per refresh tick.
     snapshot = None
     try:
         workspace = repl._mcp_registry.workspace or Path.cwd()
@@ -284,32 +283,23 @@ async def cmd_dashboard(repl: VeluneREPL, args: str) -> None:
     except Exception:
         snapshot = None
 
-    def _live_state() -> LiveSessionState:
-        model = repl.active_model
-        return LiveSessionState(
-            model_id=model.model_id if model else None,
-            provider_id=model.provider_id if model else None,
-            mode_label=repl._mode_manager.current.value.upper(),
-            context_pct=repl._context_tracker.percentage if model else 0.0,
-        )
-
-    dashboard = ProgressDashboard(
-        console=repl.console,
-        job_registry=repl._job_registry,
-        alert_store=repl._alert_store,
-        health_monitor=health_monitor,
-        snapshot=snapshot,
-        live_state=_live_state,
+    model = repl.active_model
+    live = LiveSessionState(
+        model_id=model.model_id if model else None,
+        provider_id=model.provider_id if model else None,
+        mode_label=repl._mode_manager.current.value.upper(),
+        context_pct=repl._context_tracker.percentage if model else 0.0,
     )
-    async with repl._interrupts.foreground():
-        try:
-            await dashboard.run_until_keypress()
-        except asyncio.CancelledError:
-            if not repl._interrupts.consume_user_cancelled():
-                raise
-            task = asyncio.current_task()
-            if task is not None:
-                uncancel_task(task)
+    repl.console.print(
+        build_dashboard(
+            jobs=repl._job_registry,
+            alerts=repl._alert_store,
+            health_monitor=health_monitor,
+            snapshot=snapshot,
+            live=live,
+        )
+    )
+    repl.console.print(f"[{design.FAINT}]/dashboard again to refresh · /jobs for details[/]")
 
 
 async def _submit_background_job(repl: VeluneREPL, task: str) -> None:

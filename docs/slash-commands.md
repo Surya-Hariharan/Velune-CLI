@@ -51,9 +51,9 @@ it runs.
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `council` | `c` | `/council [--bg] [--skill <name>] [--permission <name>] <task>  ·  /council show [run]  ·  /council models [set <role> <provider/model> \| clear <role\|--all>]` | A team of agents, picked for the task, works on it in stages |
-| `skills` | *(none)* | `/skills [show <name>]` | List the council's skills and permission profiles, or show one |
+| `skills` | `skill` | `/skills [show <name>]` | List the council's skills and permission profiles, or show one |
 | `jobs` | `job` | `/jobs [task\|cognition\|shell] [cancel <id>]` | List background jobs (optionally filtered by kind) or cancel one |
-| `dashboard` | `dash`, `status` | `/dashboard` | Live system dashboard: session, state, jobs, alerts, health |
+| `dashboard` | `dash`, `status` | `/dashboard` | System dashboard: session, state, jobs, alerts, health |
 | `mode` | *(none)* | `/mode [fast\|max\|normal\|status]` | Show or switch the session mode: fast \| max \| normal \| status |
 | `retry` | *(none)* | `/retry [model]` | Regenerate the last response, optionally on a different model |
 
@@ -327,10 +327,10 @@ Session lifecycle, diagnostics, and disaster recovery.
 | `fresh` | `/new` | `rm` | `/delete` |
 | `get` | `/pull` | `s` | `/session` |
 | `gh-issue` | `/issue` | `sb` | `/sandbox` |
-| `gl-issue` | `/issue` | `status` | `/dashboard` |
-| `gp` | `/push` | `usage` | `/stats` |
-| `h` | `/help` | `workspace` | `/project` |
-| `hist` | `/history`  | |
+| `gl-issue` | `/issue` | `skill` | `/skills` |
+| `gp` | `/push` | `status` | `/dashboard` |
+| `h` | `/help` | `usage` | `/stats` |
+| `hist` | `/history` | `workspace` | `/project` |
 
 </details>
 

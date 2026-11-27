@@ -26,6 +26,14 @@ def _flow_text(stages: tuple[tuple[str, ...], ...]) -> str:
     return " → ".join(", ".join(stage) for stage in stages)
 
 
+def _table(title: str, details: str) -> Table:
+    """Name plus one wrapping details cell, so it reads at any terminal width."""
+    table = Table(title=title, box=None, header_style=f"bold {design.ACCENT}", padding=(0, 2, 0, 0))
+    table.add_column("Name", no_wrap=True)
+    table.add_column(details)
+    return table
+
+
 async def cmd_skills(repl: VeluneREPL, args: str) -> None:
     library = load_library(repl)
     words = args.split()
@@ -33,40 +41,32 @@ async def cmd_skills(repl: VeluneREPL, args: str) -> None:
         _show(repl, library, words[1])
         return
     if words:
-        repl.console.print("[yellow]Usage: /skills  or  /skills show <name>[/yellow]")
+        repl.console.print(f"[{design.WARN}]Usage: /skills  or  /skills show <name>[/]")
         return
 
-    skills = Table(title="Skills", box=None, header_style=f"bold {design.ACCENT}")
-    for column in ("Name", "Team (in order)", "Output", "Default permission", "From"):
-        skills.add_column(column)
+    skills = _table("Skills", "Team (in order) · output · default permission")
     for skill in library.skills.values():
         skills.add_row(
             skill.slug,
-            _flow_text(skill.flow),
-            skill.output,
-            skill.default_permission,
-            skill.source,
+            f"{_flow_text(skill.flow)}\n"
+            f"[{design.FAINT}]{skill.output} · {skill.default_permission} · {skill.source}[/]",
         )
-    profiles = Table(title="Permission profiles", box=None, header_style=f"bold {design.ACCENT}")
-    for column in ("Name", "Tools", "Writes", "Commands", "MCP", "From"):
-        profiles.add_column(column)
+    profiles = _table("Permission profiles", "Tools · writes · commands · MCP")
     for profile in library.profiles.values():
         profiles.add_row(
             profile.slug,
-            ", ".join(sorted(profile.tools)) or "none",
-            profile.write,
-            profile.commands,
-            ", ".join(profile.mcp) or "none",
-            profile.source,
+            f"{', '.join(sorted(profile.tools)) or 'no tools'}\n"
+            f"[{design.FAINT}]writes {profile.write} · commands {profile.commands} · "
+            f"mcp {', '.join(profile.mcp) or 'none'} · {profile.source}[/]",
         )
     repl.console.print(skills)
     repl.console.print()
     repl.console.print(profiles)
     for warning in library.warnings:
-        repl.console.print(f"[yellow]Skipped:[/yellow] [dim]{warning}[/dim]")
+        repl.console.print(f"[{design.WARN}]Skipped:[/] [{design.FAINT}]{warning}[/]")
     repl.console.print(
-        "[dim]/skills show <name> for details · add your own in ~/.velune/skills/ "
-        "and ~/.velune/permissions/[/dim]"
+        f"[{design.FAINT}]/skills show <name> for details · add your own in ~/.velune/skills/ "
+        "and ~/.velune/permissions/[/]"
     )
 
 
@@ -96,4 +96,4 @@ def _show(repl: VeluneREPL, library: SkillLibrary, name: str) -> None:
         )
         repl.console.print(Markdown(profile.body))
         return
-    repl.console.print(f"[yellow]No skill or permission profile named '{name}'.[/yellow]")
+    repl.console.print(f"[{design.WARN}]No skill or permission profile named '{name}'.[/]")
