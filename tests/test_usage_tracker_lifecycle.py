@@ -11,6 +11,7 @@ from __future__ import annotations
 import gc
 import sqlite3
 import threading
+import time
 import warnings
 from pathlib import Path
 
@@ -198,9 +199,13 @@ def test_concurrent_writers_and_readers_stay_correct_and_leave_nothing_open(tmp_
     threads += [threading.Thread(target=reader) for _ in range(2)]
     for t in threads:
         t.start()
+    # One deadline for all threads, generous because a slow CI disk can take
+    # about a second per commit; counting before a writer ends reads as a lost row.
+    deadline = time.monotonic() + 600
     for t in threads:
-        t.join(timeout=60)
+        t.join(timeout=max(0.0, deadline - time.monotonic()))
 
+    assert not any(t.is_alive() for t in threads), "writers did not finish in time"
     assert not errors
     assert tracker.get_session_total_tokens("s1") == 4 * 25 * 15
     assert spy.open_handles() == 0

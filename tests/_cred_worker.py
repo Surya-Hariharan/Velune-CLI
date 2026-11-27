@@ -38,6 +38,12 @@ def main() -> int:
             import contextlib
 
             ks.locked = lambda *_a, **_k: contextlib.nullcontext()  # type: ignore[assignment]
+        else:
+            # This harness checks for lost updates, not the lock deadline (covered
+            # separately). Three processes saving in a loop on a slow CI disk can
+            # wait longer than the 5s a person's single save ever should.
+            real_locked = ks.locked
+            ks.locked = lambda target: real_locked(target, timeout=120)  # type: ignore[assignment]
 
         if crash:
             # Die between writing the temp file and renaming it over the store.

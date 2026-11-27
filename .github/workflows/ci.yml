@@ -395,7 +395,8 @@ jobs:
           uv pip install --system --no-build --resolution lowest-direct -r pyproject.toml $extra_args
           uv pip install --system --no-deps dist/*.whl
           # Test tooling at current versions (not part of the floor check).
-          uv pip install --system "pytest>=8.0.0" "pytest-asyncio>=0.23.0"
+          # (pyte: the terminal emulator some non-TUI rendering tests read back.)
+          uv pip install --system "pytest>=8.0.0" "pytest-asyncio>=0.23.0" "pyte>=0.8.2"
           uv pip list --system
 
       - name: Smoke test
