@@ -37,14 +37,12 @@ from velune.retrieval.schemas import (
 def _mode_config(**overrides) -> ModeConfig:
     base = {
         "mode": SessionMode.NORMAL,
-        "council_tier": "auto",
         "context_compression": False,
         "max_context_tokens": 16384,
         "temperature": 0.3,
         "retrieval_depth": 8,
         "use_fastest_model": False,
         "use_largest_model": False,
-        "disable_critics": False,
         "description": "test",
         "prompt_color": "cyan",
     }

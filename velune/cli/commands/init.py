@@ -129,8 +129,10 @@ workspace = "."
 [providers]
 default_provider = "{default_provider}"
 
-[council]
-default_tier = "auto"
+[swarm]
+# Limits for one /council run, shared by all its agents.
+max_seconds = 600
+max_calls = 40
 
 [memory]
 enabled = true

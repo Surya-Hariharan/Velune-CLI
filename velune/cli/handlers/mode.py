@@ -29,19 +29,11 @@ async def _set_session_mode(repl: VeluneREPL, mode_enum, label: str, color: str)
     if auto_model:
         repl.active_model = auto_model
 
-    extra = ""
-    if hasattr(config, "retrieval_depth") and config.retrieval_depth:
-        extra = f" · Retrieval depth: {config.retrieval_depth}"
-    if hasattr(config, "council_tier"):
-        council_info = f"Council: {config.council_tier}"
-    else:
-        council_info = ""
-
     repl.console.print(
         f"[{color}]{label}[/{color}] — {config.description}\n"
         f"[dim]Model: {repl.active_model.model_id if repl.active_model else 'none'} · "
         f"Context cap: {config.max_context_tokens:,} tokens · "
-        f"{council_info}{extra}[/dim]"
+        f"Retrieval depth: {config.retrieval_depth}[/dim]"
     )
 
 
@@ -93,10 +85,8 @@ async def cmd_mode(repl: VeluneREPL, args: str) -> None:
             f"{repl._runtime_profile.label} [dim]— {repl._runtime_profile.description}[/dim]",
         )
     table.add_row("Description", config.description)
-    table.add_row("Council tier", config.council_tier)
     table.add_row("Max context", f"{config.max_context_tokens:,} tokens")
     table.add_row("Compression", "on" if config.context_compression else "off")
     table.add_row("Retrieval depth", str(config.retrieval_depth))
-    table.add_row("Critics", "disabled" if config.disable_critics else "enabled")
     table.add_row("Current model", repl.active_model.model_id if repl.active_model else "none")
     repl.console.print(table)

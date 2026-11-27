@@ -35,7 +35,6 @@ def load_background_modules() -> list[SubsystemModule]:
     from velune.intelligence.subsystems import INTELLIGENCE_MODULES
     from velune.knowledge.subsystems import KNOWLEDGE_MODULES
     from velune.memory.subsystems import MEMORY_MODULES
-    from velune.orchestration.subsystems import ORCHESTRATION_MODULES
     from velune.repository.subsystems import REPOSITORY_MODULES
     from velune.retrieval.subsystems import RETRIEVAL_MODULES
     from velune.tools.subsystems import TOOL_MODULES
@@ -47,7 +46,6 @@ def load_background_modules() -> list[SubsystemModule]:
         + EXECUTION_MODULES
         + TOOL_MODULES
         + COGNITION_MODULES
-        + ORCHESTRATION_MODULES
         + KNOWLEDGE_MODULES
         + INTELLIGENCE_MODULES
     )

@@ -28,10 +28,6 @@
 # "openai"; this repository uses "groq".
 default_provider = "groq"
 #fallback_providers = ["anthropic", "ollama"]
-# Let a council seat whose local model failed retry on a cloud provider from
-# `fallback_providers`. Off by default because the retried prompt can contain
-# repository code.
-#allow_cloud_fallback_from_local = false
 # Ask for confirmation before a cloud call estimated to cost more than this
 # (USD). 0 means always ask.
 #cost_threshold_usd = 0.01
@@ -77,10 +73,6 @@ default_provider = "groq"
 # Commit the files a council edit session changed. Off by default because a
 # commit is a durable change to your history.
 #council_auto_commit = false
-# Lighter council runs for slow machines or rate-limited providers: caps the council
-# tier at STANDARD, uses one coder sample instead of several, and skips the debate round.
-# Also settable as VELUNE_LOW_RESOURCE=1 (env) or VELUNE_EXECUTION__LOW_RESOURCE_MODE=true.
-#low_resource_mode = false
 # Run agent commands inside a per-session Docker container instead of directly
 # on the host. Needs the `docker` extra and a running Docker daemon.
 #docker_sandbox = false
@@ -119,11 +111,16 @@ default_provider = "groq"
 
 # ── Agents ───────────────────────────────────────────────────────────────────
 
-#[cognition]
-# Highest council tier a task may use: instant, minimal, standard or full.
-#max_council_tier = "full"
-# "auto" classifies each task; or pin one tier.
-#default_tier_override = "auto"
+#[swarm]
+# Limits for one /council run, shared by all of its agents.
+#max_seconds = 600
+#max_calls = 40
+#max_tokens = 200000
+#turns_per_agent = 8
+# Agents that run at the same time: on a cloud provider, and on a local model
+# server (one GPU, so one at a time).
+#parallel_cloud = 3
+#parallel_local = 1
 
 # ── Hooks ───────────────────────────────────────────────────────────────────
 

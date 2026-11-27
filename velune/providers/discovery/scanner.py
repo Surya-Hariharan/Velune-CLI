@@ -122,7 +122,7 @@ class ModelDiscoveryScanner:
         if not has_key(discoverer.provider_id):
             return False
         # A key the provider has actively rejected cannot yield usable models —
-        # listing them anyway lets the council seat roles that 401 on every
+        # listing them anyway offers models that 401 on every
         # call. `/connect <provider>` in the REPL re-verifies and restores discovery.
         return verification_state(discoverer.provider_id) is not KeyState.INVALID
 

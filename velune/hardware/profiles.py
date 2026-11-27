@@ -2,7 +2,7 @@
 
 A RuntimeProfile is the bridge between *what the machine can do*
 (HardwareProfile) and *how the runtime should behave* (context budgets,
-retrieval depth, compression, council tier preference). It is computed once
+retrieval depth, compression, local model size). It is computed once
 at bootstrap and registered in the service container as ``runtime.profile``
 so every layer can adapt without re-probing hardware.
 
@@ -32,14 +32,13 @@ class RuntimeProfile:
     max_context_tokens: int  # NORMAL-mode context budget per call
     retrieval_depth: int  # memory + repo chunks pulled per turn
     context_compression: bool  # compress conversation before each call
-    council_tier_ceiling: str  # highest auto-selected tier: "minimal" | "standard" | "full"
     prefer_local_models: bool  # bias routing toward local models
     max_local_model_b: float  # largest local model size (in B params) routing should pick
     description: str
     # Ceiling on simultaneous background work (embedding batches, key
     # re-verification): max(1, min(cpu_cores, per-tier ceiling)). Defaults to
     # today's uniform CAPABLE-tier value (4) so get_profile()'s static entries
-    # — used directly by tests and cognition/orchestrator.py — are unaffected;
+    # — used directly by tests — are unaffected;
     # only derive_profile() (the live hardware-detection path) computes a
     # tier/core-count-specific value.
     background_concurrency: int = 4
@@ -59,7 +58,6 @@ _PROFILES: dict[RuntimeProfileName, RuntimeProfile] = {
         max_context_tokens=4096,
         retrieval_depth=3,
         context_compression=True,
-        council_tier_ceiling="minimal",
         prefer_local_models=False,
         max_local_model_b=3.5,
         description="Constrained hardware — compressed context, shallow retrieval, small models",
@@ -69,7 +67,6 @@ _PROFILES: dict[RuntimeProfileName, RuntimeProfile] = {
         max_context_tokens=16384,
         retrieval_depth=8,
         context_compression=False,
-        council_tier_ceiling="standard",
         prefer_local_models=True,
         max_local_model_b=8.0,
         description="Balanced — normal orchestration, 7B-class local models",
@@ -79,10 +76,9 @@ _PROFILES: dict[RuntimeProfileName, RuntimeProfile] = {
         max_context_tokens=65536,
         retrieval_depth=16,
         context_compression=False,
-        council_tier_ceiling="full",
         prefer_local_models=True,
         max_local_model_b=80.0,
-        description="High-end hardware — deep retrieval, large context, full council available",
+        description="High-end hardware — deep retrieval, large context",
     ),
 }
 

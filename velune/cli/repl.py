@@ -107,15 +107,8 @@ class VeluneREPL:
         self._tool_session_grants: set[str] = set()
         # File changes made by the last agent turn, for /rewind.
         self._last_turn_journal = None
-        from velune.orchestration.role_assignments import CouncilRoleMap
-
-        self._assignments_path = Path.home() / ".velune" / "council_roles.json"
-        self._role_map = CouncilRoleMap.load(self._assignments_path)
         self._project_profile = self._load_project_profile()
         self._registry = self._build_registry()
-        from velune.cli.handlers.councilmodel import apply_role_overrides_to_orchestrator
-
-        apply_role_overrides_to_orchestrator(self)
         self._episodic_session_id: str | None = None
         self._cached_branch: str | None = None
         self._branch_last_checked: float = 0.0
@@ -2038,16 +2031,6 @@ class VeluneREPL:
 
         await cmd_skills(self, args)
 
-    async def _cmd_councilmodel(self, args: str) -> None:
-        from velune.cli.handlers.councilmodel import cmd_councilmodel
-
-        await cmd_councilmodel(self, args)
-
-    async def _cmd_councilmodel_show(self, args: str) -> None:
-        from velune.cli.handlers.councilmodel import cmd_councilmodel_show
-
-        await cmd_councilmodel_show(self)
-
     async def _cmd_diff(self, args: str) -> None:
         from velune.cli.handlers.git import cmd_diff
 
@@ -2171,11 +2154,6 @@ class VeluneREPL:
         from velune.cli.handlers.model import restore_active_model
 
         restore_active_model(self)
-
-    def _apply_role_overrides_to_orchestrator(self) -> None:
-        from velune.cli.handlers.councilmodel import apply_role_overrides_to_orchestrator
-
-        apply_role_overrides_to_orchestrator(self)
 
     def _poll_and_render_alerts(self) -> None:
         from velune.cli.handlers.council import poll_and_render_alerts

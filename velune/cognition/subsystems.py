@@ -1,5 +1,3 @@
-import logging
-
 from velune.kernel.bootstrap import RuntimeEnvironment, SubsystemModule
 
 
@@ -9,52 +7,10 @@ def _create_cognitive_firewall(env: RuntimeEnvironment):
     return CognitiveFirewall()
 
 
-def _create_council_orchestrator(env: RuntimeEnvironment):
-    from velune.cognition.orchestrator import CouncilOrchestrator
-    from velune.models.specializations import ModelSpecializationMapper
-
-    provider_registry = env.container.get("runtime.provider_registry")
-    model_registry = env.container.get("runtime.model_registry")
-    model_specialization = ModelSpecializationMapper(model_registry)
-    try:
-        from velune.orchestration.role_assignments import apply_persisted_role_overrides
-
-        apply_persisted_role_overrides(model_specialization)
-    except Exception as exc:  # never block startup on a bad assignments file
-        logging.getLogger("velune.cognition.subsystems").warning(
-            "Could not apply saved council role assignments: %s", exc
-        )
-    sqlite_manager = (
-        env.container.get("runtime.sqlite_manager")
-        if env.container.has("runtime.sqlite_manager")
-        else None
-    )
-    lineage_memory = env.container.get("runtime.lineage_memory")
-
-    return CouncilOrchestrator(
-        provider_registry,
-        model_specialization,
-        sqlite_manager=sqlite_manager,
-        config=env.config,
-        lineage_memory=lineage_memory,
-        container=env.container,
-    )
-
-
 COGNITION_MODULES = [
     SubsystemModule(
         name="cognitive_firewall",
         factory=_create_cognitive_firewall,
         container_key="runtime.firewall",
-    ),
-    SubsystemModule(
-        name="council_orchestrator",
-        factory=_create_council_orchestrator,
-        container_key="runtime.council_orchestrator",
-        dependencies=[
-            "runtime.provider_registry",
-            "runtime.model_registry",
-            "runtime.lineage_memory",
-        ],
     ),
 ]

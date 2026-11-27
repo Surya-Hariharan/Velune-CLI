@@ -643,7 +643,7 @@ class VeluneMCPServer:
     # =========================================================================
 
     async def _velune_sampling_create_message(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle a sampling/createMessage request by routing to the council orchestrator."""
+        """Handle a sampling/createMessage request by handing it to the council."""
         messages = params.get("messages", [])
         task_parts = []
         for msg in messages:

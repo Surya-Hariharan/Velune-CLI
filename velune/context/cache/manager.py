@@ -1,6 +1,6 @@
 """ContextCacheManager — the single facade used by all call sites.
 
-Usage in BaseCouncilAgent.deliberate():
+Usage (as in the tool loop):
 
     request = self._cache_manager.prepare(request)
     response = await self.provider.infer(request)

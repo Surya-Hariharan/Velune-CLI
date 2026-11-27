@@ -1,12 +1,10 @@
-"""Anthropic prompt caching wired into ordinary chat, not just the Council.
+"""Anthropic prompt caching wired into ordinary chat.
 
-ContextCacheManager.prepare()/record() previously ran only from
-BaseCouncilAgent.deliberate() (velune/cognition/council/base.py) — a normal
-REPL chat turn, whether it went through ToolLoopRunner (the common case for
-any tool-calling model, which every Claude model is) or the StreamRenderer
-fallback path, never annotated its request with cache_control blocks at all.
-These tests pin that both paths now call through the same
-ContextCacheManager used by the Council.
+ContextCacheManager.prepare()/record() once ran only for the old council's
+agents — a normal REPL chat turn, whether it went through ToolLoopRunner (the
+common case for any tool-calling model, which every Claude model is) or the
+StreamRenderer fallback path, never annotated its request with cache_control
+blocks at all. These tests pin that both paths call through ContextCacheManager.
 """
 
 from __future__ import annotations

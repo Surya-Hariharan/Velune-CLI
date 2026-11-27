@@ -66,7 +66,6 @@ class ExecutionConfig(BaseModel):
     # a durable change to the user's history that they did not ask for, so it must
     # be opted into (``execution.council_auto_commit = true`` in velune.toml).
     council_auto_commit: bool = False
-    low_resource_mode: bool = False
     # Docker sandbox — when True, all agent-executed commands run inside a
     # per-session Docker container instead of the host subprocess sandbox.
     # Requires Docker Desktop / Docker Engine to be running.
@@ -123,14 +122,6 @@ class ProvidersConfig(BaseModel):
 
     default_provider: str = "openai"
     fallback_providers: list[str] = Field(default_factory=lambda: ["anthropic", "ollama"])
-    allow_cloud_fallback_from_local: bool = Field(
-        default=False,
-        description=(
-            "Let a council seat whose local model failed fall back to a cloud model from "
-            "'fallback_providers'. Off by default: it would send the seat's prompt (which can "
-            "contain repository code) to a cloud provider."
-        ),
-    )
     cost_threshold_usd: float = Field(
         default=0.01,
         description="Prompt for confirmation before cloud calls estimated to cost more than this (USD). Set to 0 to always ask.",
@@ -259,13 +250,6 @@ class MCPConfig(BaseModel):
     #: Empty means "no allowlist" — cloud-metadata/link-local targets are still
     #: always blocked by the SSRF guard regardless of this setting.
     allowed_hosts: list[str] = Field(default_factory=list)
-
-
-class CognitionConfig(BaseModel):
-    """Cognitive routing and agent council settings."""
-
-    max_council_tier: str = "full"  # instant, minimal, standard, full
-    default_tier_override: str = "auto"  # auto, instant, minimal, standard, full
 
 
 class SwarmConfig(BaseModel):
@@ -465,7 +449,6 @@ class VeluneConfig(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
-    cognition: CognitionConfig = Field(default_factory=CognitionConfig)
     swarm: SwarmConfig = Field(default_factory=SwarmConfig)
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
@@ -577,7 +560,7 @@ def _hardcoded_defaults() -> dict:
         providers=ProvidersConfig(),
         telemetry=TelemetryConfig(),
         mcp=MCPConfig(),
-        cognition=CognitionConfig(),
+        swarm=SwarmConfig(),
         resources=ResourcesConfig(),
         display=DisplayConfig(),
         theme=ThemeConfig(),

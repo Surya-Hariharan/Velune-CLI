@@ -1,7 +1,7 @@
 """Git context provider for orchestrator-level context injection.
 
 Gathers current git state (branch, recent commits, staged diff, file lists)
-and formats it as a token-efficient block for the Reasoning Council system prompt.
+and formats it as a token-efficient block for model system prompts.
 """
 
 from __future__ import annotations

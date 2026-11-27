@@ -160,14 +160,17 @@ async def test_pasted_key_whitespace_is_trimmed_before_saving(monkeypatch):
 
 
 def test_a_403_during_inference_does_not_mark_the_key_invalid(monkeypatch):
-    from velune.cognition.council.base import BaseCouncilAgent
-    from velune.core.errors.provider import ProviderAuthenticationError, ProviderPermissionError
+    from types import SimpleNamespace
 
+    from velune.core.errors.provider import ProviderAuthenticationError, ProviderPermissionError
+    from velune.swarm.agent import note_provider_failure
+
+    provider = SimpleNamespace(provider_id="openai")
     ks.save_key("openai", OPENAI_KEY, verified=True)
-    BaseCouncilAgent._note_provider_failure("openai", ProviderPermissionError("no access to model"))
+    note_provider_failure(provider, ProviderPermissionError("no access to model"))
     assert ks.verification_state("openai") is ks.KeyState.VERIFIED
 
-    BaseCouncilAgent._note_provider_failure("openai", ProviderAuthenticationError("401"))
+    note_provider_failure(provider, ProviderAuthenticationError("401"))
     assert ks.verification_state("openai") is ks.KeyState.INVALID
 
 

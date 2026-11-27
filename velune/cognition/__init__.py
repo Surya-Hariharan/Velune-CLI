@@ -1,1 +1,1 @@
-"""Velune multi-agent Reasoning Council cognition package."""
+"""Velune cognition: intent classification, prompts and the workspace-content firewall."""

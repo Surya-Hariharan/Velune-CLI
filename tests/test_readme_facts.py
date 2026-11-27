@@ -2,7 +2,7 @@
 
 Each graphic in ``docs/assets`` carries ``data-*`` attributes next to the figures it draws.
 These tests recompute those figures from the code (provider registry, slash-command registry,
-council tier contracts, the CI workflow) and from the documented permission table, so a
+the CI workflow) and from the documented permission table, so a
 graphic that drifts from the repository fails CI instead of quietly misleading a reader.
 They also hold every graphic to the rules that keep it safe to embed: self-contained, no
 script, no external reference, a viewBox, a title and a description, and a small size.
@@ -18,8 +18,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from velune.cli.slash_dispatcher import build_slash_registry
-from velune.cognition.council import contracts as c
-from velune.cognition.council.tiers import CouncilTier
 from velune.providers.registry import ProviderRegistry
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,17 +53,6 @@ CLOUD = {
     "meta": "Meta",
     "nvidia": "NVIDIA NIM",
     "huggingface": "Hugging Face",
-}
-SEATS = {
-    "Planner": c.SEAT_PLANNER,
-    "Coder": c.SEAT_CODER,
-    "Reviewer": c.SEAT_REVIEWER,
-    "Challenger": c.SEAT_CHALLENGER,
-    "Synthesizer": c.SEAT_SYNTHESIZER,
-    "Scalability": c.SEAT_SCALABILITY,
-    "Security": c.SEAT_SECURITY,
-    "Performance": c.SEAT_PERFORMANCE,
-    "Maintainability": c.SEAT_MAINTAINABILITY,
 }
 
 
@@ -155,6 +142,16 @@ def test_memory_tier_count_matches_the_memory_command():
     assert [t.strip() for t in tiers] == ["working", "episodic", "semantic", "graph", "lineage"]
 
 
+def test_council_skill_and_profile_counts_match_the_library():
+    from velune.swarm.library import SkillLibrary
+
+    library = SkillLibrary.load(user_root=Path("does-not-exist"))
+    builtin_skills = [s for s in library.skills.values() if s.source == "builtin"]
+    builtin_profiles = [p for p in library.profiles.values() if p.source == "builtin"]
+    assert _facts()["council_skills"] == str(len(builtin_skills))
+    assert f"{len(builtin_profiles)} permission profiles" in _read("velune-numbers.svg")
+
+
 def test_ci_matrix_matches_the_workflow():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     m = re.search(r"fail-fast: false\s+matrix:\s+os: \[(.*?)\]\s+python-version: \[(.*?)\]", ci)
@@ -170,28 +167,6 @@ def test_zero_analytics_claim_is_still_in_the_security_policy():
     assert "### Zero telemetry" in security
     assert "no analytics, usage reporting or remote crash reporting" in " ".join(security.split())
     assert _facts()["analytics"] == "0"
-
-
-# ── Council matrix ──────────────────────────────────────────────────────────────────────────
-
-
-def test_council_graphic_matches_the_tier_contracts():
-    full = c.TIER_CONTRACTS[CouncilTier.FULL]
-    assert _facts()["council_seats"] == str(len(full.required_seats))
-    rows = _with(_tree("velune-council.svg"), "data-tier")
-    assert [r.attrib["data-tier"] for r in rows] == [t.value for t in CouncilTier]
-    for row in rows:
-        contract = c.TIER_CONTRACTS[CouncilTier(row.attrib["data-tier"])]
-        assert int(row.attrib["data-samples"]) == contract.coder_samples
-        assert int(row.attrib["data-turns"]) == contract.max_debate_turns
-        assert int(row.attrib["data-budget"]) == contract.token_budget
-        drawn = {
-            SEATS[cell.attrib["data-seat"]]
-            for cell in row.iter()
-            if cell.attrib.get("data-active") == "true"
-        }
-        assert drawn == set(contract.required_seats), row.attrib["data-tier"]
-        assert len([x for x in row.iter() if "data-seat" in x.attrib]) == len(SEATS)
 
 
 # ── Permission matrix ───────────────────────────────────────────────────────────────────────

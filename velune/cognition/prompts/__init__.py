@@ -1,4 +1,4 @@
-"""Central system-prompt library for Velune's council agents and chat surfaces.
+"""Central system-prompt library for Velune's chat surfaces.
 
 Every LLM-facing system prompt in Velune is resolved through this package so the
 wording lives in exactly one place and can be tuned without touching agent code.
@@ -19,10 +19,9 @@ otherwise; a missing key in *both* raises loudly rather than silently sending an
 empty system prompt to a model. See ``_premium.example.py`` for the contract.
 
 ``active_layer()`` reports which layer is live (and a short digest of the resolved
-prompt text) so ``velune doctor`` and council traces can show it.
+prompt text) so ``velune doctor`` can show it.
 
-Prompt keys are namespaced ``"<surface>.<role>"`` (e.g. ``"council.planner"``,
-``"chat.interactive"``). Use the module-level constants below rather than raw
+Prompt keys are namespaced ``"<surface>.<role>"`` (e.g. ``"chat.interactive"``). Use the module-level constants below rather than raw
 strings so typos fail fast.
 """
 
@@ -40,12 +39,6 @@ from velune.cognition.prompts import _baseline
 logger = logging.getLogger("velune.cognition.prompts")
 
 # ── Stable prompt keys ───────────────────────────────────────────────────────
-# Council deliberation seats.
-COUNCIL_PLANNER = "council.planner"
-COUNCIL_CODER = "council.coder"
-COUNCIL_REVIEWER = "council.reviewer"
-COUNCIL_CHALLENGER = "council.challenger"
-COUNCIL_SYNTHESIZER = "council.synthesizer"
 
 # Direct chat surfaces.
 CHAT_INTERACTIVE = "chat.interactive"  # REPL main loop (velune, no args)
@@ -167,11 +160,6 @@ def active_layer() -> PromptLayerInfo:
 
 
 __all__ = [
-    "COUNCIL_PLANNER",
-    "COUNCIL_CODER",
-    "COUNCIL_REVIEWER",
-    "COUNCIL_CHALLENGER",
-    "COUNCIL_SYNTHESIZER",
     "CHAT_INTERACTIVE",
     "CHAT_CONVERSATIONAL",
     "PROMPT_LAYER_ENV",

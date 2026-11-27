@@ -50,7 +50,6 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "pull": "Models",
     "delete": "Models",
     "bench": "Models",
-    "roles": "Models",
     # Projects
     "project": "Projects",
     "index": "Projects",
@@ -431,19 +430,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             search_terms=("remove model", "uninstall model", "free space"),
         )
     )
-    registry.register(
-        SlashCommand(
-            name="roles",
-            aliases=["councilmodel", "cm"],
-            description="Assign specific models to each Reasoning Council agent role",
-            usage="/roles [show|reset]",
-            handler=repl._cmd_councilmodel,
-            examples=("/roles", "/roles show", "/roles reset"),
-            search_terms=("assign model", "roles", "council roles", "agent roles", "multi-agent"),
-            shortcut="/cm",
-        )
-    )
-
     # ── Council / orchestration ───────────────────────────────────────────────
 
     registry.register(
@@ -613,7 +599,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="fast",
             aliases=["optimus", "opt"],
-            description="Speed mode — instant tier, compressed context, smallest model",
+            description="Speed mode — compressed context, smallest model",
             usage="/fast",
             handler=repl._cmd_optimus,
             examples=("/fast",),
@@ -624,7 +610,7 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
         SlashCommand(
             name="max",
             aliases=["godly", "full", "god"],
-            description="Max power — full council, largest model, full context",
+            description="Max power — largest model, full context",
             usage="/max",
             handler=repl._cmd_godly,
             examples=("/max",),

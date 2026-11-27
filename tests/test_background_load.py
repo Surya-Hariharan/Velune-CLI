@@ -144,7 +144,7 @@ async def test_git_loop_backs_off_when_the_state_is_unchanged(tmp_path, monkeypa
 
 
 async def test_startup_model_probes_never_exceed_the_concurrency_cap(tmp_path, monkeypatch):
-    from tests.council_fakes import make_model
+    from tests.swarm_fakes import descriptor as make_model
     from velune.kernel import registry as kernel_registry
     from velune.models import probes
     from velune.models import registry as model_registry

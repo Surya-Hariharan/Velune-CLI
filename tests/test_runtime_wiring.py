@@ -91,19 +91,11 @@ async def runtime_a(tmp_path, isolated_home, network):
     await runtime.container.get("runtime.lifecycle").shutdown()
 
 
-async def _council_context(runtime, prompt="where is the entry point?") -> str:
-    """The ``repo_context`` the council's seats are handed for *prompt*."""
-    orchestrator = runtime.container.get("runtime.council_orchestrator")
-    seen: dict[str, str] = {}
+async def _council_context(runtime) -> str:
+    """The repository context every council agent is handed (no model is called)."""
+    from velune.swarm.setup import repository_summary
 
-    async def capture(prompt, repo_context, **kwargs):
-        seen["context"] = repo_context
-        return {"final_summary": "stub", "task_plan": None, "coder_proposal": None}
-
-    orchestrator.execute_task = capture  # no model is ever called
-    async for _ in orchestrator.stream(prompt, council_tier="full"):
-        pass
-    return seen["context"]
+    return await repository_summary(runtime.container)
 
 
 # ── council context ──────────────────────────────────────────────────────────
@@ -417,7 +409,8 @@ async def test_wiring_does_not_turn_on_model_probes(runtime_a, tmp_path, monkeyp
     (e.g. because the runtime had been published as the process-wide container) it
     would ping the model.
     """
-    from tests.council_fakes import FakeProvider, make_model
+    from tests.swarm_fakes import ScriptedProvider
+    from tests.swarm_fakes import descriptor as make_model
     from velune.models.probes import FastProbe
 
     pings: list[str] = []
@@ -428,9 +421,9 @@ async def test_wiring_does_not_turn_on_model_probes(runtime_a, tmp_path, monkeyp
 
     monkeypatch.setattr(FastProbe, "ping", ping)
     monkeypatch.chdir(tmp_path)  # the probe cache path is cwd-relative
-    runtime_a.container.get("runtime.provider_registry").register(
-        "fakecloud", FakeProvider("fakecloud")
-    )
+    fake = ScriptedProvider([])
+    fake.provider_id = "fakecloud"
+    runtime_a.container.get("runtime.provider_registry").register("fakecloud", fake)
     model = make_model("cloud-model", "fakecloud", is_local=False)
     await runtime_a.container.get("runtime.model_registry")._probe([model])
     assert pings == []

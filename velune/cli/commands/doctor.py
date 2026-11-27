@@ -181,7 +181,7 @@ def _all_checks() -> list:
         _check_model_benchmarks,
         _check_session_cost,
         _check_memory_health,
-        _check_council_roles,
+        _check_council_skills,
         _check_prompt_layer,
         _check_terminal_zoom_lock,
     ]
@@ -1466,76 +1466,28 @@ def _check_memory_health() -> dict:
     }
 
 
-def _check_council_roles() -> dict:
-    """Verify that each council role has at least one model candidate assigned."""
+def _check_council_skills() -> dict:
+    """The council's skills and permission profiles load, and none were skipped."""
+    from velune.swarm.library import SkillLibrary
+
     try:
-        from velune.models.registry import ModelCapabilityRegistry
-        from velune.models.specializations import CouncilRole, ModelSpecializationMapper
-
-        mapper = ModelSpecializationMapper(ModelCapabilityRegistry())
-        override_report = None
-        try:
-            from velune.orchestration.role_assignments import apply_persisted_role_overrides
-
-            override_report = apply_persisted_role_overrides(mapper)
-        except Exception:
-            pass
-        try:
-            role_map = mapper.map_roles()
-        except Exception as exc:
-            return {
-                "name": "Council Role Assignments",
-                "status": "warn",
-                "message": f"Role mapping unavailable (no providers discovered): {exc}",
-            }
-
-        missed = [m.split("=")[0] for m in mapper.override_misses]
-        roles_covered = [r.value for r in CouncilRole if r in role_map]
-        roles_missing = [r.value for r in CouncilRole if r not in role_map]
-
-        if roles_missing:
-            return {
-                "name": "Council Role Assignments",
-                "status": "warn",
-                "message": (
-                    f"{len(roles_covered)} role(s) mapped, "
-                    f"{len(roles_missing)} missing: {', '.join(roles_missing)}"
-                ),
-            }
-
-        role_summary = "  ".join(
-            f"{r.value}→{role_map[r].model_id.split('/')[-1]}"
-            + (" (assigned)" if r in mapper.overrides and r.value not in missed else "")
-            for r in CouncilRole
-            if r in role_map
-        )
-        if missed:
-            role_summary += f"  |  assigned but unavailable: {', '.join(missed)}"
-        if override_report is not None and override_report.ignored:
-            return {
-                "name": "Council Role Assignments",
-                "status": "warn",
-                "message": (
-                    f"{role_summary}  |  saved role(s) with no effect: "
-                    + ", ".join(sorted(override_report.ignored))
-                ),
-            }
+        library = SkillLibrary.load(workspace=Path.cwd(), trusted=False)
+    except Exception as exc:
+        return {"name": "Council Skills", "status": "fail", "message": f"Could not load: {exc}"}
+    message = f"{len(library.skills)} skills, {len(library.profiles)} permission profiles"
+    if not library.skills or not library.profiles:
+        return {"name": "Council Skills", "status": "fail", "message": message}
+    if library.warnings:
         return {
-            "name": "Council Role Assignments",
-            "status": "ok",
-            "message": role_summary,
-        }
-
-    except ImportError:
-        return {
-            "name": "Council Role Assignments",
+            "name": "Council Skills",
             "status": "warn",
-            "message": "ModelSpecializationMapper not importable — council subsystem unavailable",
+            "message": f"{message}; skipped: " + "; ".join(library.warnings),
         }
+    return {"name": "Council Skills", "status": "ok", "message": message}
 
 
 def _check_prompt_layer() -> dict:
-    """Which council/chat prompt layer is live, so behaviour is explainable per machine."""
+    """Which chat prompt layer is live, so behaviour is explainable per machine."""
     from velune.cognition.prompts import PROMPT_LAYER_ENV, active_layer
 
     info = active_layer()
@@ -1589,7 +1541,7 @@ def _render_results(results: list, out: Console | None = None) -> None:
         "Qdrant In-Process Initializable": "Storage",
         "velune.toml Config File": "Storage",
         "Memory Subsystem": "Storage",
-        "Council Role Assignments": "Council",
+        "Council Skills": "Council",
         "Prompt Layer": "Council",
         "OpenAI API Key": "Security",
         "Anthropic API Key": "Security",

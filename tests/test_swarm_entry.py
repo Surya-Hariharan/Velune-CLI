@@ -372,5 +372,21 @@ async def test_headless_run_refuses_writes_without_someone_to_ask(tmp_path):
     assert implementer.files_touched == []
 
 
+def test_settings_from_the_old_council_still_load():
+    """A velune.toml written for the old council must not stop Velune from starting."""
+    from velune.kernel.config import VeluneConfig
+
+    config = VeluneConfig(
+        cognition={"max_council_tier": "standard", "default_tier_override": "auto"},
+        council={"default_tier": "auto"},
+        providers={"allow_cloud_fallback_from_local": True},
+        execution={"low_resource_mode": True},
+        swarm={"max_calls": 12},
+    )
+    assert config.swarm.max_calls == 12
+    assert not hasattr(config.execution, "low_resource_mode")
+    assert not hasattr(config, "cognition")
+
+
 def test_settings_defaults_match_the_engine():
     assert setup.swarm_settings(None, fakes.model()).max_seconds == SwarmSettings().max_seconds

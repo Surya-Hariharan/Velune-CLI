@@ -1,10 +1,9 @@
 """Transparent retry + concurrency-limiting wrapper around ModelProvider.infer()/stream().
 
 Wired in once, at :meth:`velune.providers.registry.ProviderRegistry.get`, so
-every call site (Council, the native tool loop, the REPL's fallback chat
-path) gets automatic retry on transient failures without needing its own
-retry logic — previously only the Council orchestrator retried at all
-(``velune/cognition/orchestrator.py``); ordinary chat inference had none.
+every call site (the council's agents, the native tool loop, the REPL's
+fallback chat path) gets automatic retry on transient failures without
+needing its own retry logic.
 
 A :class:`~velune.core.errors.provider.RateLimitError` carrying a
 ``retry_after`` (parsed from the provider's own ``Retry-After`` header — see

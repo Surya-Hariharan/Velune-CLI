@@ -166,6 +166,20 @@ def model(model_id: str = "fake-model", *, local: bool = False) -> Any:
     )
 
 
+def descriptor(model_id: str = "m1", provider_id: str = "fake", *, is_local: bool = True) -> Any:
+    """A real ``ModelDescriptor`` (for code that validates it)."""
+    from velune.core.types.model import ModelCapabilityProfile, ModelDescriptor
+
+    return ModelDescriptor(
+        model_id=model_id,
+        provider_id=provider_id,
+        display_name=model_id,
+        context_length=32768,
+        capabilities=ModelCapabilityProfile(),
+        is_local=is_local,
+    )
+
+
 class FakeContainer:
     def __init__(self, services: dict[str, Any]) -> None:
         self.services = services

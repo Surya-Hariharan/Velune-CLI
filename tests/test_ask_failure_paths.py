@@ -1,16 +1,14 @@
-"""Failure-path contracts for `velune ask` and the council pipeline.
+"""Failure-path contracts for `velune ask` and the council.
 
 A bad API key must produce ONE actionable error and a non-zero exit code —
 not 20+ raw logger lines, a garbage "answer", and rc=0. These tests pin the
-four layers of that contract:
+three layers of that contract:
 
-* agents that fail return sentinel strings; those must never survive the
-  coder candidate vote (`_diverge_candidates`),
 * a definitive 401 rejection is persisted to the keystore so the *next* run
   fails fast at preflight,
 * preflight treats models behind a rejected key as unreachable and names the
   fix (`velune provider add <provider>`),
-* the ask command maps a no-answer council result to a clean error + exit 1.
+* the ask command maps a failed council run to a clean error + exit 1.
 """
 
 from __future__ import annotations
@@ -22,75 +20,10 @@ import pytest
 import typer
 
 from velune.cli.commands.preflight import run_preflight_check
-from velune.cognition.council.base import BaseCouncilAgent
 from velune.core.errors.provider import InferenceError, ProviderAuthenticationError
+from velune.swarm.agent import note_provider_failure
 
-# ---------------------------------------------------------------------------
-# Agent failure sentinels must not become coder candidates
-# ---------------------------------------------------------------------------
-
-
-class _FakeJobResult:
-    def __init__(self, value, ok=True):
-        self.value = value
-        self.ok = ok
-
-
-class _FakeScheduler:
-    def __init__(self, results):
-        self._results = results
-        self.last_mode = "sequential"
-
-    async def run(self, jobs, timeout):
-        return self._results
-
-
-async def test_diverge_drops_failure_sentinel_strings():
-    """'Deliberation failure…' strings are errors, not candidate solutions."""
-    from velune.cognition.orchestrator import CouncilOrchestrator
-
-    orch = CouncilOrchestrator.__new__(CouncilOrchestrator)
-    orch.scheduler = _FakeScheduler(
-        [
-            _FakeJobResult("Deliberation failure inside agent coder: 401 Unauthorized"),
-            _FakeJobResult("[Agent coder timed out — using empty response]"),
-            _FakeJobResult("def real_code(): ..."),
-        ]
-    )
-    coder = SimpleNamespace(
-        model=SimpleNamespace(provider_id="groq"),
-        write_code=None,
-    )
-    candidates = await orch._diverge_candidates(
-        coder,
-        prompt="p",
-        current_code="",
-        plan_context="",
-        style_profile=None,
-        format_instructions="",
-        n_samples=3,
-        timeout=1.0,
-    )
-    assert candidates == ["def real_code(): ..."]
-
-
-def test_all_failed_result_carries_honest_flag():
-    """Total failure reports ALL_AGENTS_FAILED, not a fake timeout, and a str tier."""
-    from velune.cognition.orchestrator import CouncilOrchestrator
-
-    orch = CouncilOrchestrator.__new__(CouncilOrchestrator)
-    res = orch._build_timeout_result(
-        "prompt",
-        "instant",
-        flag="ALL_AGENTS_FAILED",
-        summary="The council could not produce an answer.",
-        critical_issue="Every Coder attempt failed.",
-    )
-    assert res["is_timeout"] is True
-    assert res["tier"] == "instant"  # regression: was a float start_time
-    assert res["arbitration"]["flags"] == ["ALL_AGENTS_FAILED"]
-    assert "could not produce an answer" in res["final_summary"]
-
+GROQ = SimpleNamespace(provider_id="groq")
 
 # ---------------------------------------------------------------------------
 # 401 rejection is persisted; other errors are not
@@ -105,7 +38,7 @@ def test_auth_error_marks_key_invalid(monkeypatch):
         recorded["reason"] = reason
 
     monkeypatch.setattr("velune.providers.keystore.mark_invalid", _mark)
-    BaseCouncilAgent._note_provider_failure("groq", ProviderAuthenticationError("401 rejected"))
+    note_provider_failure(GROQ, ProviderAuthenticationError("401 rejected"))
     assert recorded == {"provider": "groq", "reason": "401 rejected"}
 
 
@@ -114,8 +47,32 @@ def test_non_auth_error_does_not_touch_key_state(monkeypatch):
         raise AssertionError("mark_invalid must not be called for non-auth errors")
 
     monkeypatch.setattr("velune.providers.keystore.mark_invalid", _mark)
-    BaseCouncilAgent._note_provider_failure("groq", InferenceError("rate limited"))
-    BaseCouncilAgent._note_provider_failure("groq", TimeoutError())
+    note_provider_failure(GROQ, InferenceError("rate limited"))
+    note_provider_failure(GROQ, TimeoutError())
+
+
+async def test_a_council_agent_rejected_with_401_marks_the_key(monkeypatch, tmp_path):
+    from tests.swarm_fakes import ScriptedProvider
+    from velune.swarm.agent import AgentEnv
+    from velune.swarm.library import SkillLibrary
+    from velune.swarm.run import run_swarm
+
+    marked: list[str] = []
+    monkeypatch.setattr(
+        "velune.providers.keystore.mark_invalid",
+        lambda provider_id, *, reason="": marked.append(provider_id),
+    )
+    provider = ScriptedProvider(lambda request: ProviderAuthenticationError("401 rejected"))
+    library = SkillLibrary.load(user_root=Path("does-not-exist"))
+    outcome = await run_swarm(
+        "explain",
+        library,
+        AgentEnv(provider=provider, model_id="m"),
+        runs_root=tmp_path,
+        skill="research",
+    )
+    assert not outcome.ok and "401 rejected" in outcome.error
+    assert marked and set(marked) == {"fake"}
 
 
 # ---------------------------------------------------------------------------

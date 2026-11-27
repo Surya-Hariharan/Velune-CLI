@@ -40,7 +40,6 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
     container = cli_context.container
     lifecycle = container.get("runtime.lifecycle")
     model_registry = container.get("runtime.model_registry")
-    model_specialization = container.get("runtime.council_orchestrator").mapper
     repo_cognition = container.get("runtime.repository_cognition")
 
     # 2. Boot subsystems
@@ -55,27 +54,22 @@ async def _chat_command_async(cli_context: CLIContext, resume_id: str | None = N
         await lifecycle.shutdown()
         return
 
-    # 3. Map Coder role to get fast, single-model access
-    from velune.models.specializations import CouncilRole
+    # 3. The saved default model, or the first usable one.
+    from velune.cli.model_prefs import load_active_model
+    from velune.swarm.setup import pick_model
 
-    roles = model_specialization.map_roles()
-    coder_model = roles.get(CouncilRole.CODER)
-    if not coder_model:
+    coder_model, provider = pick_model(container, load_active_model())
+    if coder_model is None or provider is None:
         from velune.cli.rendering.error_panel import render_error
         from velune.core.errors.catalog import NoModelsAvailableError
 
         console.print(
             render_error(
-                NoModelsAvailableError(
-                    cause_override="No Coder model is assigned or found in the model catalog."
-                )
+                NoModelsAvailableError(cause_override="No usable model is in the model catalog.")
             )
         )
         await lifecycle.shutdown()
         return
-
-    provider_registry = container.get("runtime.provider_registry")
-    provider = provider_registry.get_or_raise(coder_model.provider_id)
 
     # 4. Ingest and Scan AST Snapshot
     with console.status("[bold magenta]Scanning codebase AST structure...[/bold magenta]"):

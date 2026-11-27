@@ -10,6 +10,7 @@ context. Nothing else is shared between agents.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +24,8 @@ from velune.swarm.store import RunStore
 from velune.swarm.types import AgentResult, AgentSpec, SwarmPlan
 from velune.tools.base.registry import ToolRegistry
 from velune.tools.base.tool import ToolCallContext
+
+logger = logging.getLogger("velune.swarm.agent")
 
 EDIT_FORMAT = """Return each change as a SEARCH/REPLACE block:
 
@@ -206,8 +209,30 @@ async def run_agent(
         raise
     except Exception as exc:
         status = "budget" if type(exc).__name__ == "BudgetExceeded" else "error"
+        note_provider_failure(env.provider, exc)
         return store.record(_failed(spec, status, _describe(exc), runner, started))
     return store.record(_from_loop(spec, loop_result, started))
+
+
+def note_provider_failure(provider: Any, exc: BaseException) -> None:
+    """A rejected key (401) is marked invalid, so preflight and /connect can say so.
+
+    A 403 (``ProviderPermissionError``) is not a bad key: the key may simply lack
+    access to this model, so it is left alone.
+    """
+    from velune.core.errors.provider import ProviderAuthenticationError, ProviderPermissionError
+
+    if not isinstance(exc, ProviderAuthenticationError) or isinstance(exc, ProviderPermissionError):
+        return
+    provider_id = getattr(provider, "provider_id", "")
+    if not isinstance(provider_id, str) or not provider_id:
+        return
+    try:
+        from velune.providers.keystore import mark_invalid
+
+        mark_invalid(provider_id, reason=str(exc))
+    except Exception:  # bookkeeping must never fail the run
+        logger.debug("Could not mark %s invalid", provider_id, exc_info=True)
 
 
 def _describe(exc: Exception) -> str:
