@@ -159,17 +159,20 @@ class VeluneMCPServer:
 
         Returns ``{"response", "degraded", "run_id"}`` on success and ``{"error"}`` when
         the council is unavailable or produced no answer. ``degraded`` means the
-        plan was corrected or limited along the way (see ``notes``).
+        plan was corrected or limited, or something was not delivered (see ``notes``).
         """
         if self._council is None:
             return {"error": COUNCIL_UNAVAILABLE}
         outcome = await self._council(task)
         if not outcome.ok:
             return {"error": outcome.error or "The council could not produce an answer."}
+        notes = [*outcome.plan.notes, *outcome.warnings]
         return {
             "response": outcome.content,
-            "degraded": bool(outcome.plan.notes),
-            "notes": list(outcome.plan.notes),
+            "degraded": bool(notes),
+            "notes": notes,
+            "files_changed": list(outcome.files_changed),
+            "diagram": str(outcome.diagram_path) if outcome.diagram_path else None,
             "run_id": outcome.run_id,
         }
 

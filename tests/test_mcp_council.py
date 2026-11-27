@@ -18,6 +18,9 @@ def _outcome(*, ok=True, content="council says hi", error="", notes=()):
         error=error,
         run_id="run-1",
         plan=SimpleNamespace(notes=list(notes)),
+        files_changed=[],
+        warnings=[],
+        diagram_path=None,
     )
 
 
@@ -44,6 +47,8 @@ async def test_velune_ask_runs_the_council():
         "response": "council says hi",
         "degraded": False,
         "notes": [],
+        "files_changed": [],
+        "diagram": None,
         "run_id": "run-1",
         "model": "velune-council",
     }

@@ -157,6 +157,7 @@ async def _run_with_runtime(
 
 def render_outcome(outcome: Any) -> None:
     """The lead's answer, or why the run failed, plus how each agent finished."""
+    from velune.cli.display.swarm_view import outcome_lines
     from velune.cli.rendering import CustomMarkdown
 
     agents = Text()
@@ -164,6 +165,8 @@ def render_outcome(outcome: Any) -> None:
         agents.append(f"\n{result.agent_id} · {result.status}", style="dim")
         if result.error:
             agents.append(f": {result.error}", style="dim")
+    for line in outcome_lines(outcome):
+        agents.append(f"\n{line}")
     if outcome.ok:
         from rich.console import Group
 

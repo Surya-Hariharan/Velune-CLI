@@ -136,10 +136,13 @@ async def _ask_with_runtime(
         raise typer.Exit(code=1)
 
     from velune.cli import guidance, ui
+    from velune.cli.display.swarm_view import outcome_lines
     from velune.cli.rendering import CustomMarkdown
 
     console.print()
     console.print(CustomMarkdown(outcome.content))
+    for line in outcome_lines(outcome):
+        console.print(line, markup=False)
     short_task = prompt if len(prompt) <= 40 else prompt[:40].rstrip() + "…"
     steps = guidance.steps_for("ask_completed", task=f'"{short_task}"')
     if steps:
@@ -172,6 +175,9 @@ def outcome_json(prompt: str, outcome: SwarmOutcome) -> dict[str, Any]:
         "output": outcome.plan.output,
         "notes": outcome.plan.notes,
         "run_id": outcome.run_id,
+        "files_changed": outcome.files_changed,
+        "diagram": str(outcome.diagram_path) if outcome.diagram_path else None,
+        "warnings": outcome.warnings,
         "agents": [
             {"id": r.agent_id, "status": r.status, "error": r.error} for r in outcome.results
         ],

@@ -18,6 +18,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `/council show [run]` and `/skills` (lists skills and profiles). Add your own in
   `~/.velune/skills/` and `~/.velune/permissions/`. Limits live in a new `[swarm]` section.
   `velune ask` (read-only), `velune run`, chat `!run` and the MCP council tool use it too.
+- A council run reports what it left behind: the files its tool calls really changed (also
+  `files_changed` in `velune ask --json` and the MCP result), a warning when a run meant to
+  change files changed none, and a diagram saved as `diagram.mmd` in the run folder. A profile
+  that writes files never also offers a diff to apply, plan mode proposes changes instead, and
+  when a skill has no writing role its lead writes.
 
 ### Removed
 

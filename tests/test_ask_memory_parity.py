@@ -43,6 +43,9 @@ class _Orchestrator:
             content="ok",
             error="",
             run_id="r1",
+            files_changed=[],
+            warnings=[],
+            diagram_path=None,
             results=[],
             plan=SimpleNamespace(
                 skill="research", permission="answer-only", output="text", notes=[]

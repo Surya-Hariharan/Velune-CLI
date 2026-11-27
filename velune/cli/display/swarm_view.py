@@ -47,6 +47,21 @@ def plan_table(plan: SwarmPlan) -> Table:
     return table
 
 
+def outcome_lines(outcome: Any) -> list[str]:
+    """What a run left behind, as plain lines: changed files, saved diagram, warnings."""
+    lines: list[str] = []
+    if outcome.files_changed:
+        shown = ", ".join(outcome.files_changed[:10])
+        more = len(outcome.files_changed) - 10
+        if more > 0:
+            shown += f" (+{more} more)"
+        lines.append(f"Changed {len(outcome.files_changed)} file(s): {shown}")
+    if outcome.diagram_path is not None:
+        lines.append(f"Diagram saved: {outcome.diagram_path}")
+    lines.extend(outcome.warnings)
+    return lines
+
+
 class ReplSwarmUI:
     """The ``SwarmUI`` for the REPL."""
 

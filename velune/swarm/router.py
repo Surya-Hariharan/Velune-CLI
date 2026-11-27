@@ -245,6 +245,9 @@ def _plan_from_answer(
 
     for agent in agents:
         agent.can_write = agent.role in skill.writers and profile.write == "workspace"
+    if output == "files" and not any(a.can_write for a in agents):
+        next(a for a in agents if a.id == lead).can_write = True
+        notes.append(f"No agent in this team writes files, so the lead '{lead}' does.")
     stages = _split_writers(stages, {a.id: a for a in agents}, notes)
     for index, stage in enumerate(stages):
         for agent_id in stage:
@@ -309,6 +312,8 @@ def _lead_last(stages: list[list[str]], lead: str, notes: list[str]) -> list[lis
 
 
 def _downgrade(output: str, profile: PermissionProfile, notes: list[str]) -> str:
+    if profile.write == "workspace" and output == "diff":
+        return "files"  # writers edit directly; applying a diff on top would edit twice
     allowed = ALLOWED_OUTPUTS[profile.write]
     if output in allowed:
         return output

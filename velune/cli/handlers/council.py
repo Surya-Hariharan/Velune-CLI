@@ -416,6 +416,10 @@ async def execute_council_task(
         if task_obj is not None:
             uncancel_task(task_obj)
         repl.console.print("\n[yellow]Council run interrupted.[/yellow]")
+        if journal:
+            repl.console.print(
+                "[dim]Files were changed before it stopped; [bold]/rewind[/bold] undoes them.[/dim]"
+            )
         return
     except Exception as exc:
         from velune.cli.rendering.error_panel import render_error, render_unexpected_error
@@ -445,6 +449,7 @@ async def execute_council_task(
                 padding=(1, 2),
             )
         )
+        _print_left_behind(repl, outcome)
         repl.console.print(f"[dim]Run saved: /council show {outcome.run_id}[/dim]")
         return
 
@@ -459,8 +464,24 @@ async def execute_council_task(
     )
     repl._conversation.append({"role": "user", "content": f"/council {task}"})
     repl._conversation.append({"role": "assistant", "content": outcome.content})
+    _print_left_behind(repl, outcome)
     if outcome.plan.output == "diff":
         await apply_council_edits(repl, outcome.content, task)
+
+
+def _print_left_behind(repl: VeluneREPL, outcome: Any) -> None:
+    """Changed files, the saved diagram and warnings, then how to undo."""
+    from rich.markup import escape
+
+    from velune.cli.display.swarm_view import outcome_lines
+
+    for line in outcome_lines(outcome):
+        repl.console.print(escape(line))
+    if outcome.journal:
+        repl.console.print(
+            "[dim][bold]/rewind[/bold] undoes this run's file changes "
+            "(commands that ran are not undone).[/dim]"
+        )
 
 
 def show_runs(repl: VeluneREPL, run_id: str) -> None:

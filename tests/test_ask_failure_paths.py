@@ -210,6 +210,9 @@ async def test_ask_exits_nonzero_on_council_failure(monkeypatch, tmp_path, capsy
             content="",
             error="writer failed: ProviderAuthenticationError: 401",
             run_id="r1",
+            files_changed=[],
+            warnings=[],
+            diagram_path=None,
             results=[SimpleNamespace(agent_id="writer", status="error", error="401")],
             plan=SimpleNamespace(
                 skill="research", permission="answer-only", output="text", notes=[]

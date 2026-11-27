@@ -59,6 +59,13 @@ OUTPUT_CONTRACTS = {
     ),
 }
 
+#: The "files" contract for a lead that cannot write: other agents made the changes.
+CHECK_FILES_CONTRACT = (
+    "Other agents changed the files. Read the changed files to check the work, then "
+    "report every file that was created or changed, problems you found, and anything "
+    "you could not verify."
+)
+
 RULES = """Rules:
 - Base every statement about the code on files you actually read; quote them with their path.
 - Never invent files, functions, settings, APIs or results. Say what you could not verify.
@@ -75,6 +82,8 @@ _WRITE_TOOLS = {
     "create_directory",
     "delete_directory",
 }
+#: Arguments naming what a tool works on (``move_path`` changes both of its two).
+_PATH_KEYS = ("file_path", "path", "source", "destination")
 
 
 @dataclass
@@ -111,7 +120,13 @@ def build_messages(
 
     team = ", ".join(f"{a.id} ({a.role})" for a in plan.agents)
     access = profile.body
-    if not policy.can_write and profile.write == "workspace":
+    if profile.write == "workspace" and policy.write == "proposal":
+        access += (
+            "\n\nPlan mode: nothing is changed in this run. Return any change you propose as text."
+        )
+        if spec.role in skill.writers:
+            access += "\n\n" + EDIT_FORMAT
+    elif not policy.can_write and profile.write == "workspace":
         access += (
             "\n\nYou are read-only in this task: other agents change files. Return any "
             "change you propose as text."
@@ -129,10 +144,10 @@ def build_messages(
         f"# What you may do ({profile.name})\n{access}",
     ]
     if spec.id == plan.lead:
-        parts.append(
-            "# Your output\nYou write the final result for the user.\n"
-            + OUTPUT_CONTRACTS[plan.output]
-        )
+        contract = OUTPUT_CONTRACTS[plan.output]
+        if plan.output == "files" and not policy.can_write:
+            contract = CHECK_FILES_CONTRACT
+        parts.append("# Your output\nYou write the final result for the user.\n" + contract)
     parts += [RULES, WORKSPACE_SANDBOX_NOTICE]
     system = "\n\n".join(p for p in parts if p)
 
@@ -242,19 +257,21 @@ def _describe(exc: Exception) -> str:
 
 def _call_label(call: Any) -> str:
     args = call.arguments if isinstance(call.arguments, dict) else {}
-    target = next(
-        (str(args[k]) for k in ("file_path", "path", "pattern", "query") if k in args), ""
-    )
+    target = next((str(args[k]) for k in (*_PATH_KEYS, "pattern", "query") if k in args), "")
     return f"{call.name}({target[:80]})"
 
 
 def _touched(invocations: list[Any]) -> list[str]:
-    files = []
+    """Paths changed by write tool calls that succeeded (not what the model says)."""
+    files: list[str] = []
     for inv in invocations:
+        if inv.call.name not in _WRITE_TOOLS or inv.error:
+            continue
         args = inv.call.arguments if isinstance(inv.call.arguments, dict) else {}
-        target = args.get("file_path") or args.get("path")
-        if inv.call.name in _WRITE_TOOLS and not inv.error and target and target not in files:
-            files.append(str(target))
+        for key in _PATH_KEYS:
+            target = str(args.get(key) or "").replace("\\", "/")
+            if target and target not in files:
+                files.append(target)
     return files
 
 

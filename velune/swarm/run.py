@@ -9,6 +9,7 @@ journal, so one ``/rewind`` reverses every file change the run made.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -26,6 +27,8 @@ from velune.tools.filesystem.mutation import (
     reset_active_journal,
     set_active_journal,
 )
+
+_MERMAID = re.compile(r"^```mermaid[ \t]*\r?\n(.*?)^```", re.MULTILINE | re.DOTALL)
 
 
 @dataclass
@@ -47,6 +50,9 @@ class SwarmOutcome:
     run_id: str
     folder: Path
     journal: TurnJournal = field(default_factory=TurnJournal)
+    files_changed: list[str] = field(default_factory=list)  # from successful tool calls
+    warnings: list[str] = field(default_factory=list)  # what the run did not deliver
+    diagram_path: Path | None = None  # the lead's mermaid blocks, saved in the run folder
 
     @property
     def ok(self) -> bool:
@@ -121,6 +127,9 @@ async def run_swarm(
     profile = library.profile(plan.permission)
     assert skill_obj is not None and profile is not None  # route() only returns known names
     policy = SwarmPolicy.build(profile, mode=mode)
+    if plan.output == "files" and not (policy.can_write and env.tools):
+        plan.output = "diff"
+        plan.notes.append("No files can be changed in this run: the changes are proposed instead.")
     store = RunStore.create(runs_root, plan)
     ui.show_plan(plan)
 
@@ -172,14 +181,40 @@ async def run_swarm(
         status, content, error = "failed", "", f"{plan.lead} did not run."
     else:
         status, content, error = "failed", "", f"{lead.agent_id} failed: {lead.error}"
-    store.event("done", status=status, error=error)
+    results = [store.results[a.id] for a in plan.agents if a.id in store.results]
+    files_changed = list(dict.fromkeys(f for r in results for f in r.files_touched))
+    warnings: list[str] = []
+    diagram_path = None
+    if status == "ok" and plan.output == "files" and not files_changed:
+        warnings.append("No files were changed.")
+    if status == "ok" and plan.output == "diagram":
+        diagram_path = _save_diagram(store.folder, content)
+        if diagram_path is None:
+            warnings.append("No mermaid diagram was found in the answer, so none was saved.")
+    store.event("done", status=status, error=error, files=files_changed)
     return SwarmOutcome(
         plan=plan,
         status=status,
         content=content,
         error=error,
-        results=[store.results[a.id] for a in plan.agents if a.id in store.results],
+        results=results,
         run_id=store.run_id,
         folder=store.folder,
         journal=journal,
+        files_changed=files_changed,
+        warnings=warnings,
+        diagram_path=diagram_path,
     )
+
+
+def _save_diagram(folder: Path, content: str) -> Path | None:
+    """Write the answer's mermaid blocks to ``diagram.mmd`` in the run folder."""
+    blocks = [block.strip() for block in _MERMAID.findall(content) if block.strip()]
+    if not blocks:
+        return None
+    path = folder / "diagram.mmd"
+    try:
+        path.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+    except OSError:
+        return None
+    return path
