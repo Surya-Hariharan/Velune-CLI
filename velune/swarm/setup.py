@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from velune.permissions import ExecutionMode
-from velune.swarm.agent import AgentEnv
+from velune.swarm.agent import AgentEnv, ModelChoice
 from velune.swarm.library import SkillLibrary
 from velune.swarm.run import SwarmOutcome, SwarmSettings, run_swarm
 
@@ -88,7 +89,56 @@ def swarm_settings(config: Any, model: Any) -> SwarmSettings:
         max_tokens=cfg.max_tokens,
         turns_per_agent=cfg.turns_per_agent,
         parallel=cfg.parallel_local if local else cfg.parallel_cloud,
+        parallel_cloud=cfg.parallel_cloud,
+        parallel_local=cfg.parallel_local,
     )
+
+
+def find_model(container: Any, ref: str) -> tuple[Any, Any, str]:
+    """``(model, provider, problem)`` for a ``"provider/model"`` reference.
+
+    *model* is None when the reference names no known model. *problem* says why
+    the reference cannot be used right now ("" when it can).
+    """
+    from velune.models.registry import model_usable
+
+    provider_id, _, model_id = ref.partition("/")
+    models = _optional(container, "runtime.model_registry")
+    providers = _optional(container, "runtime.provider_registry")
+    model = None
+    if models is not None and provider_id and model_id:
+        model = models.get(model_id, provider_id)
+    if model is None:
+        return None, None, "is not a known model (write it as provider/model; see /models)"
+    try:
+        usable = providers is not None and model_usable(model, providers)
+        provider = providers.get(model.provider_id) if usable else None
+    except Exception as exc:
+        _log.debug("Provider for %s unavailable: %s", ref, exc)
+        provider = None
+    return model, provider, "" if provider is not None else "is not available right now"
+
+
+def role_models(
+    container: Any, config: Any, tools_for: Callable[[Any, Any], bool]
+) -> dict[str, ModelChoice]:
+    """``[swarm.models]``, resolved. *tools_for* says whether a model may use tools."""
+    configured = getattr(getattr(config, "swarm", None), "models", None) or {}
+    choices: dict[str, ModelChoice] = {}
+    for role, ref in configured.items():
+        model, provider, problem = find_model(container, ref)
+        if problem:
+            choices[role.lower()] = ModelChoice(ref, problem=problem)
+            continue
+        choices[role.lower()] = ModelChoice(
+            ref,
+            provider=provider,
+            model_id=model.model_id,
+            context_window=int(getattr(model, "context_length", 0) or 32_768),
+            tools=tools_for(model, provider),
+            local=bool(getattr(model, "is_local", False)),
+        )
+    return choices
 
 
 async def repository_summary(container: Any, max_tokens: int = CONTEXT_TOKENS) -> str:
@@ -200,7 +250,8 @@ async def run_headless(
     gate.state.mode = mode
     ctx = ToolCallContext(run_id="swarm", actor="swarm", workspace=workspace)
     ctx.gate = gate
-    settings = swarm_settings(_optional(container, "runtime.config"), model)
+    config = _optional(container, "runtime.config")
+    settings = swarm_settings(config, model)
     if max_seconds is not None:
         settings.max_seconds = min(settings.max_seconds, max_seconds)
     env = AgentEnv(
@@ -211,6 +262,8 @@ async def run_headless(
         context=context if context is not None else await repository_summary(container),
         context_window=int(getattr(model, "context_length", 0) or 32_768),
         tools=supports_tools(provider),
+        local=bool(getattr(model, "is_local", False)),
+        role_models=role_models(container, config, lambda _model, p: supports_tools(p)),
     )
     return await run_swarm(
         task,

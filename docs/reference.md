@@ -461,6 +461,8 @@ Velune keeps its own background work light, and has a few switches for slow mach
   (long transcripts). `VELUNE_REDUCED_MOTION=1` (or `[display] reduced_motion = true`) stops the spinner animating.
 - **Lighter council runs.** `[swarm]` sets the time, model-call and token limits of a `/council` run, and how many
   agents run at once (one at a time on a local model server).
+  `[swarm.models]` gives a role its own model (`reviewer = "provider/model"`, or `lead` for whichever agent
+  leads); a model that is unavailable is reported in the plan and the chat model is used.
 - **Time limits.** `VELUNE_COUNCIL_MAX_SECONDS` (default 600) bounds a whole council run;
   `VELUNE_COUNCIL_CONTEXT_SECONDS` (default 30) bounds the repository-context step before it starts.
 - **Rate limits.** A provider's `Retry-After` is honoured up to 20 s; a longer wait fails fast with the provider's error

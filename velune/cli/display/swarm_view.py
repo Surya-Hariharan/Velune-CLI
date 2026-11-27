@@ -33,7 +33,9 @@ def plan_table(plan: SwarmPlan) -> Table:
         header_style=f"bold {design.ACCENT}",
         padding=(0, 1),
     )
-    for column in ("Stage", "Agent", "Task"):
+    models = any(agent.model for agent in plan.agents)  # some role has its own model
+    columns = ("Stage", "Agent", "Model", "Task") if models else ("Stage", "Agent", "Task")
+    for column in columns:
         table.add_column(column, overflow="fold")
     for index, stage in enumerate(plan.stages, start=1):
         for agent_id in stage:
@@ -43,7 +45,8 @@ def plan_table(plan: SwarmPlan) -> Table:
                 name += " · lead"
             if agent.can_write:
                 name += " · writes"
-            table.add_row(str(index), name, escape(agent.task))
+            model = [escape(agent.model or "run model")] if models else []
+            table.add_row(str(index), name, *model, escape(agent.task))
     return table
 
 

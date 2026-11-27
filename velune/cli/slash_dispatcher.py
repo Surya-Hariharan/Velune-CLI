@@ -453,12 +453,16 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             name="council",
             aliases=["c"],
             description="A team of agents, picked for the task, works on it in stages",
-            usage="/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]",
+            usage=(
+                "/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
+                "  ·  /council models [set <role> <provider/model> | clear <role|--all>]"
+            ),
             handler=repl._cmd_council,
             examples=(
                 "/council analyze security vulnerabilities in this codebase",
                 "/council --skill coding --permission read-only add input validation",
                 "/council show",
+                "/council models set reviewer ollama/qwen3:8b",
             ),
             search_terms=(
                 "full council",

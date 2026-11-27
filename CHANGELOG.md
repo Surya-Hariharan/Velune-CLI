@@ -26,6 +26,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - With the `integrations` profile, `/council` agents are now offered Velune's integration
   tools: every agent can read through them, and only the lead can change things. Headless
   runs say that integrations are not available.
+- A council role can have its own model: `[swarm.models]` in `velune.toml`, or
+  `/council models [set <role|lead> <provider/model> | clear <role|--all>]`. All models share
+  the run's budget, local model servers still run one agent at a time, and an unavailable model
+  is reported in the plan and replaced by the chat model.
 
 ### Removed
 

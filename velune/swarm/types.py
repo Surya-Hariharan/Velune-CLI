@@ -20,6 +20,7 @@ class AgentSpec:
     can_write: bool = False  # role is a skill writer AND the profile allows writes
     can_act: bool = False  # the one agent that may change things through integrations
     max_turns: int = 8
+    model: str = ""  # "provider/model" from [swarm.models]; "" means the run's model
 
 
 @dataclass

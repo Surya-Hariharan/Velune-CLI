@@ -701,8 +701,8 @@ def get_setting_value(repl: VeluneREPL, section: str, key: str, default: Any) ->
     return default
 
 
-def save_setting_to_toml(repl: VeluneREPL, section: str, key: str, value: Any) -> None:
-    """Merge ``[section] key = value`` into velune.toml, atomically.
+def save_setting_to_toml(repl: VeluneREPL, section: str, key: str, value: Any) -> bool:
+    """Merge ``[section] key = value`` into velune.toml, atomically. True if written.
 
     The write goes to a sibling temp file which is flushed, fsynced, and only
     then ``os.replace``-d over the real config. ``os.replace`` is atomic on
@@ -729,7 +729,7 @@ def save_setting_to_toml(repl: VeluneREPL, section: str, key: str, value: Any) -
         config_path = Path(config_path)
     except Exception as exc:
         _log.debug("Could not resolve config path: %s", exc)
-        return
+        return False
 
     data: dict[str, Any] = {}
     if config_path.exists():
@@ -743,7 +743,7 @@ def save_setting_to_toml(repl: VeluneREPL, section: str, key: str, value: Any) -
                 section,
                 key,
             )
-            return
+            return False
 
     data.setdefault(section, {})[key] = value
 
@@ -767,6 +767,8 @@ def save_setting_to_toml(repl: VeluneREPL, section: str, key: str, value: Any) -
             raise
     except Exception as exc:
         _log.warning("Could not save %s.%s to velune.toml: %s", section, key, exc)
+        return False
+    return True
 
 
 def _update_runtime_config(repl: VeluneREPL, section: str, key: str, value: Any) -> None:

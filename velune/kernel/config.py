@@ -262,6 +262,9 @@ class SwarmConfig(BaseModel):
     #: Agents run at the same time on one cloud provider / one local model server.
     parallel_cloud: int = Field(default=3, ge=1)
     parallel_local: int = Field(default=1, ge=1)
+    #: ``[swarm.models]``: a model per role. Keys are role names, or ``lead`` for
+    #: whichever agent leads; values are ``"provider/model"``.
+    models: dict[str, str] = Field(default_factory=dict)
 
 
 class ResourceEntry(BaseModel):

@@ -51,7 +51,7 @@ it runs.
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `run` | `r` | `/run [--bg] <task description>` | Hand a task to the council (same as /council; --bg runs it read-only) |
-| `council` | `c` | `/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]` | A team of agents, picked for the task, works on it in stages |
+| `council` | `c` | `/council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]  ·  /council models [set <role> <provider/model> \| clear <role\|--all>]` | A team of agents, picked for the task, works on it in stages |
 | `skills` | *(none)* | `/skills [show <name>]` | List the council's skills and permission profiles, or show one |
 | `jobs` | `job` | `/jobs [task\|cognition\|shell] [cancel <id>]` | List background jobs (optionally filtered by kind) or cancel one |
 | `dashboard` | `dash`, `status` | `/dashboard` | Live system dashboard: session, state, jobs, alerts, health |
@@ -66,6 +66,9 @@ it runs.
 > five agents, shows the plan, and runs it in stages. `--skill` and
 > `--permission` choose them yourself; `/skills` lists both. One `/rewind`
 > undoes everything a run changed, and `/council show` reopens a past run.
+> Every agent uses the chat model unless its role has one of its own:
+> `/council models set reviewer <provider/model>` (or `lead`, for whichever
+> agent leads) saves it under `[swarm.models]` in `velune.toml`.
 > `/fast`, `/max` and `/normal` set the model, context budget and retrieval
 > depth for the session. Their names match `/mode`'s own vocabulary
 > (`/mode fast`, `/mode max`, `/mode normal`); `optimus`/`godly` still work

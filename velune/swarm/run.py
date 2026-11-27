@@ -1,9 +1,10 @@
 """Run a swarm: route, then run the plan's stages, then hand back the lead's result.
 
-Stages run one after another. Agents inside a stage run at the same time, at
-most ``SwarmSettings.parallel`` at once (1 for a local model server, which has
-one GPU; more for cloud providers). All agents share one budget and one undo
-journal, so one ``/rewind`` reverses every file change the run made.
+Stages run one after another. Agents inside a stage run at the same time, with
+a limit per provider (1 for local model servers, which share one GPU; more for
+cloud providers). A role may have its own model (``[swarm.models]``). All agents
+share one budget and one undo journal, so one ``/rewind`` reverses every file
+change the run made.
 """
 
 from __future__ import annotations
@@ -38,7 +39,9 @@ class SwarmSettings:
     max_calls: int = 40
     max_tokens: int = 200_000
     turns_per_agent: int = 8
-    parallel: int = 3  # agents at once on one provider; use 1 for local model servers
+    parallel: int = 3  # agents at once on the run's provider; 1 for a local model server
+    parallel_cloud: int = 3  # for a role's model on another cloud provider
+    parallel_local: int = 1  # for a role's model on a local server
 
 
 @dataclass
@@ -119,19 +122,30 @@ async def run_swarm(
     )
     for agent in plan.agents:
         agent.max_turns = settings.turns_per_agent
-    if not env.tools:
+    envs = _agent_envs(plan, env, budget, provider, ui)
+    tool_users = [a for a in plan.agents if envs[a.id].tools]
+    if not tool_users:
         plan.notes.append(
             "This model can't call tools: agents answer from the repository summary; "
             "nothing is read or changed."
+        )
+    elif len(tool_users) < len(plan.agents):
+        without = ", ".join(a.id for a in plan.agents if not envs[a.id].tools)
+        plan.notes.append(
+            f"{without}: the model can't call tools, so nothing is read or changed by them."
         )
     skill_obj = library.skill(plan.skill)
     profile = library.profile(plan.permission)
     assert skill_obj is not None and profile is not None  # route() only returns known names
     policy = SwarmPolicy.build(profile, mode=mode)
-    if plan.output == "files" and not (policy.can_write and env.tools):
+    if plan.output == "files" and not (policy.can_write and any(a.can_write for a in tool_users)):
         plan.output = "diff"
         plan.notes.append("No files can be changed in this run: the changes are proposed instead.")
-    if env.tools and env.integrations is None and ToolPermission.INTEGRATION_READ in policy.allowed:
+    if (
+        tool_users
+        and env.integrations is None
+        and ToolPermission.INTEGRATION_READ in policy.allowed
+    ):
         plan.notes.append(
             "Velune integrations are not offered in this run: they need /council inside "
             "`velune`, with resources.expose_to_model on."
@@ -139,15 +153,14 @@ async def run_swarm(
     store = RunStore.create(runs_root, plan)
     ui.show_plan(plan)
 
-    agent_env = replace(env, provider=provider, on_event=ui.agent_event)
-    gate = asyncio.Semaphore(max(1, settings.parallel))
+    keys, gates = _gates(plan, envs, env, settings)
 
     async def run_one(agent_id: str) -> AgentResult:
         spec = plan.agent(agent_id)
-        async with gate:
+        async with gates[keys[agent_id]][0]:
             try:
                 result = await asyncio.wait_for(
-                    run_agent(spec, plan, skill_obj, profile, policy, store, agent_env),
+                    run_agent(spec, plan, skill_obj, profile, policy, store, envs[agent_id]),
                     timeout=max(1.0, budget.time_left()),
                 )
             except TimeoutError:
@@ -169,7 +182,9 @@ async def run_swarm(
             stopped = budget.exhausted_reason()
             if stopped:
                 break
-            ui.stage_start(index, stage, parallel=len(stage) > 1 and settings.parallel > 1)
+            used = {keys[a] for a in stage}
+            together = len(used) > 1 or gates[keys[stage[0]]][1] > 1
+            ui.stage_start(index, stage, parallel=len(stage) > 1 and together)
             store.event("stage", stage=index, agents=stage)
             results = await asyncio.gather(*(run_one(agent_id) for agent_id in stage))
             if any(r.status == "budget" for r in results):
@@ -211,6 +226,67 @@ async def run_swarm(
         warnings=warnings,
         diagram_path=diagram_path,
     )
+
+
+def _agent_envs(
+    plan: SwarmPlan, env: AgentEnv, budget: SwarmBudget, provider: Any, ui: SwarmUI
+) -> dict[str, AgentEnv]:
+    """Each agent's environment: the model for its role, else the lead's, else the run's.
+
+    Every model is charged to the same budget. A configured model that cannot be
+    used is noted on the plan and the run's model is used instead.
+    """
+    run_env = replace(env, provider=provider, on_event=ui.agent_event)
+    envs: dict[str, AgentEnv] = {}
+    for agent in plan.agents:
+        keys = [agent.role, "lead"] if agent.id == plan.lead else [agent.role]
+        key = next((k for k in keys if k in env.role_models), None)
+        choice = env.role_models.get(key) if key else None
+        if choice is None:
+            envs[agent.id] = run_env
+        elif choice.problem:
+            note = f"Model '{choice.ref}' for '{key}' {choice.problem}; using the run's model."
+            if note not in plan.notes:
+                plan.notes.append(note)
+            envs[agent.id] = run_env
+        else:
+            agent.model = choice.ref
+            envs[agent.id] = replace(
+                run_env,
+                provider=BudgetedProvider(choice.provider, budget),
+                model_id=choice.model_id,
+                context_window=choice.context_window,
+                tools=choice.tools,
+                local=choice.local,
+            )
+    return envs
+
+
+def _gates(
+    plan: SwarmPlan, envs: dict[str, AgentEnv], env: AgentEnv, settings: SwarmSettings
+) -> tuple[dict[str, str], dict[str, tuple[asyncio.Semaphore, int]]]:
+    """Limits on how many agents call one provider at once.
+
+    All local model servers share one limit (they share the machine's GPU); each
+    cloud provider has its own. Returns each agent's key and each key's gate.
+    """
+
+    def key_of(agent_env: AgentEnv) -> str:
+        if agent_env.local:
+            return "local"
+        return f"cloud:{getattr(agent_env.provider, 'provider_id', '')}"
+
+    run_key = key_of(env)
+    keys = {a.id: key_of(envs[a.id]) for a in plan.agents}
+    gates: dict[str, tuple[asyncio.Semaphore, int]] = {}
+    for key in set(keys.values()):
+        if key == run_key:
+            size = settings.parallel
+        else:
+            size = settings.parallel_local if key == "local" else settings.parallel_cloud
+        size = max(1, size)
+        gates[key] = (asyncio.Semaphore(size), size)
+    return keys, gates
 
 
 def _save_diagram(folder: Path, content: str) -> Path | None:

@@ -2,25 +2,39 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
+import toml
 
 from tests.integration_fakes import FakeApp, OtherApp, make_env
 from tests.swarm_fakes import (
+    FakeContainer,
     ReadTool,
     RecordingGate,
+    ScriptedProvider,
     ShellTool,
     calls,
+    descriptor,
     fake_repl,
     registry,
     system_of,
     text,
 )
 from tests.test_swarm_run import CODING, LIBRARY, _agent, _answer, _route, _swarm
+from velune.cli.display.swarm_view import plan_table
+from velune.kernel.config import ConfigLoader
 from velune.permissions import ExecutionMode
 from velune.permissions.gate import Approval
-from velune.swarm.agent import CHECK_FILES_CONTRACT, OUTPUT_CONTRACTS, _touched
+from velune.swarm.agent import (
+    CHECK_FILES_CONTRACT,
+    OUTPUT_CONTRACTS,
+    AgentEnv,
+    ModelChoice,
+    _touched,
+)
+from velune.swarm.run import SwarmSettings, run_swarm
 from velune.tools.base.tool import ToolCallContext
 from velune.tools.filesystem.write import WriteFile
 
@@ -296,6 +310,215 @@ async def test_the_repl_gives_each_agent_its_own_source(tmp_path):
     factory = _swarm_integrations(repl, tmp_path)
     assert factory("a") is not factory("b")
     assert _swarm_integrations(SimpleNamespace(), tmp_path) is None
+
+
+# ── a model per role ─────────────────────────────────────────────────────────
+
+
+def _choice(provider, name, **values):
+    return ModelChoice(f"{provider.provider_id}/{name}", provider=provider, model_id=name, **values)
+
+
+def _other(provider_id="other", *, script=None, delay=0.0):
+    provider = ScriptedProvider(script or _answer(CODING), delay=delay)
+    provider.provider_id = provider_id
+    return provider
+
+
+async def _models_run(tmp_path, role_models, *, delay=0.0, settings=None):
+    main = ScriptedProvider(_answer(CODING), delay=delay)
+    env = AgentEnv(
+        provider=main, model_id="chat", registry=registry(ReadTool()), role_models=role_models
+    )
+    outcome = await run_swarm(
+        "add gc_content",
+        LIBRARY,
+        env,
+        runs_root=tmp_path / "runs",
+        settings=settings or SwarmSettings(),
+    )
+    return outcome, main
+
+
+def _asked(provider) -> dict[str, str]:
+    return {_agent(r): r.model_id for r in provider.requests}
+
+
+async def test_a_role_model_wins_over_the_lead_model_and_the_rest_use_the_run_model(tmp_path):
+    other = _other()
+    outcome, main = await _models_run(
+        tmp_path,
+        {
+            "explorer": _choice(other, "small"),
+            "reviewer": _choice(other, "judge"),
+            "lead": _choice(other, "unused"),
+        },
+    )
+    assert outcome.ok
+    assert _asked(other) == {"explorer": "small", "reviewer": "judge"}
+    assert set(_asked(main).values()) == {"chat"} and "router" in _asked(main)
+    saved = json.loads((outcome.folder / "plan.json").read_text(encoding="utf-8"))
+    models = {a["id"]: a["model"] for a in saved["agents"]}
+    assert models["reviewer"] == "other/judge" and models["tester"] == ""
+    assert "Model" in [c.header for c in plan_table(outcome.plan).columns]
+
+
+async def test_the_lead_model_applies_to_whoever_leads(tmp_path):
+    other = _other()
+    outcome, _ = await _models_run(tmp_path, {"lead": _choice(other, "judge")})
+    assert _asked(other) == {outcome.plan.lead: "judge"}
+
+
+async def test_an_unusable_role_model_is_noted_and_replaced(tmp_path):
+    broken = ModelChoice("openai/nope", problem="is not available right now")
+    outcome, main = await _models_run(tmp_path, {"reviewer": broken})
+    assert outcome.ok and _asked(main)["reviewer"] == "chat"
+    assert any("'openai/nope' for 'reviewer'" in note for note in outcome.plan.notes)
+    assert "Model" not in [c.header for c in plan_table(outcome.plan).columns]
+
+
+async def test_role_models_share_the_run_budget(tmp_path):
+    other = _other()
+    settings = SwarmSettings(max_calls=2)  # the router and one agent
+    outcome, main = await _models_run(
+        tmp_path, {"reviewer": _choice(other, "judge")}, settings=settings
+    )
+    assert outcome.status == "stopped" and other.requests == []
+    assert len(main.requests) == 2
+
+
+@pytest.mark.parametrize(("local", "together"), [(True, 1), (False, 2)])
+async def test_local_servers_share_one_limit_and_cloud_providers_do_not(tmp_path, local, together):
+    running = {"now": 0, "most": 0}
+
+    class Counting(ScriptedProvider):
+        async def infer(self, request):
+            if _agent(request) in ("implementer", "tester"):
+                running["now"] += 1
+                running["most"] = max(running["most"], running["now"])
+                try:
+                    return await super().infer(request)
+                finally:
+                    running["now"] -= 1
+            return await super().infer(request)
+
+    first, second = Counting(_answer(CODING), delay=0.05), Counting(_answer(CODING), delay=0.05)
+    first.provider_id, second.provider_id = "a", "b"
+    settings = SwarmSettings(parallel_cloud=1, parallel_local=1)
+    outcome, _ = await _models_run(
+        tmp_path,
+        {
+            "implementer": _choice(first, "x", local=local),
+            "tester": _choice(second, "y", local=local),
+        },
+        settings=settings,
+    )
+    assert outcome.ok and running["most"] == together
+
+
+async def test_files_are_proposed_when_no_writer_can_call_tools(tmp_path):
+    _, ctx, tools = _workspace(tmp_path)
+    other = _other(script=_answer(BUILD))
+    blind = _choice(other, "blind", tools=False)
+    outcome, _ = await _swarm(
+        tmp_path,
+        _answer(BUILD),
+        tools=tools,
+        ctx=ctx,
+        role_models={"implementer": blind, "tester": blind},
+    )
+    assert outcome.plan.output == "diff"
+    assert any("can't call tools" in note for note in outcome.plan.notes)
+
+
+def _models_repl(tmp_path, monkeypatch):
+    from velune.cli.handlers import council
+    from velune.kernel.config import VeluneConfig
+    from velune.swarm import setup
+
+    monkeypatch.setattr(setup, "load_library", lambda *_a, **_k: LIBRARY)
+    repl = fake_repl(tmp_path, ScriptedProvider([]))
+    known = {("ollama", "judge"): descriptor("judge", "ollama")}
+    repl.container.services.update(
+        {
+            "runtime.config": VeluneConfig(),
+            "runtime.config_path": tmp_path / "velune.toml",
+            "runtime.model_registry": SimpleNamespace(get=lambda m, p: known.get((p, m))),
+            "runtime.provider_registry": SimpleNamespace(get=lambda _id: object()),
+        }
+    )
+    return council, repl
+
+
+async def test_council_models_sets_lists_and_clears(tmp_path, monkeypatch):
+    council, repl = _models_repl(tmp_path, monkeypatch)
+    config = repl.container.services["runtime.config"]
+    saved = tmp_path / "velune.toml"
+
+    await council.cmd_council(repl, "models set Reviewer ollama/judge")
+    assert config.swarm.models == {"reviewer": "ollama/judge"}
+    assert toml.load(saved)["swarm"]["models"] == {"reviewer": "ollama/judge"}
+    assert ConfigLoader(saved).load().swarm.models == {"reviewer": "ollama/judge"}
+
+    await council.cmd_council(repl, "models")
+    assert "ready" in repl.output.getvalue()
+
+    await council.cmd_council(repl, "models clear reviewer")
+    assert config.swarm.models == {} and toml.load(saved)["swarm"].get("models", {}) == {}
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        ("models set nobody ollama/judge", "No role named 'nobody'"),
+        ("models set reviewer ollama/missing", "is not a known model"),
+        ("models set reviewer judge", "is not a known model"),
+        ("models set reviewer", "Usage: /council models"),
+        ("models clear tester", "No model is set for 'tester'"),
+    ],
+)
+async def test_council_models_refuses_bad_input(tmp_path, monkeypatch, args, message):
+    council, repl = _models_repl(tmp_path, monkeypatch)
+    await council.cmd_council(repl, args)
+    assert message in repl.output.getvalue()
+    assert not (tmp_path / "velune.toml").exists()
+
+
+@pytest.mark.parametrize(
+    "task", ["models are slow, find out why", "models set up the config please"]
+)
+async def test_a_task_that_starts_with_models_still_runs(tmp_path, monkeypatch, task):
+    from velune.cli.handlers import council
+
+    ran = []
+
+    async def fake_run(_repl, text_, **_kwargs):
+        ran.append(text_)
+
+    monkeypatch.setattr(council, "execute_council_task", fake_run)
+    await council.cmd_council(fake_repl(tmp_path, ScriptedProvider([])), task)
+    assert ran == [task]
+
+
+def test_configured_models_resolve_to_a_provider_or_a_reason():
+    from velune.swarm.setup import role_models
+
+    provider = object()
+    container = FakeContainer(
+        {
+            "runtime.model_registry": SimpleNamespace(
+                get=lambda m, p: descriptor("judge", "ollama") if m == "judge" else None
+            ),
+            "runtime.provider_registry": SimpleNamespace(get=lambda _id: provider),
+        }
+    )
+    config = SimpleNamespace(
+        swarm=SimpleNamespace(models={"Reviewer": "ollama/judge", "lead": "ollama/gone"})
+    )
+    found = role_models(container, config, lambda _m, _p: False)
+    assert found["reviewer"].provider is provider and found["reviewer"].local
+    assert found["reviewer"].tools is False and not found["reviewer"].problem
+    assert "not a known model" in found["lead"].problem
 
 
 # ── what the user is shown ───────────────────────────────────────────────────

@@ -19,7 +19,14 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("velune.cli.handlers.council")
 
-_USAGE = "Usage: /council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
+_USAGE = (
+    "Usage: /council [--skill <name>] [--permission <name>] <task>  ·  /council show [run]"
+    "  ·  /council models"
+)
+_MODELS_USAGE = (
+    "Usage: /council models  ·  /council models set <role|lead> <provider/model>"
+    "  ·  /council models clear <role|--all>"
+)
 _OPTIONS = {"--skill": "skill", "--permission": "permission"}
 
 
@@ -55,11 +62,116 @@ async def cmd_council(repl: VeluneREPL, args: str) -> None:
     if words[:1] == ["show"]:
         show_runs(repl, words[1] if len(words) > 1 else "")
         return
+    if _is_models_command(words):
+        manage_role_models(repl, words[1:])
+        return
     task, options, error = parse_council_args(args)
     if error:
         repl.console.print(f"[yellow]{error}.[/yellow] [dim]{_USAGE}[/dim]")
         return
     await execute_council_task(repl, task, **options)
+
+
+def _is_models_command(words: list[str]) -> bool:
+    """Only the subcommand's own forms, so a task that starts with "models" still runs."""
+    if words[:1] != ["models"]:
+        return False
+    longest = {"set": 4, "clear": 3}
+    return len(words) == 1 or len(words) <= longest.get(words[1], 0)
+
+
+def manage_role_models(repl: VeluneREPL, words: list[str]) -> None:
+    """``/council models``: list, set or clear the model used for each role."""
+    from rich.markup import escape
+
+    from velune.swarm.setup import find_model
+
+    config = repl.container.get_optional("runtime.config")
+    current = dict(getattr(getattr(config, "swarm", None), "models", None) or {})
+    action = words[0] if words else ""
+    if not action:
+        _show_role_models(repl, current)
+        return
+    if len(words) != (3 if action == "set" else 2):
+        repl.console.print(f"[yellow]{escape(_MODELS_USAGE)}[/yellow]")
+        return
+    role = words[1].lower()
+    note = ""
+    if action == "set":
+        roles = _council_roles(repl)
+        if role not in roles:
+            repl.console.print(
+                f"[yellow]No role named '{escape(role)}'.[/yellow] "
+                f"[dim]Roles: {', '.join(roles)}[/dim]"
+            )
+            return
+        model, _provider, problem = find_model(repl.container, words[2])
+        if model is None:
+            repl.console.print(f"[yellow]'{escape(words[2])}' {problem}.[/yellow]")
+            return
+        current[role] = words[2]
+        done = f"'{role}' now uses {words[2]}."
+        if problem:
+            note = f"It {problem}, so runs use the chat model until it is."
+    elif role == "--all":
+        current = {}
+        done = "Every role now uses the chat model."
+    elif role in current:
+        del current[role]
+        done = f"Cleared the model for '{role}'."
+    else:
+        repl.console.print(f"[yellow]No model is set for '{escape(role)}'.[/yellow]")
+        return
+    _save_role_models(repl, config, current)
+    repl.console.print(f"[green]{escape(done)}[/green]")
+    if note:
+        repl.console.print(f"[yellow]{escape(note)}[/yellow]")
+
+
+def _council_roles(repl: VeluneREPL) -> list[str]:
+    """``lead`` and every role of every skill that can be run now."""
+    from velune.swarm.setup import load_library
+
+    manager = getattr(repl, "_plugin_manager", None)
+    library = load_library(repl.container, manager.all_skills() if manager is not None else [])
+    return ["lead", *sorted({role for skill in library.skills.values() for role in skill.team})]
+
+
+def _show_role_models(repl: VeluneREPL, current: dict[str, str]) -> None:
+    from rich.markup import escape
+    from rich.table import Table
+
+    from velune.swarm.setup import find_model
+
+    if not current:
+        repl.console.print("[dim]Every role uses the chat model.[/dim]")
+    else:
+        table = Table(box=None, header_style="bold", padding=(0, 1))
+        for column in ("Role", "Model", "Status"):
+            table.add_column(column, overflow="fold")
+        for role, ref in sorted(current.items()):
+            problem = find_model(repl.container, ref)[2]
+            table.add_row(escape(role), escape(ref), problem or "ready")
+        repl.console.print(table)
+    repl.console.print(f"[dim]Roles: {', '.join(_council_roles(repl))}[/dim]")
+    repl.console.print(f"[dim]{escape(_MODELS_USAGE)}[/dim]")
+
+
+def _save_role_models(repl: VeluneREPL, config: Any, models: dict[str, str]) -> None:
+    from velune.cli.handlers.settings import save_setting_to_toml
+
+    if save_setting_to_toml(repl, "swarm", "models", models):
+        repl.console.print(
+            "[dim]Saved to velune.toml (saving rewrites the file, so comments in it are "
+            "removed).[/dim]"
+        )
+    else:
+        repl.console.print(
+            "[yellow]Could not save to velune.toml; this applies to this session only.[/yellow]"
+        )
+    swarm = getattr(config, "swarm", None)
+    if swarm is not None:
+        swarm.models = models
 
 
 _JOB_KINDS = ("task", "cognition", "shell")
@@ -346,7 +458,7 @@ async def _repl_env(repl: VeluneREPL, model: Any, provider: Any) -> tuple[Any, A
         tool_loop_available,
     )
     from velune.swarm.agent import AgentEnv
-    from velune.swarm.setup import repository_summary
+    from velune.swarm.setup import repository_summary, role_models
     from velune.tools.base.tool import ToolCallContext
 
     workspace = repl.container.get("runtime.workspace")
@@ -372,6 +484,12 @@ async def _repl_env(repl: VeluneREPL, model: Any, provider: Any) -> tuple[Any, A
         context_window=int(getattr(model, "context_length", 0) or 32_768),
         tools=tool_loop_available(repl, model, provider),
         integrations=_swarm_integrations(repl, ctx.workspace),
+        local=bool(getattr(model, "is_local", False)),
+        role_models=role_models(
+            repl.container,
+            getattr(repl.runtime, "config", None),
+            lambda m, p: tool_loop_available(repl, m, p),
+        ),
     )
     return env, gate
 
@@ -547,7 +665,10 @@ def show_runs(repl: VeluneREPL, run_id: str) -> None:
         agent_id = agent.get("id", "")
         event = finished.get(agent_id, {})
         status = event.get("status", "did not run")
-        repl.console.print(f"\n[bold]{agent_id}[/bold] [dim]({agent.get('role')}) · {status}[/dim]")
+        model = f" · {agent['model']}" if agent.get("model") else ""
+        repl.console.print(
+            f"\n[bold]{agent_id}[/bold] [dim]({agent.get('role')}){model} · {status}[/dim]"
+        )
         result = folder / f"{agent_id}.md"
         if result.exists():
             repl.console.print(result.read_text(encoding="utf-8", errors="replace")[:4000])

@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from velune.core.types.inference import InferenceRequest
@@ -87,6 +87,19 @@ _PATH_KEYS = ("file_path", "path", "source", "destination")
 
 
 @dataclass
+class ModelChoice:
+    """A model set for a role, resolved against what is available now."""
+
+    ref: str  # "provider/model", as the user wrote it
+    provider: Any = None
+    model_id: str = ""
+    context_window: int = 32_768
+    tools: bool = True
+    local: bool = False
+    problem: str = ""  # why it cannot be used; the run's model is used instead
+
+
+@dataclass
 class AgentEnv:
     """Everything an agent runs with, built by the entry point (REPL, CLI, MCP)."""
 
@@ -105,6 +118,8 @@ class AgentEnv:
     # Given an agent's task, a fresh source of integration tools for it. None
     # when the entry point has no integrations (headless runs).
     integrations: Callable[[str], Any] | None = None
+    local: bool = False  # the run's model is served by a local model server
+    role_models: dict[str, ModelChoice] = field(default_factory=dict)  # by role, or "lead"
 
 
 class _AgentTools:

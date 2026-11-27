@@ -122,6 +122,12 @@ default_provider = "groq"
 #parallel_cloud = 3
 #parallel_local = 1
 
+# A model per council role; other roles use the chat model. Keys are role names
+# (see /council models) or "lead" for whichever agent leads.
+#[swarm.models]
+#reviewer = "anthropic/<model-id>"
+#lead = "ollama/<model-id>"
+
 # ── Hooks ───────────────────────────────────────────────────────────────────
 
 # External commands run on lifecycle events (for example SessionStart). They run
