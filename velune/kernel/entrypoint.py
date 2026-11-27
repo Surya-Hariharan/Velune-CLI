@@ -83,7 +83,9 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
         raise
 
 
-async def _async_main(runtime: Any, *, plain: bool = False) -> None:
+async def _async_main(
+    runtime: Any, *, plain: bool = False, resume_session: str | None = None
+) -> None:
     """Top-level coroutine: own the subsystem lifecycle around the REPL.
 
     Startup initializes every lifecycle-managed subsystem (schema migrations,
@@ -161,7 +163,7 @@ async def _async_main(runtime: Any, *, plain: bool = False) -> None:
         track(asyncio.create_task(_warm_and_finalize(), name="velune.warm_background"))
 
     try:
-        await repl.run(plain=plain)
+        await repl.run(plain=plain, resume_session=resume_session)
     finally:
         if watcher is not None:
             try:
@@ -175,12 +177,13 @@ async def _async_main(runtime: Any, *, plain: bool = False) -> None:
                 _logger.error("Subsystem shutdown error: %s", exc)
 
 
-def launch(runtime: Any, *, plain: bool = False) -> None:
+def launch(runtime: Any, *, plain: bool = False, resume_session: str | None = None) -> None:
     """Start the full interactive Velune session from a synchronous Typer callback.
 
     ``plain=True`` runs the linear, non-alt-screen mode (``velune --plain``)
     instead of the fullscreen alternate-screen UI — see
-    :meth:`velune.cli.repl.VeluneREPL.run`.
+    :meth:`velune.cli.repl.VeluneREPL.run`. ``resume_session`` loads that saved
+    session into the conversation first (``velune chat --session <id>``).
 
     Catches ``KeyboardInterrupt`` (Ctrl-C outside the REPL loop) so Typer sees
     a clean exit.  ``SystemExit`` is re-raised so ``typer.Exit`` works normally.
@@ -192,7 +195,7 @@ def launch(runtime: Any, *, plain: bool = False) -> None:
     keeps a local copy of it.
     """
     try:
-        run_async(_async_main(runtime, plain=plain))
+        run_async(_async_main(runtime, plain=plain, resume_session=resume_session))
     except KeyboardInterrupt:
         pass
     except SystemExit:

@@ -195,7 +195,7 @@ def session_resume(
 
     # Resuming an archived session brings it back into the active list.
     store.set_archived(resolved, False)
-    chat_command(ctx, session_id=resolved)
+    chat_command(ctx, session_id=resolved, plain=False)
 
 
 @session_cmd.command("show")

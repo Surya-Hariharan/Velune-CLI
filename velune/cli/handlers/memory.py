@@ -1,4 +1,4 @@
-"""Memory, context, and knowledge graph slash command handlers: /memory /context /graph."""
+"""Memory and context slash command handlers: /memory /context."""
 
 from __future__ import annotations
 
@@ -52,9 +52,7 @@ async def cmd_memory(repl: VeluneREPL, args: str) -> None:
         for t in recent:
             preview = t.content[:80].replace("\n", " ")
             repl.console.print(f"  [dim]{t.role}:[/dim] {preview}…")
-    repl.console.print(
-        "[dim]→ /graph to explore the knowledge graph  ·  /context to see token usage[/dim]"
-    )
+    repl.console.print("[dim]→ /context to see token usage[/dim]")
 
 
 async def cmd_context(repl: VeluneREPL, args: str) -> None:
@@ -76,18 +74,3 @@ async def cmd_context(repl: VeluneREPL, args: str) -> None:
         repl.console.print(
             "[yellow]Context window nearly full. Type /clear to reset conversation.[/yellow]"
         )
-
-
-async def cmd_graph(repl: VeluneREPL, args: str) -> None:
-    """Show a summary of the repository knowledge graph."""
-    try:
-        graph = repl.container.get("runtime.knowledge_graph")
-    except Exception:
-        graph = None
-    if not graph:
-        repl.console.print("[red]The knowledge graph is not available yet.[/red]")
-        return
-
-    from velune.cli.display.memory_view import MemoryDisplayView
-
-    MemoryDisplayView(repl.console).render_knowledge_graph(await graph.stats())

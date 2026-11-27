@@ -82,7 +82,7 @@ ordinary chat uses one model and the team only runs when you ask for it (`/counc
 No hype. Counted from the code. A test recomputes them on every CI run and fails if they drift.
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-numbers.svg" alt="Counted from the repository: 18 provider adapters, 49 slash commands in 12 categories, 5 memory tiers, 4 council skills with 6 permission profiles, 3 operating systems by 5 Python versions in CI, and 0 analytics services" width="100%">
+<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-numbers.svg" alt="Counted from the repository: 18 provider adapters, 43 slash commands in 12 categories, 5 memory tiers, 4 council skills with 6 permission profiles, 3 operating systems by 5 Python versions in CI, and 0 analytics services" width="100%">
 </div>
 
 The honest part: this is **beta**. Things change between releases. Command execution is process management, not an

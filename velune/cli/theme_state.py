@@ -9,7 +9,7 @@ the process, and no separate theme file.
 Why the theme wasn't persisting before
 --------------------------------------
 It never was persisted. The only theme-looking setting was the ``Appearance ▸
-Theme`` row in the ``/settings`` TUI, which wrote ``[appearance] theme = ...``
+Theme`` row in the old ``/settings`` menu, which wrote ``[appearance] theme = ...``
 to ``velune.toml``. ``VeluneConfig`` has no ``appearance`` section and is
 declared ``extra="ignore"``, so the value was discarded the moment the file was
 parsed, and nothing anywhere read it back. The apparent "reverts to default on

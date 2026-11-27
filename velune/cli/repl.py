@@ -747,7 +747,7 @@ class VeluneREPL:
     # Main loop
     # ------------------------------------------------------------------
 
-    async def run(self, *, plain: bool = False) -> None:
+    async def run(self, *, plain: bool = False, resume_session: str | None = None) -> None:
         """Run the interactive session.
 
         ``plain=True`` selects the linear, non-alt-screen mode (``velune
@@ -791,6 +791,11 @@ class VeluneREPL:
         restore_active_model(self)
         self._warn_if_credentials_unreadable()
         await self._start_episodic_session()
+        if resume_session:
+            from velune.cli.handlers.session_mgmt import _resume_snapshot
+
+            if not await _resume_snapshot(self, resume_session):
+                self.console.print(f"[red]Session '{resume_session}' not found.[/red]")
 
         # Workspace trust must be resolved BEFORE any hook dispatch: project-level
         # hooks execute arbitrary shell commands, so the gate has to close ahead of
@@ -1553,20 +1558,6 @@ class VeluneREPL:
                     )
                 return
 
-            # Auto-lint any .py files mentioned
-            try:
-                from velune.analysis.linter import PythonLinter, render_lint_panel
-
-                linter = PythonLinter()
-                for mf in mentioned_files:
-                    if mf.resolved_path.suffix == ".py":
-                        diags = await asyncio.to_thread(linter.lint_file, mf.resolved_path)
-                        errors = [d for d in diags if d.severity == "error"]
-                        if errors:
-                            render_lint_panel(self.console, mf.resolved_path.name, errors)
-            except Exception as exc:
-                _log.debug("Auto-lint error (non-fatal): %s", exc)
-
         except Exception as exc:
             _log.debug("Mention resolution error (non-fatal): %s", exc)
 
@@ -1843,11 +1834,6 @@ class VeluneREPL:
 
         await cmd_stats(self, args)
 
-    async def _cmd_settings(self, args: str) -> None:
-        from velune.cli.handlers.settings import cmd_settings
-
-        await cmd_settings(self, args)
-
     async def _cmd_config(self, args: str) -> None:
         from velune.cli.handlers.settings import cmd_config
 
@@ -1939,11 +1925,6 @@ class VeluneREPL:
 
         await cmd_delete(self, args)
 
-    async def _cmd_bench(self, args: str) -> None:
-        from velune.cli.handlers.model import cmd_bench
-
-        await cmd_bench(self, args)
-
     async def _cmd_cognition(self, args: str) -> None:
         from velune.cli.handlers.cognition import cmd_cognition
 
@@ -1983,11 +1964,6 @@ class VeluneREPL:
         from velune.cli.handlers.memory import cmd_context
 
         await cmd_context(self, args)
-
-    async def _cmd_graph(self, args: str) -> None:
-        from velune.cli.handlers.memory import cmd_graph
-
-        await cmd_graph(self, args)
 
     async def _cmd_mode(self, args: str) -> None:
         from velune.cli.handlers.mode import cmd_mode
@@ -2086,21 +2062,6 @@ class VeluneREPL:
         from velune.cli.handlers.resources import cmd_resource
 
         await cmd_resource(self, args)
-
-    async def _cmd_lint(self, args: str) -> None:
-        from velune.cli.handlers.code_intel import cmd_lint
-
-        await cmd_lint(self, args)
-
-    async def _cmd_refactor(self, args: str) -> None:
-        from velune.cli.handlers.code_intel import cmd_refactor
-
-        await cmd_refactor(self, args)
-
-    async def _cmd_typify(self, args: str) -> None:
-        from velune.cli.handlers.code_intel import cmd_typify
-
-        await cmd_typify(self, args)
 
     async def _cmd_login(self, args: str) -> None:
         from velune.cli.handlers.providers import cmd_login

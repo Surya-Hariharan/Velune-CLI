@@ -131,23 +131,3 @@ class MemoryDisplayView:
             )
         self.console.print(table)
         self.console.print()
-
-    def render_knowledge_graph(self, stats: Any) -> None:
-        """Render ``KnowledgeGraphStats`` for the repository knowledge graph."""
-        if not stats.node_count:
-            self.console.print(
-                "[dim]The knowledge graph is empty. It fills as the repository is indexed "
-                "and watched.[/dim]"
-            )
-            return
-        table = Table(box=ROUNDED, title="[bold]Repository Knowledge Graph[/bold]")
-        table.add_column("Item")
-        table.add_column("Count", justify="right")
-        for label, count in (
-            ("Files", stats.file_count),
-            ("Classes and functions", stats.symbol_count),
-            ("All nodes", stats.node_count),
-            ("Relationships", stats.edge_count),
-        ):
-            table.add_row(label, f"{count:,}")
-        self.console.print(table)

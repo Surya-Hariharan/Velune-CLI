@@ -92,8 +92,9 @@ def test_plain_flag_forwarded_from_launch_to_async_main(monkeypatch):
 
     captured = {}
 
-    async def fake_async_main(runtime, *, plain=False):
+    async def fake_async_main(runtime, *, plain=False, resume_session=None):
         captured["plain"] = plain
+        captured["resume"] = resume_session
 
     monkeypatch.setattr(entrypoint, "_async_main", fake_async_main)
     entrypoint.launch(SimpleNamespace(), plain=True)
@@ -101,6 +102,21 @@ def test_plain_flag_forwarded_from_launch_to_async_main(monkeypatch):
 
     entrypoint.launch(SimpleNamespace(), plain=False)
     assert captured["plain"] is False
+
+
+def test_velune_chat_opens_the_main_repl_and_forwards_the_session(monkeypatch):
+    """`velune chat` is the same REPL as bare `velune`, not a separate loop."""
+    from velune.cli.commands import chat
+    from velune.cli.context import CLIContext
+    from velune.kernel import entrypoint
+
+    calls = []
+    monkeypatch.setattr(entrypoint, "launch", lambda runtime, **kw: calls.append((runtime, kw)))
+    runtime = SimpleNamespace()
+    ctx = SimpleNamespace(obj=CLIContext.__new__(CLIContext))
+    ctx.obj.runtime = runtime
+    chat.chat_command(ctx, session_id="abc123", plain=True)
+    assert calls == [(runtime, {"plain": True, "resume_session": "abc123"})]
 
 
 def test_cli_root_callback_exposes_plain_option():

@@ -217,7 +217,7 @@ def _info_lines(state: HomeState, usable: int) -> list[list[tuple[str, str]]]:
             [
                 dot(False),
                 ("class:home.warn", "no providers configured"),
-                ("class:home.meta", "  — /setup"),
+                ("class:home.meta", "  — /connect"),
             ]
         )
 

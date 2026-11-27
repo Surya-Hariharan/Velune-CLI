@@ -45,18 +45,13 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "model": "Models",
     "pull": "Models",
     "delete": "Models",
-    "bench": "Models",
     # Projects
     "project": "Projects",
     "index": "Projects",
     # Memory
     "memory": "Memory",
-    "graph": "Memory",
     "context": "Memory",
     # Tools
-    "lint": "Tools",
-    "refactor": "Tools",
-    "types": "Tools",
     "plugin": "Tools",
     "hooks": "Tools",
     # MCP
@@ -71,7 +66,6 @@ _BUILTIN_CATEGORIES: dict[str, str] = {
     "issue": "Git",
     "sandbox": "Git",
     # Settings
-    "settings": "Settings",
     "config": "Settings",
     "theme": "Settings",
     "crashreports": "Settings",
@@ -305,17 +299,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
                 "lost session",
                 "restore session",
             ),
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="settings",
-            aliases=["setup"],
-            description="Interactive settings dashboard (keyboard navigation)",
-            usage="/settings",
-            handler=repl._cmd_settings,
-            examples=("/settings",),
-            search_terms=("configure", "preferences", "setup", "dashboard", "options"),
         )
     )
     registry.register(
@@ -564,18 +547,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
             shortcut="/ctx",
         )
     )
-    registry.register(
-        SlashCommand(
-            name="graph",
-            aliases=["g"],
-            description="Render a hierarchical tree of knowledge graph entities",
-            usage="/graph",
-            handler=repl._cmd_graph,
-            examples=("/graph",),
-            search_terms=("knowledge graph", "entities", "relationships", "tree", "concepts"),
-            shortcut="/g",
-        )
-    )
 
     # ── Session mode ─────────────────────────────────────────────────────────
 
@@ -705,18 +676,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
 
     # ── Benchmarks ────────────────────────────────────────────────────────────
 
-    registry.register(
-        SlashCommand(
-            name="bench",
-            aliases=["b"],
-            description="View or run empirical model capability benchmarks",
-            usage="/bench [run]",
-            handler=repl._cmd_bench,
-            examples=("/bench", "/bench run"),
-            search_terms=("benchmark", "test model", "capability", "performance", "compare models"),
-        )
-    )
-
     # ── MCP / plugins ─────────────────────────────────────────────────────────
 
     registry.register(
@@ -839,40 +798,6 @@ def build_slash_registry(repl: VeluneREPL) -> SlashCommandRegistry:
     )
 
     # ── Code intelligence ─────────────────────────────────────────────────────
-
-    registry.register(
-        SlashCommand(
-            name="lint",
-            aliases=["check"],
-            description="Lint a Python file or the last @mentioned .py files",
-            usage="/lint [file]",
-            handler=repl._cmd_lint,
-            examples=("/lint", "/lint src/main.py"),
-            search_terms=("code quality", "errors", "linting", "syntax", "pyflakes", "warnings"),
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="refactor",
-            aliases=["smell", "smells"],
-            description="Detect code smells in a Python file",
-            usage="/refactor <file>",
-            handler=repl._cmd_refactor,
-            examples=("/refactor src/main.py",),
-            search_terms=("code smell", "cleanup", "improve code", "suggestions", "bad patterns"),
-        )
-    )
-    registry.register(
-        SlashCommand(
-            name="types",
-            aliases=["typify", "hints"],
-            description="Suggest type hints for unannotated functions in a Python file",
-            usage="/types <file>",
-            handler=repl._cmd_typify,
-            examples=("/types src/main.py",),
-            search_terms=("type hints", "annotations", "mypy", "typing", "add types"),
-        )
-    )
 
     # Assign the canonical category onto each built-in command so /help and the
     # completer derive grouping from the command itself — never a parallel dict.

@@ -1,7 +1,7 @@
 # Slash Commands
 
 *The full reference for everything you can type inside the Velune CLI REPL —
-49 commands across 12 categories.*
+43 commands across 12 categories.*
 
 For commands run in the terminal *before* the REPL starts (`velune run`,
 `velune doctor`, …), see the [command table in the reference](reference.md#commands)
@@ -152,14 +152,14 @@ Connecting and managing cloud/local AI providers.
 
 ## Models
 
-Discovering, connecting, and benchmarking models.
+Discovering, connecting and managing models. Benchmarks run from the terminal:
+`velune models benchmark`.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `model` | `m` | `/model [model-id\|discover\|connect <id>\|use <id>\|list\|status\|remove <id>\|locate\|locations\|register <path>\|recheck [id]\|relocate <id> <path>]` | Discover, connect, switch, inspect, or locate models |
 | `pull` | `download`, `get` | `/pull [model-id]` | Download an Ollama model interactively |
 | `delete` | `remove`, `rm` | `/delete <model-id>` | Delete a locally installed Ollama model |
-| `bench` | `b` | `/bench [run]` | View or run empirical model capability benchmarks |
 
 ---
 
@@ -186,13 +186,12 @@ Opening workspaces and indexing them so Velune CLI understands the code.
 
 ## Memory
 
-Inspecting the 5-tier memory system and the knowledge graph built from it.
+Inspecting the 5-tier memory system and the context window.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `memory` | `mem` | `/memory [clear\|stats]` | Inspect the 5-tier memory system: working, episodic, semantic, graph, lineage |
 | `context` | `ctx` | `/context` | Show context window usage for the current conversation |
-| `graph` | `g` | `/graph` | Render a hierarchical tree of knowledge graph entities |
 
 > `/memory clear` asks for confirmation before it runs — it drops
 > persisted state (SQLite, Qdrant, LanceDB) for the current workspace, not
@@ -202,15 +201,12 @@ Inspecting the 5-tier memory system and the knowledge graph built from it.
 
 ## Tools
 
-Code intelligence and the plugin system.
+Lifecycle hooks and the plugin system.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `hooks` | *(none)* | `/hooks` | List active lifecycle hooks and their config |
 | `plugin` | `plugins`, `pl` | `/plugin [list\|enable <name>\|disable <name>\|reload [name]\|show <name>]` | List, enable, disable, or reload declarative TOML/Markdown plugins |
-| `lint` | `check` | `/lint [file]` | Lint a Python file or the last @mentioned .py files |
-| `refactor` | `smell`, `smells` | `/refactor <file>` | Detect code smells in a Python file |
-| `types` | `typify`, `hints` | `/types <file>` | Suggest type hints for unannotated functions in a Python file |
 
 ---
 
@@ -269,7 +265,6 @@ Configuration and appearance.
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `settings` | `setup` | `/settings` | Interactive settings dashboard (keyboard navigation) |
 | `config` | `cfg` | `/config` | Show current system configuration settings |
 | `theme` | `appearance` | `/theme [theme-id\|colorblind\|motion] [on\|off]` | Switch the colour theme, or toggle an accessibility modifier |
 | `crashreports` | `crash-reports` | `/crashreports [on\|off]` | Show or toggle opt-in local crash reporting (off by default, never transmitted) |
@@ -328,28 +323,24 @@ Session lifecycle, diagnostics, and disaster recovery.
 | `?` | `/help` | `job` | `/jobs` |
 | `appearance` | `/theme` | `login` | `/connect` |
 | `auth` | `/connect` | `logs` | `/trace` |
-| `b` | `/bench` | `m` | `/model` |
-| `c` | `/council` | `mem` | `/memory` |
-| `cfg` | `/config` | `mr` | `/pr` |
-| `check` | `/lint` | `pl` | `/plugin` |
-| `cls` | `/clear` | `plugins` | `/plugin` |
-| `cog` | `/index` | `proj` | `/project` |
-| `cognition` | `/index` | `pull-request` | `/pr` |
-| `crash-reports` | `/crashreports` | `q` | `/exit` |
-| `ctx` | `/context` | `quit` | `/exit` |
-| `d` | `/diff` | `remove` | `/delete` |
-| `dash` | `/dashboard` | `res` | `/resource` |
-| `diag` | `/doctor` | `resources` | `/resource` |
-| `download` | `/pull` | `rm` | `/delete` |
-| `f` | `/fork` | `s` | `/session` |
-| `fresh` | `/new` | `sb` | `/sandbox` |
-| `g` | `/graph` | `setup` | `/settings` |
-| `get` | `/pull` | `smell` | `/refactor` |
-| `gh-issue` | `/issue` | `smells` | `/refactor` |
+| `c` | `/council` | `m` | `/model` |
+| `cfg` | `/config` | `mem` | `/memory` |
+| `cls` | `/clear` | `mr` | `/pr` |
+| `cog` | `/index` | `pl` | `/plugin` |
+| `cognition` | `/index` | `plugins` | `/plugin` |
+| `crash-reports` | `/crashreports` | `proj` | `/project` |
+| `ctx` | `/context` | `pull-request` | `/pr` |
+| `d` | `/diff` | `q` | `/exit` |
+| `dash` | `/dashboard` | `quit` | `/exit` |
+| `diag` | `/doctor` | `remove` | `/delete` |
+| `download` | `/pull` | `res` | `/resource` |
+| `f` | `/fork` | `resources` | `/resource` |
+| `fresh` | `/new` | `rm` | `/delete` |
+| `get` | `/pull` | `s` | `/session` |
+| `gh-issue` | `/issue` | `sb` | `/sandbox` |
 | `gl-issue` | `/issue` | `status` | `/dashboard` |
-| `gp` | `/push` | `typify` | `/types` |
-| `h` | `/help` | `usage` | `/stats` |
-| `hints` | `/types` | `workspace` | `/project` |
+| `gp` | `/push` | `usage` | `/stats` |
+| `h` | `/help` | `workspace` | `/project` |
 | `hist` | `/history`  | |
 
 </details>

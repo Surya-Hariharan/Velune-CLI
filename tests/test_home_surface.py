@@ -86,7 +86,7 @@ def test_empty_state_degrades_to_quiet_defaults():
     text = _text(render_home(HomeState(), width=100))
     assert "no model selected" in text
     assert "no providers configured" in text
-    assert "/setup" in text
+    assert "/connect" in text
 
 
 def test_unindexed_repository_says_so():
