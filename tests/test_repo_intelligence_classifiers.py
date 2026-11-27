@@ -2,7 +2,7 @@
 
 ``docs/repository-intelligence-baseline.md`` §8 flagged api_mapper.py,
 architecture_detector.py, technology_detector.py, project_type.py,
-config_intelligence.py, and analyzer.py's classification logic as having
+and analyzer.py's classification logic as having
 *no dedicated test files*, despite being the modules responsible for nearly
 every finding in the baseline's 8-repo benchmark (§6). This backfills that
 gap using the same repo-style corpus (``tests/fixtures/repo_styles.py``).
@@ -24,7 +24,6 @@ from velune.repository.analyzer import CodebaseAnalyzer
 from velune.repository.api_mapper import APIMapper
 from velune.repository.architecture_detector import ArchitectureDetector
 from velune.repository.cognition import RepositoryCognitionService
-from velune.repository.config_intelligence import ConfigIntelligenceExtractor
 from velune.repository.project_type import ProjectType, ProjectTypeDetector
 from velune.repository.scanner import FilesystemScanner
 from velune.repository.schemas import RepositoryLanguage
@@ -48,14 +47,6 @@ def test_well_structured_end_to_end(tmp_path):
     # Secret file must never be indexed.
     indexed_paths = {f.path.replace("\\", "/") for f in snapshot.files}
     assert ".env" not in indexed_paths
-
-
-def test_well_structured_config_intelligence(tmp_path):
-    root = materialize("well_structured", tmp_path)
-    intel = ConfigIntelligenceExtractor().extract(root, ["pyproject.toml"])
-    assert intel.test_cmd == "pytest -q"  # addopts from [tool.pytest.ini_options]
-    assert intel.lint_cmd == "ruff check ."
-    assert "fastapi" in [d.lower() for d in intel.key_dependencies]
 
 
 def test_well_structured_api_mapper_finds_route(tmp_path):

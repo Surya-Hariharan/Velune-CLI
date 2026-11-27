@@ -1,4 +1,4 @@
-"""Exponential-backoff retry utility with loop detection and bus event emission."""
+"""Exponential-backoff retry utility with bus event emission."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
-
-from velune.core.loop_detector import ErrorLoopDetector
 
 T = TypeVar("T")
 _log = logging.getLogger("velune.core.retry")
@@ -26,7 +24,6 @@ class RetryPolicy:
     retryable_exceptions: tuple[type[BaseException], ...] = field(
         default_factory=lambda: (Exception,)
     )
-    loop_detector: ErrorLoopDetector | None = None
     on_retry: Callable[[int, BaseException, float], Awaitable[None]] | None = None
     # Longest provider-supplied wait (``Retry-After``) we will sit through. Beyond this the
     # failure is surfaced immediately: a 429 that says "come back in 10 minutes" (an exhausted
@@ -67,9 +64,6 @@ async def retry_async(
     """Call *fn* up to *policy.max_attempts* times with exponential backoff.
 
     - Never retries :exc:`asyncio.CancelledError`.
-    - Checks :class:`~velune.core.loop_detector.ErrorLoopDetector` before each
-      retry; if a loop is detected the detector fires a ``retry.loop_detected``
-      event on *bus* and re-raises immediately.
     - Emits ``retry.attempt`` events on *bus* so the UI can show live status.
     """
     last_exc: BaseException | None = None
@@ -81,29 +75,6 @@ async def retry_async(
             raise
         except policy.retryable_exceptions as exc:
             last_exc = exc
-
-            if policy.loop_detector is not None:
-                sig = policy.loop_detector.record(exc)
-                if sig.is_looping:
-                    _log.error(
-                        "Loop detected for %s: '%s' seen %d times — aborting",
-                        sig.error_type,
-                        sig.error_preview,
-                        sig.occurrences,
-                    )
-                    if bus is not None:
-                        await _emit(
-                            bus,
-                            "retry.loop_detected",
-                            source,
-                            {
-                                "fingerprint": sig.fingerprint,
-                                "error_type": sig.error_type,
-                                "error_preview": sig.error_preview,
-                                "occurrences": sig.occurrences,
-                            },
-                        )
-                    raise
 
             if attempt >= policy.max_attempts:
                 break

@@ -87,7 +87,6 @@ class ProactiveWatcher:
 
         self._subscriptions = [
             await self._bus.subscribe("job.failed", self._on_job_failed),
-            await self._bus.subscribe("retry.loop_detected", self._on_loop_detected),
             await self._bus.subscribe("provider.health_changed", self._on_provider_health),
             await self._bus.subscribe("context.threshold_crossed", self._on_context_threshold),
         ]
@@ -123,17 +122,6 @@ class ProactiveWatcher:
             f"Background job failed: {job_id}",
             error[:120],
             "job_monitor",
-        )
-
-    async def _on_loop_detected(self, event: Any) -> None:
-        error_type = event.data.get("error_type", "Error")
-        preview = event.data.get("error_preview", "")
-        count = event.data.get("occurrences", 0)
-        self._add(
-            AlertSeverity.DANGER,
-            f"Error loop detected: {error_type}",
-            f"Seen {count}x in 5 min — {preview[:80]}. Use /jobs cancel to clear.",
-            "loop_detector",
         )
 
     async def _on_provider_health(self, event: Any) -> None:
