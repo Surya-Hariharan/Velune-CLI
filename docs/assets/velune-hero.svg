@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 460" width="1200" height="460" role="img" aria-labelledby="t d">
 <title id="t">Velune CLI</title>
-<desc id="d">A faceted three-dimensional V symbol with five agent nodes (Planner, Coder, Reviewer, Challenger, Synthesizer) converging on it.</desc>
+<desc id="d">A faceted three-dimensional V symbol with five agent nodes (Explorer, Implementer, Tester, Reviewer, Planner) converging on it.</desc>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a0c11"/><stop offset="1" stop-color="#17132a"/></linearGradient>
   <radialGradient id="glow" cx="50%" cy="48%" r="45%"><stop offset="0" stop-color="#7c5cff" stop-opacity=".38"/><stop offset=".55" stop-color="#2f6bff" stop-opacity=".10"/><stop offset="1" stop-color="#2f6bff" stop-opacity="0"/></radialGradient>
@@ -44,6 +44,6 @@
   <polygon points="600,95 650,124 600,153 550,124" fill="#fff" opacity=".16"/>
 </g>
 <g class="node" style="animation-delay:0.0s"><circle cx="190" cy="150" r="16" fill="#8b7bff" opacity=".14"/><circle cx="190" cy="150" r="7" fill="#0b0d12" stroke="#7fd8ff" stroke-width="2"/></g><g class="node" style="animation-delay:0.7s"><circle cx="255" cy="322" r="16" fill="#8b7bff" opacity=".14"/><circle cx="255" cy="322" r="7" fill="#0b0d12" stroke="#7fd8ff" stroke-width="2"/></g><g class="node" style="animation-delay:1.4s"><circle cx="1010" cy="150" r="16" fill="#8b7bff" opacity=".14"/><circle cx="1010" cy="150" r="7" fill="#0b0d12" stroke="#7fd8ff" stroke-width="2"/></g><g class="node" style="animation-delay:2.0999999999999996s"><circle cx="945" cy="322" r="16" fill="#8b7bff" opacity=".14"/><circle cx="945" cy="322" r="7" fill="#0b0d12" stroke="#7fd8ff" stroke-width="2"/></g><g class="node" style="animation-delay:2.8s"><circle cx="600" cy="40" r="16" fill="#8b7bff" opacity=".14"/><circle cx="600" cy="40" r="7" fill="#0b0d12" stroke="#7fd8ff" stroke-width="2"/></g>
-<text x="164" y="157" text-anchor="end" class="role">Planner</text><text x="229" y="329" text-anchor="end" class="role">Coder</text><text x="1036" y="157" text-anchor="start" class="role">Reviewer</text><text x="971" y="329" text-anchor="start" class="role">Challenger</text><text x="600" y="18" text-anchor="middle" class="role">Synthesizer</text>
+<text x="164" y="157" text-anchor="end" class="role">Explorer</text><text x="229" y="329" text-anchor="end" class="role">Implementer</text><text x="1036" y="157" text-anchor="start" class="role">Tester</text><text x="971" y="329" text-anchor="start" class="role">Reviewer</text><text x="600" y="18" text-anchor="middle" class="role">Planner</text>
 <text x="600" y="432" text-anchor="middle" font-family="Inter, 'Segoe UI', system-ui, -apple-system, Helvetica, Arial, sans-serif" font-weight="700" font-size="38" fill="url(#word)" textLength="330" lengthAdjust="spacing">VELUNE CLI</text>
 </svg>

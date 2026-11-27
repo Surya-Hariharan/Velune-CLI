@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-hero.svg" alt="Velune CLI: a faceted three-dimensional V symbol with five agent nodes (Planner, Coder, Reviewer, Challenger, Synthesizer) converging on it" width="100%">
+<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-hero.svg" alt="Velune CLI: a faceted three-dimensional V symbol with five agent nodes (Explorer, Implementer, Tester, Reviewer, Planner) converging on it" width="100%">
 
 <h1>Velune CLI</h1>
 
@@ -46,13 +46,13 @@ Velune answers every one of them. And every answer points at a file in this repo
 
 - 🔒 **Your code stays yours.** Run a model on your own machine. No analytics, no usage data sent to us
   ([proof](https://github.com/Surya-Hariharan/Velune-CLI/blob/main/SECURITY.md#zero-telemetry)).
-- 🧠 **A council, not a lone gun.** Easy question? One seat. Big refactor? Up to nine seats, including a Challenger
-  whose whole job is to poke holes in the plan.
+- 🧠 **A team picked for the task.** `/council` chooses a skill (coding, planning, review or research), builds up to
+  five agents for it, and a permission profile decides what they may touch.
 - 🛡️ **You hold the leash.** Manual by default. Every change is a diff you approve. One command to undo.
 - 📚 **It remembers.** Five memory tiers per project, so it knows your code before you explain it.
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-council.svg" alt="A matrix of council seats by depth tier. Instant uses the Coder only, minimal adds the Planner, standard adds the Reviewer and Synthesizer, and full uses all nine seats: five core roles and four specialist critics" width="100%">
+<img src="https://raw.githubusercontent.com/Surya-Hariharan/Velune-CLI/main/docs/assets/velune-swarm.svg" alt="The four built-in council skills and their stages. Coding: explorer, then implementer and tester together, then reviewer. Planning: analyst, architect, critic, planner. Review: mapper, then correctness and security together, then lead. Research: researcher, then writer. Six permission profiles decide what a team may do" width="100%">
 </div>
 
 <div align="center">
@@ -68,8 +68,8 @@ approve                                  it runs the plan. You see every diff fi
 /rewind                                  don't like it? Undo the agent's last turn.
 ```
 
-A council raises your odds of a good answer. It doesn't promise one. It costs more calls than a single model, so it only
-shows up when the task needs it. Read your diffs.
+A team of agents raises your odds of a good answer. It doesn't promise one. It costs more calls than a single model, so
+ordinary chat uses one model and the team only runs when you ask for it (`/council` or `/run`). Read your diffs.
 
 ## Plugs into everything
 

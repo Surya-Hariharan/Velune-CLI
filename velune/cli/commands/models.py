@@ -1,4 +1,4 @@
-"""Models command - velune models scan/list/assign."""
+"""Models command - velune models scan/list/benchmark."""
 
 from __future__ import annotations
 

@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "docs" / "assets"
 GRAPHICS = [
     "velune-questions.svg",
-    "velune-council.svg",
+    "velune-swarm.svg",
     "velune-permissions.svg",
     "velune-numbers.svg",
     "velune-connect.svg",
@@ -150,6 +150,25 @@ def test_council_skill_and_profile_counts_match_the_library():
     builtin_profiles = [p for p in library.profiles.values() if p.source == "builtin"]
     assert _facts()["council_skills"] == str(len(builtin_skills))
     assert f"{len(builtin_profiles)} permission profiles" in _read("velune-numbers.svg")
+
+
+def test_swarm_graphic_matches_the_library():
+    from velune.swarm.library import SkillLibrary
+
+    library = SkillLibrary.load(user_root=Path("does-not-exist"))
+    root = _tree("velune-swarm.svg")
+    drawn_skills = {el.attrib["data-skill"]: el.attrib for el in _with(root, "data-skill")}
+    assert set(drawn_skills) == set(library.skills)
+    for slug, skill in library.skills.items():
+        drawn = drawn_skills[slug]
+        assert drawn["data-flow"] == " > ".join(", ".join(stage) for stage in skill.flow)
+        assert drawn["data-lead"] == skill.lead
+        assert drawn["data-permission"] == skill.default_permission
+    drawn_profiles = {
+        el.attrib["data-profile"]: (el.attrib["data-write"], el.attrib["data-commands"])
+        for el in _with(root, "data-profile")
+    }
+    assert drawn_profiles == {s: (p.write, p.commands) for s, p in library.profiles.items()}
 
 
 def test_ci_matrix_matches_the_workflow():

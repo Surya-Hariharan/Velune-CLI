@@ -82,9 +82,8 @@ index explicitly, sized to what you are about to do:
 > backward compatibility. `/index status` shows freshness, and `/index rebuild` forces a
 > full rescan.
 
-If you skip this step, `/run` still works. The council just has less repository context to
-draw on, and complex tasks may be classified into a lower tier than they deserve (see
-[Choosing how a task runs](#4-choosing-how-a-task-runs)).
+If you skip this step, `/run` still works. The agents just start with less repository context
+(see [Choosing how a task runs](#4-choosing-how-a-task-runs)).
 
 Once you have indexed, most of the upkeep happens off the prompt path: a background engine
 watches the filesystem and keeps the index current incrementally, without re-scanning the
@@ -116,10 +115,9 @@ the list, marked unavailable with the reason. These commands handle those cases:
 | `/model register <path>` | Add an Ollama store folder (in place), or import a `.gguf` file or safetensors folder into Ollama (this copies it, and you are asked first) |
 | `/model remove <id>` | Forget a model registration (model files are never touched) |
 
-**Rule of thumb.** Local models are fine for `INSTANT` and `STANDARD` tier work (explaining
-code, small edits). Reserve your largest or most expensive model for `FULL` tier tasks
-(security review, cross-cutting refactors) through `/max` or `/council`, so you are not
-paying full-council cost for a one-line question.
+**Rule of thumb.** Local models are fine for explaining code and small edits. Keep your
+largest or most expensive model for security reviews and cross-cutting refactors. A
+`/council` run makes several model calls, so do not use it for a one-line question.
 
 Remember that a cloud model receives your prompt and the repository context Velune attaches
 to it. The [reference](reference.md#local-and-cloud-providers) explains which providers keep
@@ -163,35 +161,36 @@ and the limits.
 
 ## 4. Choosing how a task runs
 
-Every `/run` goes through automatic tier classification. It is not "always full council",
-and it is not "always the fast path" either:
+Ordinary chat uses one model with tools. `/council <task>` (or `/run <task>`) gives the task
+to a team of agents instead:
 
-- Explaining, describing, or answering "what is X" style prompts: `INSTANT`.
-- Ordinary edits and small features: `STANDARD` or `MINIMAL`.
-- Refactors, security-sensitive changes, migrations: `FULL`.
-- **Regardless of keywords**, if a file you mention has dependents in the repository's import
-  graph, Velune raises the tier automatically (1 or more dependents: at least `MINIMAL`;
-  3 or more: at least `STANDARD`; 5 or more: `FULL`). A one-line prompt touching a
-  widely imported file gets full council treatment even if it does not sound like a
-  "refactor".
+1. A **skill** is chosen: `coding`, `planning`, `review` or `research`. The skill sets the
+   roles, their order and what the team delivers.
+2. A **permission profile** is chosen. It decides which tools, files and MCP servers the team
+   may use, from `answer-only` to `build-project`.
+3. The team is shown to you (agents, stages, sub-tasks), then runs. Agents in the same stage
+   work at the same time; agents that change files never do.
+4. One agent, the lead, delivers the result. Proposed edits go through your approval.
 
-This escalation only works with an index (`/index standard` or deeper). Without one, Velune
-has no dependency data to escalate on, so it is worth indexing before a task that touches a
-central file.
+`/skills` lists the skills and profiles, and `/skills show <name>` prints one. Name them
+yourself when you know better:
 
-Override the classifier directly when you know better:
+```text
+/council --skill review check the permission gate for bypasses
+/council --skill coding --permission read-only add input validation to signup
+/council show              # recent runs; /council show <id> for one run
+```
 
-- `/council <task>` forces the full council regardless of what the classifier would pick.
-- `/fast` pins everything to the instant tier, the smallest model and a 4k context for the
-  whole session (good for a burst of quick questions).
-- `/max` pins the full council, the largest model and a 128k context for the whole session
-  (good before a big refactor pass).
-- `/normal` returns to automatic classification (16k context, adapting further to your
-  hardware profile).
+Your execution mode still applies: Plan mode changes nothing, whatever the profile says. A run
+stops at the time, model-call and token limits in the `[swarm]` section of `velune.toml`. You
+can add your own skills and profiles; see [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+`/fast`, `/max` and `/normal` are separate: they set the model and context size for the
+session.
 
 For anything that will take a while, `/run --bg <task>` submits it as a background job and
-returns your prompt immediately. `/jobs` and `/dashboard` track progress, and the status bar
-shows a live `bg:N` counter.
+returns your prompt immediately. A background job only reads and answers. `/jobs` and
+`/dashboard` track progress, and the status bar shows a live `bg:N` counter.
 
 ---
 

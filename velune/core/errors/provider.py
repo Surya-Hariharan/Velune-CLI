@@ -33,7 +33,7 @@ class ProviderPermissionError(ProviderAuthenticationError):
     :class:`ProviderAuthenticationError` so existing handlers still stop
     retrying and fall back to another provider, but it says nothing about the
     key being bad — it must never mark the stored credential invalid (see
-    ``cognition/council/base.py``'s ``_note_provider_failure``).
+    ``swarm/agent.py``'s ``note_provider_failure``).
     """
 
     pass

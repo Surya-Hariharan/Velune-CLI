@@ -273,8 +273,9 @@ flowchart LR
 | Package | Responsibility |
 | :--- | :--- |
 | `velune/cli` | Typer commands, full-screen REPL, slash commands, themes, onboarding |
-| `velune/providers`, `velune/models` | Provider adapters, discovery, credentials, model registry and role mapping |
-| `velune/cognition` | Council agents, debate, tier classification |
+| `velune/providers`, `velune/models` | Provider adapters, discovery, credentials, model registry |
+| `velune/swarm` | `/council`: skills, permission profiles, planner, stage runner |
+| `velune/cognition` | Prompts and the injection firewall |
 | `velune/orchestration` | Native tool-calling loop and the experimental native engine |
 | `velune/memory`, `velune/retrieval` | Memory tiers, SQLite and vector stores, hybrid retrieval |
 | `velune/repository`, `velune/intelligence`, `velune/knowledge` | Scanner, symbol and import index, incremental re-indexing, knowledge graph |
@@ -293,8 +294,8 @@ Module boundaries and the bootstrap sequence are in
   `OLLAMA_HOST` or an OpenAI-compatible server on another host receives your prompts and repository context.
 - **Cloud providers** receive the prompt and whatever repository or memory context Velune includes. Their retention and
   training policies are set by the provider, not by Velune.
-- A council seat whose local model fails is not retried on a cloud provider unless you set
-  `providers.allow_cloud_fallback_from_local = true`. Review `providers.fallback_providers` before enabling it.
+- A council run keeps the model it started with: a failed call is retried on the same provider, never moved to
+  another one.
 - Velune has no analytics service and sends no usage data to its maintainers. Network traffic is limited to the
   providers, MCP servers, git hosts and web pages you use, plus the PyPI request made when you run `velune update`.
 - API keys are stored AES-GCM-encrypted in your user configuration directory, with the encryption key in the OS keyring

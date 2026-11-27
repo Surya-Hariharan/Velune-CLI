@@ -444,11 +444,12 @@ through the host shell when invoked and are not currently gated by directory tru
 - **"Memory/retrieval results look stale or wrong"** — there are two vector stores (Qdrant for code
   retrieval, LanceDB for conversational memory) and three unrelated "graphs" (memory graph tier, repository
   import graph, knowledge graph). Confirm which one the code path reads before assuming a shared cause.
-- **"A council task escalated to a higher tier"** — `TierClassifier.classify()`
-  (`cognition/council/tiers.py`) raises the tier when a mentioned file has many dependents in the import graph
-  (fan-in ≥ 5 → `FULL`, ≥ 3 → `STANDARD`, ≥ 1 → `MINIMAL`), independent of keywords. Intended behaviour.
-- **"Where does X get constructed?"** — look for the `_create_X` factory in the package's `subsystems.py`
-  (services) or on `CouncilAgentFactory` (council seats), not for `class X`.
+- **"A council run picked the wrong team or could not change a file"** — `swarm/router.py` records every
+  correction it made in `plan.notes`; the run folder (`/council show <id>`) holds the plan, events and each
+  agent's result. Tool access comes from the permission profile narrowed by the execution mode
+  (`swarm/policy.py`).
+- **"Where does X get constructed?"** — look for the `_create_X` factory in the package's `subsystems.py`,
+  not for `class X`. Council agents are not services: `swarm/run.py` creates them per run.
 - **"The model list is wrong / a model 404s"** — OpenAI, Anthropic, Gemini and Groq reconcile their curated
   model lists with the provider's live `/models`; others still use static lists. Run `velune models refresh`.
 - **Windows** — Windows is a first-class platform (see the CI matrix). Sandbox PATH resolution

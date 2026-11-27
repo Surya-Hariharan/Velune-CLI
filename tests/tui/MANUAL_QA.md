@@ -89,5 +89,4 @@ Mark each item pass/fail and attach a screenshot for any failure.
 - [ ] Alt-screen is gone and the shell's earlier output is visible.
 - [ ] Cursor is visible and blinking normally; typing in the shell echoes.
 - [ ] Mouse wheel scrolls WT scrollback (mouse reporting off); paste works normally.
-- [ ] Nothing odd printed after exit (known: a `WARNING:velune.cli.handlers.councilmodel:`
-      line can appear on the main screen after the wizard; see findings).
+- [ ] Nothing odd printed after exit.
