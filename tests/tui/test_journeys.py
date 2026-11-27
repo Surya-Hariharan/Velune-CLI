@@ -349,6 +349,44 @@ def test_back_from_key_prompt_returns_to_picker_then_prompt(repl):
     assert_clean_frame(s)
 
 
+def test_dashboard_then_project_picker_keeps_the_screen_intact(repl, tmp_path):
+    """The /project picker draws in the REPL's palette, not a second Application.
+
+    A standalone picker drew its rows over the transcript and, on Esc, left a
+    stale frame with no status bar and a composer that showed nothing typed.
+    """
+    s = repl
+    other = tmp_path / "other-proj"
+    other.mkdir()
+    flows.run_command(s, f"/project add {other}")
+    s.wait_for("Registered workspace", 20)
+    flows.idle(s)
+    flows.run_command(s, "/dashboard")
+    s.wait_for("again to refresh", 20)
+    flows.idle(s)
+
+    flows.run_command(s, "/project")
+    s.wait_for("PROJECT WORKSPACES", 20)
+    assert_clean_frame(s)
+    s.key("esc")
+    s.wait_gone("PROJECT WORKSPACES", 10)
+    flows.idle(s)
+    assert_clean_frame(s)
+    assert "↑↓ navigate" not in s.text()
+    s.type("still-typing")
+    s.wait_for("❯ still-typing", 10)
+    s.key("ctrl-u")
+
+    flows.run_command(s, "/project")
+    s.wait_for("PROJECT WORKSPACES", 20)
+    s.type("other")
+    time.sleep(0.4)
+    s.key("enter")
+    s.wait_for("Workspace: other-proj", 30)
+    flows.idle(s)
+    assert_clean_frame(s)
+
+
 def test_new_session_command_resets_view(connected):
     s = connected
     flows.ask(s, "first")

@@ -67,14 +67,14 @@ def two_pane(
     """Search column | divider | detail column, at the palette's proportions."""
     left_window = Window(
         content=FormattedTextControl(left),
-        width=Dimension(min=25, preferred=34),
+        width=Dimension(min=20, preferred=34),
         dont_extend_width=False,
         style=PANEL_STYLE,
     )
     divider = Window(width=1, char="|", style=PANEL_STYLE)
     right_window = Window(
         content=FormattedTextControl(right),
-        width=Dimension(min=30, weight=2),
+        width=Dimension(min=20, weight=2),
         style=PANEL_STYLE,
     )
     return VSplit([left_window, divider, right_window], padding=1, padding_style=PANEL_STYLE)

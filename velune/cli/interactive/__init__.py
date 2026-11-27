@@ -1,9 +1,10 @@
 """Reusable interactive terminal primitives, used by onboarding/setup and the
 REPL alike.
 
-High-level, one-shot helpers (``single_select``, ``multi_select``,
-``text_input``, ``confirm``) run a widget standalone via ``runner.py`` and
-return its result, or the ``BACK``/``CANCEL`` sentinel. Wizard chrome
+High-level, one-shot helpers (``single_select``, ``text_input``, ``confirm``)
+return a widget's result, or the ``BACK``/``CANCEL`` sentinel. Inside the REPL
+(a host is installed, see ``host.py``) they draw into the REPL's own
+Application; elsewhere they run standalone via ``runner.py``. Wizard chrome
 (``chrome.WizardController``) constructs the same widgets directly so it can
 host them inside persistent sidebar/header chrome instead.
 """
@@ -38,7 +39,6 @@ __all__ = [
     "StatusWidget",
     "is_interactive_tty",
     "single_select",
-    "multi_select",
     "text_input",
     "ask",
     "confirm",
@@ -59,13 +59,13 @@ async def single_select(
 ) -> WidgetResult:
     """Arrow-key single choice. Returns the chosen ``Option.id``, or BACK/CANCEL.
 
-    ``palette=True`` draws the choice as the REPL's two-column command palette
-    (search column + detail column in a titled frame) instead of a plain list,
-    so flows reached from a slash command keep the palette's look — and, when a
-    host is installed (the REPL), draws it *in* that palette's float above the
-    prompt box rather than in an Application of its own below it.
+    Inside the REPL (a host is installed) the choice is always drawn in the
+    palette float above the prompt box, whatever ``palette`` says: a second
+    ``Application`` started under the full-screen one draws over its output and
+    leaves the screen broken when it exits. Standalone, ``palette=True`` picks
+    the two-column command-palette look instead of a plain list.
     """
-    if palette and (installed := host.active()) is not None:
+    if (installed := host.active()) is not None:
         return await installed.select(
             title,
             options,
@@ -85,25 +85,6 @@ async def single_select(
         subtitle=subtitle,
         initial_index=initial_index,
         **extra,
-    )
-    return await run_standalone(widget)
-
-
-async def multi_select(
-    title: str,
-    options: Sequence[Option],
-    *,
-    subtitle: str = "",
-    initial_checked: frozenset[str] = frozenset(),
-) -> WidgetResult:
-    """Checkbox multi-select. Returns the checked ``Option.id`` list, or BACK/CANCEL."""
-    widget = SelectWidget(
-        title=title,
-        options=list(options),
-        multiple=True,
-        filterable=False,
-        subtitle=subtitle,
-        initial_checked=initial_checked,
     )
     return await run_standalone(widget)
 

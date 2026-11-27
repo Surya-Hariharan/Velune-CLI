@@ -198,7 +198,7 @@ class SelectWidget(Widget):
         # Mouse wheel — both hosts (runner.run_standalone, chrome.WizardController)
         # already enable mouse_support=True, but nothing consumed it: scrolling
         # over any select list silently did nothing. Wired here once so every
-        # caller (single_select, multi_select, model/provider pickers, tool
+        # caller (single_select, model/provider pickers, tool
         # approval) gets it for free.
         @kb.add(Keys.ScrollUp, eager=True)
         def _scroll_up(event) -> None:

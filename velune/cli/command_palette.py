@@ -464,13 +464,13 @@ class CommandPalette:
     def container(self) -> ConditionalContainer:
         left = Window(
             content=FormattedTextControl(self.render_commands),
-            width=Dimension(min=25, preferred=34),
+            width=Dimension(min=20, preferred=34),
             dont_extend_width=False,
         )
         divider = Window(width=1, char="|", style="class:palette.border")
         right = Window(
             content=FormattedTextControl(self.render_details),
-            width=Dimension(min=30, weight=2),
+            width=Dimension(min=20, weight=2),
         )
         body = VSplit([left, divider, right], padding=1, padding_style="class:palette.border")
         frame = Frame(

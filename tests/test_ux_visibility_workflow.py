@@ -135,6 +135,26 @@ def test_dashboard_renders_with_no_sources():
     assert "alert store unavailable" in out
 
 
+def test_dashboard_collapses_unconfigured_providers():
+    from types import SimpleNamespace
+
+    from velune.cli.display.dashboard import build_dashboard
+
+    def _m(health: str) -> SimpleNamespace:
+        return SimpleNamespace(health=health, estimated_latency_ms=None)
+
+    manifests = {"groq": _m("healthy"), "ollama": _m("degraded")}
+    manifests.update({f"p{i}": _m("unconfigured") for i in range(12)})
+    monitor = SimpleNamespace(get_all_manifests=lambda: manifests)
+
+    console = _recording_console()
+    console.print(build_dashboard(health_monitor=monitor))
+    out = console.export_text()
+    assert "groq  healthy" in out and "ollama  degraded" in out
+    assert "12 unconfigured" in out
+    assert "p3" not in out
+
+
 def test_dashboard_is_content_sized_and_fits_narrow_panes(tmp_path: Path):
     """No terminal-high block (the old Live/Layout dump) and no line past the width."""
     from velune.cli.display.dashboard import build_dashboard

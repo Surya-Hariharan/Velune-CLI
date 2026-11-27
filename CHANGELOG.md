@@ -92,6 +92,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   returns to the prompt; run it again to refresh.
 - `/skills` keeps skill and profile names whole in narrow terminals, and `/skill` works as an
   alias.
+- **Pickers no longer break the REPL screen.** The `/project` and `/session` pickers and the
+  tool-approval prompts opened a second terminal app on top of the REPL: it drew over the
+  transcript and, when closed, left a stale frame with no status bar. Every picker now opens in
+  the REPL's own palette, which also fits in narrower panes (down to about 50 columns).
+- `/project status` no longer fails when a background job exists, and drops its empty
+  "Key / Value" header. `/project list` shows each path on its own line instead of cutting it off.
+- `/dashboard` lists only the providers in use and counts the unconfigured ones in one line.
 - **Chat no longer sends a local-model prompt to a cloud provider.** When a chat turn on a local
   model failed, the REPL could retry it on any configured provider, including a cloud one. It now
   only falls back to other local models; a turn on a cloud model may still use any provider.

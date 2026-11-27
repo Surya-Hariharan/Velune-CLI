@@ -242,9 +242,10 @@ async def _project_status(repl: VeluneREPL) -> None:
         box=None,
         pad_edge=False,
         padding=design.PADDING_DEFAULT,
+        show_header=False,
     )
-    for col in ("Key", "Value"):
-        table.add_column(col, style=design.MUTED)
+    table.add_column(style=design.MUTED, no_wrap=True)
+    table.add_column(overflow="fold")
 
     table.add_row("Workspace", ws_name)
     table.add_row("Path", ws_path)
@@ -267,15 +268,18 @@ async def _project_status(repl: VeluneREPL) -> None:
     if recent_jobs:
         repl.console.print(ui.header("Recent Tasks"))
         repl.console.print(ui.rule())
+        from velune.cli.display.dashboard import JOB_STATUS_COLOR
+
+        jobs_table = Table(box=None, show_header=False, padding=(0, 2, 0, 2))
+        jobs_table.add_column(style=design.MUTED, no_wrap=True)
+        jobs_table.add_column(overflow="ellipsis", no_wrap=True)
+        jobs_table.add_column(no_wrap=True)
         for job in recent_jobs:
-            status_color = (
-                "yellow"
-                if job.status.value == "running"
-                else ("green" if job.status.value == "completed" else "red")
+            status = job.status.value
+            jobs_table.add_row(
+                job.job_id, job.name, f"[{JOB_STATUS_COLOR.get(status, design.FAINT)}]{status}[/]"
             )
-            repl.console.print(
-                f"  [cyan]{job.job_id:<10}[/cyan]  {job.description[:45]:<45}  [{status_color}]{job.status.value}[/{status_color}]"
-            )
+        repl.console.print(jobs_table)
         repl.console.print()
 
     repl.console.print(ui.header("Pending Warnings"))
@@ -300,21 +304,14 @@ async def _project_list(repl: VeluneREPL) -> None:
         )
         return
     current = str(Path(repl.container.get("runtime.workspace")).resolve())
-    table = Table(
-        box=None,
-        pad_edge=False,
-        padding=design.PADDING_DEFAULT,
-    )
-    for col in ("Project", "Type", "Last Opened", "Path"):
-        table.add_column(col, style=design.MUTED)
+    table = Table(box=None, pad_edge=False, padding=(0, 2, 0, 0))
+    table.add_column("Project", no_wrap=True)
+    table.add_column("Type · last opened · path", style=design.MUTED, overflow="fold")
     for w in workspaces:
-        name = f"[bold]{w.name}[/bold] [green](current)[/green]" if w.path == current else w.name
-        table.add_row(
-            name,
-            w.project_type or ("git" if w.is_git else "—"),
-            w.last_opened[:16].replace("T", " "),
-            w.path,
-        )
+        name = f"[bold]{w.name}[/bold] [{design.OK}](current)[/]" if w.path == current else w.name
+        kind = w.project_type or ("git" if w.is_git else "folder")
+        opened = w.last_opened[:16].replace("T", " ")
+        table.add_row(name, f"{kind} · {opened}\n[{design.FAINT}]{w.path}[/]")
     repl.console.print(table)
     repl.console.print()
 

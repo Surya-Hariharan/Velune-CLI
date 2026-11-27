@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from velune.core.task_registry import JobRegistry
     from velune.proactive.alerts import AlertStore
 
-_STATUS_COLOR: dict[str, str] = {
+JOB_STATUS_COLOR: dict[str, str] = {
     "running": design.WARN,
     "completed": design.OK,
     "failed": design.DANGER,
@@ -64,9 +64,14 @@ def _panel(body: RenderableType, title: str, title_color: str, border: str = des
     )
 
 
+def _health_value(manifest: Any) -> str:
+    health = manifest.health
+    return health.value if hasattr(health, "value") else str(health)
+
+
 def _health(manifest: Any) -> str:
     """``"<colored status>  <latency>"`` for one provider manifest."""
-    value = manifest.health.value if hasattr(manifest.health, "value") else str(manifest.health)
+    value = _health_value(manifest)
     latency = getattr(manifest, "estimated_latency_ms", None)
     lat = f"  [{design.FAINT}]{latency}ms[/]" if latency else ""
     return f"[{_HEALTH_COLOR.get(value, design.FAINT)}]{value}[/]{lat}"
@@ -179,7 +184,7 @@ def _jobs_table(jobs: JobRegistry | None) -> Table:
         table.add_row(
             job.job_id,
             job.name,
-            f"[{_STATUS_COLOR.get(status, design.FAINT)}]{status}[/]",
+            f"[{JOB_STATUS_COLOR.get(status, design.FAINT)}]{status}[/]",
             job.current_phase or "—",
             f"{elapsed_s:.0f}s",
             job.result_preview or job.error or "—",
@@ -211,7 +216,13 @@ def _health_panel(health_monitor: Any | None, manifests: dict[str, Any] | None) 
     elif not manifests:
         body = f"[{design.FAINT}]No providers registered[/]"
     else:
-        body = "\n".join(f"[{design.WHITE}]{pid}[/]  {_health(m)}" for pid, m in manifests.items())
+        # Every known provider has a manifest, so listing them all is mostly a
+        # column of "unconfigured". Show the ones in use; count the rest.
+        shown = {pid: m for pid, m in manifests.items() if _health_value(m) != "unconfigured"}
+        lines = [f"[{design.WHITE}]{pid}[/]  {_health(m)}" for pid, m in shown.items()]
+        if hidden := len(manifests) - len(shown):
+            lines.append(f"[{design.FAINT}]{hidden} unconfigured — /connect to add[/]")
+        body = "\n".join(lines)
     return _panel(body, "Provider Health", design.INFO, border=design.INFO)
 
 
